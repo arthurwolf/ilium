@@ -1,0 +1,27 @@
+[package]
+name = "illium-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "illium-server"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29.0"
+directories = "6.0.0"
+illium-core = { version = "0.1.0", path = "../illium-core" }
+illium-detect = { version = "0.1.0", path = "../illium-detect" }
+illium-ipc = { version = "0.1.0", path = "../illium-ipc" }
+illium-pty = { version = "0.1.0", path = "../illium-pty" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sysinfo = "0.39.6"
+thiserror = "2.0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs", "signal"] }
+toml = "0.8.23"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

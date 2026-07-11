@@ -32,4 +32,12 @@ pub enum PtyError {
     /// the child already exited and closed its end.
     #[error("failed to write to pty: {0}")]
     Write(#[from] std::io::Error),
+
+    /// Terminating the spawned child process failed. Kept distinct from
+    /// `Write` (both ultimately wrap `std::io::Error`) so callers -- e.g.
+    /// `illium-server` closing a pane -- can tell "the pty stopped
+    /// accepting input" apart from "we couldn't kill the process" without
+    /// matching on the error message.
+    #[error("failed to kill pty child process: {0}")]
+    Kill(#[source] std::io::Error),
 }

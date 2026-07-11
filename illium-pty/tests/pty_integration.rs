@@ -118,3 +118,52 @@ async fn screen_changed_watch_channel_notifies_on_new_output() {
         session.screen_text()
     );
 }
+
+#[tokio::test]
+async fn output_bytes_broadcast_carries_the_raw_pty_bytes() {
+    let command = PtyCommand::new("echo", std::env::temp_dir(), 24, 80).arg("output-bytes-marker");
+    let session = PtySession::spawn(command).expect("spawning echo should succeed");
+    let mut output_bytes = session.subscribe_output_bytes();
+
+    let received = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut collected = Vec::new();
+        loop {
+            match output_bytes.recv().await {
+                Ok(chunk) => {
+                    collected.extend_from_slice(&chunk);
+                    if String::from_utf8_lossy(&collected).contains("output-bytes-marker") {
+                        return collected;
+                    }
+                }
+                Err(_) => return collected,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the output-bytes broadcast");
+
+    assert!(
+        String::from_utf8_lossy(&received).contains("output-bytes-marker"),
+        "expected the raw broadcast bytes to contain the echoed marker, got: {:?}",
+        String::from_utf8_lossy(&received)
+    );
+}
+
+#[test]
+fn kill_terminates_a_running_child_and_is_idempotent() {
+    // `cat` with no arguments reads stdin forever, so it only exits when
+    // killed -- exactly the "still running" case `kill` needs to prove.
+    let command = PtyCommand::new("cat", std::env::temp_dir(), 24, 80);
+    let mut session = PtySession::spawn(command).expect("spawning cat should succeed");
+    assert!(!session.has_exited(), "cat should still be running");
+
+    session.kill().expect("killing a live child should succeed");
+
+    let exited = wait_until(|| session.has_exited(), Duration::from_secs(5));
+    assert!(exited, "expected the child to have exited after kill");
+
+    // Calling kill again on an already-exited child must not error.
+    session
+        .kill()
+        .expect("killing an already-exited child should be a no-op, not an error");
+}

@@ -22,6 +22,18 @@
 //! it through a channel on every byte chunk, and it matches exactly how
 //! synchronous callers already read the screen: on demand, not by being
 //! handed a copy.
+//!
+//! The reader thread separately broadcasts the *raw* bytes it read (before
+//! `vt100` parsing) over a `tokio::sync::broadcast::channel`. This is for
+//! `illium-server`'s IPC layer, which forwards `ScreenUpdate` frames to
+//! attached clients as raw bytes so each client can drive its own
+//! `vt100::Parser` for rendering (see `illium-ipc::ServerEvent::ScreenUpdate`
+//! doc comment for why raw bytes were chosen over a server-computed diff).
+//! `broadcast` rather than another `watch` because this payload is a byte
+//! chunk, not a "something changed" pulse -- every chunk matters and none
+//! may be skipped, and `broadcast` (unlike `watch`) supports that plus
+//! multiple independent subscribers (`illium-server` may run more than one
+//! forwarder per pane across reconnects).
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -29,7 +41,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crossterm::event::MouseEvent;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 use crate::error::PtyError;
 use crate::mouse::encode_mouse_event;
@@ -94,8 +106,16 @@ pub struct PtySession {
     // `TerminalQueryResponder`, which writes terminal capability-query
     // replies back down the same channel.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    // The pty master's control handle; used for resizing.
-    master: Box<dyn MasterPty + Send>,
+    // The pty master's control handle; used for resizing. Wrapped in a
+    // `Mutex` (rather than a bare field) because `portable_pty::PtyPair`
+    // hands this back as `Box<dyn MasterPty + Send>` -- not `+ Sync` -- so
+    // without this wrapper `PtySession` itself would not be `Sync`, which
+    // `illium-server` needs (it shares pane state across concurrently
+    // running tokio tasks via `Arc<ServerState>`). `MasterPty::resize`
+    // only takes `&self`, so this mutex is purely a marker/synchronizer
+    // for concurrent callers, not protecting any actual interior state
+    // this crate owns.
+    master: Mutex<Box<dyn MasterPty + Send>>,
     // The spawned child process handle; used for exit-status polling.
     child: Box<dyn Child + Send + Sync>,
     // OS pid of the directly-spawned child, if the platform reported one.
@@ -104,6 +124,11 @@ pub struct PtySession {
     // receiver never lets its sender's send fail as "no receivers left"
     // while at least one clone (this one) is alive.
     screen_changed: watch::Receiver<()>,
+    // Sender half of the raw-output-bytes broadcast; kept here (rather than
+    // only inside the reader thread's closure) so `subscribe_output_bytes`
+    // can hand out new receivers at any point in the session's lifetime,
+    // including after every previous subscriber has dropped its receiver.
+    output_bytes: broadcast::Sender<Vec<u8>>,
 }
 
 impl PtySession {
@@ -167,8 +192,17 @@ impl PtySession {
             },
         )));
         let (screen_changed_tx, screen_changed_rx) = watch::channel(());
+        // Capacity is chunks-buffered, not bytes: at 8KiB per chunk this
+        // comfortably absorbs a slow/momentarily-disconnected subscriber
+        // (e.g. `illium-server`'s forwarder task between polls) without
+        // unbounded memory growth. A lagging subscriber gets
+        // `RecvError::Lagged` rather than silently missing data forever --
+        // the caller decides how to handle that (see `subscribe_output_bytes`).
+        const OUTPUT_BYTES_CHANNEL_CAPACITY: usize = 256;
+        let (output_bytes_tx, _) = broadcast::channel(OUTPUT_BYTES_CHANNEL_CAPACITY);
         {
             let parser = Arc::clone(&parser);
+            let output_bytes_tx = output_bytes_tx.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 loop {
@@ -200,6 +234,11 @@ impl PtySession {
                     // this thread is about to exit on its own via the next
                     // failed read.
                     let _ = screen_changed_tx.send(());
+                    // Also best-effort: a `broadcast::Sender::send` only
+                    // errors when there are currently zero receivers (no
+                    // client attached right now), which is a normal state
+                    // for a detached pane, not a failure.
+                    let _ = output_bytes_tx.send(buf[..bytes_read].to_vec());
                 }
             });
         }
@@ -207,10 +246,11 @@ impl PtySession {
         Ok(Self {
             parser,
             writer,
-            master: pair.master,
+            master: Mutex::new(pair.master),
             child,
             process_id,
             screen_changed: screen_changed_rx,
+            output_bytes: output_bytes_tx,
         })
     }
 
@@ -249,7 +289,10 @@ impl PtySession {
 
     /// Resizes both the OS pty and the `vt100` parser's screen.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), PtyError> {
+        // Poisoned-lock panic is an invariant violation (see `spawn`).
         self.master
+            .lock()
+            .unwrap()
             .resize(PtySize {
                 rows,
                 cols,
@@ -302,5 +345,31 @@ impl PtySession {
     /// through the channel.
     pub fn subscribe_screen_changed(&self) -> watch::Receiver<()> {
         self.screen_changed.clone()
+    }
+
+    /// Returns a fresh `broadcast::Receiver` that yields every raw byte
+    /// chunk the reader thread reads from the pty, from the moment of this
+    /// call onward (chunks read before subscribing are not replayed). If
+    /// the subscriber falls far enough behind that the channel's internal
+    /// buffer overwrites unread chunks, the next `.recv().await` resolves
+    /// to `Err(broadcast::error::RecvError::Lagged(n))` rather than
+    /// silently skipping bytes -- callers must treat that as "this pane's
+    /// downstream view is now out of sync" (e.g. `illium-server` should log
+    /// it) rather than ignoring it, since unlike `subscribe_screen_changed`
+    /// this channel's payload is not re-derivable from current state alone.
+    pub fn subscribe_output_bytes(&self) -> broadcast::Receiver<Vec<u8>> {
+        self.output_bytes.subscribe()
+    }
+
+    /// Terminates the spawned child process. A no-op returning `Ok(())` if
+    /// the child has already exited -- there is nothing left to kill, and
+    /// treating that as an error would make normal pane teardown (the
+    /// child often exits on its own right before the caller gets around to
+    /// closing the pane) look like a failure.
+    pub fn kill(&mut self) -> Result<(), PtyError> {
+        if self.has_exited() {
+            return Ok(());
+        }
+        self.child.kill().map_err(PtyError::Kill)
     }
 }
