@@ -28,7 +28,7 @@ use crate::modal;
 use crate::term_pane::TerminalPane;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
 use crate::tree_ui::{self, TreeNodeHit, TreeRowAction, TreeToolbarAction};
-use crate::{editor_chrome, editor_toolbar, markdown, minimap, workspace_file};
+use crate::{editor_chrome, editor_highlight, editor_toolbar, markdown, minimap, workspace_file};
 
 /// Which side of the UI currently has keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2806,7 +2806,9 @@ fn checkbox_at(
     let (bracket_col, checked) = markdown::checkbox::find_checkbox(line)?;
 
     let gutter_width = if editor.show_line_numbers {
-        line_number_gutter_width(editor.textarea.lines().len())
+        usize::from(editor_highlight::line_number_gutter_width(
+            editor.textarea.lines().len(),
+        ))
     } else {
         0
     };
@@ -2816,17 +2818,6 @@ fn checkbox_at(
     checkbox_span
         .contains(&clicked_col_on_screen)
         .then_some((row, bracket_col, checked))
-}
-
-/// Mirrors `ratatui_textarea`'s own line-number gutter width formula
-/// (digit count of the highest line number, plus one column of margin
-/// before the text starts) -- the crate applies this internally when
-/// `show_line_number_style` is set but doesn't expose it, so `checkbox_at`
-/// needs its own copy to know how many columns real content is pushed
-/// over by.
-fn line_number_gutter_width(total_lines: usize) -> usize {
-    let digits = total_lines.max(1).ilog10() as usize + 1;
-    digits + 2
 }
 
 /// True for a "this key was actually pressed" event (as opposed to a key

@@ -11,14 +11,15 @@
 
 use std::path::Path;
 
-use handlebars::Handlebars;
 use illium_core::AgentClass;
-use serde::{Deserialize, Serialize};
-
-use illium_kilo_gateway::{ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient};
+use serde::Serialize;
 
 use crate::agent_detect;
+use crate::naming::{self, PromptCompletionClient};
 use crate::transcript_prompts;
+
+const SESSION_TITLE_MIN_WORDS: usize = 2;
+const SESSION_TITLE_MAX_WORDS: usize = 4;
 
 const SESSION_TITLE_TEMPLATE: &str = r#"<instructions>
 Infer a short, 2 to 4 word title describing the task or work in progress in this coding-agent session. Prefer the shortest accurate title over a longer one. The prompts below are ordered oldest to newest -- weigh the most recent prompt the most, using the earlier ones only as background context. Do not return punctuation-only text or a generic phrase such as "coding session".
@@ -36,25 +37,11 @@ Infer a short, 2 to 4 word title describing the task or work in progress in this
 <output-example>{"session_title":"Fix Auth Bug"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
-/// Small interface keeping session-title inference testable without real HTTP.
-pub trait SessionTitleGenerator {
-    fn complete_session_title_prompt(&self, prompt: String) -> Result<String, GatewayError>;
-}
-
-impl SessionTitleGenerator for KiloGatewayClient {
-    fn complete_session_title_prompt(&self, prompt: String) -> Result<String, GatewayError> {
-        self.complete_text(&CompletionRequest::with_default_free_model(vec![
-            ChatMessage::system("You return concise, valid JSON only."),
-            ChatMessage::user(prompt),
-        ]))
-    }
-}
-
 /// Locates `session_id`'s transcript under `home`, extracts its most recent
 /// user prompts, and asks the free model for a title. This is the entry
 /// point `main.rs` spawns a worker thread around; `infer_session_title`
 /// below is the pure remainder, tested directly with fabricated prompts.
-pub fn infer_pane_title<G: SessionTitleGenerator>(
+pub fn infer_pane_title<G: PromptCompletionClient>(
     generator: &G,
     home: &Path,
     cwd: &Path,
@@ -82,7 +69,7 @@ fn agent_label(class: &AgentClass) -> &str {
 /// `generator` exactly once. Errors (no prompts, gateway failure, an
 /// unparseable or out-of-range response) are the caller's to surface;
 /// there is no retry here, matching `project_naming::bootstrap_project_name`.
-fn infer_session_title<G: SessionTitleGenerator>(
+fn infer_session_title<G: PromptCompletionClient>(
     generator: &G,
     agent_label: &str,
     prompts: &[String],
@@ -95,8 +82,8 @@ fn infer_session_title<G: SessionTitleGenerator>(
         agent_label: agent_label.to_string(),
         prompts: prompts.to_vec(),
     };
-    let prompt = render_session_title_prompt(&context)?;
-    let response = generator.complete_session_title_prompt(prompt)?;
+    let response =
+        naming::render_and_complete(generator, "session-title", SESSION_TITLE_TEMPLATE, &context)?;
     parse_session_title_response(&response)
 }
 
@@ -106,37 +93,20 @@ struct SessionTitleContext {
     prompts: Vec<String>,
 }
 
-fn render_session_title_prompt(context: &SessionTitleContext) -> anyhow::Result<String> {
-    let mut handlebars = Handlebars::new();
-    handlebars.register_template_string("session-title", SESSION_TITLE_TEMPLATE)?;
-    Ok(handlebars.render("session-title", context)?)
-}
-
-#[derive(Debug, Deserialize)]
-struct SessionTitleResponse {
-    session_title: String,
-}
-
 fn parse_session_title_response(response: &str) -> anyhow::Result<String> {
-    let parsed: SessionTitleResponse = serde_json::from_str(response)
-        .map_err(|error| anyhow::anyhow!("session-title response was not valid JSON: {error}"))?;
-    normalize_session_title(&parsed.session_title).ok_or_else(|| {
-        anyhow::anyhow!("session-title response must contain two to four short, non-empty words")
-    })
-}
-
-fn normalize_session_title(value: &str) -> Option<String> {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let word_count = normalized.split_whitespace().count();
-    ((2..=4).contains(&word_count)
-        && normalized.chars().count() <= 64
-        && normalized.chars().all(|character| !character.is_control()))
-    .then_some(normalized)
+    naming::parse_bounded_word_json(
+        response,
+        "session_title",
+        SESSION_TITLE_MIN_WORDS,
+        SESSION_TITLE_MAX_WORDS,
+        "session-title",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use illium_kilo_gateway::GatewayError;
     use std::cell::{Cell, RefCell};
 
     struct FakeGenerator {
@@ -155,8 +125,8 @@ mod tests {
         }
     }
 
-    impl SessionTitleGenerator for FakeGenerator {
-        fn complete_session_title_prompt(&self, prompt: String) -> Result<String, GatewayError> {
+    impl PromptCompletionClient for FakeGenerator {
+        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = Some(prompt);
             Ok(self.response.clone())

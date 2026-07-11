@@ -7,14 +7,15 @@
 
 use std::path::Path;
 
-use handlebars::Handlebars;
-use illium_kilo_gateway::{ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
+use crate::naming::{self, PromptCompletionClient};
 use crate::project_config;
 
 const ROOT_LISTING_MAX_LINES: usize = 100;
 const DOCUMENT_MAX_LINES: usize = 2_000;
+const PROJECT_NAME_MIN_WORDS: usize = 1;
+const PROJECT_NAME_MAX_WORDS: usize = 2;
 
 const PROJECT_NAME_TEMPLATE: &str = r#"<instructions>
 Infer the shortest useful project name from the project context. Return one or two words only. Do not use a slogan, version, punctuation-only name, or explanation.
@@ -33,20 +34,6 @@ Infer the shortest useful project name from the project context. Return one or t
 </project-context>
 <output-example>{"project_name":"Illium"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
-
-/// Small interface keeping project naming testable without real HTTP.
-pub trait ProjectNameGenerator {
-    fn complete_project_name_prompt(&self, prompt: String) -> Result<String, GatewayError>;
-}
-
-impl ProjectNameGenerator for KiloGatewayClient {
-    fn complete_project_name_prompt(&self, prompt: String) -> Result<String, GatewayError> {
-        self.complete_text(&CompletionRequest::with_default_free_model(vec![
-            ChatMessage::system("You return concise, valid JSON only."),
-            ChatMessage::user(prompt),
-        ]))
-    }
-}
 
 /// The persisted or newly inferred name returned by the boot workflow.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,11 +55,13 @@ pub fn load_stored_project_name(cwd: &Path) -> anyhow::Result<Option<String>> {
     Ok(project_config::load(cwd)?
         .project_name
         .as_deref()
-        .and_then(normalize_project_name))
+        .and_then(|value| {
+            naming::normalize_word_bounded(value, PROJECT_NAME_MIN_WORDS, PROJECT_NAME_MAX_WORDS)
+        }))
 }
 
 /// Loads a stored name, or calls the gateway exactly once to infer and save it.
-pub fn bootstrap_project_name<G: ProjectNameGenerator>(
+pub fn bootstrap_project_name<G: PromptCompletionClient>(
     cwd: &Path,
     generator: &G,
 ) -> anyhow::Result<ProjectNameBootstrap> {
@@ -85,8 +74,8 @@ pub fn bootstrap_project_name<G: ProjectNameGenerator>(
     }
 
     let context = ProjectContext::collect(cwd)?;
-    let prompt = render_project_name_prompt(&context)?;
-    let response = generator.complete_project_name_prompt(prompt)?;
+    let response =
+        naming::render_and_complete(generator, "project-name", PROJECT_NAME_TEMPLATE, &context)?;
     let project_name = parse_project_name_response(&response)?;
 
     config.project_name = Some(project_name.clone());
@@ -114,12 +103,6 @@ impl ProjectContext {
             readme_md: read_document_or_marker(&cwd.join("README.md"))?,
         })
     }
-}
-
-fn render_project_name_prompt(context: &ProjectContext) -> anyhow::Result<String> {
-    let mut handlebars = Handlebars::new();
-    handlebars.register_template_string("project-name", PROJECT_NAME_TEMPLATE)?;
-    Ok(handlebars.render("project-name", context)?)
 }
 
 fn root_listing(cwd: &Path) -> anyhow::Result<String> {
@@ -160,42 +143,43 @@ fn first_lines(contents: &str, maximum: usize) -> String {
         .join("\n")
 }
 
-#[derive(Debug, Deserialize)]
-struct ProjectNameResponse {
-    project_name: String,
-}
-
 fn parse_project_name_response(response: &str) -> anyhow::Result<String> {
-    let parsed: ProjectNameResponse = serde_json::from_str(response)
-        .map_err(|error| anyhow::anyhow!("project-name response was not valid JSON: {error}"))?;
-    normalize_project_name(&parsed.project_name).ok_or_else(|| {
-        anyhow::anyhow!("project-name response must contain one or two short, non-empty words")
-    })
-}
-
-fn normalize_project_name(value: &str) -> Option<String> {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let word_count = normalized.split_whitespace().count();
-    ((1..=2).contains(&word_count)
-        && normalized.chars().count() <= 64
-        && normalized.chars().all(|character| !character.is_control()))
-    .then_some(normalized)
+    naming::parse_bounded_word_json(
+        response,
+        "project_name",
+        PROJECT_NAME_MIN_WORDS,
+        PROJECT_NAME_MAX_WORDS,
+        "project-name",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use illium_kilo_gateway::GatewayError;
+    use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
 
     struct FakeGenerator {
         calls: Cell<u8>,
+        last_prompt: RefCell<Option<String>>,
         response: String,
     }
 
-    impl ProjectNameGenerator for FakeGenerator {
-        fn complete_project_name_prompt(&self, _prompt: String) -> Result<String, GatewayError> {
+    impl FakeGenerator {
+        fn new(response: impl Into<String>) -> Self {
+            Self {
+                calls: Cell::new(0),
+                last_prompt: RefCell::new(None),
+                response: response.into(),
+            }
+        }
+    }
+
+    impl PromptCompletionClient for FakeGenerator {
+        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
             self.calls.set(self.calls.get() + 1);
+            *self.last_prompt.borrow_mut() = Some(prompt);
             Ok(self.response.clone())
         }
     }
@@ -217,10 +201,7 @@ mod tests {
             &project_config::ProjectConfig::with_project_name("Existing Name"),
         )
         .unwrap();
-        let generator = FakeGenerator {
-            calls: Cell::new(0),
-            response: "{\"project_name\":\"Wrong\"}".to_string(),
-        };
+        let generator = FakeGenerator::new(r#"{"project_name":"Wrong"}"#);
 
         let result = bootstrap_project_name(&cwd, &generator).unwrap();
 
@@ -233,10 +214,7 @@ mod tests {
     fn missing_name_collects_context_then_persists_one_inference() {
         let cwd = scratch_dir();
         std::fs::write(cwd.join("README.md"), "# Stellar tools\n").unwrap();
-        let generator = FakeGenerator {
-            calls: Cell::new(0),
-            response: "{\"project_name\":\"Stellar Tools\"}".to_string(),
-        };
+        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools"}"#);
 
         let result = bootstrap_project_name(&cwd, &generator).unwrap();
 
@@ -257,7 +235,10 @@ mod tests {
             claude_md: "[not present]".to_string(),
             readme_md: "# Example".to_string(),
         };
-        let prompt = render_project_name_prompt(&context).unwrap();
+        let generator = FakeGenerator::new(r#"{"project_name":"Illium"}"#);
+        naming::render_and_complete(&generator, "project-name", PROJECT_NAME_TEMPLATE, &context)
+            .unwrap();
+        let prompt = generator.last_prompt.borrow().clone().unwrap();
 
         assert!(prompt.contains("<project-context>"));
         assert!(prompt.contains("<project-path>/work/example</project-path>"));

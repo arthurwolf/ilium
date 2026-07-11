@@ -16,6 +16,7 @@ mod layout;
 mod markdown;
 mod minimap;
 mod modal;
+mod naming;
 mod project_config;
 mod project_naming;
 mod session_naming;
