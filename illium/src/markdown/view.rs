@@ -1,9 +1,9 @@
 //! Draws a `RenderedDocument` into a `Rect`, scrolled by a row offset.
 //!
 //! Unlike `mdfried`'s hand-rolled buffer painter, this walks blocks with a
-//! running Y cursor and calls `Frame::render_widget` per block -- text via
-//! `Paragraph` (which owns its own word-wrap), headers/images via
-//! `ratatui_image::Image` -- since both are ordinary `Widget`s and don't
+//! running Y cursor and calls `Frame::render_widget` per block -- text and
+//! styled blank rows via `Paragraph` (which owns word-wrap), headers/images
+//! via `ratatui_image::Image` -- since all are ordinary `Widget`s and don't
 //! need a shared abstraction beyond "here's your `Rect`".
 
 use ratatui::layout::Rect;

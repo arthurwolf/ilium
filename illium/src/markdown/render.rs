@@ -19,8 +19,8 @@ use ratatui_image::{FilterType, Resize};
 use super::document::{Block, Document, ImagePath};
 use super::raster::HeaderRasterizer;
 
-/// One block of a document, ready to render: text passed through as-is,
-/// or a header/image already converted to a terminal-graphics `Protocol`.
+/// One block of a document, ready to render: text and authored spacing
+/// passed through as-is, or a header/image converted to a graphics protocol.
 pub enum RenderedBlock {
     Text(Vec<Line<'static>>),
     /// Source-authored vertical space. It remains a first-class block so
@@ -198,6 +198,47 @@ mod tests {
         assert_eq!(buffer.cell((0, 0)).unwrap().symbol(), "f");
         assert_eq!(buffer.cell((0, 1)).unwrap().symbol(), " ");
         assert_eq!(buffer.cell((0, 2)).unwrap().symbol(), "s");
+    }
+
+    #[test]
+    fn heading_to_body_spacing_survives_rasterization() {
+        let document =
+            super::super::document::parse("# Heading\n\nbody", std::path::Path::new("/tmp"));
+        let picker = Picker::halfblocks();
+        let mut rasterizer = HeaderRasterizer::new();
+        let rendered = render(&document, &picker, &mut rasterizer, 20);
+
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+        terminal
+            .draw(|frame| {
+                super::super::view::render(frame, Rect::new(0, 0, 20, 4), &rendered, 0);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.cell((0, 2)).unwrap().symbol(), " ");
+        assert_eq!(buffer.cell((0, 3)).unwrap().symbol(), "b");
+    }
+
+    #[test]
+    fn blank_line_after_code_block_has_no_code_background() {
+        let document =
+            super::super::document::parse("```\ncode\n```\n\nafter", std::path::Path::new("/tmp"));
+        let picker = Picker::halfblocks();
+        let mut rasterizer = HeaderRasterizer::new();
+        let rendered = render(&document, &picker, &mut rasterizer, 20);
+
+        let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                super::super::view::render(frame, Rect::new(0, 0, 20, 3), &rendered, 0);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_ne!(buffer.cell((0, 0)).unwrap().bg, Color::Reset);
+        assert_eq!(buffer.cell((0, 1)).unwrap().bg, Color::Reset);
+        assert_eq!(buffer.cell((0, 2)).unwrap().symbol(), "a");
     }
 
     /// Regression test for a real image actually painting pixels: builds a

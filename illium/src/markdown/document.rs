@@ -17,7 +17,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// One top-level piece of a parsed document, in source order.
+/// One renderable piece of a parsed document, in source order.
 #[derive(Debug, Clone)]
 pub enum Block {
     Heading {
@@ -759,6 +759,32 @@ mod tests {
     }
 
     #[test]
+    fn tight_list_remains_compact_without_synthetic_spacing() {
+        let document = parse("- first\n- second", Path::new("/tmp"));
+
+        assert_eq!(document.blocks.len(), 1);
+        let Block::Text(items) = &document.blocks[0] else {
+            panic!("expected one tight-list text block");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(line_text(&items[0]), "• first");
+        assert_eq!(line_text(&items[1]), "• second");
+    }
+
+    #[test]
+    fn preserves_spacing_on_both_sides_of_a_list() {
+        let document = parse("before\n\n- first\n- second\n\nafter", Path::new("/tmp"));
+
+        assert_eq!(document.blocks.len(), 5);
+        assert!(matches!(&document.blocks[1], Block::BlankLines(lines) if lines.len() == 1));
+        let Block::Text(items) = &document.blocks[2] else {
+            panic!("expected list between paragraph spacers");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&document.blocks[3], Block::BlankLines(lines) if lines.len() == 1));
+    }
+
+    #[test]
     fn fenced_code_keeps_internal_blank_rows_without_a_trailing_sentinel() {
         let document = parse("```\nfirst\n\nsecond\n```\n\nafter", Path::new("/tmp"));
 
@@ -784,6 +810,19 @@ mod tests {
         let quote_spacing = quote_spacing.expect("expected a quoted blank row");
         assert_eq!(quote_spacing.len(), 1);
         assert_eq!(line_text(&quote_spacing[0]), "│ ");
+    }
+
+    #[test]
+    fn hard_break_stays_two_adjacent_content_rows() {
+        let document = parse("first  \nsecond", Path::new("/tmp"));
+
+        assert_eq!(document.blocks.len(), 1);
+        let Block::Text(lines) = &document.blocks[0] else {
+            panic!("expected one hard-break text block");
+        };
+        assert_eq!(lines.len(), 2);
+        assert_eq!(line_text(&lines[0]), "first");
+        assert_eq!(line_text(&lines[1]), "second");
     }
 
     /// Concatenates styled spans without losing the visible text contract
