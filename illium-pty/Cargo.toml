@@ -1,0 +1,15 @@
+[package]
+name = "illium-pty"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0.103"
+crossterm = "0.29.0"
+portable-pty = "0.9.0"
+thiserror = "2.0.18"
+tokio = { version = "1", features = ["sync"] }
+vt100 = "0.16.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }

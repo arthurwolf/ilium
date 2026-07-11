@@ -1879,9 +1879,8 @@ impl App {
                             .saturating_sub(editor_content_area.height)
                     }
                     KeyCode::PageDown => {
-                        editor.rendered_scroll = (editor.rendered_scroll
-                            + editor_content_area.height)
-                            .min(max_scroll)
+                        editor.rendered_scroll =
+                            (editor.rendered_scroll + editor_content_area.height).min(max_scroll)
                     }
                     _ => {}
                 }

@@ -205,10 +205,7 @@ impl<'a> Builder<'a> {
             // following separator (notably loose-list Item ranges). Leaf
             // events already advanced through every rendered source row.
             Event::End(_) => return,
-            _ => source_range
-                .end
-                .saturating_sub(1)
-                .max(source_range.start),
+            _ => source_range.end.saturating_sub(1).max(source_range.start),
         };
         let occupied_source_line = self.source_line_for_offset(occupied_source_offset);
         self.last_source_line = Some(

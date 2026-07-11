@@ -34,9 +34,9 @@
 # Markdown rendered-mode spacing
 
 - [x] Reproduce the parser's loss of source blank lines and trace its effect through rendered height and scrolling.
-- [ ] Preserve source blank lines explicitly across Markdown parsing, rendering, and viewport layout.
-- [ ] Cover paragraph, heading, list, code-block, multiple-blank-line, wrapping, and scrolling behavior with regression tests.
-- [ ] Run focused and workspace verification, manually validate the TUI, rebuild the release binary, and install it.
+- [x] Preserve source blank lines explicitly across Markdown parsing, rendering, and viewport layout.
+- [x] Cover paragraph, heading, list, code-block, multiple-blank-line, wrapping, and scrolling behavior with regression tests.
+- [x] Run focused and workspace verification, manually validate the TUI, rebuild the release binary, and install it.
 
 # AI session titles
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["illium-core", "illium-ipc", "illium-kilo-gateway", "illium"]
+members = ["illium-core", "illium-ipc", "illium-kilo-gateway", "illium-pty", "illium"]
 
 [workspace.package]
 version = "0.1.0"

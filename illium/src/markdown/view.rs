@@ -75,10 +75,7 @@ fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64, heig
         }
         RenderedBlock::BlankLines(lines) => {
             let skip = (visible_top - y) as u16;
-            frame.render_widget(
-                Paragraph::new(lines.clone()).scroll((skip, 0)),
-                rect,
-            );
+            frame.render_widget(Paragraph::new(lines.clone()).scroll((skip, 0)), rect);
         }
         RenderedBlock::Placeholder(line) => {
             frame.render_widget(Paragraph::new(line.clone()), rect);

@@ -1125,8 +1125,8 @@ dependencies = [
  "handlebars",
  "illium-core",
  "illium-kilo-gateway",
+ "illium-pty",
  "image",
- "portable-pty",
  "pulldown-cmark",
  "ratatui",
  "ratatui-image",
@@ -1171,6 +1171,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "ureq",
+]
+
+[[package]]
+name = "illium-pty"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "portable-pty",
+ "thiserror 2.0.18",
+ "tokio",
+ "vt100",
 ]
 
 [[package]]

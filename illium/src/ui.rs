@@ -287,8 +287,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
     if let Some(minimap_area) = chrome.minimap_area {
         let lines = editor.textarea.lines();
         let borrowed: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let highlight_line =
-            minimap_highlight_line(editor, lines.len(), chrome.content_area.width);
+        let highlight_line = minimap_highlight_line(editor, lines.len(), chrome.content_area.width);
         minimap::render(
             frame,
             minimap_area,
@@ -327,11 +326,7 @@ fn draw_rendered_scrollbar(
 /// Rendered mode (the rendered view's scroll is measured in rendered
 /// rows, not source lines, so this is an approximation across headers/
 /// images whose rendered height differs from their one source line).
-fn minimap_highlight_line(
-    editor: &EditorPane,
-    total_lines: usize,
-    rendered_width: u16,
-) -> usize {
+fn minimap_highlight_line(editor: &EditorPane, total_lines: usize, rendered_width: u16) -> usize {
     match editor.view_mode {
         EditorViewMode::Source => editor.textarea.cursor().0,
         EditorViewMode::Rendered => {
