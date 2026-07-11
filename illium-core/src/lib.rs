@@ -6,12 +6,14 @@
 
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
 
 pub const ROOT_ID: NodeId = NodeId(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaneContentKind {
     Terminal,
     Editor,
@@ -20,20 +22,20 @@ pub enum PaneContentKind {
 /// Direction used by tree-row move controls. The domain owns the boundary
 /// rule because moving a pane across groups is a structural mutation, not a
 /// rendering concern.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeMoveDirection {
     Up,
     Down,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentClass {
     Claude,
     Codex,
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentActivity {
     Working,
     WaitingApproval,
@@ -45,7 +47,7 @@ pub enum AgentActivity {
     Idle,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaneStatus {
     /// Terminal pane, no agent CLI detected in it.
     PlainShell,
@@ -55,7 +57,7 @@ pub enum PaneStatus {
     Editor { dirty: bool },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
     Group {
         children: Vec<NodeId>,
@@ -67,7 +69,7 @@ pub enum NodeKind {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub parent: Option<NodeId>,
@@ -115,7 +117,13 @@ pub struct GroupListing {
 
 /// Session tree: one root Group (id 0) containing an arbitrary-depth mix
 /// of Groups and Panes.
-#[derive(Debug)]
+///
+/// Derives `Serialize`/`Deserialize` so `illium-server` can hand a full
+/// snapshot to `illium-ipc` for the `TreeSnapshot` event and so the JSON
+/// crash-recovery snapshot (README M5) can persist it; deriving serde here
+/// is not an I/O concern, it's just data shape, so it doesn't violate this
+/// crate's "no I/O" rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tree {
     nodes: HashMap<NodeId, Node>,
     next_id: u64,
