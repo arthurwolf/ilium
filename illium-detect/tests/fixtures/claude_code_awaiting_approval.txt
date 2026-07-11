@@ -1,0 +1,10 @@
+data/ has 123k files, dwarfing rest. What list you want?
+
+❯ 1. Source only (recommended)
+    src, ui, rust-src, shared-types, docs, scripts — skip data/ and import/ bulk
+  2. Write full list to file
+    Dump all 133k paths to a .txt in scratchpad, you grep/view as needed
+  3. Everything, paginated in chat
+  4. Type something.
+  5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel

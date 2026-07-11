@@ -1124,6 +1124,7 @@ dependencies = [
  "directories",
  "handlebars",
  "illium-core",
+ "illium-detect",
  "illium-kilo-gateway",
  "illium-pty",
  "image",
@@ -1150,6 +1151,14 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "illium-detect"
+version = "0.1.0"
+dependencies = [
+ "illium-core",
+ "sysinfo",
 ]
 
 [[package]]

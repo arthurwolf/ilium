@@ -10,6 +10,7 @@ cosmic-text = "0.14"
 crossterm = "0.29.0"
 directories = "6.0.0"
 illium-core = { version = "0.1.0", path = "../illium-core" }
+illium-detect = { version = "0.1.0", path = "../illium-detect" }
 illium-kilo-gateway = { version = "0.1.0", path = "../illium-kilo-gateway" }
 illium-pty = { version = "0.1.0", path = "../illium-pty" }
 handlebars = "6.3.2"

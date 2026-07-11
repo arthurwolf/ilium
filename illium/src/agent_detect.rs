@@ -1,13 +1,24 @@
-//! Agent detection: two independent signals about a terminal pane.
+//! Agent detection glue for the illium bin crate: app-level orchestration
+//! *around* `illium-detect`'s two pure signals, plus the I/O-heavy
+//! session-ID discovery that doesn't belong in a pure classification
+//! crate.
 //!
-//! `identify_agent` walks the OS process tree (via `sysinfo`) to answer
-//! "which agent CLI (if any) is running in this pane's shell" — the
-//! *identity* signal. `classify_activity` scans the pane's rendered
-//! plain-text screen contents to answer "is that agent working, blocked
-//! on a confirmation, or idle" — the *activity* signal. Both are pure
-//! functions of their inputs (no I/O of their own beyond the `System`
-//! refresh the caller drives), so `app.rs` can call them once per
-//! detection tick without owning any agent-specific state itself.
+//! `illium-detect::identify_agent`/`classify_activity` are re-exported
+//! (via thin wrappers below) so `app.rs`'s call sites keep working
+//! unchanged. What stays here, and only here:
+//!
+//! - `identify_agent`/`refresh`: thin wrappers that also perform the
+//!   targeted `cwd`/`environ` refresh and 5-tier session-ID discovery
+//!   below -- work that reads `/proc/<pid>/fd` and scans transcript files
+//!   on disk, i.e. app-level orchestration, not pure classification.
+//! - The 5-tier session-ID discovery itself (`extract_session_id` and its
+//!   tiers): command-line args, environment, `/proc/<pid>/fd`, newest
+//!   project transcript, and (via `extract_session_id_from_recent_prompt_match`)
+//!   a submitted-prompt content match.
+//! - `next_activity`: folds a raw per-tick `classify_activity` reading
+//!   together with the previous displayed activity and pane-focus state --
+//!   this depends on tree/UI state (focus, prior activity) that only
+//!   `app.rs` owns, so it isn't a pure classification concern either.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -27,148 +38,11 @@ pub struct AgentProcessInfo {
     pub session_id: Option<String>,
 }
 
-/// Substring some agent CLIs render continuously while a turn is in
-/// progress (older Claude Code builds, some Codex CLI versions). Kept as
-/// one recognized trigger, but NOT the only one: a live probe against a
-/// real, current Claude Code session (v2.1.207) showed its actual
-/// in-progress line never contains this text at all -- it looks like
-/// `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`. See
-/// `looks_like_live_status_line` for the heuristic that actually catches
-/// that format.
-const WORKING_MARKER: &str = "esc to interrupt";
-
-/// Scans a pane's plain-text screen contents (as returned by
-/// `vt100::Screen::contents()`) for activity markers and classifies it.
-///
-/// Precedence: a "working" signal is checked first because a confirmation
-/// prompt never coexists with it in practice, but checking it first keeps
-/// the rule unambiguous either way. Absent that, either a y/n-style
-/// confirmation box or a general multiple-choice/question prompt (see
-/// `looks_like_confirmation_prompt` and `looks_like_selection_prompt`)
-/// means the agent is blocked waiting on the user. Anything else is
-/// `Idle`.
+/// Scans a pane's plain-text screen contents for activity markers and
+/// classifies it. Pure classification -- delegates entirely to
+/// `illium-detect`.
 pub fn classify_activity(screen_text: &str) -> AgentActivity {
-    if screen_text.contains(WORKING_MARKER) || looks_like_live_status_line(screen_text) {
-        return AgentActivity::Working;
-    }
-
-    if looks_like_confirmation_prompt(screen_text) || looks_like_selection_prompt(screen_text) {
-        return AgentActivity::WaitingApproval;
-    }
-
-    AgentActivity::Idle
-}
-
-/// True if any line looks like an in-progress status line: contains an
-/// ellipsis ('…') *and* an elapsed-time token (digits immediately
-/// followed by 's' or 'm', e.g. "6s", "12m"). This is the structural
-/// convention observed in real Claude Code output -- a present-tense
-/// whimsical verb ending in '…' plus a live elapsed-time counter, e.g.
-/// `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"` -- and
-/// it survives whichever silly verb happens to be showing, unlike trying
-/// to match exact wording. It's also distinct from the *finished*-turn
-/// summary line Claude Code prints once a turn completes (e.g.
-/// `"✻ Cogitated for 10s"`), which uses past tense "for Ns" with no
-/// ellipsis, so it won't be mistaken for still-working.
-fn looks_like_live_status_line(screen_text: &str) -> bool {
-    screen_text
-        .lines()
-        .filter(|line| line.contains('…'))
-        .any(|line| {
-            line.split(|c: char| c.is_whitespace() || c == '·')
-                .any(is_elapsed_time_token)
-        })
-}
-
-/// True if `token` looks like an elapsed-time reading: one or more ASCII
-/// digits immediately followed by a single 's' or 'm' unit suffix and
-/// nothing else (so "6s" and "12m" match, but "s" or "class" don't).
-fn is_elapsed_time_token(token: &str) -> bool {
-    let Some(digits) = token.strip_suffix(['s', 'm']) else {
-        return false;
-    };
-    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
-}
-
-/// True if the text contains a line with "Yes" and a line with "No"
-/// (case-sensitive, matching the CLIs' actual rendering — "Yes"/"No" as
-/// whole option labels, not substrings like "Yesterday"), or a line that
-/// looks like a yes/no question (ends in '?' and mentions "yes"/"no",
-/// case-insensitive).
-fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
-    let lines: Vec<&str> = screen_text.lines().collect();
-
-    let has_yes_line = lines.iter().any(|line| contains_word(line, "Yes"));
-    let has_no_line = lines.iter().any(|line| contains_word(line, "No"));
-    if has_yes_line && has_no_line {
-        return true;
-    }
-
-    lines.iter().any(|line| {
-        let trimmed = line.trim_end();
-        if !trimmed.ends_with('?') {
-            return false;
-        }
-        let lower = trimmed.to_lowercase();
-        lower.contains("yes") && lower.contains("no")
-    })
-}
-
-/// True if the screen looks like a general multiple-choice / selection
-/// prompt -- not necessarily yes/no -- e.g. Claude Code's numbered option
-/// menus with a `❯` cursor on the currently-selected line and a footer
-/// hint like "Enter to select · ↑/↓ to navigate · Esc to cancel". Either
-/// of two independent signals is enough:
-///
-/// - A footer hint line naming both a confirm/select action and a cancel
-///   action -- that exact combination of phrasing only shows up as
-///   interactive-prompt chrome, never in normal command output.
-/// - At least two numbered option lines (e.g. "1. Source only", "  2. Write
-///   full list to file") *and* a `❯` selection cursor somewhere on screen
-///   -- requiring the cursor too keeps this from firing on an ordinary
-///   numbered list some command happened to print.
-fn looks_like_selection_prompt(screen_text: &str) -> bool {
-    let lines: Vec<&str> = screen_text.lines().collect();
-
-    let has_selection_footer = lines.iter().any(|line| {
-        let lower = line.to_lowercase();
-        let names_a_confirm_action = lower.contains("to select")
-            || lower.contains("to confirm")
-            || lower.contains("to choose");
-        names_a_confirm_action && lower.contains("cancel")
-    });
-    if has_selection_footer {
-        return true;
-    }
-
-    let numbered_option_lines = lines
-        .iter()
-        .filter(|line| is_numbered_option_line(line))
-        .count();
-    numbered_option_lines >= 2 && screen_text.contains('\u{276f}')
-}
-
-/// True if `line` starts (after an optional `❯` cursor and leading
-/// whitespace) with a small integer followed by `". "` -- e.g. "1. Source
-/// only" or "  2. Write full list to file".
-fn is_numbered_option_line(line: &str) -> bool {
-    let trimmed = line
-        .trim_start()
-        .trim_start_matches('\u{276f}')
-        .trim_start();
-    let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
-    if digits_end == 0 {
-        return false;
-    }
-    trimmed[digits_end..].starts_with(". ")
-}
-
-/// True if `word` appears in `line` as a standalone token — i.e. not
-/// merely a substring of a longer word (so "Yesterday" doesn't count as
-/// "Yes", "Nowhere" doesn't count as "No").
-fn contains_word(line: &str, word: &str) -> bool {
-    line.split(|c: char| !c.is_alphanumeric())
-        .any(|token| token == word)
+    illium_detect::classify_activity(screen_text)
 }
 
 /// Turns one tick's raw `classify_activity` reading into the activity
@@ -219,58 +93,33 @@ pub fn next_activity(
 
 /// Refreshes the system-wide process list (pid/parent/name only) on the
 /// given System. Call this once per detection tick (shared across all
-/// panes), not once per pane.
-///
-/// Deliberately cheap: `identify_agent`'s tree walk only needs pid/parent
-/// chains and process names, which sysinfo always populates. `cwd` and
-/// `environ` are per-process filesystem reads (`readlink`/`open`+`read`
-/// under `/proc`) and cost proportionally to *every* process on the
-/// machine if fetched here -- benchmarked at 300ms-1.1s+ per tick on a
-/// dev box with a few thousand processes, entirely wasted on the >99% of
-/// processes that are never an agent CLI. `identify_agent` fetches those
-/// two fields itself, scoped to just the one matched pid, once it knows
-/// which pid actually needs them.
+/// panes), not once per pane. Delegates to `illium-detect`, which owns
+/// the field set its identity walk actually needs.
 pub fn refresh(system: &mut System) {
-    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    illium_detect::refresh(system);
 }
 
 /// Given the OS pid of a pane's directly-spawned child (typically the
-/// user's shell), walks the process tree looking for a descendant
-/// process whose name matches a known agent CLI, and returns the first
-/// match found (breadth-first over `system.processes()`, matching each
-/// process's `parent()` back up its ancestor chain to `shell_pid`).
+/// user's shell), finds the agent CLI identity below it (via
+/// `illium_detect::identify_agent`'s process-tree walk against the
+/// registry of known signatures) and, if one is found, discovers its
+/// session ID -- the app-level orchestration `illium-detect` deliberately
+/// doesn't own: a targeted `cwd`/`environ` refresh scoped to just the
+/// matched pid, followed by the 5-tier `extract_session_id` lookup below
+/// (command-line args, environment, `/proc/<pid>/fd`, and transcript
+/// scanning).
 ///
-/// Known signatures (case-insensitive substring match on the process
-/// name):
-///   - contains "claude"           -> `AgentClass::Claude` (good enough
-///     for v1 — we don't special-case names like "claude-illium")
-///   - contains "codex"             -> `AgentClass::Codex`
-///   - contains "opencode" or "aider" -> `AgentClass::Other(<matched name>)`
-///
-/// Returns `None` if no descendant process matches.
-///
-/// Takes `&mut System` because, once a match is found, this fetches that
-/// one process's `cwd`/`environ` via a pid-scoped refresh (see `refresh`'s
-/// doc comment for why those fields aren't fetched for every process up
-/// front).
+/// Returns `None` if no descendant process matches a known agent CLI
+/// signature.
 pub fn identify_agent(system: &mut System, shell_pid: Pid) -> Option<AgentProcessInfo> {
-    let (matched_pid, class) = system
-        .processes()
-        .values()
-        .filter_map(|process| {
-            let depth = descendant_depth(system, process.pid(), shell_pid)?;
-            let class = classify_process_name(&process.name().to_string_lossy().to_lowercase())?;
-            Some((depth, process.pid(), class))
-        })
-        // The CLI process is closer to the pane shell than its internal
-        // helper processes (for example Codex's code-mode host).
-        .min_by_key(|(depth, pid, _)| (*depth, pid.as_u32()))
-        .map(|(_, pid, class)| (pid, class))?;
+    let identity = illium_detect::identify_agent(system, shell_pid)?;
+    let matched_pid = Pid::from_u32(identity.pid);
 
     // `cwd` can change over a process's life (only tier 4 needs a fresh
     // read); `environ` is fixed at exec time, so it's fetched once and
-    // cached thereafter -- same rationale as `exe` before this function
-    // owned the refresh.
+    // cached thereafter. Scoped to just this one matched pid -- see
+    // `illium_detect::refresh`'s doc comment for why those fields aren't
+    // fetched for every process up front.
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[matched_pid]),
         true,
@@ -280,9 +129,9 @@ pub fn identify_agent(system: &mut System, shell_pid: Pid) -> Option<AgentProces
     );
     let process = system.process(matched_pid)?;
     Some(AgentProcessInfo {
-        pid: matched_pid.as_u32(),
-        session_id: extract_session_id(process, &class),
-        class,
+        session_id: extract_session_id(process, &identity.class),
+        class: identity.class,
+        pid: identity.pid,
     })
 }
 
@@ -717,45 +566,6 @@ fn is_session_identifier(value: &str) -> bool {
     !value.is_empty() && !value.starts_with('-')
 }
 
-/// Classifies a single (already-lowercased) process name against the
-/// known agent CLI signatures.
-fn classify_process_name(lowercase_name: &str) -> Option<AgentClass> {
-    if lowercase_name.contains("claude") {
-        return Some(AgentClass::Claude);
-    }
-    if lowercase_name.contains("codex") {
-        return Some(AgentClass::Codex);
-    }
-    if lowercase_name.contains("opencode") {
-        return Some(AgentClass::Other(lowercase_name.to_string()));
-    }
-    if lowercase_name.contains("aider") {
-        return Some(AgentClass::Other(lowercase_name.to_string()));
-    }
-    None
-}
-
-/// Returns the number of parent links from `pid` to `root`, or `None` when
-/// it is outside that pane's process tree.
-fn descendant_depth(system: &System, pid: Pid, root: Pid) -> Option<usize> {
-    let mut current = Some(pid);
-    // Process trees are finite and shallow in practice; a visited set
-    // guards against any (unexpected) parent cycle from a stale snapshot.
-    let mut visited = std::collections::HashSet::new();
-    let mut depth = 0;
-    while let Some(current_pid) = current {
-        if current_pid == root {
-            return Some(depth);
-        }
-        if !visited.insert(current_pid) {
-            return None;
-        }
-        depth += 1;
-        current = system.process(current_pid).and_then(|p| p.parent());
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,118 +583,11 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn working_marker_takes_precedence() {
-        let screen = "Thinking... (esc to interrupt) · 12s · \u{2191} 1.2k tokens";
-        assert_eq!(classify_activity(screen), AgentActivity::Working);
-    }
-
-    #[test]
-    fn numbered_yes_no_choices_are_waiting_approval() {
-        let screen = "Do you want to proceed?\n\u{276f} 1. Yes\n  2. Yes, allow all edits during this session\n  3. No";
-        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
-    }
-
-    /// Real Claude Code numbered selection menu (no "Yes"/"No" anywhere)
-    /// captured live -- a plain multiple-choice question, not a
-    /// confirmation. Must still register as `WaitingApproval` on both the
-    /// footer-hint signal and the numbered+cursor signal.
-    #[test]
-    fn claude_code_selection_menu_is_waiting_approval() {
-        let screen = "data/ has 123k files, dwarfing rest. What list you want?\n\n\
-            \u{276f} 1. Source only (recommended)\n\
-            \u{a0}\u{a0}\u{a0}\u{a0}src, ui, rust-src, shared-types, docs, scripts — skip data/ and import/ bulk\n\
-            \u{a0}2. Write full list to file\n\
-            \u{a0}\u{a0}\u{a0}Dump all 133k paths to a .txt in scratchpad, you grep/view as needed\n\
-            \u{a0}3. Everything, paginated in chat\n\
-            \u{a0}4. Type something.\n\
-            \u{a0}5. Chat about this\n\
-            Enter to select · \u{2191}/\u{2193} to navigate · Esc to cancel";
-        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
-    }
-
-    /// Same shape of menu without the footer hint line -- the numbered
-    /// lines + cursor signal alone must still catch it, covering CLIs
-    /// (e.g. Codex) whose exact footer wording might differ or be absent.
-    #[test]
-    fn generic_numbered_menu_with_cursor_is_waiting_approval_without_footer_hint() {
-        let screen =
-            "Pick an option:\n\u{276f} 1. Do the thing\n  2. Do the other thing\n  3. Abort";
-        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
-    }
-
-    #[test]
-    fn numbered_list_without_cursor_is_not_a_selection_prompt() {
-        let screen = "Build steps:\n1. Compile\n2. Link\n3. Package";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn plain_shell_prompt_is_idle() {
-        let screen = "developer@workstation:~/dev/ai/illium$ ";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn yes_no_question_ending_in_question_mark_is_waiting_approval() {
-        let screen = "Overwrite existing file, yes or no?";
-        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
-    }
-
-    #[test]
-    fn substring_matches_do_not_falsely_trigger_confirmation() {
-        let screen = "Yesterday's build succeeded.\nNowhere to go from here.";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    /// Real Claude Code (v2.1.207) in-progress status line, captured from
-    /// a live session -- it never contains "esc to interrupt" at all.
-    #[test]
-    fn real_claude_code_working_line_is_working() {
-        let screen = "✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)";
-        assert_eq!(classify_activity(screen), AgentActivity::Working);
-    }
-
-    /// Real Claude Code (v2.1.207) finished-turn summary line, captured
-    /// from the same session -- past tense, no ellipsis, must NOT be
-    /// mistaken for still working.
-    #[test]
-    fn real_claude_code_done_summary_line_is_not_working() {
-        let screen = "✻ Cogitated for 10s\n❯ ";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn ellipsis_without_elapsed_time_is_not_working() {
-        let screen = "Loading dependencies… please wait";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn elapsed_time_without_ellipsis_is_not_working() {
-        let screen = "Build finished in 6s";
-        assert_eq!(classify_activity(screen), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn empty_screen_is_idle() {
-        assert_eq!(classify_activity(""), AgentActivity::Idle);
-    }
-
-    #[test]
-    fn classify_process_name_matches_known_signatures() {
-        assert_eq!(classify_process_name("claude"), Some(AgentClass::Claude));
-        assert_eq!(classify_process_name("codex"), Some(AgentClass::Codex));
-        assert_eq!(
-            classify_process_name("opencode"),
-            Some(AgentClass::Other("opencode".to_string()))
-        );
-        assert_eq!(
-            classify_process_name("aider"),
-            Some(AgentClass::Other("aider".to_string()))
-        );
-        assert_eq!(classify_process_name("bash"), None);
-    }
+    // `classify_activity`'s own behavior (working/idle/waiting-approval
+    // marker detection) and the process-name signature registry are now
+    // owned and tested by `illium-detect` -- see its fixture tests under
+    // `illium-detect/tests/fixtures/`. What remains here is app-level
+    // orchestration: session-ID discovery and prompt-focus tracking.
 
     #[test]
     fn session_id_parsing_covers_claude_and_codex_resume_forms() {
