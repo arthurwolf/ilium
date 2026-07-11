@@ -1,0 +1,7 @@
+[package]
+name = "illium-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror = "2"
