@@ -23,7 +23,7 @@ use crate::agent_detect;
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::keymap::{self, Action};
-use crate::layout::UiLayout;
+use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::modal;
 use crate::term_pane::TerminalPane;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
@@ -243,6 +243,18 @@ pub struct App {
     /// it before dispatching events, so mouse coordinates always use the
     /// same borders and split as the renderer.
     pub layout: UiLayout,
+    /// Time-based width transition owned by presentation state, separate
+    /// from the geometry it produces and from the input conditions that
+    /// choose its endpoint.
+    tree_width_animation: TreeWidthAnimation,
+    /// Last pointer cell reported by crossterm. Unlike row/toolbar hover,
+    /// this covers the tree's border and blank space, allowing the whole
+    /// left panel to participate in the width interaction.
+    pointer_position: Option<Position>,
+    /// Host-terminal focus gates pointer and keyboard focus as a whole.
+    /// Without it, the last tree mouse cell could keep the panel expanded
+    /// after the user switched to another window.
+    is_terminal_focused: bool,
     /// A tree node held by the left button until release. A release on a
     /// different tree node performs a structural drag-and-drop move.
     tree_drag_source: Option<NodeId>,
@@ -356,6 +368,8 @@ impl App {
         project_name: Option<String>,
         pane_size: (u16, u16),
     ) -> Self {
+        let started_at = Instant::now();
+
         Self {
             tree,
             panes,
@@ -371,11 +385,14 @@ impl App {
             mode: Mode::Normal,
             status_message: None,
             should_quit: false,
-            started_at: Instant::now(),
+            started_at,
             last_detect_tick: Instant::now(),
             help_leader_pending: false,
             last_known_pane_size: pane_size,
             layout: UiLayout::default(),
+            tree_width_animation: TreeWidthAnimation::new(started_at),
+            pointer_position: None,
+            is_terminal_focused: true,
             tree_drag_source: None,
             hovered_tree_node: None,
             tree_toolbar_hovered: false,
@@ -510,6 +527,12 @@ impl App {
     /// resized together; this keeps a background pane correct when it is
     /// later focused without requiring a second host-terminal resize.
     pub fn set_layout(&mut self, layout: UiLayout) {
+        // Animation runs more frequently than terminal cell widths change.
+        // Avoid redundant PTY resizes and markdown rebuilds on equal frames.
+        if self.layout == layout {
+            return;
+        }
+
         self.layout = layout;
         let (rows, cols) = layout.pane_content_size();
         self.set_pane_size(rows, cols);
@@ -527,6 +550,38 @@ impl App {
                 self.rebuild_rendered_markdown(id);
             }
         }
+    }
+
+    /// Recomputes geometry after the host terminal changes size while
+    /// preserving the animation's current visible width.
+    pub fn set_screen_area(&mut self, screen_area: Rect) {
+        let layout = UiLayout::from_screen_area_with_tree_width(
+            screen_area,
+            self.tree_width_animation.current_width(),
+        );
+        self.set_layout(layout);
+    }
+
+    /// Advances the tree width from the two independent activation signals:
+    /// pointer-over-panel and keyboard focus. The resulting `UiLayout` is
+    /// immediately shared by rendering, hit-testing, editor wrapping, and PTY
+    /// sizing, so no consumer observes a different divider position.
+    pub fn tick_layout_animation(&mut self, now: Instant) {
+        let is_pointer_over_tree = self
+            .pointer_position
+            .is_some_and(|position| self.layout.tree_area.contains(position));
+        let is_tree_active = self.is_terminal_focused
+            && (is_pointer_over_tree || matches!(self.focus, FocusTarget::Tree));
+        let tree_width = self.tree_width_animation.update(is_tree_active, now);
+        let layout =
+            UiLayout::from_screen_area_with_tree_width(self.layout.screen_area, tree_width);
+        self.set_layout(layout);
+    }
+
+    /// Lets the event loop temporarily use animation-rate polling without
+    /// permanently increasing idle CPU use.
+    pub const fn is_layout_animating(&self) -> bool {
+        self.tree_width_animation.is_animating()
     }
 
     /// Clears a `Done` (finished, unseen) agent pane back to `Idle` the
@@ -640,6 +695,19 @@ impl App {
             return self.handle_mouse_event(mouse);
         }
 
+        match &event {
+            // Host focus is part of the activation contract: an internal
+            // tree focus becomes active again on FocusGained, without stale
+            // pointer coordinates pretending the mouse never left.
+            Event::FocusLost => {
+                self.is_terminal_focused = false;
+                self.pointer_position = None;
+                self.clear_tree_hover();
+            }
+            Event::FocusGained => self.is_terminal_focused = true,
+            _ => {}
+        }
+
         match std::mem::replace(&mut self.mode, Mode::Normal) {
             Mode::Help => self.handle_help_event(&event),
             Mode::Explorer(overlay, target) => {
@@ -675,6 +743,10 @@ impl App {
     /// The sidebar owns its clicks and drags; the pane receives coordinates
     /// relative to its content rectangle only after it is focused.
     fn handle_mouse_event(&mut self, mouse: MouseEvent) -> anyhow::Result<()> {
+        let position = Position::new(mouse.column, mouse.row);
+        self.is_terminal_focused = true;
+        self.pointer_position = Some(position);
+
         // Only actually take `self.mode` out when it's the one variant this
         // function handles. The previous unconditional `mem::replace` swapped
         // *any* mode (Explorer included) out for `Normal` here and never put
@@ -727,7 +799,6 @@ impl App {
             return Ok(());
         }
 
-        let position = Position::new(mouse.column, mouse.row);
         if self.layout.tree_area.contains(position) {
             self.handle_tree_mouse(mouse, position);
             return Ok(());
@@ -1088,6 +1159,25 @@ impl App {
                         },
                     );
                     return Ok(());
+                }
+
+                // Syntax-highlighted buffers render through `editor_highlight`,
+                // which scrolls off `source_scroll_row` rather than
+                // `TextArea`'s own (private, cursor-following) viewport --
+                // see `EditorPane::scroll_source_view`. Forwarding wheel
+                // events into `TextArea::input` for those buffers would move
+                // state nothing reads, so handle the scroll ourselves and
+                // skip the widget forward entirely.
+                let wheel_delta = match mouse.kind {
+                    MouseEventKind::ScrollUp => Some(-3),
+                    MouseEventKind::ScrollDown => Some(3),
+                    _ => None,
+                };
+                if let Some(delta) = wheel_delta {
+                    if editor.highlighted_lines().is_some() {
+                        editor.scroll_source_view(delta);
+                        return Ok(());
+                    }
                 }
 
                 let modified = editor.input(ratatui_textarea::Input::from(Event::Mouse(mouse)));
@@ -2314,8 +2404,9 @@ impl App {
     /// back via `Tree::set_pane_status`.
     pub fn tick_detection(&mut self, system: &mut System) {
         agent_detect::refresh(system);
-        // Resolved once per tick rather than per pane; only actually used
-        // by the tier-5 prompt-match fallback below, and cheap either way.
+        // Resolved once per tick rather than per pane; used by both the
+        // tier-4 newest-transcript fallback and the tier-5 prompt-match
+        // fallback below, and cheap either way.
         let home_dir = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
 
         let pane_ids: Vec<NodeId> = self.panes.keys().copied().collect();
@@ -2325,9 +2416,25 @@ impl App {
             };
 
             let raw_activity = agent_detect::classify_activity(&term.screen_text());
-            let mut agent_process = term
-                .shell_pid()
-                .and_then(|pid| agent_detect::identify_agent(&mut *system, Pid::from_u32(pid)));
+            // Every session ID already confidently assigned to a *different*
+            // pane -- passed to `identify_agent` so its last-resort
+            // newest-transcript guess (tier 4) can never hand this pane an ID
+            // that unambiguously belongs to another live, concurrently
+            // active session in the same project directory.
+            let claimed_by_other_panes: HashSet<String> = self
+                .agent_processes
+                .iter()
+                .filter(|(&other_id, _)| other_id != id)
+                .filter_map(|(_, process)| process.session_id.clone())
+                .collect();
+            let mut agent_process = term.shell_pid().and_then(|pid| {
+                agent_detect::identify_agent(
+                    &mut *system,
+                    Pid::from_u32(pid),
+                    &claimed_by_other_panes,
+                    home_dir.as_deref(),
+                )
+            });
             if let Some(process) = &mut agent_process {
                 // Tier 0: an ID illium already knows for certain because it
                 // just typed `resume <id>` / `--resume <id>` into this exact
@@ -2876,6 +2983,42 @@ fn encode_key_for_terminal(key: &KeyEvent) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::{EXPANDED_TREE_WIDTH, TREE_WIDTH, TREE_WIDTH_ANIMATION_DURATION};
+
+    /// Exercises the public input path rather than mutating `focus` directly,
+    /// matching the documented Ctrl+A prefix used by the real TUI.
+    fn execute_leader_action(app: &mut App, letter: char) {
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('a'),
+            KeyModifiers::CONTROL,
+        )))
+        .expect("leader key should be handled");
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char(letter),
+            KeyModifiers::NONE,
+        )))
+        .expect("leader action should be handled");
+    }
+
+    /// Creates the same any-motion event crossterm emits while mouse capture
+    /// is enabled in `TerminalGuard`.
+    fn mouse_move(column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    /// Reads the vt100 dimensions behind the selected real terminal pane.
+    fn focused_terminal_size(app: &App) -> (u16, u16) {
+        let pane_id = app.focused_pane.expect("a terminal pane should be focused");
+        let Some(PaneRuntime::Terminal(terminal)) = app.panes.get(&pane_id) else {
+            panic!("the focused pane should be a terminal");
+        };
+        terminal.with_screen(|screen| screen.size())
+    }
 
     #[test]
     fn saved_agent_commands_use_each_cli_resume_syntax() {
@@ -3011,6 +3154,184 @@ mod tests {
             })
             .expect("restored terminal should still exist");
         assert_eq!(resized_terminal_size, (55, 150));
+    }
+
+    #[test]
+    fn keyboard_focus_expands_and_collapses_the_tree_panel() {
+        let mut app =
+            App::new(scratch_session_dir("tree-width-keyboard-focus")).expect("app should start");
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        execute_leader_action(&mut app, 't');
+        assert_eq!(app.focus, FocusTarget::Tree);
+
+        let expansion_started_at = Instant::now();
+        app.tick_layout_animation(expansion_started_at);
+        assert!(app.is_layout_animating());
+        app.tick_layout_animation(expansion_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, EXPANDED_TREE_WIDTH);
+        assert_eq!(app.layout.tree_area.width, EXPANDED_TREE_WIDTH + 1);
+        assert_eq!(focused_terminal_size(&app), (37, 54));
+
+        execute_leader_action(&mut app, 'p');
+        assert_eq!(app.focus, FocusTarget::Pane);
+
+        let collapse_started_at = expansion_started_at + TREE_WIDTH_ANIMATION_DURATION;
+        app.tick_layout_animation(collapse_started_at);
+        assert!(app.is_layout_animating());
+        app.tick_layout_animation(collapse_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, TREE_WIDTH);
+        assert_eq!(app.layout.tree_area.width, TREE_WIDTH + 1);
+        assert_eq!(focused_terminal_size(&app), (37, 86));
+    }
+
+    #[test]
+    fn host_focus_loss_collapses_stale_hover_and_focus_gain_restores_tree_focus() {
+        let mut app =
+            App::new(scratch_session_dir("tree-width-host-focus")).expect("app should start");
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.handle_event(mouse_move(5, 5))
+            .expect("tree hover should be handled");
+
+        let expansion_started_at = Instant::now();
+        app.tick_layout_animation(expansion_started_at);
+        app.tick_layout_animation(expansion_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.focus, FocusTarget::Tree);
+        assert_eq!(app.layout.pane_area.x, EXPANDED_TREE_WIDTH);
+
+        app.handle_event(Event::FocusLost)
+            .expect("host focus loss should be handled");
+        let collapse_started_at = expansion_started_at + TREE_WIDTH_ANIMATION_DURATION;
+        app.tick_layout_animation(collapse_started_at);
+        app.tick_layout_animation(collapse_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, TREE_WIDTH);
+        assert_eq!(app.focus, FocusTarget::Tree);
+
+        app.handle_event(Event::FocusGained)
+            .expect("host focus gain should be handled");
+        let restore_started_at = collapse_started_at + TREE_WIDTH_ANIMATION_DURATION;
+        app.tick_layout_animation(restore_started_at);
+        app.tick_layout_animation(restore_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, EXPANDED_TREE_WIDTH);
+    }
+
+    #[test]
+    fn tree_hover_keeps_the_panel_expanded_until_the_pointer_reaches_the_pane() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut app =
+            App::new(scratch_session_dir("tree-width-pointer-hover")).expect("app should start");
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("create test terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .expect("normal frame should render");
+
+        // Blank panel space is still hover: row/toolbar-specific affordance
+        // state remains empty, while the panel-wide pointer state expands.
+        app.handle_event(mouse_move(5, 10))
+            .expect("tree hover should be handled");
+        assert!(app.hovered_tree_node.is_none());
+        assert!(!app.tree_toolbar_hovered);
+
+        let expansion_started_at = Instant::now();
+        app.tick_layout_animation(expansion_started_at);
+        app.tick_layout_animation(expansion_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, EXPANDED_TREE_WIDTH);
+
+        // The renderer must consume the exact same expanded divider used by
+        // hit-testing and PTY sizing, not silently recreate the old split.
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .expect("expanded frame should render");
+        {
+            let buffer = terminal.backend().buffer();
+            assert_eq!(
+                buffer
+                    .cell((EXPANDED_TREE_WIDTH, 1))
+                    .expect("expanded divider cell")
+                    .symbol(),
+                "│"
+            );
+            assert_ne!(
+                buffer
+                    .cell((TREE_WIDTH, 1))
+                    .expect("former divider cell")
+                    .symbol(),
+                "│"
+            );
+        }
+
+        // A pane-row press deliberately gives keyboard focus to the pane.
+        // Because the pointer remains over the tree, hover must win the OR
+        // contract and keep the panel fully expanded.
+        let pane_id = app.focused_pane.expect("initial pane should be focused");
+        let pane_hit = (app.layout.tree_area.y..app.layout.tree_area.bottom())
+            .find_map(|row| {
+                let position = Position::new(app.layout.tree_area.x + 2, row);
+                tree_ui::node_at_position(
+                    &app.tree,
+                    &app.tree_state,
+                    app.layout.tree_area,
+                    position,
+                )
+                .filter(|hit| hit.id == pane_id)
+                .map(|_| position)
+            })
+            .expect("the pane row should be visible");
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: pane_hit.x,
+            row: pane_hit.y,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .expect("pane-row press should be handled");
+        assert_eq!(app.focus, FocusTarget::Pane);
+        app.tick_layout_animation(
+            expansion_started_at + TREE_WIDTH_ANIMATION_DURATION + Duration::from_millis(1),
+        );
+        assert_eq!(app.layout.pane_area.x, EXPANDED_TREE_WIDTH);
+        assert!(!app.is_layout_animating());
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: pane_hit.x,
+            row: pane_hit.y,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .expect("pane-row release should be handled");
+
+        app.handle_event(mouse_move(100, 5))
+            .expect("pane hover should be handled");
+        assert_eq!(app.focus, FocusTarget::Pane);
+
+        let collapse_started_at =
+            expansion_started_at + TREE_WIDTH_ANIMATION_DURATION + Duration::from_millis(2);
+        app.tick_layout_animation(collapse_started_at);
+        app.tick_layout_animation(collapse_started_at + TREE_WIDTH_ANIMATION_DURATION);
+        assert_eq!(app.layout.pane_area.x, TREE_WIDTH);
+    }
+
+    #[test]
+    fn expanded_geometry_owns_mouse_hit_testing_beyond_the_normal_tree_width() {
+        let mut app =
+            App::new(scratch_session_dir("tree-width-shared-hitbox")).expect("app should start");
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        execute_leader_action(&mut app, 't');
+
+        let expansion_started_at = Instant::now();
+        app.tick_layout_animation(expansion_started_at);
+        app.tick_layout_animation(expansion_started_at + TREE_WIDTH_ANIMATION_DURATION);
+
+        let expanded_only_column = TREE_WIDTH + 8;
+        assert!(app
+            .layout
+            .tree_area
+            .contains(Position::new(expanded_only_column, 5)));
+        app.handle_event(mouse_move(expanded_only_column, 5))
+            .expect("expanded tree hover should be handled");
+        assert_eq!(app.focus, FocusTarget::Tree);
     }
 
     #[test]
@@ -3412,6 +3733,78 @@ mod tests {
             panic!("expected the replaced pane to still be an editor");
         };
         assert_eq!(editor.textarea.cursor().0, expected_line);
+
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    /// Regression test for a bug where, on a syntax-highlighted buffer, a
+    /// mouse-wheel scroll after a minimap click had no visible effect: the
+    /// wheel event was forwarded into `TextArea::input`, which moves the
+    /// widget's own private viewport, but `editor_highlight::render` (the
+    /// path taken for recognized languages) reads `EditorPane`'s separate
+    /// `source_scroll_row` mirror instead -- one nothing else ever wrote to
+    /// on a scroll, so the view snapped straight back to the cursor's row
+    /// (wherever the minimap click had just jumped it to) every frame.
+    #[test]
+    fn scrolling_after_a_minimap_click_moves_the_highlighted_source_viewport() {
+        let dir = std::env::temp_dir().join("illium-app-tests").join(format!(
+            "{:?}-minimap-then-scroll",
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let file_path = dir.join("notes.rs"); // recognized extension -> highlighted render path
+        let contents: String = (0..50).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(&file_path, &contents).expect("write fixture file");
+
+        let mut app = App::new(dir.clone()).expect("app should start");
+        app.set_layout(UiLayout::from_screen_area(Rect::new(0, 0, 120, 40)));
+
+        let pane_id = app.focused_pane.expect("initial shell pane is focused");
+        let editor = EditorPane::load(file_path.clone()).expect("load fixture");
+        assert!(
+            editor.highlighted_lines().is_some(),
+            "fixture must take the highlighted render path for this regression to apply"
+        );
+        app.panes
+            .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
+
+        let chrome = editor_chrome::compute(app.layout.pane_content_area, true);
+        let minimap_area = chrome
+            .minimap_area
+            .expect("pane is wide enough for a minimap");
+        let click_row = minimap_area.y + minimap_area.height - 1; // jump near the end of the buffer
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: minimap_area.x,
+            row: click_row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
+        app.handle_event(click)
+            .expect("clicking the minimap should not error");
+
+        let Some(PaneRuntime::Editor(editor)) = app.panes.get(&pane_id) else {
+            panic!("expected the replaced pane to still be an editor");
+        };
+        editor.update_source_scroll_mirror(chrome.content_area.height);
+        let scroll_row_after_click = editor.source_scroll_row();
+
+        let scroll_up = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: chrome.content_area.x,
+            row: chrome.content_area.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
+        app.handle_event(scroll_up)
+            .expect("scrolling the editor should not error");
+
+        let Some(PaneRuntime::Editor(editor)) = app.panes.get(&pane_id) else {
+            panic!("expected the replaced pane to still be an editor");
+        };
+        assert_ne!(
+            editor.source_scroll_row(),
+            scroll_row_after_click,
+            "mouse-wheel scroll must move the highlighted viewport, not snap back to the minimap-click position"
+        );
 
         let _ = std::fs::remove_file(&file_path);
     }

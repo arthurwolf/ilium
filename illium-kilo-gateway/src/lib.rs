@@ -54,11 +54,19 @@ impl CompletionRequest {
         Self {
             model: DEFAULT_FREE_MODEL.to_string(),
             messages,
-            // `kilo-auto/free` can select reasoning-capable models. Leave
-            // enough headroom for their invisible reasoning tokens and the
-            // tiny requested JSON response, rather than treating a perfectly
-            // valid but unfinished turn as malformed output.
-            max_tokens: 256,
+            // `kilo-auto/free` can select reasoning-capable models. 256 was
+            // not enough headroom in practice: verified live against a real
+            // Codex session-title prompt (~3.4k chars of structured task
+            // instructions), the routed model (`tencent/hy3-.../free`) spent
+            // its entire budget on invisible reasoning tokens and returned
+            // `finish_reason: "length"` with a null visible `content` --
+            // surfaced as `GatewayError::InvalidResponse("missing
+            // non-empty assistant content")`, not a parse failure. The same
+            // prompt succeeded at 1024; 1536 keeps margin for longer or more
+            // structured inputs (a full agentic task prompt, not just a
+            // short human-typed one) without being needlessly large for the
+            // tiny JSON reply this is actually asking for.
+            max_tokens: 1536,
             temperature: 0.0,
         }
     }

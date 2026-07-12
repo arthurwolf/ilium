@@ -1,11 +1,10 @@
 //! Top-level layout: a left tree column, the focused pane's content on
 //! the right, and a bottom status bar -- with the Explorer file-picker or
 //! Help reference drawn as an overlay on top of everything else when
-//! active. This is the only module that lays out `Rect`s; everything it
-//! draws is delegated to `tree_ui`, `help`, or the pane runtimes
-//! themselves.
+//! active. It consumes the shared animated `App::layout`; everything it
+//! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
 
-use illium_core::{AgentClass, NodeId, ROOT_ID};
+use illium_core::{AgentClass, NodeId, NodeKind, PaneStatus, ROOT_ID};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -15,7 +14,6 @@ use tui_term::widget::PseudoTerminal;
 
 use crate::app::{App, ContextMenu, CreateGroupState, FocusTarget, Mode, PaneRuntime};
 use crate::editor_pane::{EditorPane, EditorViewMode};
-use crate::layout::UiLayout;
 use crate::{
     editor_chrome, editor_highlight, editor_toolbar, explorer_overlay, help, markdown, minimap,
     modal, theme, tree_ui,
@@ -23,8 +21,7 @@ use crate::{
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-
-    let layout = UiLayout::from_screen_area(area);
+    let layout = app.layout;
 
     // The pane renders first: `PseudoTerminal` clears its whole area before
     // drawing (so a shrunk PTY screen never leaves stale content behind),
@@ -340,26 +337,32 @@ fn minimap_highlight_line(editor: &EditorPane, total_lines: usize, rendered_widt
     }
 }
 
-/// Builds the selected right-panel title from logical pane naming plus the
-/// agent process facts that were actually observed this detection tick.
+/// Builds the selected right-panel title from logical pane naming plus
+/// whatever agent class the render-cache tree currently knows for it.
+///
+/// Unlike the pre-client/server design, this never shows a real PID or
+/// session ID: those are volatile OS facts the server discovers by
+/// walking the pane's actual process tree, and `illium_ipc::PaneStatus`
+/// (the only agent information carried over the wire, via
+/// `ServerEvent::PaneStatusChanged`) only carries `AgentClass` +
+/// `AgentActivity` -- see `crate::naming_workers`'s module docs for the
+/// matching gap on the session-title-inference side. Extending the wire
+/// protocol to carry PID/session-id for display is a reasonable future
+/// addition, not something this stage's scope covers.
 fn selected_pane_title(app: &App) -> String {
     let Some(id) = app.focused_pane else {
         return "Terminal".to_string();
     };
-    let pane_name = app
-        .tree
-        .get(id)
-        .map(|node| node.name.as_str())
-        .unwrap_or("Terminal");
-    let Some(process) = app.agent_processes.get(&id) else {
-        return pane_name.to_string();
+    let Some(node) = app.tree.get(id) else {
+        return "Terminal".to_string();
     };
-    let session = process.session_id.as_deref().unwrap_or("unavailable");
-    format!(
-        "{pane_name} — {} PID {} · Session {session}",
-        agent_class_title(&process.class),
-        process.pid
-    )
+    match &node.kind {
+        NodeKind::Pane {
+            status: PaneStatus::Agent(class, _),
+            ..
+        } => format!("{} — {}", node.name, agent_class_title(class)),
+        _ => node.name.clone(),
+    }
 }
 
 /// Compact, stable class name for the selected-terminal title.

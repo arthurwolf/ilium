@@ -38,8 +38,8 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -54,7 +54,7 @@ use ratatui::Terminal;
 use sysinfo::System;
 
 use crate::app::App;
-use crate::layout::UiLayout;
+use crate::layout::{UiLayout, TREE_WIDTH_ANIMATION_FRAME_INTERVAL};
 
 /// illium: a tmux-like terminal multiplexer TUI.
 #[derive(Parser, Debug)]
@@ -100,7 +100,12 @@ struct TerminalGuard {
 impl TerminalGuard {
     fn enter() -> anyhow::Result<Self> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableFocusChange
+        )?;
 
         // Not every terminal supports the Kitty keyboard protocol; only
         // push the enhancement flags when the terminal says it can
@@ -127,7 +132,12 @@ impl Drop for TerminalGuard {
         if self.keyboard_enhancement_pushed {
             let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         }
-        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableFocusChange,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = disable_raw_mode();
     }
 }
@@ -238,13 +248,22 @@ fn run(
             &mut project_name_worker,
         );
         poll_title_workers(&mut app, &mut title_workers);
+        app.tick_layout_animation(Instant::now());
         terminal.draw(|frame| ui::draw(frame, &mut app))?;
 
-        if event::poll(POLL_INTERVAL)? {
+        // Idle behavior keeps the existing low-frequency poll. Only a live
+        // width transition opts into animation-rate frames, then drops back
+        // automatically as soon as the endpoint is reached.
+        let poll_interval = if app.is_layout_animating() {
+            TREE_WIDTH_ANIMATION_FRAME_INTERVAL
+        } else {
+            POLL_INTERVAL
+        };
+        if event::poll(poll_interval)? {
             let event = event::read()?;
             match &event {
                 Event::Resize(cols, rows) => {
-                    app.set_layout(UiLayout::from_screen_area(Rect::new(0, 0, *cols, *rows)));
+                    app.set_screen_area(Rect::new(0, 0, *cols, *rows));
                 }
                 _ => {
                     if let Err(err) = app.handle_event(event) {

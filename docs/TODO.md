@@ -46,3 +46,10 @@
 - [x] Wire `App::panes_needing_title_inference`/`mark_title_inference_started`/`apply_inferred_title`/`fail_title_inference` and per-pane worker orchestration in `main.rs` (mirrors the project-name worker, generalized to a map).
 - [x] Render the shared braille spinner in place of a pane's name in `tree_ui::pane_label` while its title inference is in flight.
 - [x] Cover with unit tests; `cargo clippy --workspace --all-targets` and `cargo fmt --check` clean on all touched files.
+
+# Animated tree-panel width
+
+- [x] Add a deterministic eased width animation and dynamic shared layout geometry.
+- [x] Drive expansion from tree hover or keyboard focus, and collapse on pane focus.
+- [x] Cover focus, hover, reversal, terminal-width limits, and shared hit-testing with tests.
+- [x] Run workspace verification and manually validate the animation in the real TUI.

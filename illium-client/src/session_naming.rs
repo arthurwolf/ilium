@@ -6,16 +6,16 @@
 //! `session_naming` only turns "agent class + already-extracted prompts"
 //! into a title; it never touches a transcript file itself
 //! (`transcript_prompts` does that) and never resolves a session ID to a
-//! path itself (`agent_detect::transcript_path_for_session` does that) --
-//! kept separate so each piece stays independently testable.
+//! path itself (`session_transcript::transcript_path_for_session` does
+//! that) -- kept separate so each piece stays independently testable.
 
 use std::path::Path;
 
 use illium_core::AgentClass;
 use serde::Serialize;
 
-use crate::agent_detect;
 use crate::naming::{self, PromptCompletionClient};
+use crate::session_transcript;
 use crate::transcript_prompts;
 
 const SESSION_TITLE_MIN_WORDS: usize = 2;
@@ -49,7 +49,7 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
     session_id: &str,
 ) -> anyhow::Result<String> {
     let transcript_path =
-        agent_detect::transcript_path_for_session(agent_class, home, cwd, session_id)
+        session_transcript::transcript_path_for_session(agent_class, home, cwd, session_id)
             .ok_or_else(|| anyhow::anyhow!("no transcript file found for session {session_id}"))?;
     let prompts = transcript_prompts::recent_user_prompts(agent_class, &transcript_path)?;
     infer_session_title(generator, agent_label(agent_class), &prompts)

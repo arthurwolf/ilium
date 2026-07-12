@@ -1152,6 +1152,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "illium-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cosmic-text",
+ "crossterm",
+ "directories",
+ "handlebars",
+ "illium-core",
+ "illium-ipc",
+ "illium-kilo-gateway",
+ "image",
+ "pulldown-cmark",
+ "ratatui",
+ "ratatui-image",
+ "ratatui-textarea",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "syntect",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tui-term",
+ "tui-tree-widget",
+ "two-face",
+ "unicode-width",
+ "vt100",
+]
+
+[[package]]
 name = "illium-core"
 version = "0.1.0"
 dependencies = [

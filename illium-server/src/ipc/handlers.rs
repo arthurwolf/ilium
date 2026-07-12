@@ -37,6 +37,13 @@ pub async fn handle_request(
             handle_new_pane(state, parent_group, kind, direct_tx).await;
             false
         }
+        ClientRequest::NewGroup { parent_group, name } => {
+            handle_tree_mutation(state, direct_tx, |tree| {
+                tree.add_group(parent_group, name).map(|_id| ())
+            })
+            .await;
+            false
+        }
         ClientRequest::ClosePane { pane_id } => {
             handle_close_pane(state, pane_id, direct_tx).await;
             false
@@ -154,12 +161,14 @@ async fn handle_tree_mutation(
 /// Resolves where a `NewPane` request should actually land: `requested`
 /// itself, unless it's the session root, in which case panes fall back to
 /// the tree's default top-level group (creating one if none exists yet).
-/// `illium_ipc::ClientRequest` has no "create group" request yet, so a
-/// client with no group to target passes `illium_core::ROOT_ID` as
-/// `parent_group` and relies on this fallback -- matching
-/// `Tree::ensure_default_group`'s own documented purpose ("a UI fallback
-/// with no more specific target") rather than rejecting the request with
-/// `TreeError::PanesRequireGroup`.
+/// Panes are never direct children of the root (`Tree::add_pane`'s own
+/// invariant), so a client with no group to target passes
+/// `illium_core::ROOT_ID` as `parent_group` and relies on this fallback --
+/// matching `Tree::ensure_default_group`'s own documented purpose ("a UI
+/// fallback with no more specific target") rather than rejecting the
+/// request with `TreeError::PanesRequireGroup`. `NewGroup` needs no
+/// equivalent fallback: the domain tree allows a group directly under the
+/// root, so its `parent_group` is used as-is.
 fn resolve_parent_group(tree: &mut Tree, requested: NodeId) -> NodeId {
     if requested == illium_core::ROOT_ID {
         tree.ensure_default_group("default")
@@ -398,8 +407,15 @@ async fn handle_key_input(
     bytes: &[u8],
     direct_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    let panes = state.panes.read().await;
-    match panes.get(&pane_id) {
+    // Write lock (not read) so keystrokes can also pull this pane's
+    // `next_due` forward -- typing is the clearest possible signal that a
+    // pane is about to become `Working`, and without this a pane classified
+    // `Idle` (or plain-shell) moments ago would otherwise sit on the slow
+    // `idle_poll_interval` (default 45s) until its next scheduled tick
+    // before the detection loop even looks at it again. See README "Poll
+    // cadence" and `crate::detection::run_due_panes`.
+    let mut panes = state.panes.write().await;
+    match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
             if let Err(error) = runtime.session.write(bytes) {
                 send_direct_error(
@@ -407,6 +423,7 @@ async fn handle_key_input(
                     format!("failed to write to pane {pane_id:?}: {error}"),
                 );
             }
+            runtime.detection_schedule.next_due = std::time::Instant::now();
         }
         Some(PaneResource::Editor { .. }) => {
             send_direct_error(

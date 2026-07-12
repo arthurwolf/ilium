@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "illium-client",
     "illium-core",
     "illium-detect",
     "illium-ipc",

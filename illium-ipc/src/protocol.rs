@@ -110,6 +110,16 @@ pub enum ClientRequest {
     Detach,
     /// End the session: kill every pane's process and tear down the tree.
     KillSession,
+    /// Create a new group as a child of `parent_group` (`illium_core::ROOT_ID`
+    /// for a top-level group -- unlike `NewPane`, the domain tree itself
+    /// allows a group directly under the session root, so this needs no
+    /// "no group to target" fallback the way `NewPane`'s `parent_group`
+    /// does server-side). Appended as the last variant (rather than next to
+    /// `NewPane`, its closest conceptual neighbor) so it doesn't shift the
+    /// bincode variant index of every request declared after it -- see
+    /// `illium-ipc`'s `a_bad_shape_frame_errors_instead_of_misparsing_as_the_wrong_variant`
+    /// test, which pins specific cross-enum shape collisions.
+    NewGroup { parent_group: NodeId, name: String },
 }
 
 /// Events pushed from `illium-server` to `illium-client`, asynchronously

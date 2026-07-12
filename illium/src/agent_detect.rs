@@ -20,6 +20,7 @@
 //!   this depends on tree/UI state (focus, prior activity) that only
 //!   `app.rs` owns, so it isn't a pure classification concern either.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -111,7 +112,19 @@ pub fn refresh(system: &mut System) {
 ///
 /// Returns `None` if no descendant process matches a known agent CLI
 /// signature.
-pub fn identify_agent(system: &mut System, shell_pid: Pid) -> Option<AgentProcessInfo> {
+///
+/// `claimed_by_other_panes` is every session ID illium currently has
+/// confidently assigned to a *different* pane -- passed through to tier 4
+/// (see `extract_session_id`'s doc comment) so a guess can never collide
+/// with an ID another live pane already owns. `home` is the user's home
+/// directory (also only used by tier 4); `None` if it couldn't be resolved,
+/// in which case tier 4 simply finds nothing, same as any other tier.
+pub fn identify_agent(
+    system: &mut System,
+    shell_pid: Pid,
+    claimed_by_other_panes: &HashSet<String>,
+    home: Option<&Path>,
+) -> Option<AgentProcessInfo> {
     let identity = illium_detect::identify_agent(system, shell_pid)?;
     let matched_pid = Pid::from_u32(identity.pid);
 
@@ -129,7 +142,7 @@ pub fn identify_agent(system: &mut System, shell_pid: Pid) -> Option<AgentProces
     );
     let process = system.process(matched_pid)?;
     Some(AgentProcessInfo {
-        session_id: extract_session_id(process, &identity.class),
+        session_id: extract_session_id(process, &identity.class, claimed_by_other_panes, home),
         class: identity.class,
         pid: identity.pid,
     })
@@ -166,12 +179,23 @@ pub fn identify_agent(system: &mut System, shell_pid: Pid) -> Option<AgentProces
 ///    -- without that check, a Codex pane whose tiers 1-3 all miss (e.g. a
 ///    timing gap right after spawn, before Codex opens its rollout file)
 ///    would otherwise pick up an unrelated Claude pane's session ID from the
-///    same project directory.
+///    same project directory. Also excludes any transcript already claimed
+///    by another pane this run (`claimed_by_other_panes`) -- the recency
+///    filter alone is not enough: a second, concurrently *active* session in
+///    the same project directory keeps getting modified after this pane's
+///    start time too, and without this exclusion tier 4 would confidently
+///    (and silently) hand this brand-new, still-empty pane someone else's
+///    session ID, transcript, and therefore inferred title.
 ///
 /// We do not infer a fresh session from history files with no recency or
 /// process-identity check at all, because multiple live panes can share a
 /// working directory and such a guess would be wrong.
-fn extract_session_id(process: &Process, class: &AgentClass) -> Option<String> {
+fn extract_session_id(
+    process: &Process,
+    class: &AgentClass,
+    claimed_by_other_panes: &HashSet<String>,
+    home: Option<&Path>,
+) -> Option<String> {
     let arguments: Vec<String> = process
         .cmd()
         .iter()
@@ -191,9 +215,15 @@ fn extract_session_id(process: &Process, class: &AgentClass) -> Option<String> {
             if *class != AgentClass::Claude {
                 return None;
             }
+            let home = home?;
             let cwd = process.cwd()?;
             let started_at = SystemTime::UNIX_EPOCH + Duration::from_secs(process.start_time());
-            extract_session_id_from_newest_project_transcript(cwd, started_at)
+            extract_session_id_from_newest_project_transcript(
+                home,
+                cwd,
+                started_at,
+                claimed_by_other_panes,
+            )
         })
 }
 
@@ -270,13 +300,21 @@ fn session_id_from_transcript_stem(class: &AgentClass, stem: &str) -> Option<Str
 /// under this project's `~/.claude/projects/<slug>/` directory, but only
 /// if it was modified at or after `not_before` (the pane's own process
 /// start time) -- so an older, unrelated session already on disk before
-/// this process even started can never be picked up by mistake. Codex has
-/// no per-project session directory, so this fallback is Claude-only.
+/// this process even started can never be picked up by mistake -- and not
+/// already claimed by another pane in `claimed_by_other_panes` -- so an
+/// unrelated session that is merely *still active* (and therefore still
+/// getting modified after `not_before` too) can never be picked up by
+/// mistake either. Codex has no per-project session directory, so this
+/// fallback is Claude-only. `home` is passed in (rather than resolved
+/// internally via `directories::BaseDirs`) so tests can point this at a
+/// scratch directory instead of the real `~/.claude` -- the same pattern
+/// `transcript_path_for_session` already uses.
 fn extract_session_id_from_newest_project_transcript(
+    home: &Path,
     cwd: &Path,
     not_before: SystemTime,
+    claimed_by_other_panes: &HashSet<String>,
 ) -> Option<String> {
-    let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
     let project_dir = home
         .join(".claude")
         .join("projects")
@@ -289,7 +327,8 @@ fn extract_session_id_from_newest_project_transcript(
             let path = entry.path();
             let stem = path.file_stem()?.to_str()?.to_string();
             (path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
-                && looks_like_uuid(&stem))
+                && looks_like_uuid(&stem)
+                && !claimed_by_other_panes.contains(&stem))
             .then_some(())?;
             let modified = entry.metadata().ok()?.modified().ok()?;
             (modified >= not_before).then_some((modified, stem))
@@ -908,6 +947,80 @@ mod tests {
         let older = reference - Duration::from_secs(60);
         let file = std::fs::File::open(path).unwrap();
         file.set_modified(older).expect("backdate mtime");
+    }
+
+    #[test]
+    fn newest_project_transcript_skips_a_session_already_claimed_by_another_pane() {
+        // Reproduces the reported bug: a second, concurrently active Claude
+        // Code session in the same project directory keeps its transcript
+        // modified after this (brand-new, still empty) pane's own start
+        // time, so the recency filter alone can't tell them apart. The
+        // already-claimed-elsewhere exclusion is what must reject it.
+        let home = scratch_dir();
+        let cwd = Path::new("/home/developer/dev/ai/illium");
+        let project_dir = home
+            .join(".claude")
+            .join("projects")
+            .join(slugify_claude_project_path(cwd));
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let started_at = SystemTime::now();
+        // Filesystem mtime granularity can round down below `SystemTime::now()`'s
+        // own precision -- see `recent_prompt_match_finds_claude_transcript_by_content`
+        // for the same margin, needed for the same reason. Ensures this test
+        // fails for the claim exclusion specifically, not an incidental
+        // recency-filter miss.
+        std::thread::sleep(Duration::from_millis(10));
+        let other_pane_id = "44444444-4444-4444-8444-444444444444";
+        std::fs::write(project_dir.join(format!("{other_pane_id}.jsonl")), "{}").unwrap();
+
+        let mut claimed_by_other_panes = HashSet::new();
+        claimed_by_other_panes.insert(other_pane_id.to_string());
+
+        assert_eq!(
+            extract_session_id_from_newest_project_transcript(
+                &home,
+                cwd,
+                started_at,
+                &claimed_by_other_panes,
+            ),
+            None,
+            "the only candidate transcript belongs to another live pane, so none should match"
+        );
+    }
+
+    #[test]
+    fn newest_project_transcript_still_matches_an_unclaimed_transcript() {
+        let home = scratch_dir();
+        let cwd = Path::new("/home/developer/dev/ai/illium");
+        let project_dir = home
+            .join(".claude")
+            .join("projects")
+            .join(slugify_claude_project_path(cwd));
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let started_at = SystemTime::now();
+        // Filesystem mtime granularity can round down below `SystemTime::now()`'s
+        // own precision -- see `recent_prompt_match_finds_claude_transcript_by_content`
+        // for the same margin, needed for the same reason.
+        std::thread::sleep(Duration::from_millis(10));
+        let other_pane_id = "44444444-4444-4444-8444-444444444444";
+        let this_pane_id = "55555555-5555-4555-8555-555555555555";
+        std::fs::write(project_dir.join(format!("{other_pane_id}.jsonl")), "{}").unwrap();
+        std::fs::write(project_dir.join(format!("{this_pane_id}.jsonl")), "{}").unwrap();
+
+        let mut claimed_by_other_panes = HashSet::new();
+        claimed_by_other_panes.insert(other_pane_id.to_string());
+
+        assert_eq!(
+            extract_session_id_from_newest_project_transcript(
+                &home,
+                cwd,
+                started_at,
+                &claimed_by_other_panes,
+            ),
+            Some(this_pane_id.to_string())
+        );
     }
 
     #[test]

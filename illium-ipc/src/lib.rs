@@ -84,6 +84,10 @@ mod tests {
             },
             ClientRequest::Detach,
             ClientRequest::KillSession,
+            ClientRequest::NewGroup {
+                parent_group: ROOT_ID,
+                name: "backend".to_string(),
+            },
         ]
     }
 

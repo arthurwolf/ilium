@@ -399,6 +399,26 @@ impl EditorPane {
         self.textarea.move_cursor(CursorMove::Jump(line as u16, 0));
     }
 
+    /// Moves the mirrored Source-mode viewport (`source_scroll_row`) by
+    /// `delta` rows, independent of the cursor. Mouse-wheel scrolling over a
+    /// syntax-highlighted buffer must go through here rather than
+    /// `TextArea::input`: `editor_highlight::render` reads `source_scroll_row`
+    /// directly and never sees `TextArea`'s own private scroll state, so
+    /// forwarding wheel events into the widget moved a viewport nothing
+    /// reads, leaving the visible view frozen at the cursor's row (e.g.
+    /// wherever a minimap click last jumped to). Clamped so the top can't
+    /// run past the buffer's last line.
+    pub fn scroll_source_view(&self, delta: i16) {
+        let max_top = (self.textarea.lines().len() as u16).saturating_sub(1);
+        let current = self.source_scroll_row.get();
+        let next = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as u16)
+        };
+        self.source_scroll_row.set(next.min(max_top));
+    }
+
     /// Flips the checked state of the task-list checkbox at `bracket_col`
     /// (the char index of its `[`, as returned by
     /// `markdown::checkbox::find_checkbox`) on buffer `row`. Edits the

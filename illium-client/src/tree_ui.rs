@@ -313,8 +313,8 @@ fn pane_label(
 /// pane's own name.
 fn agent_class_label(class: &AgentClass) -> String {
     match class {
-        AgentClass::Claude => "Claude".to_string(),
-        AgentClass::Codex => "Codex".to_string(),
+        AgentClass::Claude => "Claude:".to_string(),
+        AgentClass::Codex => "Codex:".to_string(),
         AgentClass::Other(name) => name.clone(),
     }
 }
