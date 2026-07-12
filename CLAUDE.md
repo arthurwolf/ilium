@@ -7,18 +7,32 @@ Project-specific rules. This is a Rust project; the global `~/.claude/CLAUDE.md`
 Cargo workspace, one crate per architectural layer (see README "Architecture"). Do not collapse layers back into a single crate for convenience — the boundaries exist so `illium-core` and `illium-detect` stay unit-testable without a PTY, a terminal, or a running server.
 
 ```
-illium/
-├── Cargo.toml              # workspace root
-├── illium-core/            # domain: Session/Group/Pane tree, no I/O
-├── illium-pty/             # adapter: portable-pty + vt100
-├── illium-detect/          # agent identity + activity classification
-├── illium-server/          # owns PTYs + tree, IPC server, detection loop
-├── illium-client/          # ratatui TUI, thin renderer over IPC
-├── illium-ipc/             # shared request/response types, wire (de)serialization
-└── src/main.rs (or illium-cli/) # clap entrypoint, talks to illium-client + illium-server lifecycle
+illium/                     # workspace root
+├── Cargo.toml               # workspace root manifest
+├── illium-core/              # domain: Tree of Node/NodeKind (Group|Pane), no I/O
+│   └── src/lib.rs             # single-file crate: Tree, Node, NodeId, NodeKind, PaneStatus, PaneContentKind, AgentClass, AgentActivity
+├── illium-pty/               # adapter: portable-pty + vt100 + xterm mouse-protocol encoding
+│   └── src/{session,mouse,query,error}.rs
+├── illium-detect/            # agent identity + activity classification
+│   └── src/lib.rs             # single-file crate: AGENT_SIGNATURES registry, identify_agent, classify_activity
+├── illium-ipc/                # shared request/event types, wire (de)serialization
+│   └── src/{protocol,framing,error}.rs
+├── illium-kilo-gateway/      # adapter: Kilo Gateway (OpenAI-compatible) HTTP client, used only by illium-client's background naming workers
+│   └── src/lib.rs
+├── illium-server/            # owns PTYs + tree, IPC server, adaptive detection loop -- one process per session
+│   ├── src/main.rs            # daemon entrypoint: resolves real paths (paths.rs), calls lib.rs's run()
+│   ├── src/lib.rs              # run(): binds the UDS listener, owns the top-level select! loop
+│   └── src/{config,detection,error,mouse,pane,paths,persistence,state}.rs, src/ipc/{mod,connection,handlers}.rs
+├── illium-client/             # ratatui TUI, thin renderer over illium-ipc (see its module map in src/lib.rs)
+│   ├── src/lib.rs              # module map + run(): terminal lifecycle, connects, drives the event loop
+│   └── src/{app,connection,render_cache,keys,mouse,tick,naming_workers}.rs, plus presentation/local-file-I/O
+│       modules (ui, tree_ui, modal, help, theme, layout, editor_*, markdown/, naming*, session_*, project_*, ...)
+│       that don't care whether their data came from a local Tree or a render-cache mirror of one
+└── illium/                    # the `illium` bin: clap entrypoint, spawns illium-server as a detached
+    └── src/{main,session,error}.rs   # process and hands off to illium_client::run for the TUI
 ```
 
-`illium-ipc` holds the message types both `illium-server` and `illium-client` depend on — never let the client reach into server-internal types directly, and never let `illium-core` depend on `illium-ipc` (core is pure domain, ipc is transport).
+`illium-ipc` holds the message types both `illium-server` and `illium-client` depend on — never let the client reach into server-internal types directly, and never let `illium-core` depend on `illium-ipc` (core is pure domain, ipc is transport). `illium-kilo-gateway` is a narrow adapter crate of its own (an LLM HTTP client, not part of the mux/detection architecture); only `illium-client` depends on it.
 
 ## Layering rules (non-negotiable)
 
@@ -57,7 +71,7 @@ Use the `directories` crate, never hardcode `~`:
 
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
 - Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see README "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
-- Milestones in the README (M0–M5) are meant to be built in order — each is independently runnable. Don't jump ahead to agent detection (M4) before the tree model and pane rendering (M1) actually work end to end.
+- Milestones in the README (M0–M5) are meant to be built in order. M0–M2 and M4 are done; M3 (tree manipulation) is only partially done — arbitrary drag-and-drop and indent-into/out-of-a-group are explicitly deferred, not merely unstarted; M5 (config surface, snapshot-restore-on-boot, notifications) is not done. Read the README "Implementation plan" for exactly what each milestone's status covers before assuming a piece of it already exists.
 <!-- NEXUS:START -->
 ## Nexus Memory Substrate
 - Identity: [Soul](/home/developer/.config/nexus/soul.md)

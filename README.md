@@ -26,10 +26,10 @@ Session
       └── Pane         (one PTY: shell or command, own scrollback, own title)
 ```
 
-- The left panel renders this tree (via `tui-tree-widget`): expand/collapse groups, select a pane to focus it on the right, drag entries to move them, and right-click an entry for create/rename/move/close actions. It eases from its normal width to twice that width whenever the pointer is over it or it has keyboard focus, then eases back when focus returns to the right panel. Hover its footer for compact new-shell/Claude/Codex/editor/group controls; hover an entry for up/down arrows. A pane arrow at its group's boundary transfers it into the adjacent group, so panes never become root-level nodes.
+- The left panel renders this tree (via `tui-tree-widget`): expand/collapse groups, select a pane to focus it on the right, reorder entries one step at a time (hover an entry's up/down arrows, or leader `m` for keyboard move-mode), and right-click an entry for create/rename/move/close actions. It eases from its normal width to twice that width whenever the pointer is over it or it has keyboard focus, then eases back when focus returns to the right panel. Hover its footer for compact new-shell/Claude/Codex/editor/group controls. A pane arrow at its group's boundary transfers it into the adjacent group, so panes never become root-level nodes. Arbitrary drag-and-drop (dropping a node onto any sibling position or a different parent) is not implemented yet — see M3 below.
 - The right panel renders the focused pane's live terminal. For a detected agent it titles the panel with the real agent PID and its session ID when the CLI exposes one; otherwise it explicitly says that the session is unavailable rather than guessing.
 - Click either panel to focus it. When a terminal application enables an xterm mouse protocol (for example `vim`, `htop`, or `lazygit`), illium forwards clicks, drags, scrolls, and modifiers to that PTY using its requested encoding.
-- Panes carry a `PaneKind` (`PlainShell` | `Agent(AgentClass, AgentActivity)`), set by the detection engine, which drives the icon/color shown next to them in the tree.
+- Each tree node is either a `Group` or a `Pane`; a pane carries a `PaneContentKind` (`Terminal` | `Editor`) and a `PaneStatus` (`PlainShell` | `Agent(AgentClass, AgentActivity)` | `Editor { dirty }`). The detection engine drives `PlainShell`/`Agent(...)` for terminal panes, which in turn drives the icon/color shown next to them in the tree.
 
 ### Pane states shown in the tree
 
@@ -47,32 +47,37 @@ The blocked/waiting-for-approval state wasn't explicitly requested but falls out
 Client/server, like Zellij and tmux itself — this is what makes detach/reattach and session persistence possible instead of "just a TUI app that dies with the terminal."
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ illium-server (background process, one per machine/user)    │
-│                                                               │
-│  ┌────────────┐   ┌───────────────┐   ┌────────────────┐   │
-│  │ tree store  │   │ pane registry │   │ detection loop  │   │
-│  │ (sessions/  │   │ (PTY handle + │   │ (tokio interval,│   │
-│  │  groups/    │   │  vt100 screen │   │  adaptive poll  │   │
-│  │  panes)     │   │  per pane)    │   │  per pane)      │   │
-│  └────────────┘   └───────────────┘   └────────────────┘   │
-│           UDS socket: ~/.local/share/illium/<session>.sock  │
-└──────────────────────────┬────────────────────────────────┘
-                            │ length-prefixed bincode frames
-                ┌───────────┴───────────┐
-                │      illium-client (ratatui TUI, one per attached terminal)     │
-                └───────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│  illium-server (one process per session, spawned on demand)    │
+│                                                                  │
+│  ┌─────────────┐   ┌───────────────┐   ┌─────────────────┐    │
+│  │ ServerState │   │ pane registry │   │ detection loop   │    │
+│  │ (illium_core│   │ (PaneResource:│   │ (tokio task,     │    │
+│  │  ::Tree --  │   │  PtySession + │   │  adaptive poll   │    │
+│  │  Node/      │   │  vt100 screen │   │  per pane, see   │    │
+│  │  NodeKind)  │   │  per pane)    │   │  config.rs)      │    │
+│  └─────────────┘   └───────────────┘   └─────────────────┘    │
+│        UDS socket: ~/.local/share/illium/<session>.sock        │
+└────────────────────────────┬────────────────────────────────┘
+                              │ length-prefixed bincode frames
+                              │ (illium-ipc: ClientRequest / ServerEvent)
+                  ┌───────────┴────────────┐
+                  │ illium-client (ratatui  │
+                  │ TUI, one per attached   │
+                  │ terminal)               │
+                  └─────────────────────────┘
 ```
 
-- **illium-core** — pure domain types: `Session`, `Group`, `Pane`, `PaneId`, `PaneKind`, `AgentActivity`, tree operations (move/reorder/insert/remove). No I/O, fully unit-testable.
-- **illium-pty** — adapter around `portable-pty` (spawn, resize, write) + `vt100` (parse the byte stream into a screen grid you can read text/cells from). One PTY reader task per pane.
+- **illium-core** — pure domain types: a single `Tree` of `Node`s (`NodeId`, `NodeKind::Group { children, expanded }` | `NodeKind::Pane { content: PaneContentKind, status: PaneStatus }`), `AgentClass`, `AgentActivity`, tree operations (`add_group`/`add_pane`/`remove_node`/`rename_node`/`move_node`/`move_node_one_step`/`reorder_sibling`). No I/O, fully unit-testable. Groups and panes are one node type rather than two separate structs — a pane is just a node whose `NodeKind` happens to be `Pane`, which is what lets `move_node_one_step` treat "reorder within a group" and "cross a group boundary" as one operation.
+- **illium-pty** — adapter around `portable-pty` (spawn, resize, write) + `vt100` (parse the byte stream into a screen grid you can read text/cells from), plus xterm mouse-protocol encoding (`mouse.rs`) so a pane's foreground app (`vim`, `htop`, `lazygit`, …) receives clicks/drags/scrolls in whatever encoding it negotiated. One PTY reader task per pane.
 - **illium-detect** — the agent-detection engine. Two independent signals, combined:
-  - **Identity** (which CLI, if any): walk the PTY's child process tree via `sysinfo` and match process names/cmdlines against a registry of known agent signatures (`claude`, `codex`, `opencode`, …). This is the primary signal — robust against UI redesigns, unlike text scraping.
-  - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for literal markers. Both Claude Code and Codex CLI render a static `"esc to interrupt"` string (plus a live token/time counter) for the entire duration of a working turn — that substring is the reliable "working" signal, far more stable than trying to catch a spinner frame mid-cycle. An empty bordered input box with no such marker means idle; a `y/n`-style approval box means blocked.
-  - Detectors are registered in a table (`Vec<AgentSignature>`), not a hardcoded if/else chain, so adding support for a new CLI is a data entry, not a code change.
-- **illium-server** — owns all PTYs and the tree, runs the detection loop, persists tree state to disk (JSON snapshot, crash-recovery only — not a database), speaks the IPC protocol over a Unix domain socket per session (mirrors tmux's per-session socket model).
-- **illium-client** — the `ratatui` TUI: left tree panel + right pane view, keybinding dispatch, mouse drag-and-drop for reordering, sends commands to the server and renders the screen diffs it streams back.
-- **illium** (bin) — `clap`-based CLI: `illium` (attach or create default session), `illium new-session <name>`, `illium ls`, `illium kill-session <name>`, `illium new-pane -- <cmd>` — tmux-shaped surface on purpose.
+  - **Identity** (which CLI, if any): walk the PTY's child process tree via `sysinfo` and match process names against a registry of known agent signatures (`claude`, `codex`, `opencode`, `aider`). This is the primary signal — robust against UI redesigns, unlike text scraping.
+  - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for markers. A literal `"esc to interrupt"` substring is one recognized "working" trigger, but real Claude Code builds also render a present-tense status line ending in an ellipsis alongside a live elapsed-time token (e.g. `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`) — `looks_like_live_status_line` catches that shape instead of matching exact wording, so it survives whichever whimsical verb is showing. A `y/n`-style confirmation line or a numbered selection menu with a `❯` cursor means blocked (`WaitingApproval`); anything else with no agent CLI detected, or an agent CLI with no such marker, is idle.
+  - Detectors are registered in a table (`AGENT_SIGNATURES: &[AgentSignature]`), not a hardcoded if/else chain, so adding support for a new CLI is a data entry, not a code change.
+- **illium-server** — owns all PTYs and the tree (`ServerState`), runs the detection loop, writes a JSON crash-recovery snapshot to disk after structural tree changes (loading that snapshot back on startup is implemented, but automatically respawning its panes is not wired up yet — see M5), speaks the `illium-ipc` protocol over a Unix domain socket per session (mirrors tmux's per-session socket model). One process serves exactly one session; there is no multi-session registry.
+- **illium-client** — the `ratatui` TUI: left tree panel + right pane view, keybinding dispatch (`keys.rs`/`keymap.rs`), one-step tree reordering via hover arrows or keyboard move-mode (`mouse.rs`/`keys.rs`, backed by `MoveNode`), sends `ClientRequest`s to the server and renders the `ScreenUpdate`/`TreeSnapshot`/`PaneStatusChanged` events it streams back. Also owns a built-in editor pane (syntax highlighting, markdown rendering, minimap) and background LLM-assisted session/project naming via `illium-kilo-gateway` — both grew out of the original scope during the refactor and aren't covered further in this document.
+- **illium-ipc** — `ClientRequest`/`ServerEvent` wire enums plus `write_frame`/`read_frame`: a 4-byte little-endian length prefix followed by that many bytes of bincode payload, generic over any `AsyncRead`/`AsyncWrite` so both the request stream and the event stream reuse the same framing code.
+- **illium** (bin) — `clap`-based CLI: `illium` (attach or create default session), `illium new-session <name>`, `illium ls`, `illium kill-session <name>`, `illium new-pane -- <cmd>` — tmux-shaped surface on purpose. Spawns `illium-server` as a separate detached process (not linked in as a library) and hands off to `illium_client::run` for the TUI.
 
 ### Why a process-tree check before text scraping
 
@@ -102,19 +107,23 @@ Text-scraping a banner is what most "detect the AI tool" hacks do, and it breaks
 | `bincode` | wire format for the client↔server IPC frames |
 | [`directories`](https://docs.rs/directories) | XDG-correct config/data/socket paths |
 | [`clap`](https://docs.rs/clap) | CLI argument parsing |
-| `aho-corasick` | fast multi-pattern literal search for the identity/activity marker sets |
-| `notify-rust` *(optional, later)* | desktop notification on a pane's `Working → Done` transition |
+| `ureq` | HTTP client for `illium-kilo-gateway`'s LLM calls (background session/project title inference) |
+| `notify-rust` *(not yet added)* | desktop notification on a pane's `Working → Done` transition — see M5 |
 
 ## Implementation plan
 
 Each milestone is meant to be independently runnable/demoable, not a big-bang integration.
 
-1. **M0 — PTY passthrough skeleton.** One `portable-pty` + `vt100` + `tui-term` pipeline rendering a single full-screen pane. Proves the core rendering pipeline before anything else is built on top of it.
-2. **M1 — In-process multi-pane tree.** `illium-core` tree model, left `tui-tree-widget` panel, switch focus between panes, create/close pane, create/close group. No client/server split yet — single binary.
-3. **M2 — Client/server split.** Move PTY ownership + tree into `illium-server`, UDS IPC, `illium-client` becomes a thin renderer. This is what buys detach/reattach and session persistence across terminal closes.
-4. **M3 — Tree manipulation.** Move-mode keybindings (pick up / drop a node, reorder siblings, indent into/out of a group) plus mouse drag-and-drop in the left panel.
-5. **M4 — Agent detection engine.** `illium-detect`: signature registry, process-tree identity check, text-marker activity check, adaptive poll loop, icon/color wiring into the tree render.
-6. **M5 — Polish.** Config file (keybindings, detection signatures, poll intervals, theme), tree state persisted across server restarts, optional desktop notifications on state transitions.
+1. **M0 — PTY passthrough skeleton. Done.** One `portable-pty` + `vt100` + `tui-term` pipeline rendering a single full-screen pane, now `illium-pty`'s `PtySession`.
+2. **M1 — In-process multi-pane tree. Done** (superseded by M2). `illium-core`'s tree model, a left `tui-tree-widget` panel, switching focus between panes, create/close pane, create/close group all shipped first as a single binary; that single-binary form was later split apart in M2 and no longer exists as such.
+3. **M2 — Client/server split. Done.** PTY ownership and the tree now live in `illium-server` (`ServerState`, one process per session, spawned on demand rather than run once per machine); `illium-client` is a thin `ratatui` renderer over `illium-ipc`. Concretely, as built:
+   - One Unix domain socket per session at `~/.local/share/illium/<session_name>.sock` (via `directories::ProjectDirs::from("", "", "illium").data_dir()`), matching tmux's per-session-socket model — never one socket multiplexing every session.
+   - Wire format: `illium-ipc::framing` — a 4-byte little-endian length prefix followed by that many bytes of `bincode`-encoded payload, generic over the payload type and over the async stream (so both the request and event streams reuse it, and tests can frame into an in-memory buffer).
+   - Message shapes: `illium_ipc::ClientRequest` (`Attach`, `NewPane`, `NewGroup`, `ClosePane`, `MoveNode`, `RenameNode`, `ResizePane`, `KeyInput`, `MouseInput`, `Detach`, `KillSession`) sent client→server, and `illium_ipc::ServerEvent` (`TreeSnapshot(Tree)`, `ScreenUpdate { pane_id, bytes }`, `PaneStatusChanged { pane_id, status }`, `Error { message }`) pushed server→client. `TreeSnapshot` is always a full snapshot rather than a diff — the tree is small and this keeps the client from ever drifting by missing an incremental update. `ScreenUpdate` carries raw PTY bytes rather than a pre-computed cell diff, since the client already runs its own `vt100::Parser` per pane to drive `tui-term`.
+   - The `illium` CLI spawns `illium-server` as a separate detached OS process (not linked in as a library), then either attaches `illium_client::run` or sends one short-lived request and exits — this is what buys detach/reattach and session persistence across terminal closes.
+4. **M3 — Tree manipulation. Partially done.** What shipped: one-step move keybindings (leader `m` toggles keyboard move-mode, up/down or `j`/`k` calls `Tree::move_node_one_step`), the same one-step move via each tree row's hover ↑/↓ arrows, and reordering siblings including the pane-crosses-a-group-boundary case (`move_node_one_step` transfers a pane into the adjacent group so panes never become root-level nodes). What did **not** ship: arbitrary mouse drag-and-drop (dropping a node onto any sibling position or a different parent) and the original left/right "indent into/out of a group" keybindings — both are explicitly deferred in code comments (`illium-client/src/mouse.rs`, `illium-client/src/keys.rs`) because they need a reparent-to-arbitrary-index tree mutation `illium_ipc::ClientRequest` has no shape for yet (only the one-step `MoveNode { direction }`).
+5. **M4 — Agent detection engine. Done.** `illium-detect`: the `AGENT_SIGNATURES` registry table, process-tree identity check via `sysinfo` (`identify_agent`), text-marker activity check (`classify_activity`, covering the working/waiting-approval/idle states plus the numbered-selection-menu and live-status-line cases added after the original design), `illium-server`'s adaptive poll loop (`detection.rs`, fast interval for `Working` panes, slow for everything else, both configurable), and icon/color wiring into the client's tree render.
+6. **M5 — Polish. Not done.** What exists: a `config.toml` `[detection]` table for the two poll intervals only (`illium-server/src/config.rs`) — no keybinding, detection-signature, or theme config surface yet (the client's keymap/theme are still hardcoded). A JSON crash-recovery snapshot is written to `<data_dir>/<session>.snapshot.json` after every structural tree change and *can* be loaded back on server startup, but the loaded snapshot is not currently used to respawn its panes — `illium-server::run` logs that it found one and then starts with a fresh tree regardless (see `illium-server/src/persistence.rs`'s module doc for the deliberately-deferred gap). No desktop notifications: `notify-rust` is not a dependency of any crate in this workspace yet.
 
 ## Non-goals (for now)
 
