@@ -19,6 +19,7 @@ use illium_ipc::ServerEvent;
 use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
 
+use crate::notifications::{self, PendingNotification};
 use crate::pane::PaneResource;
 use crate::state::ServerState;
 
@@ -92,48 +93,78 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
 /// infallible, so this loop's only real failure mode is a lock/task
 /// issue, not a per-pane one; the structure is still one pane at a time so
 /// a future fallible step here stays isolated per pane).
+///
+/// A `Working -> Done`/`Idle` transition (see
+/// `notifications::is_finished_transition`) queues a desktop notification,
+/// but the notification itself is only sent after the `tree`/`panes` locks
+/// below are dropped -- a slow or unavailable notification daemon must
+/// never hold up an attached client's tree access.
 async fn run_due_panes(
     state: &ServerState,
     system: &System,
 ) -> Result<(), crate::error::ServerError> {
     let now = Instant::now();
-    // Lock ordering: `tree` before `panes` (see `ServerState` docs).
-    let mut tree = state.tree.write().await;
-    let mut panes = state.panes.write().await;
+    let mut pending_notifications = Vec::new();
 
-    for (pane_id, resource) in panes.iter_mut() {
-        let PaneResource::Terminal(runtime) = resource else {
-            continue;
-        };
-        if runtime.detection_schedule.next_due > now {
-            continue;
+    {
+        // Lock ordering: `tree` before `panes` (see `ServerState` docs).
+        let mut tree = state.tree.write().await;
+        let mut panes = state.panes.write().await;
+
+        for (pane_id, resource) in panes.iter_mut() {
+            let PaneResource::Terminal(runtime) = resource else {
+                continue;
+            };
+            if runtime.detection_schedule.next_due > now {
+                continue;
+            }
+
+            let new_status = classify_pane(system, runtime);
+            runtime.detection_schedule.current_interval = interval_for(&new_status, state);
+            runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
+
+            let previous_status = tree.get(*pane_id).and_then(|node| match &node.kind {
+                illium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
+                illium_core::NodeKind::Group { .. } => None,
+            });
+            if previous_status.as_ref() == Some(&new_status) {
+                continue;
+            }
+
+            let pane_name_before_update = tree.get(*pane_id).map(|node| node.name.clone());
+
+            if let Err(error) = tree.set_pane_status(*pane_id, new_status.clone()) {
+                // A pane present in the registry but missing from the tree
+                // would be an invariant violation elsewhere (both are
+                // always updated together on create/close); log and skip
+                // rather than letting one inconsistent entry stop every
+                // other pane's classification this tick.
+                tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
+                continue;
+            }
+
+            // Queued only once the status update actually took -- a
+            // rejected `set_pane_status` above (a stale/inconsistent
+            // registry entry) must never fire a notification for a
+            // transition that didn't actually happen.
+            if state.notifications_config.enabled
+                && notifications::is_finished_transition(previous_status.as_ref(), &new_status)
+            {
+                pending_notifications.push(PendingNotification {
+                    session_name: state.session_name.clone(),
+                    pane_name: pane_name_before_update.unwrap_or_default(),
+                });
+            }
+
+            state.broadcast(ServerEvent::PaneStatusChanged {
+                pane_id: *pane_id,
+                status: new_status,
+            });
         }
+    }
 
-        let new_status = classify_pane(system, runtime);
-        runtime.detection_schedule.current_interval = interval_for(&new_status, state);
-        runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
-
-        let previous_status = tree.get(*pane_id).and_then(|node| match &node.kind {
-            illium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
-            illium_core::NodeKind::Group { .. } => None,
-        });
-        if previous_status.as_ref() == Some(&new_status) {
-            continue;
-        }
-
-        if let Err(error) = tree.set_pane_status(*pane_id, new_status.clone()) {
-            // A pane present in the registry but missing from the tree
-            // would be an invariant violation elsewhere (both are always
-            // updated together on create/close); log and skip rather than
-            // letting one inconsistent entry stop every other pane's
-            // classification this tick.
-            tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
-            continue;
-        }
-        state.broadcast(ServerEvent::PaneStatusChanged {
-            pane_id: *pane_id,
-            status: new_status,
-        });
+    for pending in pending_notifications {
+        notifications::send(pending).await;
     }
 
     Ok(())

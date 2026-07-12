@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use illium_core::{NodeId, ROOT_ID};
 use illium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
-use illium_server::config::DetectionConfig;
+use illium_server::config::{DetectionConfig, NotificationsConfig};
 use illium_server::{run, ServerOptions};
 use tokio::net::UnixStream;
 
@@ -72,6 +72,7 @@ impl TestServer {
             socket_path: socket_path.clone(),
             snapshot_path,
             detection_config: DetectionConfig::default(),
+            notifications_config: NotificationsConfig::default(),
         };
 
         // Leaked, not dropped: `TempDir` deletes its directory on drop, but

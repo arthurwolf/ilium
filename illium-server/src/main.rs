@@ -56,11 +56,11 @@ async fn async_main(session_name: String) -> ExitCode {
 
     // A config file that fails to load is a warning, not a fatal error --
     // see `illium_server::config::load`'s doc comment.
-    let detection_config = match illium_server::config::load(&paths.config_dir) {
+    let server_config = match illium_server::config::load(&paths.config_dir) {
         Ok(config) => config,
         Err(error) => {
             tracing::warn!("failed to load config, using defaults: {error}");
-            illium_server::config::DetectionConfig::default()
+            illium_server::config::ServerConfig::default()
         }
     };
 
@@ -68,7 +68,8 @@ async fn async_main(session_name: String) -> ExitCode {
         session_name,
         socket_path: paths.socket_path,
         snapshot_path: paths.snapshot_path,
-        detection_config,
+        detection_config: server_config.detection,
+        notifications_config: server_config.notifications,
     };
 
     match illium_server::run(options).await {

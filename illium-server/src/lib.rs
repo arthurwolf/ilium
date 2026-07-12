@@ -19,6 +19,7 @@ mod detection;
 pub mod error;
 mod ipc;
 mod mouse;
+mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
@@ -30,7 +31,7 @@ use std::time::Duration;
 
 use tokio::net::UnixListener;
 
-use crate::config::DetectionConfig;
+use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::error::ServerError;
 use crate::state::ServerState;
 
@@ -43,6 +44,7 @@ pub struct ServerOptions {
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
+    pub notifications_config: NotificationsConfig,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -73,6 +75,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         options.session_name,
         options.snapshot_path,
         options.detection_config,
+        options.notifications_config,
     ));
 
     match persistence::load_snapshot(&state.snapshot_path).await {
@@ -267,6 +270,7 @@ mod restore_tests {
             socket_path: socket_path.clone(),
             snapshot_path,
             detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
         };
         let server_task = tokio::spawn(run(options));
 

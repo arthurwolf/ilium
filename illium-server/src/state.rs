@@ -17,7 +17,7 @@ use illium_ipc::ServerEvent;
 use tokio::sync::{broadcast, Notify, RwLock};
 use tokio::task::JoinHandle;
 
-use crate::config::DetectionConfig;
+use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
 
 /// Capacity of the per-session broadcast channel. Sized generously for
@@ -35,6 +35,7 @@ pub struct ServerState {
     pub session_name: String,
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
+    pub notifications_config: NotificationsConfig,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
     /// Broadcast to every currently-attached client. Connection tasks each
@@ -58,12 +59,14 @@ impl ServerState {
         session_name: String,
         snapshot_path: PathBuf,
         detection_config: DetectionConfig,
+        notifications_config: NotificationsConfig,
     ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             session_name,
             snapshot_path,
             detection_config,
+            notifications_config,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),
             events,
