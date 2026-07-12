@@ -20,6 +20,17 @@ pub fn socket_path(session_name: &str) -> Result<PathBuf, ClientError> {
     Ok(project_dirs.data_dir().join(format!("{session_name}.sock")))
 }
 
+/// This client's config directory, `~/.config/illium/` on Linux -- the
+/// same `directories::ProjectDirs` app-id `illium-server` resolves
+/// independently for its own `config.toml` (see the workspace
+/// `CLAUDE.md`'s "Config & data locations"). Holds `config.toml`'s
+/// client-side tables (`[keybindings]`, `[theme]`) -- see
+/// `crate::config::load`.
+pub fn config_dir() -> Result<PathBuf, ClientError> {
+    let project_dirs = ProjectDirs::from("", "", "illium").ok_or(ClientError::NoProjectDirs)?;
+    Ok(project_dirs.config_dir().to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

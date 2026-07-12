@@ -518,7 +518,7 @@ fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction
         let is_hovered = hovered == Some(*action);
         let style = if is_hovered {
             Style::new()
-                .fg(theme::ACCENT_FG)
+                .fg(theme::accent_fg())
                 .bg(action.accent())
                 .add_modifier(Modifier::BOLD)
         } else {

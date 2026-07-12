@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use illium_core::{NodeId, Tree};
+use illium_detect::AgentSignature;
 use illium_ipc::ServerEvent;
 use tokio::sync::{broadcast, Notify, RwLock};
 use tokio::task::JoinHandle;
@@ -36,6 +37,11 @@ pub struct ServerState {
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
+    /// User-configured agent signatures checked alongside `illium-detect`'s
+    /// built-in registry on every detection-loop tick (see
+    /// `illium_detect::identify_agent_with_extra`). Never mutated after
+    /// construction -- there is no "reload config" request yet.
+    pub custom_signatures: Vec<AgentSignature>,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
     /// Broadcast to every currently-attached client. Connection tasks each
@@ -60,6 +66,7 @@ impl ServerState {
         snapshot_path: PathBuf,
         detection_config: DetectionConfig,
         notifications_config: NotificationsConfig,
+        custom_signatures: Vec<AgentSignature>,
     ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
@@ -67,6 +74,7 @@ impl ServerState {
             snapshot_path,
             detection_config,
             notifications_config,
+            custom_signatures,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),
             events,

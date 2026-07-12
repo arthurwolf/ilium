@@ -8,6 +8,9 @@
 //! - [`app`] -- `App`: render-cache state, input-mode state machine, and
 //!   the domain-ish "what happens when X occurs" methods `keys`/`mouse`
 //!   dispatch into.
+//! - [`config`] -- loads `config.toml`'s client-side `[keybindings]`/
+//!   `[theme]` tables and merges them onto `keymap`/`theme`'s defaults;
+//!   `run` installs the result once at startup.
 //! - [`connection`] -- owns the session's UDS connection (reader/writer
 //!   tasks).
 //! - [`render_cache`] -- applies incoming `ServerEvent`s to `App`.
@@ -27,6 +30,7 @@
 //! data came from a local `Tree` or a render-cache mirror of one.
 
 pub mod app;
+pub mod config;
 pub mod connection;
 pub mod editor_chrome;
 pub mod editor_highlight;
@@ -98,12 +102,42 @@ pub async fn run(options: RunOptions) -> Result<(), ClientError> {
     }
     let socket_path = crate::paths::socket_path(&options.session_name)?;
 
+    // Resolved and installed once, before the terminal enters raw/
+    // alternate-screen mode and before any render call -- see
+    // `theme::THEME`'s doc comment on why a one-time `OnceLock` init is only
+    // safe this early.
+    init_config();
+
     // `TerminalGuard::drop` restores the terminal whether this function
     // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
     let guard = TerminalGuard::enter()?;
     let result = run_inner(options, &socket_path).await;
     drop(guard);
     result
+}
+
+/// Resolves `config.toml`'s client-side tables and installs the effective
+/// keybinding table / theme for the rest of the process's lifetime. A
+/// config directory that can't be resolved, or a config file that fails to
+/// load, is logged and falls back to defaults rather than refusing to
+/// start the client over it -- matches `illium-server::main`'s own
+/// "a bad optional config file is a warning, not a fatal error" policy.
+fn init_config() {
+    let config = match crate::paths::config_dir() {
+        Ok(config_dir) => match crate::config::load(&config_dir) {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!("failed to load config, using defaults: {error}");
+                crate::config::ClientConfig::default()
+            }
+        },
+        Err(error) => {
+            tracing::warn!("failed to resolve config directory, using defaults: {error}");
+            crate::config::ClientConfig::default()
+        }
+    };
+    crate::keymap::init_effective_bindings(config.keybindings);
+    crate::theme::init(config.theme);
 }
 
 async fn run_inner(options: RunOptions, socket_path: &std::path::Path) -> Result<(), ClientError> {

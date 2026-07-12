@@ -4,6 +4,16 @@
 //! rounded, connected-border look, so every bordered widget in illium picks
 //! it up from one place instead of scattering `Color::`/`BorderType::`
 //! literals across each view module.
+//!
+//! The actual colors ([`Theme`]) are configurable via `config.toml`'s
+//! `[theme]` table (`crate::config::load`) -- covers the four colors below
+//! (accent background/foreground, focused/unfocused border) since those
+//! are illium's most visually prominent choices; every other visual
+//! (border type/merge strategy, the chrome icon glyphs, status bar caps)
+//! stays a hardcoded constant, not every `ratatui::style::Style` in the
+//! app is themeable.
+
+use std::sync::OnceLock;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::merge::MergeStrategy;
@@ -18,20 +28,89 @@ const BORDER_TYPE: BorderType = BorderType::Rounded;
 /// a `┬`/`┴`/`┼`) instead of drawing two borders on top of each other.
 const BORDER_MERGE: MergeStrategy = MergeStrategy::Fuzzy;
 
-const BORDER_FOCUSED: Color = Color::Cyan;
-const BORDER_UNFOCUSED: Color = Color::DarkGray;
+/// The illium color palette every bordered/accented widget reads from.
+/// `Theme::default()` reproduces the exact hardcoded values this crate
+/// shipped with before config support existed -- a user with no
+/// `config.toml` `[theme]` table must see byte-identical rendering to
+/// before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    /// Lavender accent used for the status bar and the current tree
+    /// selection.
+    pub accent_bg: Color,
+    /// Near-black foreground for contrast on top of `accent_bg`.
+    pub accent_fg: Color,
+    /// Border color for a panel that currently has focus.
+    pub border_focused: Color,
+    /// Border color for a panel that does not.
+    pub border_unfocused: Color,
+}
 
-/// Lavender accent used for the status bar and the current tree selection,
-/// with a near-black foreground for contrast on top of it.
-pub const ACCENT_BG: Color = Color::Rgb(0x9d, 0x7c, 0xd8);
-pub const ACCENT_FG: Color = Color::Rgb(0x1a, 0x1b, 0x26);
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            accent_bg: Color::Rgb(0x9d, 0x7c, 0xd8),
+            accent_fg: Color::Rgb(0x1a, 0x1b, 0x26),
+            border_focused: Color::Cyan,
+            border_unfocused: Color::DarkGray,
+        }
+    }
+}
+
+/// The effective theme for the process's lifetime, installed once at
+/// startup (`crate::run`, after `crate::config::load`) and never mutated
+/// again.
+///
+/// This is a legitimate use of a global, not a smell: illium-client is a
+/// single-process TUI with exactly one render loop, the theme is resolved
+/// once before that loop's first frame and never changes afterward (there
+/// is no live "reload theme" request), and every render call site
+/// (`ui.rs`/`tree_ui.rs`/`modal.rs`/`help.rs`/`explorer_overlay.rs`) already
+/// calls straight into this module's free functions with no `&App`/state
+/// threaded through them -- adding a `&Theme` parameter to every one of
+/// those call sites across every render module would be a large,
+/// mechanical, purely-plumbing change for no behavioral benefit over one
+/// `OnceLock` read at the bottom of each function.
+static THEME: OnceLock<Theme> = OnceLock::new();
+
+/// Installs the effective theme for the rest of the process's lifetime --
+/// called once at client startup. A second call is a no-op (there is no
+/// "reload config" request yet, so nothing should ever attempt one).
+pub fn init(theme: Theme) {
+    let _ = THEME.set(theme);
+}
+
+/// The theme currently in effect. Falls back to [`Theme::default`] when
+/// [`init`] hasn't run yet (every unit test in this crate, and any render
+/// call that could theoretically happen before startup finishes) rather
+/// than panicking -- a themeable value defaulting to "the value it always
+/// had before this feature existed" is never a bug worth crashing over.
+fn current() -> Theme {
+    THEME.get().copied().unwrap_or_default()
+}
+
+/// The effective accent background color -- exposed directly (not just via
+/// `statusbar_style`/`selected_style`) for the handful of call sites that
+/// need to compose it with another color themselves (e.g.
+/// `tree_ui.rs::draw_toolbar`'s hovered-button style, which layers it over
+/// a per-action accent).
+pub fn accent_bg() -> Color {
+    current().accent_bg
+}
+
+/// The effective accent foreground color -- see [`accent_bg`]'s doc
+/// comment for why this is exposed as a plain `Color` getter too.
+pub fn accent_fg() -> Color {
+    current().accent_fg
+}
 
 /// Border color/weight for a panel, brighter and bold when `focused`.
 pub fn border_style(focused: bool) -> Style {
+    let theme = current();
     let style = Style::new().fg(if focused {
-        BORDER_FOCUSED
+        theme.border_focused
     } else {
-        BORDER_UNFOCUSED
+        theme.border_unfocused
     });
     if focused {
         style.add_modifier(Modifier::BOLD)
@@ -83,14 +162,15 @@ pub const STATUSBAR_CAP_RIGHT: &str = "\u{e0b4}";
 /// background of its own, so it reads as a rounded edge rather than a
 /// solid block.
 pub fn statusbar_cap_style() -> Style {
-    Style::new().fg(ACCENT_BG)
+    Style::new().fg(current().accent_bg)
 }
 
 /// Background fill for the bottom status bar: solid accent, not reversed
 /// video, so per-row semantic text colors (e.g. an agent's status color)
 /// keep reading correctly wherever else they're reused.
 pub fn statusbar_style() -> Style {
-    Style::new().fg(ACCENT_FG).bg(ACCENT_BG)
+    let theme = current();
+    Style::new().fg(theme.accent_fg).bg(theme.accent_bg)
 }
 
 /// Background tint for the current tree selection. A plain `bg` fill
@@ -98,7 +178,8 @@ pub fn statusbar_style() -> Style {
 /// spinner's yellow, the waiting-approval cyan dot, etc. -- stays legible
 /// on top of it instead of being flipped into the background channel.
 pub fn selected_style() -> Style {
-    Style::new().bg(ACCENT_BG).fg(ACCENT_FG)
+    let theme = current();
+    Style::new().bg(theme.accent_bg).fg(theme.accent_fg)
 }
 
 #[cfg(test)]
@@ -140,5 +221,18 @@ mod tests {
         // A long selected-pane title must be clipped inside the title area,
         // never overwrite the panel's closing rounded corner.
         assert_eq!(buffer[(119, 0)].symbol(), "╮");
+    }
+
+    /// With no `init` call (the state every test in this binary runs
+    /// under, since `init` is only ever called once, for real, from
+    /// `crate::run`), every color getter must read back the exact
+    /// pre-config-support hardcoded values -- a no-config-file user's
+    /// rendering must stay byte-identical.
+    #[test]
+    fn colors_default_to_the_original_hardcoded_values_when_uninitialised() {
+        assert_eq!(accent_bg(), Color::Rgb(0x9d, 0x7c, 0xd8));
+        assert_eq!(accent_fg(), Color::Rgb(0x1a, 0x1b, 0x26));
+        assert_eq!(border_style(true).fg, Some(Color::Cyan));
+        assert_eq!(border_style(false).fg, Some(Color::DarkGray));
     }
 }

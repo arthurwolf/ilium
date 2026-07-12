@@ -31,6 +31,8 @@ use std::time::Duration;
 
 use tokio::net::UnixListener;
 
+use illium_detect::AgentSignature;
+
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::error::ServerError;
 use crate::state::ServerState;
@@ -45,6 +47,11 @@ pub struct ServerOptions {
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
+    /// User-configured agent signatures (`config::ServerConfig::custom_signatures`)
+    /// to check alongside `illium-detect`'s built-in registry -- threaded
+    /// straight through to `ServerState` and from there into every
+    /// detection-loop tick's `identify_agent_with_extra` call.
+    pub custom_signatures: Vec<AgentSignature>,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -76,6 +83,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         options.snapshot_path,
         options.detection_config,
         options.notifications_config,
+        options.custom_signatures,
     ));
 
     match persistence::load_snapshot(&state.snapshot_path).await {
@@ -271,6 +279,7 @@ mod restore_tests {
             snapshot_path,
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
+            custom_signatures: Vec::new(),
         };
         let server_task = tokio::spawn(run(options));
 

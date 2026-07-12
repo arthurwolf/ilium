@@ -73,6 +73,7 @@ impl TestServer {
             snapshot_path,
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),
+            custom_signatures: Vec::new(),
         };
 
         // Leaked, not dropped: `TempDir` deletes its directory on drop, but

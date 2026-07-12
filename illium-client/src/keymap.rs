@@ -6,9 +6,22 @@
 //! `is_leader_key`), but `Ctrl+A` is the documented default since it needs
 //! no special terminal protocol support — it works identically in a plain
 //! xterm, VS Code's integrated terminal, tmux, everywhere. Both the
-//! input-dispatch logic (`app.rs`) and the help screen render straight
-//! from `LEADER_BINDINGS`, so the two can't drift out of sync — add a new
-//! leader shortcut here and both consumers pick it up automatically.
+//! input-dispatch logic (`app.rs`) and the help screen render from
+//! [`effective_bindings`] (defaulting to [`LEADER_BINDINGS`] until
+//! [`init_effective_bindings`] runs at startup), so the two can't drift out
+//! of sync — add a new leader shortcut to `LEADER_BINDINGS` and both
+//! consumers pick it up automatically.
+//!
+//! A user may remap which letter triggers an existing [`Action`] via
+//! `config.toml`'s `[keybindings]` table (`crate::config`) — see
+//! [`action_name`]/[`action_from_name`] for the stable string each
+//! `Action` is addressed by in that config, and [`init_effective_bindings`]
+//! for how the override table replaces [`LEADER_BINDINGS`] as the table
+//! `action_for` searches. Deliberately scoped to *remapping* only: `config.toml`
+//! cannot define a brand-new action, only change which letter dispatches
+//! one of the actions already listed here.
+
+use std::sync::OnceLock;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -130,6 +143,69 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
     },
 ];
 
+/// The stable, `snake_case` config-file name for each [`Action`] --
+/// `config.toml`'s `[keybindings]` table keys are these names, e.g.
+/// `new_terminal = "c"`. Kept as one explicit match (rather than deriving
+/// a name from `Debug`) so renaming an `Action` variant for readability
+/// doesn't silently rename what users type in their config file.
+pub fn action_name(action: Action) -> &'static str {
+    match action {
+        Action::NewTerminal => "new_terminal",
+        Action::NewEditor => "new_editor",
+        Action::ClosePane => "close_pane",
+        Action::NewGroup => "new_group",
+        Action::Rename => "rename",
+        Action::ToggleMove => "toggle_move",
+        Action::FocusTree => "focus_tree",
+        Action::FocusPane => "focus_pane",
+        Action::Save => "save",
+        Action::RunCommand => "run_command",
+        Action::Help => "help",
+        Action::Quit => "quit",
+        Action::ToggleEditorViewMode => "toggle_editor_view_mode",
+        Action::ToggleLineNumbers => "toggle_line_numbers",
+        Action::ToggleMinimap => "toggle_minimap",
+        Action::ToggleAutosave => "toggle_autosave",
+    }
+}
+
+/// The inverse of [`action_name`]: looks up the `Action` a config-file
+/// `[keybindings]` key refers to. `None` for any name that isn't exactly
+/// one of [`action_name`]'s outputs -- `crate::config`'s loader turns that
+/// into a clear "unknown action" error rather than silently ignoring a
+/// typo.
+pub fn action_from_name(name: &str) -> Option<Action> {
+    LEADER_BINDINGS
+        .iter()
+        .map(|binding| binding.action)
+        .find(|&action| action_name(action) == name)
+}
+
+/// The table [`action_for`] and the help screen actually search: either
+/// the startup-computed override table (see [`init_effective_bindings`])
+/// or, absent that (no config file, or a test that never calls it),
+/// [`LEADER_BINDINGS`] unchanged.
+static EFFECTIVE_BINDINGS: OnceLock<Vec<KeyBinding>> = OnceLock::new();
+
+/// Installs the effective leader-key binding table for the rest of the
+/// process's lifetime -- called once at client startup (`crate::run`)
+/// after merging `config.toml`'s `[keybindings]` overrides onto
+/// [`LEADER_BINDINGS`] (see `crate::config::load`). A second call is a
+/// no-op: there is no "reload config" request yet, so nothing should ever
+/// attempt one.
+pub fn init_effective_bindings(bindings: Vec<KeyBinding>) {
+    let _ = EFFECTIVE_BINDINGS.set(bindings);
+}
+
+/// The binding table currently in effect -- what [`action_for`] and the
+/// help screen (`crate::help`) search.
+pub fn effective_bindings() -> &'static [KeyBinding] {
+    EFFECTIVE_BINDINGS
+        .get()
+        .map(Vec::as_slice)
+        .unwrap_or(LEADER_BINDINGS)
+}
+
 /// True if this key event is the leader key itself: `Ctrl+A` (the
 /// documented default — a classic Ctrl+letter combo, encoded identically
 /// as a single control byte on every terminal, no protocol negotiation
@@ -158,9 +234,19 @@ pub fn is_leader_key(key: &KeyEvent) -> bool {
     }
 }
 
-/// Looks up the action bound to a letter pressed right after the leader.
+/// Looks up the action bound to a letter pressed right after the leader,
+/// searching [`effective_bindings`] (the possibly-user-remapped table)
+/// rather than [`LEADER_BINDINGS`] directly.
 pub fn action_for(letter: char) -> Option<Action> {
-    LEADER_BINDINGS
+    action_for_table(effective_bindings(), letter)
+}
+
+/// The lookup [`action_for`] runs, parameterized over an explicit table
+/// rather than the global [`effective_bindings`] -- lets `crate::config`'s
+/// tests exercise a merged table's lookup behavior without touching
+/// [`EFFECTIVE_BINDINGS`]' process-lifetime `OnceLock`.
+pub fn action_for_table(bindings: &[KeyBinding], letter: char) -> Option<Action> {
+    bindings
         .iter()
         .find(|binding| binding.letter == letter)
         .map(|binding| binding.action)
@@ -232,5 +318,32 @@ mod tests {
     #[test]
     fn action_for_unknown_letter() {
         assert_eq!(action_for('z'), None);
+    }
+
+    /// Every binding's `action_name` round-trips back through
+    /// `action_from_name` -- the two are meant to be exact inverses of
+    /// each other over every action `LEADER_BINDINGS` actually lists.
+    #[test]
+    fn action_name_round_trips_through_action_from_name_for_every_binding() {
+        for binding in LEADER_BINDINGS {
+            let name = action_name(binding.action);
+            assert_eq!(action_from_name(name), Some(binding.action));
+        }
+    }
+
+    #[test]
+    fn action_from_name_rejects_an_unknown_name() {
+        assert_eq!(action_from_name("not_a_real_action"), None);
+    }
+
+    /// `effective_bindings` falls back to `LEADER_BINDINGS` unchanged in
+    /// this test binary, since nothing here ever calls
+    /// `init_effective_bindings` (a deliberately untested global -- see
+    /// `crate::config`'s tests for the pure merge logic that would feed
+    /// it, kept separate from this `OnceLock` so tests never race on
+    /// shared global state).
+    #[test]
+    fn effective_bindings_defaults_to_leader_bindings() {
+        assert_eq!(effective_bindings().len(), LEADER_BINDINGS.len());
     }
 }

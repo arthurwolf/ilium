@@ -1,13 +1,17 @@
 //! Server-wide configuration, loaded from `~/.config/illium/config.toml`
 //! (see `CLAUDE.md`'s "Config & data locations"): the detection loop's
-//! adaptive poll cadence (README "Poll cadence") and the desktop
-//! notification toggle (README M5, `Working -> Done` notifications). Other
-//! config (keybindings, detection signatures, theme) is explicitly listed
-//! under README milestone M5 and out of scope for this crate today.
+//! adaptive poll cadence (README "Poll cadence"), user-configured agent
+//! detection signatures (README M5), and the desktop notification toggle
+//! (README M5, `Working -> Done` notifications). Keybinding and theme
+//! config live client-side (`illium-client/src/config.rs`) since this
+//! crate never touches rendering or input dispatch.
 
+use std::borrow::Cow;
 use std::path::Path;
 use std::time::Duration;
 
+use illium_core::AgentClass;
+use illium_detect::AgentSignature;
 use serde::Deserialize;
 
 use crate::error::{ConfigLoadError, ServerError};
@@ -59,18 +63,30 @@ impl Default for NotificationsConfig {
 /// [`load`] returns; a config file that fails to load falls back to
 /// [`ServerConfig::default`] (every field's own default) at the call site
 /// rather than this crate hardcoding a fallback here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// No `PartialEq`/`Eq`/`Copy` here (unlike its sub-fields): `custom_signatures`
+/// holds `illium_detect::AgentSignature`, whose `class_of` is a `fn`
+/// pointer -- comparing those is documented as unreliable, so
+/// `AgentSignature` deliberately doesn't derive equality either (see its
+/// own doc comment). Nothing needs whole-`ServerConfig` equality; tests
+/// compare the individual fields that do support it instead.
+#[derive(Debug, Clone, Default)]
 pub struct ServerConfig {
     pub detection: DetectionConfig,
     pub notifications: NotificationsConfig,
+    /// User-configured agent signatures (`[[detection.custom_signatures]]`)
+    /// to check alongside `illium-detect`'s built-in registry -- see
+    /// `illium_detect::identify_agent_with_extra`, the registry extension
+    /// point this list feeds.
+    pub custom_signatures: Vec<AgentSignature>,
 }
 
 /// The on-disk shape of `config.toml`. Kept separate from [`ServerConfig`]
 /// (which uses `Duration`, has no serde impl by design, and enforces the
 /// clamp/default invariants) so a partially-specified or out-of-range
 /// config file can be validated in one place ([`DetectionConfig::from_raw`],
-/// [`NotificationsConfig::from_raw`]) rather than every field needing its
-/// own serde validator.
+/// [`NotificationsConfig::from_raw`], [`RawCustomSignature::validate`])
+/// rather than every field needing its own serde validator.
 #[derive(Debug, Default, Deserialize)]
 struct RawConfig {
     #[serde(default)]
@@ -83,6 +99,10 @@ struct RawConfig {
 struct RawDetectionConfig {
     working_poll_seconds: Option<u64>,
     idle_poll_seconds: Option<u64>,
+    /// `[[detection.custom_signatures]]` -- an array of tables, each one
+    /// process-name pattern plus the `AgentClass` it should resolve to.
+    #[serde(default)]
+    custom_signatures: Vec<RawCustomSignature>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -90,12 +110,63 @@ struct RawNotificationsConfig {
     enabled: Option<bool>,
 }
 
+/// One `[[detection.custom_signatures]]` entry as read from TOML, before
+/// validation. `agent_class` is a free-form string rather than a serde enum
+/// so an unrecognized value produces this crate's own
+/// [`ConfigLoadError::InvalidCustomSignature`] (naming the exact allowed
+/// values) instead of serde's generic "unknown variant" message.
+#[derive(Debug, Deserialize)]
+struct RawCustomSignature {
+    /// Lowercase substring matched against a process name -- same
+    /// semantics as `AgentSignature::name_substring`.
+    process_name: String,
+    /// One of `"claude"`, `"codex"`, or `"other"`. `"other"` resolves to
+    /// `AgentClass::Other(<the process name that actually matched>)`,
+    /// mirroring how the built-in `opencode`/`aider` signatures behave --
+    /// there is no separate "fixed label" field, since `class_of` is a
+    /// plain non-capturing `fn` pointer (see `AgentSignature`'s doc
+    /// comment) and a fixed label would require a closure that captures
+    /// per-entry config data instead.
+    agent_class: String,
+}
+
+impl RawCustomSignature {
+    fn validate(self) -> Result<AgentSignature, ConfigLoadError> {
+        let name_substring = self.process_name.trim().to_lowercase();
+        if name_substring.is_empty() {
+            return Err(ConfigLoadError::InvalidCustomSignature(
+                "process_name must not be empty".to_string(),
+            ));
+        }
+
+        let class_of: fn(&str) -> AgentClass = match self.agent_class.trim().to_lowercase().as_str()
+        {
+            "claude" => |_matched_name: &str| AgentClass::Claude,
+            "codex" => |_matched_name: &str| AgentClass::Codex,
+            "other" => |matched_name: &str| AgentClass::Other(matched_name.to_string()),
+            other => {
+                return Err(ConfigLoadError::InvalidCustomSignature(format!(
+                    "unknown agent_class {other:?} (expected \"claude\", \"codex\", or \"other\")"
+                )))
+            }
+        };
+
+        Ok(AgentSignature {
+            name_substring: Cow::Owned(name_substring),
+            class_of,
+        })
+    }
+}
+
 /// The smallest interval a misconfigured `config.toml` is allowed to
 /// request -- see [`DetectionConfig`]'s doc comment.
 const MINIMUM_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 impl DetectionConfig {
-    fn from_raw(raw: RawDetectionConfig) -> Self {
+    /// Borrows rather than consumes `raw` -- `load` still needs
+    /// `raw.detection.custom_signatures` (owned, to validate into
+    /// `AgentSignature`s) after this call.
+    fn from_raw(raw: &RawDetectionConfig) -> Self {
         let defaults = Self::default();
         Self {
             working_poll_interval: raw
@@ -140,9 +211,23 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         path: path.clone(),
         source: ConfigLoadError::Parse(source),
     })?;
+
+    let detection = DetectionConfig::from_raw(&raw.detection);
+    let custom_signatures = raw
+        .detection
+        .custom_signatures
+        .into_iter()
+        .map(RawCustomSignature::validate)
+        .collect::<Result<Vec<_>, ConfigLoadError>>()
+        .map_err(|source| ServerError::ConfigLoad {
+            path: path.clone(),
+            source,
+        })?;
+
     Ok(ServerConfig {
-        detection: DetectionConfig::from_raw(raw.detection),
+        detection,
         notifications: NotificationsConfig::from_raw(raw.notifications),
+        custom_signatures,
     })
 }
 
@@ -163,7 +248,12 @@ mod tests {
     fn missing_config_file_loads_defaults() {
         let dir = scratch_dir();
         let config = load(&dir).expect("missing file is not an error");
-        assert_eq!(config, ServerConfig::default());
+        // `ServerConfig` doesn't derive `PartialEq` (see its doc comment --
+        // `AgentSignature::class_of` is a `fn` pointer), so defaults are
+        // asserted field by field instead of via one struct comparison.
+        assert_eq!(config.detection, DetectionConfig::default());
+        assert_eq!(config.notifications, NotificationsConfig::default());
+        assert!(config.custom_signatures.is_empty());
     }
 
     #[test]
@@ -249,5 +339,99 @@ mod tests {
 
         let result = load(&dir);
         assert!(matches!(result, Err(ServerError::ConfigLoad { .. })));
+    }
+
+    #[test]
+    fn custom_signatures_default_to_empty() {
+        let dir = scratch_dir();
+        let config = load(&dir).expect("missing file is not an error");
+        assert!(config.custom_signatures.is_empty());
+    }
+
+    #[test]
+    fn custom_signatures_are_parsed_and_validated_into_agent_signatures() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[[detection.custom_signatures]]\n",
+                "process_name = \"MyTool\"\n",
+                "agent_class = \"Other\"\n",
+                "\n",
+                "[[detection.custom_signatures]]\n",
+                "process_name = \"myclaudefork\"\n",
+                "agent_class = \"claude\"\n",
+            ),
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid config should load");
+        assert_eq!(config.custom_signatures.len(), 2);
+
+        // `process_name` is lowercased at load time, matching
+        // `AgentSignature::name_substring`'s documented lowercase-only
+        // contract.
+        assert_eq!(
+            config.custom_signatures[0].name_substring.as_ref(),
+            "mytool"
+        );
+        assert_eq!(
+            (config.custom_signatures[0].class_of)("mytool"),
+            AgentClass::Other("mytool".to_string())
+        );
+        assert_eq!(
+            config.custom_signatures[1].name_substring.as_ref(),
+            "myclaudefork"
+        );
+        assert_eq!(
+            (config.custom_signatures[1].class_of)("myclaudefork"),
+            AgentClass::Claude
+        );
+    }
+
+    #[test]
+    fn a_custom_signature_with_an_unknown_agent_class_is_a_config_load_error() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[[detection.custom_signatures]]\n",
+                "process_name = \"mytool\"\n",
+                "agent_class = \"not-a-real-class\"\n",
+            ),
+        )
+        .unwrap();
+
+        let result = load(&dir);
+        assert!(matches!(
+            result,
+            Err(ServerError::ConfigLoad {
+                source: ConfigLoadError::InvalidCustomSignature(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_custom_signature_with_an_empty_process_name_is_a_config_load_error() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[[detection.custom_signatures]]\n",
+                "process_name = \"   \"\n",
+                "agent_class = \"other\"\n",
+            ),
+        )
+        .unwrap();
+
+        let result = load(&dir);
+        assert!(matches!(
+            result,
+            Err(ServerError::ConfigLoad {
+                source: ConfigLoadError::InvalidCustomSignature(_),
+                ..
+            })
+        ));
     }
 }

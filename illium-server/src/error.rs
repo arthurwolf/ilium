@@ -122,6 +122,13 @@ pub enum ConfigLoadError {
     Read(#[from] std::io::Error),
     #[error("failed to parse config file as TOML: {0}")]
     Parse(#[from] toml::de::Error),
+    /// A `[[detection.custom_signatures]]` entry parsed as valid TOML but
+    /// failed semantic validation (empty `process_name`, or an
+    /// `agent_class` other than `"claude"`/`"codex"`/`"other"`). Kept
+    /// distinct from `Parse` -- the file *is* well-formed TOML, just not a
+    /// signature this crate knows how to build.
+    #[error("invalid detection.custom_signatures entry: {0}")]
+    InvalidCustomSignature(String),
 }
 
 /// Why a crash-recovery snapshot read/write failed.

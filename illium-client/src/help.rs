@@ -1,6 +1,7 @@
-//! Renders the leader-key reference (`keymap::LEADER_BINDINGS`) as a
-//! centered popup overlay, so the bindings can never drift out of sync
-//! with what `app.rs` actually dispatches.
+//! Renders the leader-key reference (`keymap::effective_bindings`, the
+//! possibly user-remapped table) as a centered popup overlay, so the
+//! bindings shown here can never drift out of sync with what `app.rs`
+//! actually dispatches (`keymap::action_for` searches the same table).
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -8,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::keymap::LEADER_BINDINGS;
+use crate::keymap;
 use crate::layout::centered_rect;
 use crate::theme;
 
@@ -22,13 +23,14 @@ pub fn render(frame: &mut Frame, area: Rect) {
     // underneath it this frame.
     frame.render_widget(Clear, popup_area);
 
-    let mut lines = Vec::with_capacity(LEADER_BINDINGS.len() + 4);
+    let bindings = keymap::effective_bindings();
+    let mut lines = Vec::with_capacity(bindings.len() + 4);
     lines.push(Line::from(Span::styled(
         "illium — keyboard reference",
         Style::new().add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
-    for binding in LEADER_BINDINGS {
+    for binding in bindings {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("Ctrl+A then {}", binding.letter),

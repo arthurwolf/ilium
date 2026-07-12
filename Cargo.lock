@@ -1397,6 +1397,7 @@ dependencies = [
  "syntect",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tracing",
  "tui-term",
  "tui-tree-widget",

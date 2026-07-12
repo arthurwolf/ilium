@@ -119,7 +119,7 @@ async fn run_due_panes(
                 continue;
             }
 
-            let new_status = classify_pane(system, runtime);
+            let new_status = classify_pane(system, runtime, &state.custom_signatures);
             runtime.detection_schedule.current_interval = interval_for(&new_status, state);
             runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
 
@@ -171,7 +171,15 @@ async fn run_due_panes(
 }
 
 /// Runs the identity + activity classification for one terminal pane.
-fn classify_pane(system: &System, runtime: &crate::pane::TerminalPaneRuntime) -> PaneStatus {
+/// `extra_signatures` is the session's user-configured
+/// `[[detection.custom_signatures]]` list (`ServerState::custom_signatures`),
+/// checked alongside `illium-detect`'s built-in registry via
+/// `identify_agent_with_extra`.
+fn classify_pane(
+    system: &System,
+    runtime: &crate::pane::TerminalPaneRuntime,
+    extra_signatures: &[illium_detect::AgentSignature],
+) -> PaneStatus {
     let Some(shell_pid) = runtime.session.process_id() else {
         // The platform never reported a pid for this pane's shell (should
         // not happen on the platforms illium targets, but `process_id`'s
@@ -180,7 +188,11 @@ fn classify_pane(system: &System, runtime: &crate::pane::TerminalPaneRuntime) ->
         return PaneStatus::PlainShell;
     };
 
-    match illium_detect::identify_agent(system, Pid::from_u32(shell_pid)) {
+    match illium_detect::identify_agent_with_extra(
+        system,
+        Pid::from_u32(shell_pid),
+        extra_signatures,
+    ) {
         Some(identity) => {
             let screen_text = runtime.session.screen_text();
             let activity = illium_detect::classify_activity(&screen_text);

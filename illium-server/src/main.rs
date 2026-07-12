@@ -70,6 +70,7 @@ async fn async_main(session_name: String) -> ExitCode {
         snapshot_path: paths.snapshot_path,
         detection_config: server_config.detection,
         notifications_config: server_config.notifications,
+        custom_signatures: server_config.custom_signatures,
     };
 
     match illium_server::run(options).await {

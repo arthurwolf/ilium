@@ -17,6 +17,7 @@
 //! loop, currently `illium`'s `app.rs` during the strangler-fig
 //! migration), not to this crate.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use illium_core::{AgentActivity, AgentClass};
@@ -27,33 +28,58 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 /// [`AgentClass`] from the matched (lowercased) name.
 ///
 /// New agent CLI support is a new entry here, not a new branch in an
-/// if/else chain -- see `CLAUDE.md`'s layering rule.
-struct AgentSignature {
+/// if/else chain -- see `CLAUDE.md`'s layering rule. `pub` (and its fields
+/// `pub`) so a caller can also build its own signatures at runtime -- see
+/// [`identify_agent_with_extra`] -- from user config
+/// (`illium-server/src/config.rs`'s `[[detection.custom_signatures]]`)
+/// rather than that config surface needing a parallel matching code path.
+///
+/// `name_substring` is `Cow<'static, str>` rather than plain `&'static
+/// str` so the same type serves both the compile-time [`AGENT_SIGNATURES`]
+/// table (`Cow::Borrowed`) and signatures built at runtime from an owned
+/// `String` read out of a config file (`Cow::Owned`), with no separate
+/// "config signature" type needed. `class_of` stays a plain `fn` pointer
+/// (not a boxed closure) since every signature -- built-in or
+/// config-provided -- only ever needs one of three fixed shapes (always
+/// `Claude`, always `Codex`, or `Other` carrying whatever process name
+/// actually matched); a non-capturing closure literal coerces to `fn`
+/// automatically, so config-provided signatures build these the same way
+/// the built-in ones do, no dynamic dispatch required.
+///
+/// Deliberately does not derive `PartialEq`/`Eq`: `class_of` is a `fn`
+/// pointer, and comparing those is documented as unreliable (their
+/// addresses aren't guaranteed stable across codegen units) -- nothing in
+/// this crate or its callers needs to compare two signatures for equality,
+/// so there's no reason to take on that footgun.
+#[derive(Debug, Clone)]
+pub struct AgentSignature {
     /// Lowercase substring matched against a process's name.
-    name_substring: &'static str,
+    pub name_substring: Cow<'static, str>,
     /// Builds the `AgentClass` for a match. Receives the matched
     /// (lowercased) process name so `AgentClass::Other` can carry the
     /// exact name that matched.
-    class_of: fn(matched_name: &str) -> AgentClass,
+    pub class_of: fn(matched_name: &str) -> AgentClass,
 }
 
 /// Known agent CLI signatures, in match-priority order (first match wins
-/// when a process name could match more than one entry).
+/// when a process name could match more than one entry). Checked before
+/// any caller-supplied `extra_signatures` -- see
+/// [`identify_agent_with_extra`].
 const AGENT_SIGNATURES: &[AgentSignature] = &[
     AgentSignature {
-        name_substring: "claude",
+        name_substring: Cow::Borrowed("claude"),
         class_of: |_matched_name| AgentClass::Claude,
     },
     AgentSignature {
-        name_substring: "codex",
+        name_substring: Cow::Borrowed("codex"),
         class_of: |_matched_name| AgentClass::Codex,
     },
     AgentSignature {
-        name_substring: "opencode",
+        name_substring: Cow::Borrowed("opencode"),
         class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
     },
     AgentSignature {
-        name_substring: "aider",
+        name_substring: Cow::Borrowed("aider"),
         class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
     },
 ];
@@ -245,13 +271,34 @@ pub fn refresh(system: &mut System) {
 /// equivalent) rather than owning any refresh itself -- session-ID
 /// discovery, which does need a targeted `cwd`/`environ` refresh on the
 /// matched pid, is the caller's job.
+///
+/// Thin wrapper over [`identify_agent_with_extra`] with no extra
+/// signatures -- kept as its own function since it's the call every
+/// existing site (and every test) uses, and "no user config" is by far
+/// the common case.
 pub fn identify_agent(system: &System, shell_pid: Pid) -> Option<AgentIdentity> {
+    identify_agent_with_extra(system, shell_pid, &[])
+}
+
+/// Same as [`identify_agent`], but also checks `extra_signatures` (e.g.
+/// user-configured `[[detection.custom_signatures]]` entries) alongside
+/// the built-in [`AGENT_SIGNATURES`] table -- the registry-driven
+/// extension point `CLAUDE.md`'s layering rule calls for, rather than a
+/// second, parallel matching code path for config-provided signatures.
+pub fn identify_agent_with_extra(
+    system: &System,
+    shell_pid: Pid,
+    extra_signatures: &[AgentSignature],
+) -> Option<AgentIdentity> {
     system
         .processes()
         .values()
         .filter_map(|process| {
             let depth = descendant_depth(system, process.pid(), shell_pid)?;
-            let class = classify_process_name(&process.name().to_string_lossy().to_lowercase())?;
+            let class = classify_process_name_with_extra(
+                &process.name().to_string_lossy().to_lowercase(),
+                extra_signatures,
+            )?;
             Some((depth, process.pid(), class))
         })
         // The CLI process is closer to the pane shell than its internal
@@ -264,11 +311,17 @@ pub fn identify_agent(system: &System, shell_pid: Pid) -> Option<AgentIdentity> 
 }
 
 /// Classifies a single (already-lowercased) process name against the
-/// [`AGENT_SIGNATURES`] registry.
-fn classify_process_name(lowercase_name: &str) -> Option<AgentClass> {
+/// built-in [`AGENT_SIGNATURES`] table followed by `extra_signatures`, in
+/// that order -- so a user-configured signature can add coverage for a new
+/// agent CLI, but never silently shadows a built-in one.
+fn classify_process_name_with_extra(
+    lowercase_name: &str,
+    extra_signatures: &[AgentSignature],
+) -> Option<AgentClass> {
     AGENT_SIGNATURES
         .iter()
-        .find(|signature| lowercase_name.contains(signature.name_substring))
+        .chain(extra_signatures.iter())
+        .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
         .map(|signature| (signature.class_of)(lowercase_name))
 }
 
@@ -389,17 +442,23 @@ mod tests {
 
     #[test]
     fn classify_process_name_matches_known_signatures() {
-        assert_eq!(classify_process_name("claude"), Some(AgentClass::Claude));
-        assert_eq!(classify_process_name("codex"), Some(AgentClass::Codex));
         assert_eq!(
-            classify_process_name("opencode"),
+            classify_process_name_with_extra("claude", &[]),
+            Some(AgentClass::Claude)
+        );
+        assert_eq!(
+            classify_process_name_with_extra("codex", &[]),
+            Some(AgentClass::Codex)
+        );
+        assert_eq!(
+            classify_process_name_with_extra("opencode", &[]),
             Some(AgentClass::Other("opencode".to_string()))
         );
         assert_eq!(
-            classify_process_name("aider"),
+            classify_process_name_with_extra("aider", &[]),
             Some(AgentClass::Other("aider".to_string()))
         );
-        assert_eq!(classify_process_name("bash"), None);
+        assert_eq!(classify_process_name_with_extra("bash", &[]), None);
     }
 
     /// `identify_agent` walks a *real* process tree (sysinfo has no fake
@@ -414,5 +473,38 @@ mod tests {
         system.refresh_all();
         let current_pid = Pid::from_u32(std::process::id());
         assert_eq!(identify_agent(&system, current_pid), None);
+    }
+
+    /// A name that matches no built-in signature is only classified once a
+    /// matching extra (e.g. user-configured) signature is supplied
+    /// alongside the built-in table -- this is the registry extension
+    /// point `illium-server/src/config.rs`'s custom signatures ride on.
+    #[test]
+    fn classify_process_name_with_extra_matches_a_caller_supplied_signature() {
+        let custom = AgentSignature {
+            name_substring: Cow::Owned("mytool".to_string()),
+            class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
+        };
+
+        assert_eq!(classify_process_name_with_extra("mytool", &[]), None);
+        assert_eq!(
+            classify_process_name_with_extra("mytool", &[custom]),
+            Some(AgentClass::Other("mytool".to_string()))
+        );
+    }
+
+    /// A built-in signature always wins over an extra one for the same
+    /// substring -- extras extend the registry, they never shadow it.
+    #[test]
+    fn classify_process_name_with_extra_never_shadows_a_built_in_signature() {
+        let custom = AgentSignature {
+            name_substring: Cow::Owned("claude".to_string()),
+            class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
+        };
+
+        assert_eq!(
+            classify_process_name_with_extra("claude", &[custom]),
+            Some(AgentClass::Claude)
+        );
     }
 }
