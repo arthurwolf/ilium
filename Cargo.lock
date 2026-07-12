@@ -1369,6 +1369,7 @@ dependencies = [
  "illium-client",
  "illium-core",
  "illium-ipc",
+ "illium-pty",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

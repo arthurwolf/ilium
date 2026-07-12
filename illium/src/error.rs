@@ -23,8 +23,8 @@ pub enum CliError {
     ServerStartTimeout(String, Duration),
     #[error("session {0:?} is not running")]
     SessionNotRunning(String),
-    #[error("failed to read the data directory {0:?}: {1}")]
-    ReadDataDir(PathBuf, std::io::Error),
+    #[error("failed to read the session socket directory {0:?}: {1}")]
+    ReadSocketDir(PathBuf, std::io::Error),
     #[error("the server reported an error: {0}")]
     ServerReportedError(String),
     #[error(transparent)]

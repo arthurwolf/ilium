@@ -6,100 +6,18 @@
 //! path, no real `~/.local/share/illium` writes, no dependency on a real
 //! `claude`/`codex` binary (the plain shell it spawns is `$SHELL`, falling
 //! back to `/bin/sh`, exactly like the pre-refactor bin crate's own tests).
+//!
+//! Shared server-startup/polling/frame-reading helpers live in
+//! `tests/common/mod.rs`, alongside `live_agent_detection.rs`'s own use of
+//! the same `TestServer`.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use illium_core::{NodeId, ROOT_ID};
 use illium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
-use illium_server::config::{DetectionConfig, NotificationsConfig};
-use illium_server::{run, ServerOptions};
-use tokio::net::UnixStream;
 
-/// Polls `condition` until it's true or `timeout` elapses, without a fixed
-/// sleep -- the server binding its socket is not instant, and a fixed
-/// sleep would be either flaky (too short) or slow (long enough to never
-/// flake). Mirrors `illium-pty`'s integration test helper of the same
-/// name.
-async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> bool {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        if condition() {
-            return true;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-/// Reads frames from `stream` until one matches `predicate`, ignoring
-/// (but not losing track of, via the timeout) any that don't -- the
-/// detection loop or another connection could in principle interleave
-/// unrelated broadcasts, so a strict "the very next frame must match"
-/// assertion would be a flaky test for the wrong reason.
-async fn expect_event(
-    stream: &mut UnixStream,
-    timeout: Duration,
-    predicate: impl Fn(&ServerEvent) -> bool,
-) -> ServerEvent {
-    tokio::time::timeout(timeout, async {
-        loop {
-            let event: ServerEvent = read_frame(stream).await.expect("read a server event");
-            if predicate(&event) {
-                return event;
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for the expected server event")
-}
-
-struct TestServer {
-    socket_path: PathBuf,
-    server_task: tokio::task::JoinHandle<Result<(), illium_server::error::ServerError>>,
-}
-
-impl TestServer {
-    async fn start(session_name: &str) -> Self {
-        let dir = tempfile::tempdir().expect("create tempdir");
-        let socket_path = dir.path().join(format!("{session_name}.sock"));
-        let snapshot_path = dir.path().join(format!("{session_name}.snapshot.json"));
-
-        let options = ServerOptions {
-            session_name: session_name.to_string(),
-            socket_path: socket_path.clone(),
-            snapshot_path,
-            detection_config: DetectionConfig::default(),
-            notifications_config: NotificationsConfig::default(),
-            custom_signatures: Vec::new(),
-        };
-
-        // Leaked, not dropped: `TempDir` deletes its directory on drop, but
-        // this test's `illium-server` instance needs the directory (and
-        // the socket file inside it) to outlive the whole test, not just
-        // this constructor call. The OS reclaims the tempdir on process
-        // exit either way.
-        std::mem::forget(dir);
-
-        let server_task = tokio::spawn(run(options));
-
-        let bound = wait_until(|| socket_path.exists(), Duration::from_secs(5)).await;
-        assert!(bound, "server did not bind its socket in time");
-
-        Self {
-            socket_path,
-            server_task,
-        }
-    }
-
-    async fn connect(&self) -> UnixStream {
-        UnixStream::connect(&self.socket_path)
-            .await
-            .expect("connect to the session socket")
-    }
-}
+mod common;
+use common::{expect_event, TestServer};
 
 #[tokio::test]
 async fn attach_returns_a_tree_snapshot_with_just_the_root() {

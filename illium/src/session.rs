@@ -3,13 +3,16 @@
 //! by one that crashed, and spawning a detached `illium-server` process
 //! for a session that isn't running yet.
 //!
-//! Deliberately re-derives the `<data_dir>/<session>.sock` path formula
-//! independently rather than depending on `illium_server::paths` or
-//! `illium_client::paths` for it -- both of those already re-derive it
-//! themselves rather than sharing a crate for one path formula (see
-//! `illium-client/src/paths.rs`'s doc comment for the rationale), and this
-//! binary additionally needs the *directory* itself (to enumerate every
-//! session for `ls`), which neither of those modules exposes.
+//! Deliberately re-derives the socket path formula independently rather
+//! than depending on `illium_server::paths` or `illium_client::paths` for
+//! it -- both of those already re-derive it themselves rather than sharing
+//! a crate for one path formula (see `illium-client/src/paths.rs`'s doc
+//! comment for the rationale), and this binary additionally needs the
+//! *directory* itself (to enumerate every session for `ls`), which neither
+//! of those modules exposes. This formula MUST stay in sync with
+//! `illium_server::paths::resolve_socket_path` (prefer `$XDG_RUNTIME_DIR/
+//! illium/<session>.sock`, falling back to `<data_dir>/<session>.sock`) --
+//! update all three together.
 
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::os::unix::process::CommandExt;
@@ -17,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use directories::ProjectDirs;
+use directories::{BaseDirs, ProjectDirs};
 
 use crate::error::CliError;
 
@@ -36,17 +39,35 @@ pub struct SessionListing {
     pub live: bool,
 }
 
-/// `illium`'s shared data directory (holds every session's socket).
+/// `illium`'s shared data directory. Holds every session's socket only
+/// when no runtime dir is available (see [`socket_dir`]); always holds
+/// this session's crash-recovery snapshot regardless.
 pub fn data_dir() -> Result<PathBuf, CliError> {
     let project_dirs = ProjectDirs::from("", "", "illium").ok_or(CliError::NoProjectDirs)?;
     Ok(project_dirs.data_dir().to_path_buf())
 }
 
-/// `<data_dir>/<session_name>.sock`, matching the formula
+/// The directory that actually holds session socket files, matching
+/// `illium_server::paths::resolve_socket_path`'s own preference:
+/// `$XDG_RUNTIME_DIR/illium` when a runtime dir is available (the common
+/// case on any systemd/pam-managed Linux session -- `sockaddr_un.sun_path`
+/// is capped at roughly 108 bytes, and the runtime dir is guaranteed short
+/// where `data_dir` routinely isn't), falling back to [`data_dir`] only
+/// when the platform exposes no runtime dir at all. [`socket_path`] and
+/// [`list_sessions`] both go through this so neither can drift from where
+/// a real spawned server actually binds.
+fn socket_dir() -> Result<PathBuf, CliError> {
+    match BaseDirs::new().as_ref().and_then(BaseDirs::runtime_dir) {
+        Some(runtime_dir) => Ok(runtime_dir.join("illium")),
+        None => data_dir(),
+    }
+}
+
+/// This session's Unix domain socket path, matching the formula
 /// `illium_server::paths::resolve` and `illium_client::paths::socket_path`
 /// compute for the same session.
 pub fn socket_path(session_name: &str) -> Result<PathBuf, CliError> {
-    Ok(data_dir()?.join(format!("{session_name}.sock")))
+    Ok(socket_dir()?.join(format!("{session_name}.sock")))
 }
 
 /// True if `socket_path` both exists and currently accepts a connection.
@@ -69,22 +90,22 @@ pub fn is_session_live(socket_path: &Path) -> bool {
     }
 }
 
-/// Every session with a socket file in `data_dir`, live or not (a
+/// Every session with a socket file in [`socket_dir`], live or not (a
 /// not-live entry has already had its stale file removed by the
 /// `is_session_live` check below by the time this returns). Empty (not an
-/// error) when `data_dir` doesn't exist yet -- that just means no session
-/// has ever run.
+/// error) when that directory doesn't exist yet -- that just means no
+/// session has ever run.
 pub fn list_sessions() -> Result<Vec<SessionListing>, CliError> {
-    let dir = data_dir()?;
+    let dir = socket_dir()?;
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
 
     let entries =
-        std::fs::read_dir(&dir).map_err(|source| CliError::ReadDataDir(dir.clone(), source))?;
+        std::fs::read_dir(&dir).map_err(|source| CliError::ReadSocketDir(dir.clone(), source))?;
     let mut sessions = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|source| CliError::ReadDataDir(dir.clone(), source))?;
+        let entry = entry.map_err(|source| CliError::ReadSocketDir(dir.clone(), source))?;
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
             continue;
@@ -231,5 +252,36 @@ mod tests {
         // `locate_server_binary`'s pure logic above, covered separately.
         let missing = PathBuf::from("/nonexistent/path/for/illium/tests/data-dir");
         assert!(!missing.is_dir());
+    }
+
+    /// Mirrors `illium_server::paths`'s own `prefers_runtime_dir_when_available`
+    /// test and `illium_client::paths`'s copy of the same: this CLI's
+    /// `socket_path` must land at the exact path a real spawned
+    /// `illium-server` actually binds, or `ensure_server_running` can
+    /// never observe its own freshly-spawned server as live and `ls` can
+    /// never find a running session's socket.
+    #[test]
+    fn socket_path_prefers_runtime_dir_when_available() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "illium-session-test-runtime-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("failed to create temp runtime dir");
+
+        // SAFETY: this test process does not read `XDG_RUNTIME_DIR` from
+        // any other thread concurrently; `directories::BaseDirs::new` is
+        // called synchronously right after this within the same test.
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", &temp_dir);
+        }
+
+        let path = socket_path("my-session").expect("resolving under a temp runtime dir");
+
+        unsafe {
+            std::env::remove_var("XDG_RUNTIME_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        assert_eq!(path, temp_dir.join("illium").join("my-session.sock"));
     }
 }
