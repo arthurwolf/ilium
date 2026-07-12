@@ -1,0 +1,6 @@
+Bottom line: changing selector at top of Dashboard changes nothing on Dashboard.
+
+Yes, that's the finding — the store persists but nothing downstream reads it here.
+No further changes needed on this page; the effect lives entirely on /findings.
+
+Does that match what you expected, or does it need a closer look?

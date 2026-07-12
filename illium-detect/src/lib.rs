@@ -131,27 +131,29 @@ fn is_elapsed_time_token(token: &str) -> bool {
     !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
 }
 
-/// True if the text contains a line with "Yes" and a line with "No"
-/// (case-sensitive, matching the CLIs' actual rendering — "Yes"/"No" as
-/// whole option labels, not substrings like "Yesterday"), or a line that
-/// looks like a yes/no question (ends in '?' and mentions "yes"/"no",
-/// case-insensitive).
+/// True if a line looks like a yes/no question: ends in '?' and mentions
+/// "yes"/"no" as whole words (case-insensitive), not substrings — so
+/// "...does that make sense or not?" (which contains "not", not "no") and
+/// "...is that known?" don't false-match.
+///
+/// Deliberately does NOT treat "some line has the word Yes" plus "some
+/// other line has the word No" *anywhere on screen* as a prompt: normal
+/// agent prose routinely contains both words in unrelated sentences (a
+/// pros/cons recap, a "Yes, ... No further changes needed" aside), and a
+/// numbered "1. Yes" / "2. No" style menu is already caught by
+/// `looks_like_selection_prompt`, which additionally requires a selection
+/// cursor.
 fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
-    let lines: Vec<&str> = screen_text.lines().collect();
-
-    let has_yes_line = lines.iter().any(|line| contains_word(line, "Yes"));
-    let has_no_line = lines.iter().any(|line| contains_word(line, "No"));
-    if has_yes_line && has_no_line {
-        return true;
-    }
-
-    lines.iter().any(|line| {
+    screen_text.lines().any(|line| {
         let trimmed = line.trim_end();
         if !trimmed.ends_with('?') {
             return false;
         }
-        let lower = trimmed.to_lowercase();
-        lower.contains("yes") && lower.contains("no")
+        let tokens: HashSet<String> = trimmed
+            .split(|c: char| !c.is_alphanumeric())
+            .map(|token| token.to_lowercase())
+            .collect();
+        tokens.contains("yes") && tokens.contains("no")
     })
 }
 
@@ -165,9 +167,15 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
 ///   action -- that exact combination of phrasing only shows up as
 ///   interactive-prompt chrome, never in normal command output.
 /// - At least two numbered option lines (e.g. "1. Source only", "  2. Write
-///   full list to file") *and* a `❯` selection cursor somewhere on screen
-///   -- requiring the cursor too keeps this from firing on an ordinary
-///   numbered list some command happened to print.
+///   full list to file") where at least one of them is itself prefixed by
+///   the `❯` selection cursor -- matching how the fixtures actually render
+///   it (`"❯ 1. Source only"`). Requiring the cursor to prefix an option
+///   line specifically (not merely appear *somewhere* on screen) keeps
+///   this from firing when an agent's own numbered analysis (e.g. "1.
+///   Findings list page...", "2. Finding detail page...") shares a screen
+///   with an unrelated `❯` glyph -- a Starship-themed shell prompt uses
+///   that exact character, and it doesn't mean the numbered lines above it
+///   are a selection menu.
 fn looks_like_selection_prompt(screen_text: &str) -> bool {
     let lines: Vec<&str> = screen_text.lines().collect();
 
@@ -186,7 +194,10 @@ fn looks_like_selection_prompt(screen_text: &str) -> bool {
         .iter()
         .filter(|line| is_numbered_option_line(line))
         .count();
-    numbered_option_lines >= 2 && screen_text.contains('\u{276f}')
+    let has_cursor_on_option_line = lines
+        .iter()
+        .any(|line| line.trim_start().starts_with('\u{276f}') && is_numbered_option_line(line));
+    numbered_option_lines >= 2 && has_cursor_on_option_line
 }
 
 /// True if `line` starts (after an optional `❯` cursor and leading
@@ -202,14 +213,6 @@ fn is_numbered_option_line(line: &str) -> bool {
         return false;
     }
     trimmed[digits_end..].starts_with(". ")
-}
-
-/// True if `word` appears in `line` as a standalone token — i.e. not
-/// merely a substring of a longer word (so "Yesterday" doesn't count as
-/// "Yes", "Nowhere" doesn't count as "No").
-fn contains_word(line: &str, word: &str) -> bool {
-    line.split(|c: char| !c.is_alphanumeric())
-        .any(|token| token == word)
 }
 
 /// Refreshes the system-wide process list (pid/parent/name only) on the
@@ -347,6 +350,32 @@ mod tests {
         assert_eq!(
             classify_activity(&fixture("codex_awaiting_approval.txt")),
             AgentActivity::WaitingApproval
+        );
+    }
+
+    #[test]
+    fn prose_mentioning_yes_and_no_is_idle_not_waiting_approval() {
+        assert_eq!(
+            classify_activity(&fixture("claude_code_prose_with_yes_no.txt")),
+            AgentActivity::Idle
+        );
+    }
+
+    #[test]
+    fn rhetorical_question_with_not_is_not_waiting_approval() {
+        assert_eq!(
+            classify_activity("Does that make sense, or not?"),
+            AgentActivity::Idle
+        );
+    }
+
+    #[test]
+    fn numbered_analysis_with_stray_cursor_elsewhere_is_idle() {
+        assert_eq!(
+            classify_activity(&fixture(
+                "claude_code_numbered_analysis_with_stray_cursor.txt"
+            )),
+            AgentActivity::Idle
         );
     }
 

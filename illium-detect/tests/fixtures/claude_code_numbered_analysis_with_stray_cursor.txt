@@ -1,0 +1,6 @@
+Grep confirms only two consumers react to it:
+
+1. Findings list page (FindingsPage.vue:100,271-283) — reload on change
+2. Finding detail page (FindingDetailPage.vue:204-206) — fallback only
+
+❯
