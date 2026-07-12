@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use illium_core::{NodeId, PaneContentKind, Tree, TreeError};
 use illium_ipc::{ClientRequest, NewPaneKind, ServerEvent};
+use illium_pty::PtyError;
 use tokio::sync::mpsc;
 
 use crate::mouse::to_crossterm_event;
-use crate::pane::{PaneResource, TerminalOrigin};
+use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::ServerState;
 use crate::{pane, persistence};
 
@@ -205,75 +206,101 @@ fn default_pane_cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
+/// Turns a client's `NewPaneKind` into the `PaneSnapshotKind` that both
+/// `spawn_and_register_pane` and the tree's initial name/content-kind
+/// choice need -- the one place a `NewPane` request's shape is translated
+/// into the shape this crate spawns/persists from.
+fn pane_snapshot_kind_for(kind: NewPaneKind) -> (PaneSnapshotKind, String, PaneContentKind) {
+    match kind {
+        NewPaneKind::Editor(path) => {
+            let name = editor_pane_name(&path);
+            (
+                PaneSnapshotKind::Editor { path: Some(path) },
+                name,
+                PaneContentKind::Editor,
+            )
+        }
+        NewPaneKind::PlainShell => {
+            let origin = TerminalOrigin::PlainShell;
+            let name = origin.default_pane_name().to_string();
+            (
+                PaneSnapshotKind::Terminal(origin),
+                name,
+                PaneContentKind::Terminal,
+            )
+        }
+        NewPaneKind::Command(command_line) => {
+            let origin = TerminalOrigin::Command(command_line);
+            let name = origin.default_pane_name().to_string();
+            (
+                PaneSnapshotKind::Terminal(origin),
+                name,
+                PaneContentKind::Terminal,
+            )
+        }
+    }
+}
+
 async fn handle_new_pane(
     state: &Arc<ServerState>,
     parent_group: NodeId,
     kind: NewPaneKind,
     direct_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    match kind {
-        NewPaneKind::Editor(path) => {
-            let mut tree = state.tree.write().await;
-            let parent_group = resolve_parent_group(&mut tree, parent_group);
-            let pane_id = match tree.add_pane(
-                parent_group,
-                editor_pane_name(&path),
-                PaneContentKind::Editor,
-            ) {
-                Ok(id) => id,
-                Err(error) => {
-                    drop(tree);
-                    send_direct_error(direct_tx, format!("failed to create editor pane: {error}"));
-                    return;
-                }
-            };
-            let snapshot = tree.clone();
+    let (spawn_kind, name, content_kind) = pane_snapshot_kind_for(kind);
+
+    let mut tree = state.tree.write().await;
+    let parent_group = resolve_parent_group(&mut tree, parent_group);
+    let pane_id = match tree.add_pane(parent_group, name, content_kind) {
+        Ok(id) => id,
+        Err(error) => {
             drop(tree);
-
-            let mut panes = state.panes.write().await;
-            panes.insert(pane_id, PaneResource::Editor { path: Some(path) });
-            drop(panes);
-
-            state.broadcast(ServerEvent::TreeSnapshot(snapshot));
-            save_snapshot_and_log(state).await;
+            send_direct_error(direct_tx, format!("failed to create pane: {error}"));
+            return;
         }
-        NewPaneKind::PlainShell | NewPaneKind::Command(_) => {
-            let origin = match kind {
-                NewPaneKind::PlainShell => TerminalOrigin::PlainShell,
-                NewPaneKind::Command(command_line) => TerminalOrigin::Command(command_line),
-                NewPaneKind::Editor(_) => unreachable!("Editor handled in the outer match arm"),
-            };
+    };
+    let snapshot = tree.clone();
+    drop(tree);
 
-            let mut session = match pane::spawn_terminal_session(&origin, &default_pane_cwd()) {
-                Ok(session) => session,
-                Err(error) => {
-                    send_direct_error(direct_tx, format!("failed to spawn pane: {error}"));
-                    return;
-                }
-            };
+    if let Err(error) = spawn_and_register_pane(state, pane_id, spawn_kind).await {
+        // The tree node exists (created just above) but has no resource
+        // behind it -- nothing was broadcast yet, so no attached client has
+        // seen it; remove it rather than leaving a phantom node no client
+        // could ever interact with (mirrors how `handle_close_pane` tears a
+        // pane out of the tree).
+        let mut tree = state.tree.write().await;
+        let _ = tree.remove_node(pane_id);
+        drop(tree);
+        send_direct_error(direct_tx, format!("failed to spawn pane: {error}"));
+        return;
+    }
 
-            let mut tree = state.tree.write().await;
-            let parent_group = resolve_parent_group(&mut tree, parent_group);
-            let pane_id = match tree.add_pane(
-                parent_group,
-                origin.default_pane_name(),
-                PaneContentKind::Terminal,
-            ) {
-                Ok(id) => id,
-                Err(error) => {
-                    drop(tree);
-                    // The tree rejected the spot to put this pane (e.g. a
-                    // bad/stale parent_group); the pty was already spawned,
-                    // so it must be killed rather than left running
-                    // detached from any tree node.
-                    let _ = session.kill();
-                    send_direct_error(direct_tx, format!("failed to create pane: {error}"));
-                    return;
-                }
-            };
-            let snapshot = tree.clone();
-            drop(tree);
+    state.broadcast(ServerEvent::TreeSnapshot(snapshot));
+    save_snapshot_and_log(state).await;
+}
 
+/// Spawns (for a `Terminal` origin) or registers (for an `Editor`) the
+/// `PaneResource` for `pane_id` per `kind`, inserting it into
+/// `state.panes`. `pane_id` must already exist in `state.tree` as a pane
+/// node -- this function only ever touches the pane registry, never the
+/// tree.
+///
+/// Shared by two callers that both need exactly this "given a tree node
+/// id and what it should run, make it live" step: `handle_new_pane` above
+/// (whose tree node was just created) and `crate::run`'s startup
+/// crash-recovery restore path (whose tree nodes already exist as part of
+/// a loaded snapshot). Keeping this in one place means a future change to
+/// how a terminal's output-forwarder task is spawned, or how its detection
+/// schedule is seeded, can never drift between the two call sites.
+pub(crate) async fn spawn_and_register_pane(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    kind: PaneSnapshotKind,
+) -> Result<(), PtyError> {
+    let resource = match kind {
+        PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
+        PaneSnapshotKind::Terminal(origin) => {
+            let session = pane::spawn_terminal_session(&origin, &default_pane_cwd())?;
             let forward_task = tokio::spawn(forward_output_bytes(
                 Arc::clone(state),
                 pane_id,
@@ -285,15 +312,13 @@ async fn handle_new_pane(
                 state.detection_config.idle_poll_interval,
                 forward_task,
             );
-
-            let mut panes = state.panes.write().await;
-            panes.insert(pane_id, PaneResource::Terminal(runtime));
-            drop(panes);
-
-            state.broadcast(ServerEvent::TreeSnapshot(snapshot));
-            save_snapshot_and_log(state).await;
+            PaneResource::Terminal(runtime)
         }
-    }
+    };
+
+    let mut panes = state.panes.write().await;
+    panes.insert(pane_id, resource);
+    Ok(())
 }
 
 /// Forwards one pane's raw pty output bytes to every attached client as

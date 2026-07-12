@@ -2,7 +2,11 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
-mod handlers;
+// `pub(crate)`, not private: `crate::run`'s crash-recovery restore path
+// (in `lib.rs`) calls `handlers::spawn_and_register_pane` directly, the
+// same function `handle_new_pane` uses for a live client's `NewPane`
+// request -- see that function's doc comment for why the two share it.
+pub(crate) mod handlers;
 
 use std::sync::Arc;
 

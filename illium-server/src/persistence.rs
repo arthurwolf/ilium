@@ -21,19 +21,28 @@
 //! crate's `agent_detect.rs`, which is app-level orchestration tied to
 //! pane-creation flows that don't exist in this crate yet. A pane
 //! recovered from a snapshot respawns as a fresh (non-resumed) invocation
-//! of the same command. Loading a snapshot on startup is implemented and
-//! tested here; actually respawning panes from it is `illium-server`'s
-//! caller's decision and not wired into `main`/`run` yet (see the comment
-//! there) -- this module only guarantees "the data needed to do that is
-//! persisted and round-trips."
+//! of the same command.
+//!
+//! Loading a snapshot on startup is implemented and tested here.
+//! Respawning its panes is `crate::run`'s job: on finding a snapshot, it
+//! replaces `ServerState::tree` with the snapshot's tree wholesale (the
+//! snapshot already *is* the tree) and calls
+//! `crate::ipc::handlers::spawn_and_register_pane` once per
+//! [`PaneSnapshot`] to bring each pane's resource back to life -- the same
+//! function a live client's `NewPane` request uses, so there is exactly one
+//! place that knows how to turn a [`crate::pane::PaneSnapshotKind`] into a
+//! running `PaneResource`. A pane whose command can no longer be spawned
+//! (e.g. its binary was uninstalled since the snapshot was written) is
+//! logged and dropped from the restored tree rather than left as a node
+//! with no resource behind it; see `run`'s doc comment for why.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use illium_core::{NodeId, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ServerError, SnapshotError};
-use crate::pane::{PaneResource, TerminalOrigin};
+use crate::pane::{PaneResource, PaneSnapshotKind};
 use crate::state::ServerState;
 
 /// Bumped whenever `SessionSnapshot`'s shape changes incompatibly. Not
@@ -59,12 +68,6 @@ pub struct SessionSnapshot {
 pub struct PaneSnapshot {
     pub node_id: NodeId,
     pub kind: PaneSnapshotKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum PaneSnapshotKind {
-    Terminal(TerminalOrigin),
-    Editor { path: Option<PathBuf> },
 }
 
 /// Builds a snapshot of `state`'s current tree and pane registry. Takes
@@ -176,7 +179,10 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use crate::pane::TerminalOrigin;
     use illium_core::{PaneContentKind, ROOT_ID};
 
     fn scratch_snapshot_path() -> PathBuf {

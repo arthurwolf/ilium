@@ -107,6 +107,21 @@ pub struct DetectionSchedule {
     pub current_interval: Duration,
 }
 
+/// What a pane resource should be built from -- either a terminal to spawn
+/// per [`TerminalOrigin`], or an editor pointing at a (possibly
+/// not-yet-chosen) path. Shared by the crash-recovery snapshot schema
+/// (`crate::persistence::PaneSnapshot`, which needs exactly this to record
+/// what to respawn) and by `crate::ipc::handlers::spawn_and_register_pane`
+/// (which needs exactly this to actually do the respawning for both a
+/// client-initiated `NewPane` and startup crash-recovery restoration), so it
+/// lives here, next to the `TerminalOrigin` it wraps, rather than being
+/// defined once per caller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneSnapshotKind {
+    Terminal(TerminalOrigin),
+    Editor { path: Option<PathBuf> },
+}
+
 /// One entry in the server's pane registry: either a live terminal or an
 /// editor pane's known file path.
 pub enum PaneResource {
