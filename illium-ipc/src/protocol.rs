@@ -120,6 +120,19 @@ pub enum ClientRequest {
     /// `illium-ipc`'s `a_bad_shape_frame_errors_instead_of_misparsing_as_the_wrong_variant`
     /// test, which pins specific cross-enum shape collisions.
     NewGroup { parent_group: NodeId, name: String },
+    /// Move `node_id` to become a child of `new_parent`, inserted at
+    /// `index` within the new parent's children (`None` appends at the
+    /// end). Mirrors `Tree::move_node` directly -- unlike `MoveNode`
+    /// (`Tree::move_node_one_step`, a one-step sibling swap), this carries
+    /// an arbitrary destination and index, for drag-and-drop and
+    /// indent-into/out-of-group moves. Appended last for the same reason
+    /// `NewGroup` is: keeps every earlier variant's bincode variant index
+    /// stable.
+    ReparentNode {
+        node_id: NodeId,
+        new_parent: NodeId,
+        index: Option<usize>,
+    },
 }
 
 /// Events pushed from `illium-server` to `illium-client`, asynchronously

@@ -81,6 +81,17 @@ pub async fn handle_request(
             handle_mouse_input(state, pane_id, kind, column, row, modifiers, direct_tx).await;
             false
         }
+        ClientRequest::ReparentNode {
+            node_id,
+            new_parent,
+            index,
+        } => {
+            handle_tree_mutation(state, direct_tx, |tree| {
+                tree.move_node(node_id, new_parent, index)
+            })
+            .await;
+            false
+        }
         ClientRequest::Detach => true,
         ClientRequest::KillSession => {
             handle_kill_session(state).await;

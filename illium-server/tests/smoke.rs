@@ -252,6 +252,124 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
 }
 
 #[tokio::test]
+async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
+    let server = TestServer::start("reparent-test").await;
+    let mut client = server.connect().await;
+
+    // Two groups, each with one pane: `source`'s pane will move into
+    // `dest` at index 0 (ahead of the pane already there).
+    write_frame(
+        &mut client,
+        &ClientRequest::NewGroup {
+            parent_group: ROOT_ID,
+            name: "source".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+    let source_group = *tree
+        .children_of(ROOT_ID)
+        .unwrap()
+        .last()
+        .expect("source group present");
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewGroup {
+            parent_group: ROOT_ID,
+            name: "dest".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+    let dest_group = *tree
+        .children_of(ROOT_ID)
+        .unwrap()
+        .last()
+        .expect("dest group present");
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: source_group,
+            kind: NewPaneKind::PlainShell,
+        },
+    )
+    .await
+    .unwrap();
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if !tree.children_of(source_group).unwrap().is_empty())
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+    let moved_pane = tree.children_of(source_group).unwrap()[0];
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: dest_group,
+            kind: NewPaneKind::PlainShell,
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if !tree.children_of(dest_group).unwrap().is_empty())
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::ReparentNode {
+            node_id: moved_pane,
+            new_parent: dest_group,
+            index: Some(0),
+        },
+    )
+    .await
+    .expect("write ReparentNode request");
+
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(source_group).unwrap().is_empty())
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+
+    assert!(
+        tree.children_of(source_group).unwrap().is_empty(),
+        "source group should have lost its pane"
+    );
+    let dest_children = tree.children_of(dest_group).unwrap();
+    assert_eq!(
+        dest_children.len(),
+        2,
+        "dest group should now have both panes"
+    );
+    assert_eq!(
+        dest_children[0], moved_pane,
+        "moved pane should be inserted at index 0"
+    );
+}
+
+#[tokio::test]
 async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
     let server = TestServer::start("close-pane-test").await;
     let mut creator = server.connect().await;

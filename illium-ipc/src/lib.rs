@@ -88,6 +88,16 @@ mod tests {
                 parent_group: ROOT_ID,
                 name: "backend".to_string(),
             },
+            ClientRequest::ReparentNode {
+                node_id: NodeId(2),
+                new_parent: NodeId(3),
+                index: Some(1),
+            },
+            ClientRequest::ReparentNode {
+                node_id: NodeId(2),
+                new_parent: ROOT_ID,
+                index: None,
+            },
         ]
     }
 
