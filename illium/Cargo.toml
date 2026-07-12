@@ -4,29 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = "1.0.103"
 clap = { version = "4.6.1", features = ["derive"] }
-cosmic-text = "0.14"
-crossterm = "0.29.0"
 directories = "6.0.0"
+illium-client = { version = "0.1.0", path = "../illium-client" }
 illium-core = { version = "0.1.0", path = "../illium-core" }
-illium-detect = { version = "0.1.0", path = "../illium-detect" }
-illium-kilo-gateway = { version = "0.1.0", path = "../illium-kilo-gateway" }
-illium-pty = { version = "0.1.0", path = "../illium-pty" }
-handlebars = "6.3.2"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
-pulldown-cmark = "0.13"
-ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
-ratatui-image = { version = "11.0", default-features = false }
-ratatui-textarea = "0.9.2"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_norway = "0.9.42"
-serde_json = "1.0.149"
-sysinfo = "0.39.6"
+illium-ipc = { version = "0.1.0", path = "../illium-ipc" }
 thiserror = "2.0.18"
-tui-term = "0.3.4"
-tui-tree-widget = "0.24.0"
-vt100 = "0.16.2"
-two-face = "0.5.1"
-syntect = { version = "5.3.0", default-features = false, features = ["default-onig", "parsing", "dump-load"] }
-unicode-width = "0.2.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
