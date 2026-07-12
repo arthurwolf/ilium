@@ -66,18 +66,15 @@ pub enum Mode {
 /// to the same focused-node operations as the keyboard, so neither input
 /// path can drift into a different tree mutation policy.
 ///
-/// Unlike the pre-client/server design, this deliberately has no
-/// "Indent into previous group" / "Outdent" entry: those required an
-/// arbitrary reparent-to-any-position tree mutation
-/// (`Tree::move_node(id, new_parent, index)`), and `illium_ipc::ClientRequest`
-/// only exposes the one-step `MoveNode { direction }` shape backing
-/// `Tree::move_node_one_step` (see that method's own doc comment on how
-/// its boundary-crossing already covers "move a pane into the adjacent
-/// group" for `MoveUp`/`MoveDown`). Adding a general reparent-to-index
-/// request is real protocol-design work (README M3 territory, not this
-/// client/server split), not the mechanical addition `NewGroup` was, so
-/// it's left out rather than shipped as a menu entry that can't actually
-/// do anything.
+/// This still has no "Indent into previous group" / "Outdent" entry:
+/// `illium_ipc::ClientRequest::ReparentNode` (backing `Tree::move_node`)
+/// makes that mutation possible, and it's what mouse drag-and-drop
+/// (`crate::mouse`) and the leader/move-mode indent/outdent keys
+/// (`crate::keys`) use, but a context-menu entry needs a mouse position to
+/// mean anything ("indent into *which* preceding group" isn't well-defined
+/// from a menu click the way it is from a specific drop position or an
+/// ordered sibling walk) -- left out of the menu for that reason, not a
+/// protocol gap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuAction {
     FocusPane,
@@ -533,6 +530,20 @@ impl App {
         self.queue_request(ClientRequest::MoveNode { node_id, direction });
     }
 
+    /// Queues a `ReparentNode` request -- an arbitrary move to `new_parent`
+    /// at `index` (`None` appends at the end), backing both mouse
+    /// drag-and-drop (`crate::mouse`) and the leader/move-mode indent/outdent
+    /// keybindings (`crate::keys`). The tree itself only changes once the
+    /// server confirms it via the next `TreeSnapshot`, same as every other
+    /// structural request.
+    pub fn request_reparent(&mut self, node_id: NodeId, new_parent: NodeId, index: Option<usize>) {
+        self.queue_request(ClientRequest::ReparentNode {
+            node_id,
+            new_parent,
+            index,
+        });
+    }
+
     pub fn request_rename(&mut self, node_id: NodeId, title: String) {
         self.queue_request(ClientRequest::RenameNode { node_id, title });
     }
@@ -874,12 +885,16 @@ impl App {
     }
 
     /// Records the tree node currently being drag-held by the left mouse
-    /// button, if any -- see `crate::mouse`. Only the setter is used today:
-    /// drop-target reparenting isn't wired yet (the IPC protocol only has
-    /// a one-step `MoveNode { direction }`, not a reparent-to-index
-    /// request), so nothing currently reads this back out.
+    /// button, if any -- see `crate::mouse`, which reads this back out on
+    /// mouse-up to compute the `ReparentNode` request a drop should send.
     pub(crate) fn set_drag_source(&mut self, source: Option<NodeId>) {
         self.tree_drag_source = source;
+    }
+
+    /// The tree node currently being drag-held, if any -- see
+    /// `set_drag_source`.
+    pub(crate) fn drag_source(&self) -> Option<NodeId> {
+        self.tree_drag_source
     }
 
     pub(crate) fn help_leader_pending(&self) -> bool {

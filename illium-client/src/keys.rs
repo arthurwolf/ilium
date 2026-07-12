@@ -4,7 +4,7 @@
 //! (see `app.rs`'s module docs) instead of a direct tree edit.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
-use illium_core::TreeMoveDirection;
+use illium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
 use illium_ipc::ClientRequest;
 
 use crate::app::{App, FocusTarget, Mode};
@@ -118,16 +118,11 @@ fn execute_action(app: &mut App, action: Action) {
     }
 }
 
-/// While `Mode::Move` is active: up/down (arrows or hjkl) reorder the
-/// selected node one step via a queued `MoveNode` request; `Enter`/`m`/
-/// `Esc` exits back to Normal.
-///
-/// Unlike the pre-client/server design, left/right ("outdent"/"indent
-/// into the previous group") are not available here: those required an
-/// arbitrary reparent-to-any-position tree mutation that
-/// `illium_ipc::ClientRequest` has no shape for yet (only the one-step
-/// `MoveNode { direction }`, backing `Tree::move_node_one_step` -- see
-/// `crate::app::ContextMenuAction`'s doc comment for the same gap).
+/// While `Mode::Move` is active: up/down (arrows or `k`/`j`) reorder the
+/// selected node one step via a queued `MoveNode` request; left/right
+/// (arrows or `h`/`l`) outdent/indent it via a queued `ReparentNode`
+/// request (see `compute_outdent_target`/`compute_indent_target`);
+/// `Enter`/`m`/`Esc` exits back to Normal.
 fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
     let Some(id) = app.selected_node_id() else {
         return;
@@ -135,6 +130,16 @@ fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => app.request_move(id, TreeMoveDirection::Up),
         KeyCode::Down | KeyCode::Char('j') => app.request_move(id, TreeMoveDirection::Down),
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some((new_parent, index)) = compute_outdent_target(&app.tree, id) {
+                app.request_reparent(id, new_parent, index);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let Some((new_parent, index)) = compute_indent_target(&app.tree, id) {
+                app.request_reparent(id, new_parent, index);
+            }
+        }
         KeyCode::Enter | KeyCode::Char('m') | KeyCode::Esc => {
             app.mode = Mode::Normal;
             return;
@@ -142,6 +147,53 @@ fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
         _ => {}
     }
     app.mode = Mode::Move;
+}
+
+/// Computes the "indent into the previous group" `ReparentNode` target for
+/// `id`: the nearest preceding sibling that is a `Group`, walking outward
+/// from `id`'s own position among its current siblings, appended at the
+/// end of that group's children. Returns `None` when there is no
+/// preceding sibling group to indent into (already first, or every
+/// preceding sibling is a pane) -- nothing is sent in that case rather
+/// than a request that could only be rejected.
+fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
+    let parent = tree.parent_of(id)?;
+    let siblings = tree.children_of(parent).ok()?;
+    let own_index = siblings.iter().position(|&sibling| sibling == id)?;
+    let preceding_group = siblings[..own_index].iter().rev().find(|&&candidate| {
+        matches!(
+            tree.get(candidate).map(|node| &node.kind),
+            Some(NodeKind::Group { .. })
+        )
+    })?;
+    Some((*preceding_group, None))
+}
+
+/// Computes the "outdent out of the current group" `ReparentNode` target
+/// for `id`: `id`'s current group's own parent, positioned right after
+/// that group among its new siblings. Returns `None` when `id` is already
+/// at the top level (no enclosing group to outdent out of) or when
+/// outdenting would leave a pane parentless at the top level (panes always
+/// need an enclosing group) -- nothing is sent in either case rather than
+/// a request that could only be rejected.
+fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usize>)> {
+    let current_group = tree.parent_of(id)?;
+    if current_group == ROOT_ID {
+        return None;
+    }
+    let grandparent = tree.parent_of(current_group)?;
+    let is_pane = matches!(
+        tree.get(id).map(|node| &node.kind),
+        Some(NodeKind::Pane { .. })
+    );
+    if grandparent == ROOT_ID && is_pane {
+        return None;
+    }
+    let group_siblings = tree.children_of(grandparent).ok()?;
+    let group_index = group_siblings
+        .iter()
+        .position(|&sibling| sibling == current_group)?;
+    Some((grandparent, Some(group_index + 1)))
 }
 
 /// While `Mode::Help` is active: only `Esc`, or `Ctrl+A` followed by `?`,
@@ -359,5 +411,78 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
             app.execute_context_action(menu.actions[menu.selected_index], menu.target);
         }
         _ => app.mode = Mode::ContextMenu(menu),
+    }
+}
+
+#[cfg(test)]
+mod indent_outdent_tests {
+    use super::*;
+
+    /// `top` (group) containing `sibling_group` (group, empty) and `pane`
+    /// (pane), in that order, plus a second top-level group `other`.
+    fn sample_tree() -> (Tree, NodeId, NodeId, NodeId, NodeId) {
+        let mut tree = Tree::new();
+        let top = tree.add_group(ROOT_ID, "top").unwrap();
+        let sibling_group = tree.add_group(top, "sibling_group").unwrap();
+        let pane = tree
+            .add_pane(top, "pane", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let other = tree.add_group(ROOT_ID, "other").unwrap();
+        (tree, top, sibling_group, pane, other)
+    }
+
+    #[test]
+    fn indent_moves_into_the_nearest_preceding_sibling_group() {
+        let (tree, _top, sibling_group, pane, _other) = sample_tree();
+        assert_eq!(
+            compute_indent_target(&tree, pane),
+            Some((sibling_group, None))
+        );
+    }
+
+    #[test]
+    fn indent_with_no_preceding_sibling_group_is_a_no_op() {
+        let (tree, _top, sibling_group, ..) = sample_tree();
+        // `sibling_group` is the first child of `top`; nothing precedes it.
+        assert_eq!(compute_indent_target(&tree, sibling_group), None);
+    }
+
+    #[test]
+    fn outdent_moves_out_into_the_parent_group_right_after_the_current_group() {
+        // top_a -> [inner_b -> [pane_x], pane_c]
+        let mut tree = Tree::new();
+        let top_a = tree.add_group(ROOT_ID, "top_a").unwrap();
+        let inner_b = tree.add_group(top_a, "inner_b").unwrap();
+        let pane_x = tree
+            .add_pane(inner_b, "x", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+        tree.add_pane(top_a, "c", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+
+        // Outdenting `pane_x` out of `inner_b` lands it in `top_a` (the
+        // group's own parent) right after `inner_b` among `top_a`'s
+        // children -- index 1, ahead of `pane_c`.
+        assert_eq!(
+            compute_outdent_target(&tree, pane_x),
+            Some((top_a, Some(1)))
+        );
+    }
+
+    #[test]
+    fn outdent_at_the_top_level_is_a_no_op() {
+        let (tree, top, ..) = sample_tree();
+        assert_eq!(compute_outdent_target(&tree, top), None);
+    }
+
+    #[test]
+    fn outdent_rejects_leaving_a_pane_parentless_at_the_top_level() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "group").unwrap();
+        let pane = tree
+            .add_pane(group, "pane", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+        // `group` is already top-level, so outdenting `pane` out of it
+        // would leave the pane parentless at the root -- rejected.
+        assert_eq!(compute_outdent_target(&tree, pane), None);
     }
 }

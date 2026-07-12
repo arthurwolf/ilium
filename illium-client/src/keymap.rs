@@ -75,7 +75,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
     KeyBinding {
         letter: 'm',
         action: Action::ToggleMove,
-        description: "Toggle move mode for the selected node (then use arrow keys)",
+        description: "Toggle move mode for the selected node (up/down to reorder, left/right to outdent/indent)",
     },
     KeyBinding {
         letter: 't',

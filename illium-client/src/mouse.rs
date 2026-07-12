@@ -1,12 +1,14 @@
 //! Mouse dispatch: routes crossterm mouse events according to
 //! `App::mode`/the last-rendered layout, mirroring the pre-client/server
 //! `App::handle_mouse_event`'s structure. Terminal-pane clicks/drags become
-//! a queued `MouseInput` request (see `to_ipc_mouse_event`); everything
-//! about the tree panel, modals, and editor chrome stays purely local
-//! since none of that needs the server at all.
+//! a queued `MouseInput` request (see `to_ipc_mouse_event`); tree-panel
+//! selection, hover, and modal/editor-chrome interaction stay purely local,
+//! except for a tree-row drag-and-drop, which queues a `ReparentNode`
+//! request (see `compute_drop_target`) the same way any other structural
+//! tree edit does.
 
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
-use illium_core::{NodeKind, ROOT_ID};
+use illium_core::{NodeId, NodeKind, Tree, ROOT_ID};
 use ratatui::layout::Position;
 
 use crate::app::{App, ContextMenu, CreateGroupState, FocusTarget, Mode};
@@ -178,16 +180,20 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
-            // Arbitrary drag-and-drop reordering (dropping a node onto an
-            // arbitrary sibling position, possibly under a different
-            // parent) is not implemented: it needs a reparent-to-index
-            // tree mutation `illium_ipc::ClientRequest` has no shape for
-            // yet (only the one-step `MoveNode { direction }`) -- see
-            // `crate::app::ContextMenuAction`'s doc comment for the same
-            // protocol gap. The drag source is cleared without attempting
-            // a move; `Mode::Move` (keyboard, leader `m`) and the tree
-            // row's ↑/↓ hover buttons both still work today since they
-            // only ever need a one-step move.
+            // Arbitrary drag-and-drop: drop onto another tree row (its
+            // `NodeId`) or `None` for the empty space below the last row
+            // (meaning "append at the top level") -- see
+            // `compute_drop_target`'s doc comment for the exact target
+            // rules and the cases that are rejected client-side rather
+            // than round-tripped to the server.
+            if let Some(dragged_id) = app.drag_source() {
+                let drop_target = app.tree_node_at(position).map(|hit| hit.id);
+                if let Some((new_parent, index)) =
+                    compute_drop_target(&app.tree, dragged_id, drop_target)
+                {
+                    app.request_reparent(dragged_id, new_parent, index);
+                }
+            }
             app.set_drag_source(None);
         }
         _ => {}
@@ -212,6 +218,72 @@ fn handle_tree_row_action(app: &mut App, id: illium_core::NodeId, action: TreeRo
         TreeRowAction::MoveDown => app.request_move(id, illium_core::TreeMoveDirection::Down),
         TreeRowAction::Close => app.action_close_selected(),
     }
+}
+
+/// True if `ancestor` is `node` itself or a transitive parent of `node` --
+/// a client-side mirror of `illium_core::Tree`'s own (private) check of the
+/// same name. Needed here so a drop onto the dragged node's own descendant
+/// is rejected before ever forming a request, not just after a round trip
+/// to the server.
+fn is_ancestor_of(tree: &Tree, ancestor: NodeId, node: NodeId) -> bool {
+    let mut current = Some(node);
+    while let Some(id) = current {
+        if id == ancestor {
+            return true;
+        }
+        current = tree.parent_of(id);
+    }
+    false
+}
+
+/// Computes the `ReparentNode` target (new parent + insertion index) for
+/// dropping `dragged_id` onto `drop_target` -- `None` means the drop landed
+/// in the empty space below the last tree row, meaning "append at the top
+/// level". Dropping onto a `Group` row places `dragged_id` as the last
+/// child of that group; dropping onto a `Pane` row places it as that
+/// pane's immediate predecessor, within the pane's own parent group.
+///
+/// Returns `None` -- meaning nothing should be sent at all -- for the
+/// cases that are unambiguously invalid without asking the server: dropping
+/// a node onto itself or one of its own descendants, and dropping a pane at
+/// the top level (panes always need an enclosing group). Every other
+/// outcome is still just a request; the server has the final say, and any
+/// other rejection (e.g. a stale id from a race with a concurrent
+/// structural change) surfaces as `ServerEvent::Error` rather than crashing
+/// the client -- see `crate::render_cache::apply`.
+fn compute_drop_target(
+    tree: &Tree,
+    dragged_id: NodeId,
+    drop_target: Option<NodeId>,
+) -> Option<(NodeId, Option<usize>)> {
+    let dragged_is_pane = matches!(
+        tree.get(dragged_id).map(|node| &node.kind),
+        Some(NodeKind::Pane { .. })
+    );
+
+    let (new_parent, index) = match drop_target {
+        None => (ROOT_ID, None),
+        Some(target_id) => {
+            if target_id == dragged_id || is_ancestor_of(tree, dragged_id, target_id) {
+                return None;
+            }
+            match tree.get(target_id).map(|node| &node.kind) {
+                Some(NodeKind::Group { .. }) => (target_id, None),
+                Some(NodeKind::Pane { .. }) => {
+                    let parent = tree.parent_of(target_id)?;
+                    let siblings = tree.children_of(parent).ok()?;
+                    let position = siblings.iter().position(|&sibling| sibling == target_id)?;
+                    (parent, Some(position))
+                }
+                None => return None,
+            }
+        }
+    };
+
+    if new_parent == ROOT_ID && dragged_is_pane {
+        return None;
+    }
+    Some((new_parent, index))
 }
 
 /// Executes a bottom-toolbar creation action. Agent entries create their
@@ -301,5 +373,70 @@ fn handle_explorer_mouse(
             app.status_message = Some(format!("File picker error: {err}"));
             app.mode = Mode::Explorer(overlay, target);
         }
+    }
+}
+
+#[cfg(test)]
+mod drop_target_tests {
+    use super::*;
+
+    /// Two top-level groups, `a` (containing pane `b`) and `c` (containing
+    /// pane `d`).
+    fn sample_tree() -> (Tree, NodeId, NodeId, NodeId, NodeId) {
+        let mut tree = Tree::new();
+        let group_a = tree.add_group(ROOT_ID, "a").unwrap();
+        let pane_b = tree
+            .add_pane(group_a, "b", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let group_c = tree.add_group(ROOT_ID, "c").unwrap();
+        let pane_d = tree
+            .add_pane(group_c, "d", illium_core::PaneContentKind::Terminal)
+            .unwrap();
+        (tree, group_a, pane_b, group_c, pane_d)
+    }
+
+    #[test]
+    fn dropping_onto_a_group_appends_as_its_last_child() {
+        let (tree, group_a, _pane_b, group_c, _pane_d) = sample_tree();
+        assert_eq!(
+            compute_drop_target(&tree, group_a, Some(group_c)),
+            Some((group_c, None))
+        );
+    }
+
+    #[test]
+    fn dropping_onto_a_pane_inserts_right_before_it_in_its_parent() {
+        let (tree, group_a, _pane_b, group_c, pane_d) = sample_tree();
+        assert_eq!(
+            compute_drop_target(&tree, group_a, Some(pane_d)),
+            Some((group_c, Some(0)))
+        );
+    }
+
+    #[test]
+    fn dropping_in_empty_space_appends_at_the_top_level() {
+        let (tree, group_a, _pane_b, _group_c, _pane_d) = sample_tree();
+        assert_eq!(
+            compute_drop_target(&tree, group_a, None),
+            Some((ROOT_ID, None))
+        );
+    }
+
+    #[test]
+    fn dropping_a_pane_in_empty_space_is_rejected_since_panes_require_a_group() {
+        let (tree, _group_a, pane_b, ..) = sample_tree();
+        assert_eq!(compute_drop_target(&tree, pane_b, None), None);
+    }
+
+    #[test]
+    fn dropping_a_node_onto_itself_is_rejected() {
+        let (tree, group_a, ..) = sample_tree();
+        assert_eq!(compute_drop_target(&tree, group_a, Some(group_a)), None);
+    }
+
+    #[test]
+    fn dropping_a_group_onto_its_own_descendant_is_rejected() {
+        let (tree, group_a, pane_b, ..) = sample_tree();
+        assert_eq!(compute_drop_target(&tree, group_a, Some(pane_b)), None);
     }
 }
