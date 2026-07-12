@@ -120,7 +120,8 @@ async fn run_due_panes(
             }
 
             let new_status = classify_pane(system, runtime, &state.custom_signatures);
-            runtime.detection_schedule.current_interval = interval_for(&new_status, state);
+            runtime.detection_schedule.current_interval =
+                interval_for(&new_status, &state.detection_config);
             runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
 
             let previous_status = tree.get(*pane_id).and_then(|node| match &node.kind {
@@ -203,15 +204,83 @@ fn classify_pane(
 }
 
 /// The next poll interval for a pane just classified as `status`, per
-/// README "Poll cadence": actively `Working` panes poll fast, everything
-/// else (idle, waiting on approval, done, or no agent detected at all)
-/// polls slow -- none of those states change on their own between polls,
-/// so there is no benefit to checking them often.
-fn interval_for(status: &PaneStatus, state: &ServerState) -> Duration {
+/// README "Poll cadence": `Working` and `WaitingApproval` panes poll fast,
+/// everything else (idle, done, or no agent detected at all) polls slow.
+///
+/// `WaitingApproval` deliberately shares the fast tier with `Working`
+/// rather than sitting in the slow one with genuinely-static states: it is
+/// the one non-`Working` state most likely to change within seconds (the
+/// user answers), and it is also the state a single mis-firing
+/// classification on one transient screen (e.g. a numbered list in an
+/// agent's own prose that briefly resembles a selection menu) is most
+/// disruptive to leave stale in -- see `illium-detect::classify_activity`'s
+/// heuristics, which only look at *current* screen text and have no memory
+/// of their own past verdicts. Fast-repolling means either case
+/// self-corrects within one `working_poll_interval`, not up to a full
+/// `idle_poll_interval` later.
+///
+/// Takes `&DetectionConfig` rather than `&ServerState` -- this is a pure
+/// decision over the classified status and the two configured durations,
+/// with no need for anything else `ServerState` carries; a narrower
+/// parameter keeps it unit-testable without constructing a whole server.
+fn interval_for(
+    status: &PaneStatus,
+    detection_config: &crate::config::DetectionConfig,
+) -> Duration {
     match status {
-        PaneStatus::Agent(_, illium_core::AgentActivity::Working) => {
-            state.detection_config.working_poll_interval
+        PaneStatus::Agent(
+            _,
+            illium_core::AgentActivity::Working | illium_core::AgentActivity::WaitingApproval,
+        ) => detection_config.working_poll_interval,
+        _ => detection_config.idle_poll_interval,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DetectionConfig;
+    use illium_core::{AgentActivity, AgentClass};
+
+    fn config() -> DetectionConfig {
+        DetectionConfig {
+            working_poll_interval: Duration::from_secs(5),
+            idle_poll_interval: Duration::from_secs(45),
         }
-        _ => state.detection_config.idle_poll_interval,
+    }
+
+    /// Regression test: `WaitingApproval` must poll on the fast tier, same
+    /// as `Working` -- previously it shared the slow `idle_poll_interval`
+    /// tier with genuinely-static states, so a pane that was ever
+    /// misclassified as `WaitingApproval` on one transient screen (or had
+    /// its prompt genuinely answered) could show a stale badge for up to
+    /// `idle_poll_interval` after the real screen content had already moved
+    /// on.
+    #[test]
+    fn waiting_approval_polls_on_the_fast_tier_like_working() {
+        let config = config();
+        let waiting = PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingApproval);
+        let working = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
+        assert_eq!(
+            interval_for(&waiting, &config),
+            config.working_poll_interval
+        );
+        assert_eq!(
+            interval_for(&working, &config),
+            config.working_poll_interval
+        );
+    }
+
+    #[test]
+    fn idle_done_and_plain_shell_poll_on_the_slow_tier() {
+        let config = config();
+        let idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
+        let done = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done);
+        assert_eq!(interval_for(&idle, &config), config.idle_poll_interval);
+        assert_eq!(interval_for(&done, &config), config.idle_poll_interval);
+        assert_eq!(
+            interval_for(&PaneStatus::PlainShell, &config),
+            config.idle_poll_interval
+        );
     }
 }

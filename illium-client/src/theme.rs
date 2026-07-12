@@ -174,9 +174,9 @@ pub fn statusbar_style() -> Style {
 }
 
 /// Background tint for the current tree selection. A plain `bg` fill
-/// (rather than `Modifier::REVERSED`) so a row's own status color -- the
-/// spinner's yellow, the waiting-approval cyan dot, etc. -- stays legible
-/// on top of it instead of being flipped into the background channel.
+/// (rather than `Modifier::REVERSED`) so a row's own bold weight -- e.g. a
+/// waiting-approval row's emphasis -- stays legible on top of it instead of
+/// being flipped into the background channel.
 pub fn selected_style() -> Style {
     let theme = current();
     Style::new().bg(theme.accent_bg).fg(theme.accent_fg)

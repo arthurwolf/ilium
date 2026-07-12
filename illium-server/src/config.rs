@@ -24,13 +24,20 @@ use crate::error::{ConfigLoadError, ServerError};
 /// backoff" into "busy loop."
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DetectionConfig {
-    /// Poll interval for panes last classified as `Working` -- the state
-    /// where a prompt user most wants a quick `Working -> Done` transition
-    /// to show up.
+    /// Poll interval for panes last classified as `Working` or
+    /// `WaitingApproval` -- both are states a prompt user actively wants a
+    /// quick transition out of (`Working -> Done`, or `WaitingApproval`
+    /// resolving once they answer). `WaitingApproval` in particular must
+    /// not share the slow tier below: it is by definition a state the user
+    /// is expected to act on imminently, so any answer -- or any
+    /// classification that flagged it in error on a single transient
+    /// screen -- should self-correct within one fast interval, not linger
+    /// for up to `idle_poll_interval` after the screen has already moved
+    /// on. See `crate::detection::interval_for`.
     pub working_poll_interval: Duration,
-    /// Poll interval for panes last classified as `Idle`, `Done`,
-    /// `WaitingApproval`, or plain shells with no agent detected -- nothing
-    /// is changing, so polling slowly is both correct and cheap.
+    /// Poll interval for panes last classified as `Idle`, `Done`, or plain
+    /// shells with no agent detected -- none of those change on their own
+    /// between polls, so polling slowly is both correct and cheap.
     pub idle_poll_interval: Duration,
 }
 

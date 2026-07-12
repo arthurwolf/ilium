@@ -24,8 +24,9 @@ const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦
 const SPINNER_FRAME_MS: u128 = 90;
 
 /// How long each half-cycle of the `Done` bell pulse lasts. Same glyph
-/// every frame (a bell), only its brightness pulses -- reads as "ringing"
-/// without any change in rendered width, so the tree row never jitters.
+/// every frame (a bell), only its boldness pulses -- reads as "ringing"
+/// without any change in rendered width or color, so the tree row never
+/// jitters and every agent status still shares one base text color.
 const DONE_PULSE_MS: u128 = 450;
 
 /// Fixed "this pane is a detected agent" glyph, prefixed before the
@@ -254,22 +255,22 @@ fn pane_label(
         PaneStatus::Agent(class, AgentActivity::Working) => {
             let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             let glyph = SPINNER_FRAMES[frame_index];
-            let style = Style::new().fg(Color::Yellow);
             Line::from(vec![
                 Span::raw(AGENT_ICON),
-                Span::styled(format!("{glyph} "), style),
-                Span::styled(format!("{} ", agent_class_label(class)), style),
-                Span::styled(title(), style),
+                Span::raw(format!("{glyph} ")),
+                Span::raw(format!("{} ", agent_class_label(class))),
+                Span::raw(title()),
             ])
         }
         PaneStatus::Agent(class, AgentActivity::Done) => {
+            // Pulses bold on/off rather than changing color -- every agent
+            // status shares the same base text color, so "come look, I'm
+            // done" reads through boldness alone.
             let bright = (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2);
             let style = if bright {
-                Style::new()
-                    .fg(Color::LightMagenta)
-                    .add_modifier(Modifier::BOLD)
+                Style::new().add_modifier(Modifier::BOLD)
             } else {
-                Style::new().fg(Color::Magenta)
+                Style::new()
             };
             let title = title();
             Line::from(vec![
@@ -280,25 +281,22 @@ fn pane_label(
             ])
         }
         PaneStatus::Agent(class, AgentActivity::WaitingApproval) => {
-            // Static (not animated) -- a question mid-air doesn't pulse or
-            // spin, it just sits there until answered.
-            let style = Style::new().fg(Color::Cyan);
+            // Bold, not colored -- every agent status shares the same base
+            // text color; boldness alone signals "needs you."
+            let style = Style::new().add_modifier(Modifier::BOLD);
             Line::from(vec![
                 Span::raw(AGENT_ICON),
-                Span::styled("\u{2753} ", style),
+                Span::styled("? ", style),
                 Span::styled(format!("{} ", agent_class_label(class)), style),
                 Span::styled(title(), style),
             ])
         }
-        PaneStatus::Agent(class, AgentActivity::Idle) => {
-            let style = Style::new().fg(Color::Green);
-            Line::from(vec![
-                Span::raw(AGENT_ICON),
-                Span::styled("\u{25cf} ", style),
-                Span::styled(format!("{} ", agent_class_label(class)), style),
-                Span::styled(title(), style),
-            ])
-        }
+        PaneStatus::Agent(class, AgentActivity::Idle) => Line::from(vec![
+            Span::raw(AGENT_ICON),
+            Span::raw("\u{25cf} "),
+            Span::raw(format!("{} ", agent_class_label(class))),
+            Span::raw(title()),
+        ]),
         PaneStatus::Editor { dirty: true } => Line::from(vec![
             Span::styled("\u{1F589} ", Style::new().fg(Color::Magenta)),
             Span::styled(format!("{name}*"), Style::new().fg(Color::Magenta)),
