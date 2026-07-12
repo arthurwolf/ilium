@@ -22,10 +22,10 @@ illium/                     # workspace root
 ├── illium-server/            # owns PTYs + tree, IPC server, adaptive detection loop -- one process per session
 │   ├── src/main.rs            # daemon entrypoint: resolves real paths (paths.rs), calls lib.rs's run()
 │   ├── src/lib.rs              # run(): binds the UDS listener, owns the top-level select! loop
-│   └── src/{config,detection,error,mouse,pane,paths,persistence,state}.rs, src/ipc/{mod,connection,handlers}.rs
+│   └── src/{config,detection,error,mouse,notifications,pane,paths,persistence,state}.rs, src/ipc/{mod,connection,handlers}.rs
 ├── illium-client/             # ratatui TUI, thin renderer over illium-ipc (see its module map in src/lib.rs)
 │   ├── src/lib.rs              # module map + run(): terminal lifecycle, connects, drives the event loop
-│   └── src/{app,connection,render_cache,keys,mouse,tick,naming_workers}.rs, plus presentation/local-file-I/O
+│   └── src/{app,config,connection,render_cache,keys,mouse,tick,naming_workers}.rs, plus presentation/local-file-I/O
 │       modules (ui, tree_ui, modal, help, theme, layout, editor_*, markdown/, naming*, session_*, project_*, ...)
 │       that don't care whether their data came from a local Tree or a render-cache mirror of one
 └── illium/                    # the `illium` bin: clap entrypoint, spawns illium-server as a detached
@@ -64,14 +64,14 @@ illium/                     # workspace root
 Use the `directories` crate, never hardcode `~`:
 
 - Config: `directories::ProjectDirs::from("", "", "illium").config_dir()` → `~/.config/illium/config.toml` on Linux.
-- Data/sockets/session snapshots: same `ProjectDirs` `.data_dir()` → `~/.local/share/illium/`.
-- One UDS socket per session (`<data_dir>/<session_name>.sock`), matching tmux's per-session-socket model described in the README — do not multiplex all sessions over one socket.
+- Data/session snapshots: same `ProjectDirs` `.data_dir()` → `~/.local/share/illium/` (crash-recovery snapshot: `<data_dir>/<session_name>.snapshot.json`).
+- One UDS socket per session, resolved by `illium-server/src/paths.rs::resolve_socket_path`: prefers `$XDG_RUNTIME_DIR/illium/<session_name>.sock` (via `directories::BaseDirs::runtime_dir`, short by construction and guaranteed to fit `sockaddr_un.sun_path`'s ~108-byte cap) and falls back to `<data_dir>/<session_name>.sock` only when no runtime dir is available — never `<data_dir>` unconditionally, and never multiplex all sessions over one socket. `illium/src/session.rs` (CLI) and `illium-client/src/paths.rs` must compute the identical formula to ever find a server they didn't just spawn themselves.
 
 ## Scope reminders specific to this project
 
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
 - Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see README "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
-- Milestones in the README (M0–M5) are meant to be built in order. M0–M2 and M4 are done; M3 (tree manipulation) is only partially done — arbitrary drag-and-drop and indent-into/out-of-a-group are explicitly deferred, not merely unstarted; M5 (config surface, snapshot-restore-on-boot, notifications) is not done. Read the README "Implementation plan" for exactly what each milestone's status covers before assuming a piece of it already exists.
+- Milestones in the README (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read the README "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
 <!-- NEXUS:START -->
 ## Nexus Memory Substrate
 - Identity: [Soul](/home/developer/.config/nexus/soul.md)
