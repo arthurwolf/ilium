@@ -23,7 +23,7 @@ pub enum ServerError {
     #[error("could not determine the platform config/data directories for illium")]
     NoProjectDirs,
 
-    /// The `<data_dir>/<session>.sock` path could not be bound. Fatal at
+    /// The resolved session socket path could not be bound. Fatal at
     /// startup; the most common cause is a stale socket file left behind
     /// by a crashed previous server for the same session, which the
     /// caller is expected to have already attempted to remove.
@@ -32,6 +32,26 @@ pub enum ServerError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+
+    /// The resolved session socket path (whether under
+    /// `$XDG_RUNTIME_DIR/illium` or, lacking that, `<data_dir>`) is at or
+    /// over the ~108-byte `sockaddr_un.sun_path` limit the OS enforces for
+    /// Unix domain socket paths. Caught in `paths::resolve` before
+    /// `bind()` is ever attempted, so the user gets a specific "shorten
+    /// this env var or session name" message instead of a raw, opaque
+    /// `std::io::Error` complaining the path must be shorter than
+    /// `SUN_LEN`. Fatal at startup -- there is no shorter path to fall
+    /// back to.
+    #[error(
+        "session socket path {path:?} is {byte_length} bytes, at or over the \
+         {max_byte_length}-byte limit this OS allows for a Unix domain socket path; shorten \
+         XDG_RUNTIME_DIR (or, if that is unset, XDG_DATA_HOME) or use a shorter session name"
+    )]
+    SocketPathTooLong {
+        path: PathBuf,
+        byte_length: usize,
+        max_byte_length: usize,
     },
 
     /// Reading or parsing `~/.config/illium/config.toml` failed. Not fatal
