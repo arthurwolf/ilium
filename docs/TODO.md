@@ -1,9 +1,22 @@
+# Split view containers
+
+- [ ] Implement the persistent split-container domain model, invariants, IPC request, server mutation, and persistence coverage. (IN PROGRESS)
+- [ ] Implement shared client viewport geometry, multi-pane rendering, per-slot sizing, focus, and input routing.
+- [ ] Add split creation dialogs, shortcut, tree toolbar/context integration, and tree presentation.
+- [ ] Run focused tests, full workspace checks, and live PTY/TUI verification.
+
 # Mouse interaction
+
+# Folder browser nodes
+
+- [x] Add a persisted folder-root node and folder-only selector.
+- [x] Render local files/directories as virtual sidebar descendants and open files in editors.
+- [x] Cover domain, client behavior, workspace checks, and installed-binary verification.
 
 # AI project names
 
 - [x] Add a Kilo Gateway client and deterministic project-name inference workflow.
-- [x] Persist inferred project names in `.illium/config.yaml` and render them in the sidebar title.
+- [x] Persist inferred project names in `.ilium/config.yaml` and render them in the sidebar title.
 - [x] Verify no-call-on-existing-name behavior, retry handling, and full workspace checks.
 
 - [x] Define mouse interaction model and shared layout/hit-test contracts.
@@ -26,7 +39,7 @@
 # Syntax highlighting
 
 - [x] Pick a highlighting engine: `syntect` + `two-face` (bat's bundled Sublime syntax/theme sets) instead of hand-rolled lexers.
-- [x] Add `syntax.rs`: per-line token highlighting (`highlight()`), extensionless-filename + extension lookup, foreground/bold/italic/underline only (no background, to avoid a colored box over illium's dark chrome).
+- [x] Add `syntax.rs`: per-line token highlighting (`highlight()`), extensionless-filename + extension lookup, foreground/bold/italic/underline only (no background, to avoid a colored box over ilium's dark chrome).
 - [x] Add `editor_highlight.rs`: Source-mode renderer recomposing `ratatui_textarea`'s line-number gutter/cursor/current-line/selection styling with per-token syntax color patched underneath (that crate exposes no per-token styling hook, hence the custom renderer) -- falls back to the plain `TextArea` widget for unrecognized languages.
 - [x] Wire into `EditorPane` (`content_revision`-cached `highlighted_lines`, horizontal scroll mirror) and `ui::draw_editor`.
 - [x] Cover Rust/JS/TS/Python/Markdown/Makefile with tests (recognition, contiguous token coverage, multi-color proof, rendered-buffer cursor/gutter/color assertions); `cargo clippy`/`cargo fmt` clean.
@@ -53,3 +66,9 @@
 - [x] Drive expansion from tree hover or keyboard focus, and collapse on pane focus.
 - [x] Cover focus, hover, reversal, terminal-width limits, and shared hit-testing with tests.
 - [x] Run workspace verification and manually validate the animation in the real TUI.
+
+# Shell command titles
+
+- [x] Persist automatic versus user-specified pane-title ownership in the core tree.
+- [x] Use completed input only while the original shell owns the foreground PTY, excluding agents and foreground applications.
+- [x] Verify cross-client updates, manual-name opt-out, formatting, clippy, workspace tests, release build, and local installation.

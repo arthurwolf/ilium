@@ -1,8 +1,0 @@
-[package]
-name = "illium-detect"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-illium-core = { version = "0.1.0", path = "../illium-core" }
-sysinfo = "0.39.6"

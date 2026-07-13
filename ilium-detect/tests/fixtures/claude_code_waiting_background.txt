@@ -1,0 +1,5 @@
+✻ Waiting for 2 background agents to finish
+
+  2 tasks (0 done, 2 open)
+  ◻ Add pulse/highlight animation for newly created panes
+  ◻ Fix LLM auto-naming feature for Codex agent sessions

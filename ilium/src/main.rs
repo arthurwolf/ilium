@@ -1,0 +1,330 @@
+//! ilium: the `clap`-based CLI entrypoint -- a tmux-shaped surface over
+//! `ilium-client` (the TUI) and a separately-built `ilium-server`
+//! process. This binary owns none of the domain/PTY/detection logic
+//! itself: it only parses the subcommand, ensures the target session's
+//! server is running (spawning a detached `ilium-server` process if not
+//! -- see `session::ensure_server_running`), and then either attaches the
+//! TUI (`ilium_client::run`) or sends one short-lived IPC request and
+//! exits. See README "Architecture" and the workspace `CLAUDE.md` for why
+//! the actual logic lives in `ilium-client`/`ilium-server` instead of
+//! here.
+//!
+//! `ilium-server` is spawned as a *separate process*, not linked in as a
+//! library: its own `main.rs` already exists as a standalone daemon
+//! entrypoint (own `tokio` runtime, own tracing setup, own tiny
+//! `<session-name>` argument surface) explicitly meant to be launched this
+//! way -- see its module doc comment. Linking it in-process here would
+//! mean this CLI's `ilium_client::run` (a raw-mode terminal UI) and the
+//! server's PTY/detection machinery sharing one process and one runtime
+//! for no benefit, plus pulling every one of `ilium-server`'s dependencies
+//! (`sysinfo`, `crossterm`, `tracing-subscriber`, ...) into what's meant to
+//! be this workspace's thinnest crate.
+
+mod error;
+mod session;
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::Duration;
+
+use clap::{Parser, Subcommand};
+
+use crate::error::CliError;
+
+/// How long the `new-pane`/`kill-session` one-shot subcommands wait for
+/// the server to confirm a request before giving up and reporting failure.
+const REQUEST_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// ilium: a tmux-like terminal multiplexer TUI.
+#[derive(Parser, Debug)]
+#[command(
+    name = "ilium",
+    about = "A tmux-like terminal multiplexer TUI",
+    version
+)]
+struct Cli {
+    /// Project directory for the session being attached to or created.
+    /// Every pane spawns here, and the editor's file picker opens rooted
+    /// here. Every command that addresses a session is scoped to this
+    /// canonical project directory.
+    #[arg(long, global = true, default_value = ".")]
+    cwd: PathBuf,
+
+    /// Replace this project's running server before attaching. The restored
+    /// server uses this executable's sibling `ilium-server`, which is useful
+    /// while developing a new build.
+    #[arg(long, global = true)]
+    fresh: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Create (if not already running) and attach to a named session.
+    NewSession { name: String },
+    /// List this project's known sessions and whether each is currently running.
+    Ls,
+    /// Gracefully end a running session: kills every pane and tears down
+    /// its tree.
+    KillSession { name: String },
+    /// Add a pane running `cmd` to this project's default session, spawning that
+    /// session's server if it isn't running yet. Does not attach a TUI --
+    /// run bare `ilium` to view the result.
+    NewPane {
+        /// Project-local session to receive the pane.
+        #[arg(long, default_value = session::DEFAULT_SESSION_NAME)]
+        session_name: String,
+        #[arg(last = true, required = true, value_name = "CMD")]
+        cmd: Vec<String>,
+    },
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match dispatch(cli).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("ilium: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn dispatch(cli: Cli) -> Result<(), CliError> {
+    match cli.command {
+        None => attach_or_create(session::DEFAULT_SESSION_NAME, &cli.cwd, cli.fresh).await,
+        Some(Command::NewSession { name }) => attach_or_create(&name, &cli.cwd, cli.fresh).await,
+        Some(Command::Ls) => list_sessions(&cli.cwd),
+        Some(Command::KillSession { name }) => kill_session(&name, &cli.cwd).await,
+        Some(Command::NewPane { session_name, cmd }) => {
+            new_pane(&session_name, &cmd, &cli.cwd).await
+        }
+    }
+}
+
+/// The bare-invocation and `new-session` paths: ensure the session's
+/// server is running, then hand off to the TUI until the user quits or
+/// the connection drops.
+async fn attach_or_create(session_name: &str, cwd: &Path, is_fresh: bool) -> Result<(), CliError> {
+    let project_session = session::resolve_project_session(cwd, session_name)?;
+    if is_fresh {
+        session::replace_server(&project_session).await?;
+    } else {
+        session::ensure_server_running(&project_session).await?;
+    }
+    ilium_client::run(ilium_client::RunOptions {
+        session_name: project_session.name,
+        session_cwd: project_session.project_root,
+        socket_path: project_session.socket_path,
+    })
+    .await?;
+    Ok(())
+}
+
+fn list_sessions(cwd: &Path) -> Result<(), CliError> {
+    let sessions = session::list_sessions(cwd)?;
+    if sessions.is_empty() {
+        println!("no sessions");
+        return Ok(());
+    }
+    for listing in &sessions {
+        let status = if listing.live {
+            "running"
+        } else {
+            "not running"
+        };
+        println!("{:<24} {status}", listing.name);
+    }
+    Ok(())
+}
+
+async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
+    let project_session = session::resolve_project_session(cwd, session_name)?;
+    if !session::is_session_live(&project_session.socket_path) {
+        return Err(CliError::SessionNotRunning(session_name.to_string()));
+    }
+
+    let mut connection = ilium_client::connection::Connection::connect(
+        &project_session.socket_path,
+        session_name.to_string(),
+    )
+    .await?;
+    connection
+        .requests
+        .send(ilium_ipc::ClientRequest::KillSession)
+        .await
+        .map_err(|_send_error| CliError::SessionNotRunning(session_name.to_string()))?;
+
+    // `ilium_server::run`'s `KillSession` path closes every connection on
+    // this session (including this one) after broadcasting the final
+    // `TreeSnapshot` and a short grace period -- draining events until the
+    // channel closes is this CLI's confirmation the shutdown actually
+    // completed, not merely that the request was sent. A closed channel
+    // (`recv` returning `None`) and a timed-out wait are both treated as
+    // "done here" rather than errors: either way there is nothing further
+    // this connection can do, and the server process tears down its own
+    // socket file regardless.
+    let _ = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while connection.events.recv().await.is_some() {}
+    })
+    .await;
+
+    println!("session {session_name:?} killed");
+    Ok(())
+}
+
+async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), CliError> {
+    let project_session = session::resolve_project_session(cwd, session_name)?;
+    session::ensure_server_running(&project_session).await?;
+
+    let mut connection = ilium_client::connection::Connection::connect(
+        &project_session.socket_path,
+        session_name.to_string(),
+    )
+    .await?;
+
+    // `Connection::connect` already queued the initial `Attach`. Its
+    // direct-reply `TreeSnapshot` carries the pane count *before* this
+    // command's own pane exists; recording it here (skipping over any
+    // unrelated `ScreenUpdate`/`PaneStatusChanged` broadcasts that might
+    // interleave from other panes/clients already attached to this
+    // session) lets the wait below tell "our `NewPane` landed" apart from
+    // "some unrelated `TreeSnapshot` broadcast arrived" instead of just
+    // trusting the first `TreeSnapshot` it happens to see.
+    let baseline_pane_count = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            if let ilium_ipc::ServerEvent::TreeSnapshot(tree) = event {
+                return Some(tree.panes().count());
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten();
+
+    let command_line = shell_join(cmd);
+    connection
+        .requests
+        .send(ilium_ipc::ClientRequest::NewPane {
+            parent_group: ilium_core::ROOT_ID,
+            kind: ilium_ipc::NewPaneKind::Command(command_line),
+        })
+        .await
+        .map_err(|_send_error| {
+            CliError::ServerReportedError("connection closed before NewPane was sent".to_string())
+        })?;
+
+    let outcome = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ilium_ipc::ServerEvent::Error { message } => return Some(Err(message)),
+                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
+                    let grew =
+                        baseline_pane_count.is_none_or(|baseline| tree.panes().count() > baseline);
+                    if grew {
+                        return Some(Ok(()));
+                    }
+                    // A `TreeSnapshot` that didn't grow the pane count is
+                    // some other client's unrelated mutation racing on the
+                    // same session -- keep waiting for our own.
+                }
+                _ => {}
+            }
+        }
+        None
+    })
+    .await;
+
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+
+    match outcome {
+        Ok(Some(Ok(()))) => {
+            println!("pane created in project session {session_name:?}");
+            Ok(())
+        }
+        Ok(Some(Err(message))) => Err(CliError::ServerReportedError(message)),
+        Ok(None) | Err(_) => Err(CliError::ServerReportedError(
+            "no confirmation received from the server".to_string(),
+        )),
+    }
+}
+
+/// Joins `new-pane`'s trailing `CMD` arguments into the single shell
+/// command string `NewPaneKind::Command` carries over IPC -- the server
+/// always runs it as `$SHELL -c <command_line>` (see
+/// `ilium-server/src/pane.rs`'s `spawn_terminal_session`) and also echoes it
+/// verbatim as the pane's display name (`TerminalOrigin::default_pane_name`).
+/// A naive `cmd.join(" ")` loses each argument's boundary: `ilium new-pane
+/// -- ls "my folder"` would reconstruct as `ls my folder`, which `$SHELL -c`
+/// re-splits into two arguments instead of one. Quoting only the arguments
+/// that need it keeps the overwhelmingly common single bare-token case
+/// (`claude`, `codex`, `cat`, ...) rendering unquoted.
+fn shell_join(args: &[String]) -> String {
+    args.iter()
+        .map(|argument| shell_quote_if_needed(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// True if `argument` is safe to place bare (unquoted) in a POSIX shell
+/// command line: non-empty, and made up only of characters that never
+/// trigger word-splitting, globbing, expansion, or redirection.
+fn is_shell_safe_bare_word(argument: &str) -> bool {
+    !argument.is_empty()
+        && argument.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'_' | b'-' | b'.' | b'/' | b'=' | b',' | b':' | b'@' | b'+'
+                )
+        })
+}
+
+/// Quotes `argument` for `$SHELL -c` only if `is_shell_safe_bare_word` says
+/// it needs it; otherwise returns it unchanged.
+fn shell_quote_if_needed(argument: &str) -> String {
+    if is_shell_safe_bare_word(argument) {
+        return argument.to_string();
+    }
+    // Close the current single-quoted segment, emit a backslash-escaped
+    // single quote, then reopen single-quoting -- the standard POSIX
+    // technique for embedding a literal `'` inside a `'...'` string.
+    // Mirrors `ilium-server/src/persistence.rs`'s private `shell_quote`;
+    // duplicated here rather than imported per this workspace's crate
+    // layering rules (`ilium/CLAUDE.md`).
+    format!("'{}'", argument.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod shell_join_tests {
+    use super::shell_join;
+
+    #[test]
+    fn bare_single_token_commands_round_trip_unquoted() {
+        assert_eq!(shell_join(&["cat".to_string()]), "cat");
+        assert_eq!(shell_join(&["ls".to_string(), "-la".to_string()]), "ls -la");
+    }
+
+    #[test]
+    fn arguments_with_spaces_are_quoted_so_they_stay_one_word() {
+        assert_eq!(
+            shell_join(&["ls".to_string(), "my folder".to_string()]),
+            "ls 'my folder'"
+        );
+    }
+
+    #[test]
+    fn embedded_single_quotes_are_escaped() {
+        assert_eq!(
+            shell_join(&["echo".to_string(), "it's here".to_string()]),
+            "echo 'it'\\''s here'"
+        );
+    }
+}

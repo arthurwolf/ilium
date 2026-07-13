@@ -1,0 +1,8 @@
+[package]
+name = "ilium-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror = "2"
+serde = { version = "1.0.228", features = ["derive"] }

@@ -1,0 +1,21 @@
+[package]
+name = "ilium"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+directories = "6.0.0"
+sha2 = "0.10.9"
+ilium-client = { version = "0.1.0", path = "../ilium-client" }
+ilium-core = { version = "0.1.0", path = "../ilium-core" }
+ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
+libc = "0.2.183"
+thiserror = "2.0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+
+[dev-dependencies]
+ilium-pty = { version = "0.1.0", path = "../ilium-pty" }
+tempfile = "3.27.0"
+tokio = { version = "1", features = ["process"] }
+vt100 = "0.16.2"

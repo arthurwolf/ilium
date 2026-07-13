@@ -1,0 +1,17 @@
+Estimate: mv+sed = instant, <5s. Dominant cost is step 3-4 (workspace crates recompile under new names, deps reused from cache) — roughly 2-6 min depending on machine, not hours.
+──────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Proceed?
+
+Go ahead now with full rename (mv+sed) + cargo regen/build/test/clippy verification?
+
+❯ 1. Yes, full swap+verify (Recommended)
+     git mv dirs, sed content, regen Cargo.lock, build+test+clippy+fmt — matches CLAUDE.md verification gate
+  2. Rename only, skip verify
+     Fast mv+sed pass only, no cargo build/test after — leaves correctness unconfirmed
+  3. Full swap + also flag/handle outside-repo refs
+     Same as full swap, plus explicitly address ~/.cargo/bin, ~/.config/ilium, ~/.local/share/ilium, sibling money/.ilium
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel »

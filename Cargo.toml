@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "illium-client",
-    "illium-core",
-    "illium-detect",
-    "illium-ipc",
-    "illium-kilo-gateway",
-    "illium-pty",
-    "illium-server",
-    "illium",
+    "ilium-client",
+    "ilium-core",
+    "ilium-detect",
+    "ilium-ipc",
+    "ilium-kilo-gateway",
+    "ilium-pty",
+    "ilium-server",
+    "ilium",
 ]
 
 [workspace.package]
