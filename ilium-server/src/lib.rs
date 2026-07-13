@@ -25,6 +25,7 @@ pub mod paths;
 mod persistence;
 mod session_id;
 mod shell_title;
+mod sounds;
 mod state;
 
 use std::os::unix::net::UnixStream as StdUnixStream;
@@ -40,6 +41,8 @@ use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::error::ServerError;
 use crate::state::ServerState;
 
+pub use crate::sounds::{NoopSoundPlayer, SoundPlayer, SystemSoundPlayer};
+
 /// Everything [`run`] needs to serve one session. Constructed by `main`
 /// from CLI-resolved project paths, or directly
 /// by tests with tempdir paths -- either way `run` itself never touches
@@ -53,6 +56,11 @@ pub struct ServerOptions {
     pub session_cwd: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
+    pub sound_settings: ilium_sound::SoundSettings,
+    /// Path watched by detached servers so changes made from a different
+    /// project session also apply. Tests pass `None` to stay hermetic.
+    pub sound_config_path: Option<PathBuf>,
+    pub sound_player: Arc<dyn SoundPlayer>,
     /// User-configured agent signatures (`config::ServerConfig::custom_signatures`)
     /// to check alongside `ilium-detect`'s built-in registry -- threaded
     /// straight through to `ServerState` and from there into every
@@ -80,11 +88,14 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
             source,
         })?;
 
+    let (sound_requests, sound_playback_task) = sounds::spawn(Arc::clone(&options.sound_player));
     let state = Arc::new(ServerState::new(
         options.session_name,
         options.snapshot_path,
         options.detection_config,
         options.notifications_config,
+        options.sound_settings,
+        sound_requests,
         options.custom_signatures,
     ));
 
@@ -96,6 +107,10 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
 
     let detection_task = detection::spawn(Arc::clone(&state));
     let snapshot_writer_task = persistence::spawn_snapshot_writer(Arc::clone(&state));
+    let sound_config_watcher_task = options
+        .sound_config_path
+        .clone()
+        .map(|path| sounds::spawn_config_watcher(Arc::clone(&state), path));
 
     tokio::select! {
         () = ipc::accept_loop(Arc::clone(&state), listener) => {}
@@ -105,6 +120,9 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     detection_task.abort();
+    if let Some(task) = sound_config_watcher_task {
+        task.abort();
+    }
     // Gives already-broadcast events (notably `KillSession`'s final
     // `TreeSnapshot`) a chance to actually reach attached clients before
     // their connection tasks are cancelled -- see this constant's doc
@@ -126,6 +144,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         let _write_guard = state.snapshot_write_lock.lock().await;
     }
     snapshot_writer_task.abort();
+    sound_playback_task.abort();
 
     // Best-effort: a clean `KillSession` shutdown has usually already
     // removed this file itself, so `NotFound` is the common, silent case --
@@ -337,6 +356,9 @@ mod restore_tests {
             session_cwd: dir.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_config_path: None,
+            sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
         };
         let server_task = tokio::spawn(run(options));
@@ -415,6 +437,9 @@ mod restore_tests {
             session_cwd: directory.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_config_path: None,
+            sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
         };
         let server_task = tokio::spawn(run(options));

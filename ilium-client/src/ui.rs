@@ -14,7 +14,8 @@ use tui_term::widget::PseudoTerminal;
 
 use crate::app::{
     App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind, ContextMenu, CreateBoardState,
-    CreateGroupState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
+    CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState, FocusTarget, Mode,
+    PaneRuntime, RightPanelTarget,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::{
@@ -94,13 +95,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         );
     }
     if matches!(app.mode, Mode::Help) {
-        help::render(frame, area);
+        help::render(frame, area, app.keyboard_settings.shortcut_base);
     }
     if let Mode::ContextMenu(menu) = &app.mode {
         draw_context_menu(frame, menu);
     }
     if let Mode::CreateGroup(state) = &app.mode {
         draw_create_group(frame, app, state);
+    }
+    if let Mode::CreateSplitOrientation(state) = &app.mode {
+        draw_create_split_orientation(frame, area, state);
+    }
+    if let Mode::CreateSplitMembers(state) = &app.mode {
+        draw_create_split_members(frame, area, state);
     }
     if let Mode::CreateBoard(state) = &app.mode {
         draw_create_board(frame, area, state);
@@ -162,6 +169,94 @@ fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
             Style::new().add_modifier(Modifier::DIM),
         )),
     ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_create_split_orientation(
+    frame: &mut Frame,
+    area: Rect,
+    state: &CreateSplitOrientationState,
+) {
+    let popup = modal::create_split_orientation_dialog_area(area);
+    frame.render_widget(Clear, popup);
+    let block = theme::block(true).title(theme::chrome_title("New split view"));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let vertical_marker = if state.orientation == ilium_core::SplitOrientation::Vertical {
+        "›"
+    } else {
+        " "
+    };
+    let horizontal_marker = if state.orientation == ilium_core::SplitOrientation::Horizontal {
+        "›"
+    } else {
+        " "
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from("Choose how two or three panes are arranged:"),
+            Line::from(""),
+            Line::from(format!("{vertical_marker} ▥  Vertical — side by side")),
+            Line::from(format!("{horizontal_marker} ▤  Horizontal — stacked")),
+            Line::from(""),
+            Line::from(Span::styled(
+                "←/→ choose · Enter continue · Esc cancel",
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+        ]),
+        inner,
+    );
+}
+
+fn draw_create_split_members(frame: &mut Frame, area: Rect, state: &CreateSplitMembersState) {
+    let popup = modal::create_split_members_dialog_area(area, state.choices.len());
+    frame.render_widget(Clear, popup);
+    let block = theme::block(true).title(theme::chrome_title("Add panes to split"));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let (start, end) =
+        modal::create_split_member_visible_window(state.selected_index, state.choices.len());
+    let selected_count = state
+        .choices
+        .iter()
+        .filter(|choice| choice.selected)
+        .count();
+    let mut lines = vec![
+        Line::from(format!(
+            "Select up to four panes ({selected_count}/4). Selecting none creates an empty split."
+        )),
+        Line::from(""),
+    ];
+    if state.choices.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No eligible panes; all existing panes are already in split views.",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    } else {
+        for (index, choice) in state.choices[start..end].iter().enumerate() {
+            let absolute_index = start + index;
+            let marker = if absolute_index == state.selected_index {
+                "›"
+            } else {
+                " "
+            };
+            let checkbox = if choice.selected { "[x]" } else { "[ ]" };
+            let style = if absolute_index == state.selected_index {
+                theme::selected_style()
+            } else {
+                Style::new()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("{marker} {checkbox} {}", choice.label),
+                style,
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑/↓ navigate · Space toggle · Enter create · Esc cancel",
+        Style::new().add_modifier(Modifier::DIM),
+    )));
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -663,6 +758,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::FolderExplorer(..) => "FOLDER PICKER".to_string(),
         Mode::ContextMenu(..) => "TREE ACTIONS".to_string(),
         Mode::CreateGroup(_) => "NEW GROUP".to_string(),
+        Mode::CreateSplitOrientation(_) => "NEW SPLIT".to_string(),
+        Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES".to_string(),
         Mode::CreateBoard(_) => "NEW BOARD".to_string(),
         Mode::BoardPathPicker(_, _) => "BOARD PATH".to_string(),
         Mode::BoardCardPrompt(_, _) => "NEW CARD".to_string(),
@@ -712,9 +809,13 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{PaneRuntime, RightPanelTarget};
+    use crate::terminal_view::TerminalView;
+    use ilium_core::{PaneContentKind, SplitOrientation};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
+    use std::path::PathBuf;
 
     #[test]
     fn source_scrollbar_renders_only_for_overflowing_buffers() {
@@ -741,5 +842,58 @@ mod tests {
             (0..4).all(|row| buffer[(11, row)].symbol() == " "),
             "fitting source should not render a scrollbar"
         );
+    }
+
+    #[test]
+    fn split_view_renders_both_terminal_members_and_active_slot_chrome() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        let mut first_view = TerminalView::new(20, 30);
+        first_view.feed(b"LEFT-PANE");
+        let mut second_view = TerminalView::new(20, 30);
+        second_view.feed(b"RIGHT-PANE");
+        app.panes
+            .insert(first, PaneRuntime::Terminal(Box::new(first_view)));
+        app.panes
+            .insert(second, PaneRuntime::Terminal(Box::new(second_view)));
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(second),
+        };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("LEFT-PANE"));
+        assert!(rendered.contains("RIGHT-PANE"));
+        assert!(rendered.contains("first"));
+        assert!(rendered.contains("second"));
     }
 }

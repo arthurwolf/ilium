@@ -37,6 +37,10 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
+        Mode::CreateSplitOrientation(state) => {
+            handle_create_split_orientation_event(app, state, &event)
+        }
+        Mode::CreateSplitMembers(state) => handle_create_split_members_event(app, state, &event),
         Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
         Mode::BoardPathPicker(overlay, state) => {
             handle_board_path_picker_event(app, overlay, state, &event)
@@ -278,12 +282,15 @@ fn execute_action(app: &mut App, action: Action) {
             let preselected = app.create_group_preselect_target();
             app.open_create_group_dialog(preselected);
         }
+        Action::NewSplitView => app.open_create_split_dialog(),
         Action::NewFolder => app.action_new_folder(),
         Action::Rename => app.action_start_rename(),
         Action::ToggleMove => app.mode = Mode::Move,
         Action::FocusTree => app.leave_pane_focus(),
         Action::FocusPane => {
             if let Some(id) = app.active_pane_id() {
+                app.focus_pane(id);
+            } else if let Some(id) = app.displayed_pane_ids().first().copied() {
                 app.focus_pane(id);
             } else {
                 app.focus = FocusTarget::Pane;
@@ -349,13 +356,19 @@ fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usiz
     let parent = tree.parent_of(id)?;
     let siblings = tree.children_of(parent).ok()?;
     let own_index = siblings.iter().position(|&sibling| sibling == id)?;
-    let preceding_group = siblings[..own_index].iter().rev().find(|&&candidate| {
-        matches!(
-            tree.get(candidate).map(|node| &node.kind),
-            Some(NodeKind::Container(container)) if container.is_group()
-        )
-    })?;
-    Some((*preceding_group, None))
+    let moving_is_pane = tree.get(id).is_some_and(ilium_core::Node::is_pane);
+    let preceding_container = siblings[..own_index]
+        .iter()
+        .rev()
+        .find(|&&candidate| match tree.get(candidate).map(|node| &node.kind) {
+            Some(NodeKind::Container(container)) if container.is_group() => true,
+            Some(NodeKind::Container(container)) if container.is_split_view() => {
+                moving_is_pane
+                    && container.children.len() < ilium_core::MAXIMUM_SPLIT_VIEW_PANES
+            }
+            _ => false,
+        })?;
+    Some((*preceding_container, None))
 }
 
 /// Computes the "outdent out of the current group" `ReparentNode` target
@@ -375,7 +388,8 @@ fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usi
         tree.get(id).map(|node| &node.kind),
         Some(NodeKind::Pane { .. })
     );
-    if grandparent == ROOT_ID && is_pane {
+    let is_split_view = tree.get(id).is_some_and(ilium_core::Node::is_split_view);
+    if grandparent == ROOT_ID && (is_pane || is_split_view) {
         return None;
     }
     let group_siblings = tree.children_of(grandparent).ok()?;
@@ -617,6 +631,66 @@ fn handle_create_group_event(
     }
 }
 
+fn handle_create_split_orientation_event(
+    app: &mut App,
+    mut state: crate::app::CreateSplitOrientationState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::CreateSplitOrientation(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::CreateSplitOrientation(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
+            state.orientation = match state.orientation {
+                ilium_core::SplitOrientation::Vertical => ilium_core::SplitOrientation::Horizontal,
+                ilium_core::SplitOrientation::Horizontal => ilium_core::SplitOrientation::Vertical,
+            };
+            app.mode = Mode::CreateSplitOrientation(state);
+        }
+        KeyCode::Enter => app.continue_create_split(state.orientation),
+        _ => app.mode = Mode::CreateSplitOrientation(state),
+    }
+}
+
+fn handle_create_split_members_event(
+    app: &mut App,
+    mut state: crate::app::CreateSplitMembersState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::CreateSplitMembers(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::CreateSplitMembers(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.selected_index = state.selected_index.saturating_sub(1);
+            app.mode = Mode::CreateSplitMembers(state);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.selected_index =
+                (state.selected_index + 1).min(state.choices.len().saturating_sub(1));
+            app.mode = Mode::CreateSplitMembers(state);
+        }
+        KeyCode::Char(' ') => {
+            app.toggle_create_split_member(&mut state);
+            app.mode = Mode::CreateSplitMembers(state);
+        }
+        KeyCode::Enter => app.commit_create_split(state),
+        _ => app.mode = Mode::CreateSplitMembers(state),
+    }
+}
+
 /// While `Mode::ContextMenu(menu)` is active: `Up`/`Down` move the
 /// selection, `Enter` performs the selected action, `Esc` cancels.
 fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, event: &Event) {
@@ -731,6 +805,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     let max_scroll = crate::settings_ui::max_scroll(
         state.tab,
         &app.ui_settings,
+        &app.keyboard_settings,
         state.selected_row,
         content_area,
     );
@@ -741,6 +816,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
 #[cfg(test)]
 mod indent_outdent_tests {
     use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
 
     /// `top` (group) containing `sibling_group` (group, empty) and `pane`
     /// (pane), in that order, plus a second top-level group `other`.
@@ -753,6 +830,23 @@ mod indent_outdent_tests {
             .unwrap();
         let other = tree.add_group(ROOT_ID, "other").unwrap();
         (tree, top, sibling_group, pane, other)
+    }
+
+    #[test]
+    fn changing_the_shortcut_base_updates_dispatch_immediately() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let ctrl_a = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        let ctrl_b = Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+
+        handle_event(&mut app, ctrl_a.clone());
+        assert!(matches!(app.mode, Mode::LeaderPending));
+        app.mode = Mode::Normal;
+
+        app.settings_set_shortcut_base(ShortcutBase::B);
+        handle_event(&mut app, ctrl_a);
+        assert!(matches!(app.mode, Mode::Normal));
+        handle_event(&mut app, ctrl_b);
+        assert!(matches!(app.mode, Mode::LeaderPending));
     }
 
     #[test]

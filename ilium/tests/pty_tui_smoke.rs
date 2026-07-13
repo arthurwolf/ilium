@@ -17,7 +17,8 @@
 //!    `ilium_client::tree_ui::sidebar_title`) and the pane created in
 //!    phase 1 (named after its command line, `"cat"`, per
 //!    `TerminalOrigin::default_pane_name`). A scripted leader-key + help
-//!    keystroke (`Ctrl+A` then `?`, see `ilium_client::keymap`) is then
+//!    keystroke (`Ctrl+B` then `?`, configured through the real
+//!    `[keyboard]` table) is then
 //!    written to the pty, proving input routing and rendering are both
 //!    alive end-to-end: the screen must change to show
 //!    `ilium_client::help`'s overlay text.
@@ -233,10 +234,24 @@ fn seed_project_config(cwd: &Path) {
     .expect("write .ilium/config.yaml");
 }
 
+/// Writes the user-wide client config inside this test's isolated XDG root,
+/// proving the TUI reads a non-default shortcut base through the real config
+/// path rather than only exercising an in-memory unit-test value.
+fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
+    let ilium_config_dir = xdg.config_home.join("ilium");
+    std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
+    std::fs::write(
+        ilium_config_dir.join("config.toml"),
+        "[keyboard]\nshortcut_base = \"b\"\n",
+    )
+    .expect("write isolated keyboard config");
+}
+
 #[tokio::test]
 async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_keyboard_config(&xdg);
     let project_dir = temp_root.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
     seed_project_config(&project_dir);
@@ -326,13 +341,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // focus on the (empty) pane panel, so phase 1's "cat" pane isn't
     // actually listed yet -- expand it to also prove out tree navigation
     // (`ilium_client::app::App::handle_tree_key`), not just leader-key
-    // dispatch: `Ctrl+A then t` (`Action::FocusTree`) moves focus to the
+    // dispatch: `Ctrl+B then t` (`Action::FocusTree`) moves focus to the
     // tree, Down selects its first entry (the "default" group -- see
     // `tui_tree_widget::TreeState::key_down`'s "nothing selected ->
     // select the first item" behavior), and Right expands it
     // (`TreeState::key_right`).
-    tui.write(b"\x01t")
-        .expect("writing Ctrl+A then t (FocusTree)");
+    tui.write(b"\x02t")
+        .expect("writing Ctrl+B then t (FocusTree)");
     tui.write(b"\x1b[B").expect("writing Down arrow"); // selects the first tree entry
     tui.write(b"\x1b[C").expect("writing Right arrow"); // expands it
     let pane_listed = wait_until(|| tui.screen_text().contains("cat"), WAIT_TIMEOUT).await;
@@ -341,29 +356,101 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the \"cat\" pane to appear in the tree after expanding its group, got: {:?}",
         tui.screen_text()
     );
+    let focused_footer_shown =
+        wait_until(|| tui.screen_text().contains('\u{2699}'), WAIT_TIMEOUT).await;
+    assert!(
+        focused_footer_shown,
+        "expected the settings gear to be visible while the tree has keyboard focus, got: {:?}",
+        tui.screen_text()
+    );
 
-    // Structural assertion #2: input routing. `Ctrl+A` (0x01, the
-    // documented leader key -- `ilium_client::keymap::is_leader_key`)
+    // Structural assertion #2: input routing. `Ctrl+B` (0x02, selected in
+    // this test's isolated config -- `ilium_client::keymap::is_leader_key`)
     // followed by `?` (`ilium_client::keymap::Action::Help`'s bound
     // letter) must flip the render to show
     // `ilium_client::help::render`'s overlay -- proof that keystrokes
     // typed into this pty actually reach the input-dispatch state
     // machine and that its effect actually reaches the next rendered
     // frame, not just that *a* frame renders.
-    tui.write(b"\x01?")
+    tui.write(b"\x02?")
         .expect("writing the leader+help keystroke to the pty");
     let help_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("keyboard reference") && screen.contains("Ctrl+A then ?")
+            screen.contains("keyboard reference") && screen.contains("Ctrl+B then ?")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         help_shown,
-        "expected the help overlay after Ctrl+A then ?, got: {:?}",
+        "expected the help overlay after Ctrl+B then ?, got: {:?}",
         tui.screen_text()
+    );
+
+    // Exercise the real full-screen settings path too: open it with the
+    // configured base, switch to Keyboard, select a custom warned letter,
+    // then restore the tmux preset. These assertions cover the actual
+    // rendered labels rather than only config/keymap units.
+    tui.write(b"\x1b").expect("closing Help with Esc");
+    tui.write(b"\x02S")
+        .expect("opening Settings with Ctrl+B then S");
+    let settings_shown = wait_until(
+        || tui.screen_text().contains("\u{2699} Settings"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        settings_shown,
+        "expected Settings to open, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\t")
+        .expect("switching to the Keyboard settings tab");
+    let keyboard_tab_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Shortcut base")
+                && screen.contains("Ctrl+B")
+                && screen.contains("Recommended")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        keyboard_tab_shown,
+        "expected the Keyboard settings tab with Ctrl+B selected, got: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(b"C")
+        .expect("selecting custom shortcut base Ctrl+C");
+    let custom_warning_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Warning: Ctrl+C") && screen.contains("interrupt/SIGINT")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        custom_warning_shown,
+        "expected the specific Ctrl+C warning, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"2").expect("restoring the Ctrl+B preset");
+    let preset_restored = wait_until(
+        || tui.screen_text().contains("Recommended: Ctrl+B"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(preset_restored, "expected Ctrl+B preset to restore");
+    let persisted_config =
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+            .expect("read settings-persisted keyboard config");
+    assert!(
+        persisted_config.contains("shortcut_base = \"b\""),
+        "expected the restored Ctrl+B preset to persist, got: {persisted_config:?}"
     );
 
     // Cleanup: reuse the CLI's own graceful `kill-session` subcommand

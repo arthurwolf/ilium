@@ -115,6 +115,8 @@ pub enum Mode {
     ContextMenu(ContextMenu),
     /// The "New group" destination picker is open.
     CreateGroup(CreateGroupState),
+    CreateSplitOrientation(CreateSplitOrientationState),
+    CreateSplitMembers(CreateSplitMembersState),
     /// Board creation owns its storage choice and destination before a tree
     /// node exists, so a cancelled dialog cannot leave a phantom pane.
     CreateBoard(CreateBoardState),
@@ -265,10 +267,12 @@ impl Default for SettingsState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuAction {
     FocusPane,
+    ShowSplitView,
     ToggleGroup,
     NewTerminal,
     NewEditor,
     NewGroup,
+    NewSplitView,
     NewFolder,
     Rename,
     MoveUp,
@@ -287,10 +291,12 @@ impl ContextMenuAction {
     pub const fn label(self) -> &'static str {
         match self {
             Self::FocusPane => "Focus pane",
+            Self::ShowSplitView => "Show split view",
             Self::ToggleGroup => "Expand / collapse",
             Self::NewTerminal => "New terminal here",
             Self::NewEditor => "New editor here",
             Self::NewGroup => "New group\u{2026}",
+            Self::NewSplitView => "New split view\u{2026}",
             Self::NewFolder => "Open folder\u{2026}",
             Self::Rename => "Rename",
             Self::MoveUp => "Move up",
@@ -326,6 +332,23 @@ pub struct CreateGroupState {
     pub destinations: Vec<GroupListing>,
     pub selected_index: usize,
     pub name: TextPromptState,
+}
+
+pub struct CreateSplitOrientationState {
+    pub orientation: SplitOrientation,
+}
+
+pub struct SplitPaneChoice {
+    pub pane_id: NodeId,
+    pub label: String,
+    pub selected: bool,
+}
+
+pub struct CreateSplitMembersState {
+    pub parent_group: NodeId,
+    pub orientation: SplitOrientation,
+    pub choices: Vec<SplitPaneChoice>,
+    pub selected_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -723,7 +746,9 @@ impl App {
     pub fn reconcile_right_panel_target(&mut self) {
         self.right_panel_target = match self.right_panel_target.clone() {
             RightPanelTarget::Empty => RightPanelTarget::Empty,
-            RightPanelTarget::Pane { pane_id } if self.tree.get(pane_id).is_some_and(Node::is_pane) => {
+            RightPanelTarget::Pane { pane_id }
+                if self.tree.get(pane_id).is_some_and(Node::is_pane) =>
+            {
                 RightPanelTarget::Pane { pane_id }
             }
             RightPanelTarget::SplitView {
@@ -1649,6 +1674,119 @@ impl App {
         self.request_new_group(destination.id, state.name.buf.clone());
     }
 
+    pub fn open_create_split_dialog(&mut self) {
+        self.mode = Mode::CreateSplitOrientation(CreateSplitOrientationState {
+            orientation: SplitOrientation::Vertical,
+        });
+    }
+
+    fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
+        let node = self.tree.get(node_id)?;
+        if node.is_group() {
+            return Some(node_id);
+        }
+        let parent = node.parent?;
+        if self.tree.get(parent).is_some_and(Node::is_group) {
+            return Some(parent);
+        }
+        self.tree.parent_of(parent)
+    }
+
+    fn split_parent_group(&self) -> NodeId {
+        self.selected_node_id()
+            .and_then(|node_id| self.normal_group_for_node(node_id))
+            .or_else(|| {
+                self.active_pane_id()
+                    .and_then(|pane_id| self.normal_group_for_node(pane_id))
+            })
+            .or_else(|| {
+                self.tree.children_of(ROOT_ID).ok().and_then(|children| {
+                    children
+                        .iter()
+                        .copied()
+                        .find(|node_id| self.tree.get(*node_id).is_some_and(Node::is_group))
+                })
+            })
+            .unwrap_or(ROOT_ID)
+    }
+
+    fn pane_tree_path_label(&self, pane_id: NodeId) -> String {
+        let mut names = Vec::new();
+        let mut current = Some(pane_id);
+        while let Some(node_id) = current {
+            let Some(node) = self.tree.get(node_id) else {
+                break;
+            };
+            if node_id != ROOT_ID {
+                names.push(node.name.clone());
+            }
+            current = node.parent;
+        }
+        names.reverse();
+        names.join(" / ")
+    }
+
+    pub fn continue_create_split(&mut self, orientation: SplitOrientation) {
+        let choices = self
+            .tree
+            .pane_ids_in_tree_order()
+            .into_iter()
+            .filter(|pane_id| {
+                self.tree
+                    .parent_of(*pane_id)
+                    .and_then(|parent| self.tree.get(parent))
+                    .is_none_or(|parent| !parent.is_split_view())
+            })
+            .map(|pane_id| SplitPaneChoice {
+                pane_id,
+                label: self.pane_tree_path_label(pane_id),
+                selected: false,
+            })
+            .collect();
+        self.mode = Mode::CreateSplitMembers(CreateSplitMembersState {
+            parent_group: self.split_parent_group(),
+            orientation,
+            choices,
+            selected_index: 0,
+        });
+    }
+
+    pub fn toggle_create_split_member(&mut self, state: &mut CreateSplitMembersState) {
+        let selected_count = state
+            .choices
+            .iter()
+            .filter(|choice| choice.selected)
+            .count();
+        let Some(choice) = state.choices.get_mut(state.selected_index) else {
+            return;
+        };
+        if !choice.selected && selected_count >= ilium_core::MAXIMUM_SPLIT_VIEW_PANES {
+            self.status_message = Some("A split view can contain at most four panes".to_string());
+            return;
+        }
+        choice.selected = !choice.selected;
+    }
+
+    pub fn commit_create_split(&mut self, state: CreateSplitMembersState) {
+        let pane_ids = state
+            .choices
+            .into_iter()
+            .filter(|choice| choice.selected)
+            .map(|choice| choice.pane_id)
+            .collect();
+        let name = match state.orientation {
+            SplitOrientation::Vertical => "Vertical split",
+            SplitOrientation::Horizontal => "Horizontal split",
+        };
+        self.queue_request(ClientRequest::CreateSplitView {
+            parent_group: state.parent_group,
+            name: name.to_string(),
+            orientation: state.orientation,
+            pane_ids,
+        });
+        self.mode = Mode::Normal;
+    }
+
     /// Builds the right-click context menu for `target`, anchored at the
     /// mouse position `(column, row)` -- sized to fit its action list and
     /// clamped inside the screen.
@@ -1681,6 +1819,7 @@ impl App {
                 ContextMenuAction::NewTerminal,
                 ContextMenuAction::NewEditor,
                 ContextMenuAction::NewGroup,
+                ContextMenuAction::NewSplitView,
                 ContextMenuAction::NewFolder,
                 ContextMenuAction::Settings,
             ];
@@ -1689,12 +1828,26 @@ impl App {
             ContextMenuAction::NewTerminal,
             ContextMenuAction::NewEditor,
             ContextMenuAction::NewGroup,
+            ContextMenuAction::NewSplitView,
             ContextMenuAction::NewFolder,
         ];
-        match self.tree.get(target).map(|node| &node.kind) {
-            Some(NodeKind::Container(_)) => actions.insert(0, ContextMenuAction::ToggleGroup),
-            Some(NodeKind::Pane { .. }) => actions.insert(0, ContextMenuAction::FocusPane),
-            Some(NodeKind::Folder { .. }) => actions.insert(0, ContextMenuAction::ToggleGroup),
+        match self.tree.get(target) {
+            Some(node) if node.is_split_view() => {
+                actions.retain(|action| {
+                    !matches!(
+                        action,
+                        ContextMenuAction::NewGroup | ContextMenuAction::NewFolder
+                    )
+                });
+                actions.insert(0, ContextMenuAction::ShowSplitView);
+            }
+            Some(node) if node.is_group() => actions.insert(0, ContextMenuAction::ToggleGroup),
+            Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
+            Some(Node {
+                kind: NodeKind::Folder { .. },
+                ..
+            }) => actions.insert(0, ContextMenuAction::ToggleGroup),
+            Some(_) => return vec![ContextMenuAction::Settings],
             // A stale/unrecognized target (e.g. a race with a concurrent
             // structural change) still gets a menu -- just the one action
             // that never depends on the target actually existing.
@@ -1716,6 +1869,7 @@ impl App {
         self.mode = Mode::Normal;
         match action {
             ContextMenuAction::FocusPane => self.focus_pane(target),
+            ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
                 self.tree_state.toggle_selected();
             }
@@ -1725,6 +1879,7 @@ impl App {
                 let preselected = self.create_group_target_for_click(target);
                 self.open_create_group_dialog(preselected);
             }
+            ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
             ContextMenuAction::NewFolder => self.action_new_folder(),
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
@@ -1766,7 +1921,7 @@ impl App {
 
     /// Adds a sidebar folder root selected from a directory-only picker.
     pub fn action_new_folder(&mut self) {
-        let parent = self.group_for_new_node();
+        let parent = self.split_parent_group();
         match ExplorerOverlay::open_folder_at(&self.session_cwd) {
             Ok(overlay) => self.mode = Mode::FolderExplorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open folder picker: {err}")),
@@ -3020,5 +3175,152 @@ mod tests {
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         app.tree_state.select(vec![group]);
         assert_eq!(app.group_for_new_node(), group);
+    }
+
+    #[test]
+    fn focusing_a_split_child_displays_every_member_and_activates_only_that_child() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+
+        app.focus_pane(second);
+
+        assert_eq!(app.displayed_pane_ids(), vec![first, second]);
+        assert_eq!(app.active_pane_id(), Some(second));
+        assert_eq!(
+            app.right_panel_target,
+            RightPanelTarget::SplitView {
+                split_id: split,
+                active_pane_id: Some(second)
+            }
+        );
+    }
+
+    #[test]
+    fn split_creation_choices_exclude_panes_already_in_a_split() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let available = app
+            .tree
+            .add_pane(group, "available", PaneContentKind::Editor)
+            .unwrap();
+        let contained = app
+            .tree
+            .add_pane(group, "contained", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[contained],
+            )
+            .unwrap();
+
+        app.continue_create_split(SplitOrientation::Horizontal);
+
+        let Mode::CreateSplitMembers(state) = &app.mode else {
+            panic!("expected split member selector");
+        };
+        assert_eq!(state.choices.len(), 1);
+        assert_eq!(state.choices[0].pane_id, available);
+    }
+
+    #[test]
+    fn committing_an_empty_split_queues_one_atomic_request() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree_state.select(vec![group]);
+        app.continue_create_split(SplitOrientation::Horizontal);
+        let Mode::CreateSplitMembers(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("expected split member selector");
+        };
+
+        app.commit_create_split(state);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::CreateSplitView {
+                parent_group: group,
+                name: "Horizontal split".to_string(),
+                orientation: SplitOrientation::Horizontal,
+                pane_ids: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn split_layout_resizes_only_visible_terminal_members_to_their_slots() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let hidden = app
+            .tree
+            .add_pane(group, "hidden", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        for pane_id in [first, second, hidden] {
+            app.panes.insert(
+                pane_id,
+                PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+            );
+        }
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(first),
+        };
+
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        let resize_requests = app
+            .take_outbound_requests()
+            .into_iter()
+            .filter_map(|request| match request {
+                ClientRequest::ResizePane {
+                    pane_id,
+                    rows,
+                    cols,
+                } => Some((pane_id, rows, cols)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(resize_requests.len(), 2);
+        assert!(resize_requests
+            .iter()
+            .all(|(_, rows, cols)| *rows == 37 && *cols == 42));
+        assert!(!resize_requests
+            .iter()
+            .any(|(pane_id, _, _)| *pane_id == hidden));
     }
 }

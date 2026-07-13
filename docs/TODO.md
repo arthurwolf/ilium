@@ -1,6 +1,13 @@
+# Sound settings and event alerts
+
+- [ ] Add a cross-platform sound adapter with system sound discovery, system beep, file playback, and pure event-transition rules. (IN PROGRESS)
+- [ ] Persist sound settings and apply live changes to the detached server over IPC.
+- [ ] Add the Sound settings tab with source/file selection, previews, discovered folders/files, and event checkboxes.
+- [ ] Add focused coverage, run workspace gates, manually verify the real TUI and sound playback, rebuild, and install.
+
 # Split view containers
 
-- [ ] Implement the persistent split-container domain model, invariants, IPC request, server mutation, and persistence coverage. (IN PROGRESS)
+- [ ] Implement the persistent split-container domain model, invariants, IPC request, server mutation, and persistence coverage.
 - [ ] Implement shared client viewport geometry, multi-pane rendering, per-slot sizing, focus, and input routing.
 - [ ] Add split creation dialogs, shortcut, tree toolbar/context integration, and tree presentation.
 - [ ] Run focused tests, full workspace checks, and live PTY/TUI verification.

@@ -22,6 +22,7 @@ use tokio::task::JoinHandle;
 
 use crate::notifications::{self, PendingNotification};
 use crate::pane::PaneResource;
+use crate::sounds::{self, PlaybackRequest};
 use crate::state::ServerState;
 
 /// How often the loop wakes to check which panes are due. Independent of
@@ -402,7 +403,9 @@ async fn run_due_panes(
     }
 
     // Phase 3: brief write-locked critical section applying results.
+    let sound_settings = state.sound_settings.read().await.clone();
     let mut pending_notifications = Vec::new();
+    let mut pending_sounds = Vec::new();
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
         let mut tree = state.tree.write().await;
@@ -470,7 +473,9 @@ async fn run_due_panes(
                 }
             }
 
-            let pane_name_before_update = tree.get(pane_id).map(|node| node.name.clone());
+            let pane_titles_before_update = tree
+                .get(pane_id)
+                .map(|node| (node.name.clone(), node.short_name.clone()));
 
             if let Err(error) = tree.set_pane_status(pane_id, new_status.clone()) {
                 // A pane present in the registry but missing from the tree
@@ -489,21 +494,39 @@ async fn run_due_panes(
             if state.notifications_config.enabled
                 && notifications::is_finished_transition(previous_status.as_ref(), &new_status)
             {
-                pending_notifications.push(PendingNotification {
-                    session_name: state.session_name.clone(),
-                    pane_name: pane_name_before_update.unwrap_or_default(),
-                });
+                let (long_pane_name, short_pane_name) =
+                    pane_titles_before_update.unwrap_or_default();
+                pending_notifications.push(PendingNotification::from_pane_titles(
+                    state.session_name.clone(),
+                    long_pane_name,
+                    short_pane_name,
+                ));
             }
 
             state.broadcast(ServerEvent::PaneStatusChanged {
                 pane_id,
                 status: new_status,
-            });
-        }
+                });
+            }
+
+            if let Some(event) =
+                ilium_sound::event_for_transition(previous_status.as_ref(), &new_status)
+            {
+                if sound_settings.events.is_enabled(event) {
+                    pending_sounds.push(PlaybackRequest {
+                        settings: sound_settings.clone(),
+                        event: Some(event),
+                        pane_name: pane_name_before_update.clone(),
+                    });
+                }
+            }
     }
 
     for pending in pending_notifications {
         notifications::send(pending).await;
+    }
+    for pending in pending_sounds {
+        sounds::enqueue(state, pending);
     }
 
     Ok(())

@@ -24,13 +24,14 @@
 //! dialog and `crate::tree_ui`'s row controls already use.
 
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Position, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 use crate::app::{App, AppearanceRow, SettingsState, SettingsTab};
-use crate::config::UiSettings;
+use crate::config::{KeyboardSettings, UiSettings};
+use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::theme::{self, ColorScheme};
 
 /// Fixed header height: a title line (with the close button right-aligned
@@ -124,6 +125,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     match state.tab {
         SettingsTab::Appearance => {
             let lines = appearance_lines(&app.ui_settings, state.selected_row);
+            render_scrollable(frame, layout.content_area, lines, state.scroll);
+        }
+        SettingsTab::Keyboard => {
+            let lines = keyboard_lines(&app.keyboard_settings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::About => {
@@ -240,14 +245,111 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 pub fn max_scroll(
     tab: SettingsTab,
     ui: &UiSettings,
+    keyboard: &KeyboardSettings,
     selected_row: usize,
     content_area: Rect,
 ) -> u16 {
     let total_lines = match tab {
         SettingsTab::Appearance => appearance_lines(ui, selected_row).len() as u16,
+        SettingsTab::Keyboard => keyboard_lines(keyboard).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+/// Keyboard-tab content: one live selector, explicit A/B presets, and the
+/// specific recommendation or warning for the currently selected letter.
+fn keyboard_lines(keyboard: &KeyboardSettings) -> Vec<Line<'static>> {
+    let shortcut_base = keyboard.shortcut_base;
+    let advice = keymap::shortcut_base_advice(shortcut_base);
+    let advice_heading = if advice.is_recommended {
+        "Recommended"
+    } else {
+        "Warning"
+    };
+    let advice_color = if advice.is_recommended {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+    let label = "Shortcut base";
+    let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+    let control = format!("\u{2039} {} \u{203a}", shortcut_base.label());
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled(
+                label,
+                Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(
+                control,
+                theme::selected_style().add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "    Use Left/Right to browse A-Z, or type Shift+A-Z for an exact custom letter.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Recommended presets",
+            Style::new().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    for (index, preset) in SHORTCUT_BASE_PRESETS.into_iter().enumerate() {
+        let standard = if preset == ShortcutBase::A {
+            "GNU Screen standard"
+        } else {
+            "tmux standard"
+        };
+        lines.push(Line::from(format!(
+            "  [{}] {:<7}  {standard}",
+            index + 1,
+            preset.label()
+        )));
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{advice_heading}: {}", shortcut_base.label()),
+            Style::new().fg(advice_color).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("  {}", advice.explanation)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "The new base applies immediately to input and every shortcut label, including Help.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+    ]);
+    lines
+}
+
+/// Returns the decrement/increment direction for the Keyboard tab's one
+/// selector. Geometry mirrors the selector line in [`keyboard_lines`].
+pub fn keyboard_content_hit(content_area: Rect, scroll: u16, position: Position) -> Option<i32> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let selector_y = content_area
+        .y
+        .saturating_add(APPEARANCE_TOP_PADDING)
+        .saturating_sub(scroll);
+    if position.y != selector_y {
+        return None;
+    }
+    let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+    if position.x < control_start_x {
+        return None;
+    }
+    Some(if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+        -1
+    } else {
+        1
+    })
 }
 
 fn appearance_row_label(row: AppearanceRow) -> &'static str {
@@ -404,7 +506,11 @@ mod tests {
             tab_at(area, Position::new(2, 1)),
             Some(SettingsTab::Appearance)
         );
-        assert_eq!(tab_at(area, Position::new(2, 3)), Some(SettingsTab::About));
+        assert_eq!(
+            tab_at(area, Position::new(2, 3)),
+            Some(SettingsTab::Keyboard)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
@@ -454,17 +560,63 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_content_hit_finds_both_stepper_directions() {
+        let area = Rect::new(0, 0, 60, 20);
+        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+        assert_eq!(
+            keyboard_content_hit(area, 0, Position::new(control_start_x, 1)),
+            Some(-1)
+        );
+        assert_eq!(
+            keyboard_content_hit(
+                area,
+                0,
+                Position::new(control_start_x + DECREMENT_ZONE_WIDTH, 1)
+            ),
+            Some(1)
+        );
+        assert_eq!(keyboard_content_hit(area, 0, Position::new(2, 1)), None);
+    }
+
+    #[test]
+    fn keyboard_lines_show_presets_and_specific_current_advice() {
+        let mut keyboard = KeyboardSettings::default();
+        let recommended = keyboard_lines(&keyboard)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(recommended.contains("[1] Ctrl+A"));
+        assert!(recommended.contains("[2] Ctrl+B"));
+        assert!(recommended.contains("Recommended: Ctrl+A"));
+
+        keyboard.shortcut_base = ShortcutBase::parse("c").unwrap();
+        let warned = keyboard_lines(&keyboard)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(warned.contains("Warning: Ctrl+C"));
+        assert!(warned.contains("interrupt/SIGINT"));
+    }
+
+    #[test]
     fn max_scroll_is_zero_when_content_already_fits() {
         let ui = UiSettings::default();
+        let keyboard = KeyboardSettings::default();
         let area = Rect::new(0, 0, 60, 40);
-        assert_eq!(max_scroll(SettingsTab::Appearance, &ui, 0, area), 0);
+        assert_eq!(
+            max_scroll(SettingsTab::Appearance, &ui, &keyboard, 0, area),
+            0
+        );
     }
 
     #[test]
     fn max_scroll_is_positive_when_content_overflows_a_short_terminal() {
         let ui = UiSettings::default();
+        let keyboard = KeyboardSettings::default();
         let area = Rect::new(0, 0, 60, 3);
-        assert!(max_scroll(SettingsTab::Appearance, &ui, 0, area) > 0);
+        assert!(max_scroll(SettingsTab::Appearance, &ui, &keyboard, 0, area) > 0);
     }
 
     #[test]

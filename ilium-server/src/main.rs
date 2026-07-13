@@ -63,6 +63,9 @@ async fn async_main(launch: ServerLaunch) -> ExitCode {
         session_cwd: launch.session_cwd,
         detection_config: server_config.detection,
         notifications_config: server_config.notifications,
+        sound_settings: server_config.sound,
+        sound_config_path: Some(config_dir.join("config.toml")),
+        sound_player: std::sync::Arc::new(ilium_server::SystemSoundPlayer),
         custom_signatures: server_config.custom_signatures,
     };
     match ilium_server::run(options).await {

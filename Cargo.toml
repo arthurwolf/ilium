@@ -8,6 +8,7 @@ members = [
     "ilium-kilo-gateway",
     "ilium-pty",
     "ilium-server",
+    "ilium-sound",
     "ilium",
 ]
 

@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use ilium_core::{BoardStorage, NodeId, PaneStatus, SplitOrientation, Tree, TreeMoveDirection};
+use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
 
 /// What kind of pane to create for a [`ClientRequest::NewPane`]. Kept
@@ -188,6 +189,16 @@ pub enum ClientRequest {
         name: String,
         orientation: SplitOrientation,
         pane_ids: Vec<NodeId>,
+    },
+    /// Replaces the detached server's live sound configuration immediately.
+    /// The client has already persisted the same value to `config.toml` so a
+    /// future server process starts with it as well.
+    UpdateSoundSettings { settings: SoundSettings },
+    /// Plays the current source once without changing any event checkbox.
+    /// Used by the Sound settings tab's Preview row.
+    PreviewSound {
+        source: SoundSourceKind,
+        file: Option<PathBuf>,
     },
 }
 

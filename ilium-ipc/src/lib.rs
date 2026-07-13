@@ -29,6 +29,7 @@ mod tests {
         AgentActivity, AgentClass, BoardStorage, NodeId, PaneStatus, SplitOrientation, Tree,
         TreeMoveDirection, ROOT_ID,
     };
+    use ilium_sound::{SoundSettings, SoundSourceKind};
 
     use super::*;
 
@@ -140,6 +141,13 @@ mod tests {
                 name: "Vertical split".to_string(),
                 orientation: SplitOrientation::Vertical,
                 pane_ids: vec![NodeId(2), NodeId(3)],
+            },
+            ClientRequest::UpdateSoundSettings {
+                settings: SoundSettings::default(),
+            },
+            ClientRequest::PreviewSound {
+                source: SoundSourceKind::SoundFile,
+                file: Some(PathBuf::from("/usr/share/sounds/example.oga")),
             },
         ]
     }

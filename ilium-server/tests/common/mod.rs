@@ -74,6 +74,7 @@ pub async fn expect_event(
 
 pub struct TestServer {
     pub socket_path: PathBuf,
+    pub snapshot_path: PathBuf,
     pub server_task: tokio::task::JoinHandle<Result<(), ilium_server::error::ServerError>>,
     /// Owns the socket/snapshot directory for as long as this `TestServer`
     /// (and thus the running server) is alive. `TempDir` deletes its
@@ -111,10 +112,13 @@ impl TestServer {
         let options = ServerOptions {
             session_name: session_name.to_string(),
             socket_path: socket_path.clone(),
-            snapshot_path,
+            snapshot_path: snapshot_path.clone(),
             session_cwd: dir.path().to_path_buf(),
             detection_config,
             notifications_config: NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_config_path: None,
+            sound_player: std::sync::Arc::new(ilium_server::NoopSoundPlayer),
             custom_signatures: Vec::new(),
         };
 
@@ -125,6 +129,7 @@ impl TestServer {
 
         Self {
             socket_path,
+            snapshot_path,
             server_task,
             // Held for the struct's lifetime (see the field doc) instead
             // of being forgotten -- the directory it owns is exactly the

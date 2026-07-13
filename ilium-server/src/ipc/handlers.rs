@@ -73,10 +73,31 @@ pub async fn handle_request(
             pane_ids,
         } => {
             handle_tree_mutation(state, direct_tx, |tree| {
+                let parent_group = resolve_parent_group(tree, parent_group);
                 tree.create_split_view(parent_group, name, orientation, &pane_ids)
                     .map(|_id| ())
             })
             .await;
+            false
+        }
+        ClientRequest::UpdateSoundSettings { settings } => {
+            *state.sound_settings.write().await = settings;
+            false
+        }
+        ClientRequest::PreviewSound { source, file } => {
+            let settings = ilium_sound::SoundSettings {
+                source,
+                file,
+                ..ilium_sound::SoundSettings::default()
+            };
+            match tokio::task::spawn_blocking(move || ilium_sound::play(&settings)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => send_direct_error(direct_tx, error.to_string()).await,
+                Err(error) => {
+                    send_direct_error(direct_tx, format!("sound preview task failed: {error}"))
+                        .await
+                }
+            }
             false
         }
         ClientRequest::ClosePane { pane_id } => {
@@ -158,6 +179,26 @@ pub async fn handle_request(
             state.request_snapshot_save();
             state.shutdown.notify_waiters();
             true
+        }
+        ClientRequest::UpdateSoundSettings { settings } => {
+            *state.sound_settings.write().await = settings;
+            false
+        }
+        ClientRequest::PreviewSound { source, file } => {
+            let settings = ilium_sound::SoundSettings {
+                source,
+                file,
+                ..state.sound_settings.read().await.clone()
+            };
+            crate::sounds::enqueue(
+                state,
+                crate::sounds::PlaybackRequest {
+                    settings,
+                    event: None,
+                    pane_name: None,
+                },
+            );
+            false
         }
     }
 }

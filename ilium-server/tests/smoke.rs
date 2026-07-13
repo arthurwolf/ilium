@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use ilium_core::{NodeId, ROOT_ID};
+use ilium_core::{NodeId, SplitOrientation, ROOT_ID};
 use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 
 mod common;
@@ -132,6 +132,91 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+}
+
+#[tokio::test]
+async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
+    let server = TestServer::start("split-view-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "split-view-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+
+    let mut pane_ids = Vec::new();
+    let mut parent_group = ROOT_ID;
+    for expected_count in 1..=2 {
+        write_frame(
+            &mut client,
+            &ClientRequest::NewPane {
+                parent_group: ROOT_ID,
+                kind: NewPaneKind::PlainShell,
+            },
+        )
+        .await
+        .unwrap();
+        let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == expected_count)
+        })
+        .await;
+        let ServerEvent::TreeSnapshot(tree) = event else {
+            unreachable!();
+        };
+        parent_group = tree.children_of(ROOT_ID).unwrap()[0];
+        pane_ids = tree.panes().map(|node| node.id).collect();
+    }
+    pane_ids.sort();
+
+    write_frame(
+        &mut client,
+        &ClientRequest::CreateSplitView {
+            parent_group,
+            name: "Vertical split".to_string(),
+            orientation: SplitOrientation::Vertical,
+            pane_ids: pane_ids.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.all_ids().any(|id| tree.split_orientation(id).is_some()))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!();
+    };
+    let split_id = tree
+        .all_ids()
+        .find(|id| tree.split_orientation(*id).is_some())
+        .unwrap();
+    assert_eq!(
+        tree.split_orientation(split_id),
+        Some(SplitOrientation::Vertical)
+    );
+    assert_eq!(tree.children_of(split_id).unwrap(), pane_ids.as_slice());
+
+    let snapshot_written = common::wait_until(
+        || {
+            std::fs::read_to_string(&server.snapshot_path)
+                .is_ok_and(|contents| contents.contains("Vertical split"))
+        },
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(snapshot_written, "split orientation was not persisted");
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
 }
 

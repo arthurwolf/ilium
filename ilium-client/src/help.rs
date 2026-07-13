@@ -15,7 +15,7 @@ use crate::theme;
 
 /// Draws the help popup, centered within `area` at roughly 60% width /
 /// 70% height.
-pub fn render(frame: &mut Frame, area: Rect) {
+pub fn render(frame: &mut Frame, area: Rect, shortcut_base: keymap::ShortcutBase) {
     let popup_area = centered_rect(60, 70, area);
 
     // Clear the popup's own footprint first so it reads as an opaque
@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
     for binding in bindings {
         lines.push(Line::from(vec![
             Span::styled(
-                format!("Ctrl+A then {}", binding.letter),
+                format!("{} then {}", shortcut_base.label(), binding.letter),
                 Style::new().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  —  "),
@@ -55,10 +55,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
         "right-click a tree entry for rename, move, create, and close actions",
     ));
     lines.push(Line::from(
-        "right-click anywhere in the tree panel for Settings (appearance, theme)",
+        "use the right-aligned tree-footer gear for Settings (appearance and keyboard)",
     ));
     lines.push(Line::from(
-        "hover the tree footer for the shell / Claude / Codex / editor / group buttons",
+        "focus or hover the tree panel to reveal its footer actions",
     ));
     lines.push(Line::from(
         "hover a tree row for ✎/↑/↓ controls; ✎ renames, pane arrows cross into adjacent groups at boundaries",
@@ -82,11 +82,36 @@ pub fn render(frame: &mut Frame, area: Rect) {
     ));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "press Ctrl+A ? again, or Esc, to close",
+        format!("press {} ? again, or Esc, to close", shortcut_base.label()),
         Style::new().add_modifier(Modifier::ITALIC),
     )));
 
     let block = theme::block(true).title(theme::chrome_title("Help"));
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn help_renders_the_current_shortcut_base_in_rows_and_close_hint() {
+        let backend = TestBackend::new(140, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), keymap::ShortcutBase::B))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Ctrl+B then ?"));
+        assert!(rendered.contains("press Ctrl+B ? again"));
+        assert!(!rendered.contains("Ctrl+A then ?"));
+    }
 }

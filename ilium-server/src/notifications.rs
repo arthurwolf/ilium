@@ -1,10 +1,11 @@
 //! Desktop notification on a pane's `Working -> Done`/`Idle` transition
-//! (README M5). Two pieces, deliberately kept apart: [`is_finished_transition`]
+//! (README M5). Three pieces, deliberately kept apart: [`is_finished_transition`]
 //! is the pure decision ("does this status change deserve a notification at
 //! all") that a plain `#[test]` can exercise for every relevant status-pair
-//! combination with no D-Bus/notification-daemon dependency; [`send`] is the
-//! thin I/O adapter around `notify-rust` that actually shows one, and is
-//! deliberately *not* unit tested here -- see its own doc comment.
+//! combination with no D-Bus/notification-daemon dependency;
+//! [`PendingNotification`] owns the pure presentation contract, including a
+//! pane's distinct long-form agent description when one exists; and [`send`]
+//! is the thin I/O adapter around `notify-rust` that actually shows one.
 
 use ilium_core::{AgentActivity, PaneStatus};
 
@@ -40,8 +41,50 @@ pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -
 /// `detection::run_due_panes`) -- a slow or unavailable notification daemon
 /// must never hold up an attached client's tree access.
 pub struct PendingNotification {
-    pub session_name: String,
-    pub pane_name: String,
+    session_name: String,
+    pane_name: String,
+    agent_description: Option<String>,
+}
+
+impl PendingNotification {
+    /// Builds the presentation data from a pane's long-form `name` and its
+    /// optional short-form alternative. Inferred titles provide both forms:
+    /// the short one identifies the pane compactly, while the distinct long
+    /// one explains what the agent was working on after the existing text.
+    /// A manually named pane has no distinct description, so its notification
+    /// remains byte-for-byte identical to the previous presentation.
+    pub fn from_pane_titles(
+        session_name: String,
+        long_pane_name: String,
+        short_pane_name: Option<String>,
+    ) -> Self {
+        let pane_name = short_pane_name.unwrap_or_else(|| long_pane_name.clone());
+        let agent_description = (pane_name != long_pane_name).then_some(long_pane_name);
+
+        Self {
+            session_name,
+            pane_name,
+            agent_description,
+        }
+    }
+
+    /// Notification summary shown by the desktop shell.
+    fn summary(&self) -> String {
+        format!("{} finished", self.pane_name)
+    }
+
+    /// Notification body, with a distinct long-form description appended as
+    /// a second paragraph so the original completion text remains first.
+    fn body(&self) -> String {
+        let current_text = format!(
+            "Session \"{}\": the agent in \"{}\" is done and waiting on you.",
+            self.session_name, self.pane_name
+        );
+        match &self.agent_description {
+            Some(description) => format!("{current_text}\n\nAbout: {description}"),
+            None => current_text,
+        }
+    }
 }
 
 /// Shows a desktop notification for `pending`. `notify-rust`'s `show()` is
@@ -64,11 +107,8 @@ pub struct PendingNotification {
 pub async fn send(pending: PendingNotification) {
     let result = tokio::task::spawn_blocking(move || {
         notify_rust::Notification::new()
-            .summary(&format!("{} finished", pending.pane_name))
-            .body(&format!(
-                "Session \"{}\": the agent in \"{}\" is done and waiting on you.",
-                pending.session_name, pending.pane_name
-            ))
+            .summary(&pending.summary())
+            .body(&pending.body())
             .show()
     })
     .await;
@@ -211,5 +251,50 @@ mod tests {
         let claude_working = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
         let codex_idle = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
         assert!(is_finished_transition(Some(&claude_working), &codex_idle));
+    }
+
+    #[test]
+    fn notification_appends_distinct_long_agent_description_after_current_text() {
+        let pending = PendingNotification::from_pane_titles(
+            "default".to_string(),
+            "Fix Authentication Bug In Login Flow".to_string(),
+            Some("Auth Bug".to_string()),
+        );
+
+        assert_eq!(pending.summary(), "Auth Bug finished");
+        assert_eq!(
+            pending.body(),
+            "Session \"default\": the agent in \"Auth Bug\" is done and waiting on you.\n\n\
+             About: Fix Authentication Bug In Login Flow"
+        );
+    }
+
+    #[test]
+    fn notification_without_distinct_long_description_preserves_current_text() {
+        let pending = PendingNotification::from_pane_titles(
+            "release".to_string(),
+            "Manually Named Pane".to_string(),
+            None,
+        );
+
+        assert_eq!(pending.summary(), "Manually Named Pane finished");
+        assert_eq!(
+            pending.body(),
+            "Session \"release\": the agent in \"Manually Named Pane\" is done and waiting on you."
+        );
+    }
+
+    #[test]
+    fn equal_short_and_long_names_do_not_duplicate_the_description() {
+        let pending = PendingNotification::from_pane_titles(
+            "default".to_string(),
+            "Agent Work".to_string(),
+            Some("Agent Work".to_string()),
+        );
+
+        assert_eq!(
+            pending.body(),
+            "Session \"default\": the agent in \"Agent Work\" is done and waiting on you."
+        );
     }
 }

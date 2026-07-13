@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 bincode = "1.3.3"
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
+ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["io-util", "macros"] }

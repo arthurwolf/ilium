@@ -86,6 +86,21 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_create_group_mouse(app, state, mouse);
         return;
     }
+    if matches!(app.mode, Mode::CreateSplitOrientation(_)) {
+        let Mode::CreateSplitOrientation(state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::CreateSplitOrientation above");
+        };
+        handle_create_split_orientation_mouse(app, state, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::CreateSplitMembers(_)) {
+        let Mode::CreateSplitMembers(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::CreateSplitMembers above");
+        };
+        handle_create_split_members_mouse(app, state, mouse);
+        return;
+    }
     if matches!(app.mode, Mode::CreateBoard(_)) {
         let Mode::CreateBoard(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::CreateBoard");
@@ -167,6 +182,58 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
 }
 
+fn handle_create_split_orientation_mouse(
+    app: &mut App,
+    state: crate::app::CreateSplitOrientationState,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::CreateSplitOrientation(state);
+        return;
+    }
+    let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
+    let orientation = match mouse.row {
+        row if row == popup.y.saturating_add(3) => Some(ilium_core::SplitOrientation::Vertical),
+        row if row == popup.y.saturating_add(4) => Some(ilium_core::SplitOrientation::Horizontal),
+        _ => None,
+    };
+    if let Some(orientation) = orientation {
+        app.continue_create_split(orientation);
+    } else {
+        app.mode = Mode::CreateSplitOrientation(state);
+    }
+}
+
+fn handle_create_split_members_mouse(
+    app: &mut App,
+    mut state: crate::app::CreateSplitMembersState,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::CreateSplitMembers(state);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    if let Some(index) = crate::modal::create_split_member_row_at(
+        app.layout.screen_area,
+        state.selected_index,
+        state.choices.len(),
+        position,
+    ) {
+        state.selected_index = index;
+        app.toggle_create_split_member(&mut state);
+        app.mode = Mode::CreateSplitMembers(state);
+        return;
+    }
+    let popup =
+        crate::modal::create_split_members_dialog_area(app.layout.screen_area, state.choices.len());
+    if mouse.row == popup.bottom().saturating_sub(2) && popup.contains(position) {
+        app.commit_create_split(state);
+    } else {
+        app.mode = Mode::CreateSplitMembers(state);
+    }
+}
+
 /// Selects tree rows, opens the right-click menu, scrolls, and handles the
 /// toolbar/row hover controls.
 fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
@@ -231,7 +298,11 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 }
                 app.select_node(hit.id);
                 app.set_drag_source(Some(hit.id));
-                if app.tree.get(hit.id).is_some_and(ilium_core::Node::is_split_view) {
+                if app
+                    .tree
+                    .get(hit.id)
+                    .is_some_and(ilium_core::Node::is_split_view)
+                {
                     app.tree_state.toggle_selected();
                     app.show_split_view(hit.id);
                 } else if matches!(
@@ -334,7 +405,17 @@ fn compute_drop_target(
                 return None;
             }
             match tree.get(target_id).map(|node| &node.kind) {
-                Some(NodeKind::Container(_)) => (target_id, None),
+                Some(NodeKind::Container(container)) => {
+                    if container.is_split_view()
+                        && (!dragged_is_pane
+                            || (tree.parent_of(dragged_id) != Some(target_id)
+                                && container.children.len()
+                                    >= ilium_core::MAXIMUM_SPLIT_VIEW_PANES))
+                    {
+                        return None;
+                    }
+                    (target_id, None)
+                }
                 Some(NodeKind::Pane { .. }) => {
                     let parent = tree.parent_of(target_id)?;
                     let siblings = tree.children_of(parent).ok()?;
@@ -364,6 +445,10 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             app.open_create_group_dialog(preselected);
             return;
         }
+        TreeToolbarAction::Split => {
+            app.open_create_split_dialog();
+            return;
+        }
         // `action_new_editor` only opens the file picker (or reports its
         // own failure via `status_message`); nothing is created yet, so it
         // must own the status message rather than have it clobbered below
@@ -378,6 +463,10 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
         }
         TreeToolbarAction::Folder => {
             app.action_new_folder();
+            return;
+        }
+        TreeToolbarAction::Settings => {
+            app.action_open_settings();
             return;
         }
         TreeToolbarAction::Shell => app.action_new_terminal(),
@@ -510,6 +599,14 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                     app.settings_adjust_row(row, direction);
                 }
+            } else if state.tab == crate::app::SettingsTab::Keyboard {
+                if let Some(direction) = crate::settings_ui::keyboard_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                ) {
+                    app.settings_adjust_shortcut_base(direction);
+                }
             }
         }
         MouseEventKind::ScrollUp => {
@@ -524,6 +621,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let max_scroll = crate::settings_ui::max_scroll(
         state.tab,
         &app.ui_settings,
+        &app.keyboard_settings,
         state.selected_row,
         layout.content_area,
     );
@@ -766,5 +864,12 @@ mod row_action_click_tests {
         click_retitle_slot(&mut app, editor_id);
 
         assert_eq!(app.take_pending_retitle_requests().len(), 0);
+    }
+
+    #[test]
+    fn settings_toolbar_action_opens_the_settings_view() {
+        let mut app = test_app();
+        execute_tree_toolbar_action(&mut app, TreeToolbarAction::Settings);
+        assert!(matches!(app.mode, Mode::Settings(_)));
     }
 }

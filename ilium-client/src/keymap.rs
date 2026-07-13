@@ -94,11 +94,11 @@ pub const fn shortcut_base_advice(base: ShortcutBase) -> ShortcutBaseAdvice {
         'f' => warning("commonly moves forward one character or opens search"),
         'g' => warning("commonly cancels the current operation or rings the terminal bell"),
         'h' => warning("is normally Backspace in terminal control encoding"),
-        'i' => warning("is normally Tab in terminal control encoding"),
+        'i' => warning("is indistinguishable from Tab in ordinary terminals, so every Tab becomes the shortcut base"),
         'j' => warning("is normally line-feed/newline in terminal control encoding"),
         'k' => warning("commonly cuts from the cursor to the end of the line"),
         'l' => warning("commonly clears or redraws the terminal"),
-        'm' => warning("is normally Enter/carriage-return in terminal control encoding"),
+        'm' => warning("is indistinguishable from Enter in ordinary terminals, so every Enter becomes the shortcut base"),
         'n' => warning("commonly selects the next history entry or search result"),
         'o' => warning("commonly accepts the current line and fetches the next history entry"),
         'p' => warning("commonly selects the previous history entry"),
@@ -132,6 +132,7 @@ pub enum Action {
     NewBoard,
     ClosePane,
     NewGroup,
+    NewSplitView,
     NewFolder,
     Rename,
     ToggleMove,
@@ -188,6 +189,11 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         letter: 'g',
         action: Action::NewGroup,
         description: "New group (choose where in a dialog)",
+    },
+    KeyBinding {
+        letter: 'W',
+        action: Action::NewSplitView,
+        description: "New vertical or horizontal split view",
     },
     KeyBinding {
         letter: 'f',
@@ -248,7 +254,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
     KeyBinding {
         letter: 'S',
         action: Action::Settings,
-        description: "Open settings (also: right-click the tree panel)",
+        description: "Open settings (also: use the tree footer gear)",
     },
     KeyBinding {
         letter: '?',
@@ -274,6 +280,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::NewBoard => "new_board",
         Action::ClosePane => "close_pane",
         Action::NewGroup => "new_group",
+        Action::NewSplitView => "new_split_view",
         Action::NewFolder => "new_folder",
         Action::Rename => "rename",
         Action::ToggleMove => "toggle_move",
@@ -332,8 +339,17 @@ pub fn effective_bindings() -> &'static [KeyBinding] {
 /// shortcut base. ASCII control-letter events are portable across ordinary
 /// terminals without requiring an enhanced keyboard protocol.
 pub fn is_leader_key(key: &KeyEvent, base: ShortcutBase) -> bool {
-    matches!(key.code, KeyCode::Char(letter) if letter.eq_ignore_ascii_case(&base.letter()))
-        && key.modifiers.contains(KeyModifiers::CONTROL)
+    match (base.letter(), key.code) {
+        // Raw terminal input cannot distinguish Ctrl+I from Tab or Ctrl+M
+        // from Enter. These bases remain available as requested, with an
+        // explicit severe warning in the settings screen.
+        ('i', KeyCode::Tab) | ('m', KeyCode::Enter) => true,
+        (_, KeyCode::Char(letter)) => {
+            letter.eq_ignore_ascii_case(&base.letter())
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+        }
+        _ => false,
+    }
 }
 
 /// Looks up the action bound to a letter pressed right after the leader,
@@ -416,6 +432,16 @@ mod tests {
         );
         assert!(!is_leader_key(&ctrl_a, ShortcutBase::B));
         assert!(is_leader_key(&ctrl_b, ShortcutBase::B));
+    }
+
+    #[test]
+    fn ctrl_i_and_ctrl_m_terminal_ambiguities_remain_selectable() {
+        let tab = key(KeyCode::Tab, KeyModifiers::NONE);
+        let enter = key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(is_leader_key(&tab, ShortcutBase::parse("i").unwrap()));
+        assert!(is_leader_key(&enter, ShortcutBase::parse("m").unwrap()));
+        assert!(!is_leader_key(&tab, ShortcutBase::A));
+        assert!(!is_leader_key(&enter, ShortcutBase::A));
     }
 
     #[test]

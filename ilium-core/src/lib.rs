@@ -324,6 +324,25 @@ impl Tree {
         self.nodes.values().filter(|n| n.is_pane())
     }
 
+    pub fn pane_ids_in_tree_order(&self) -> Vec<NodeId> {
+        fn collect(tree: &Tree, parent: NodeId, pane_ids: &mut Vec<NodeId>) {
+            let Ok(children) = tree.children_of(parent) else {
+                return;
+            };
+            for child in children {
+                match tree.get(*child) {
+                    Some(node) if node.is_pane() => pane_ids.push(*child),
+                    Some(node) if node.is_container() => collect(tree, *child, pane_ids),
+                    _ => {}
+                }
+            }
+        }
+
+        let mut pane_ids = Vec::new();
+        collect(self, ROOT_ID, &mut pane_ids);
+        pane_ids
+    }
+
     /// All node ids, in no particular order (used for persistence/debugging).
     pub fn all_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.nodes.keys().copied()
@@ -1327,5 +1346,34 @@ mod tests {
             ),
             Err(TreeError::PaneAlreadyInSplitView(id)) if id == pane
         ));
+    }
+
+    #[test]
+    fn split_views_accept_every_supported_member_count() {
+        for pane_count in 0..=MAXIMUM_SPLIT_VIEW_PANES {
+            let mut tree = Tree::new();
+            let group = tree.add_group(ROOT_ID, "work").unwrap();
+            let panes = (0..pane_count)
+                .map(|index| {
+                    tree.add_pane(
+                        group,
+                        format!("pane {index}"),
+                        PaneContentKind::Terminal,
+                    )
+                    .unwrap()
+                })
+                .collect::<Vec<_>>();
+
+            let split = tree
+                .create_split_view(
+                    group,
+                    "split",
+                    SplitOrientation::Vertical,
+                    &panes,
+                )
+                .unwrap();
+
+            assert_eq!(tree.children_of(split).unwrap().len(), pane_count);
+        }
     }
 }

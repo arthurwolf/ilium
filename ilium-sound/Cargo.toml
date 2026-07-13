@@ -1,0 +1,9 @@
+[package]
+name = "ilium-sound"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ilium-core = { version = "0.1.0", path = "../ilium-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"

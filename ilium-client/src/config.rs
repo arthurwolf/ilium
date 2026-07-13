@@ -16,6 +16,7 @@ use std::path::Path;
 
 use ratatui::style::Color;
 use serde::Deserialize;
+use ilium_sound::SoundSettings;
 
 use crate::error::ClientError;
 use crate::keymap::{self, KeyBinding, ShortcutBase, LEADER_BINDINGS};
@@ -40,6 +41,9 @@ pub struct ClientConfig {
     /// running client can also *write*, not just read at startup -- see
     /// [`save_ui_settings`].
     pub ui: UiSettings,
+    /// User-global sound source and event checkboxes. The client persists
+    /// changes; the detached server owns actual playback.
+    pub sound: SoundSettings,
 }
 
 impl Default for ClientConfig {
@@ -49,6 +53,7 @@ impl Default for ClientConfig {
             keyboard: KeyboardSettings::default(),
             theme: Theme::default(),
             ui: UiSettings::default(),
+            sound: SoundSettings::default(),
         }
     }
 }
@@ -107,6 +112,8 @@ struct RawClientConfig {
     theme: RawThemeConfig,
     #[serde(default)]
     ui: RawUiConfig,
+    #[serde(default)]
+    sound: SoundSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -233,6 +240,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         keyboard,
         theme,
         ui,
+        sound: raw.sound,
     })
 }
 
@@ -441,10 +449,28 @@ pub fn save_keyboard_settings(
     let table = document
         .as_table_mut()
         .expect("a TOML document's root is always a table");
-    table.insert(
-        "keyboard".to_string(),
-        keyboard_settings_to_toml(keyboard),
-    );
+    table.insert("keyboard".to_string(), keyboard_settings_to_toml(keyboard));
+    write_toml_document(&path, &document)
+}
+
+/// Persists the complete `[sound]` table without replacing settings owned by
+/// either the client or server. The server receives the same typed value over
+/// IPC for immediate application; this file is the restart/global-session
+/// source of truth.
+pub fn save_sound_settings(
+    config_dir: &Path,
+    sound: &SoundSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let sound_value = toml::Value::try_from(sound).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("sound".to_string(), sound_value);
     write_toml_document(&path, &document)
 }
 
@@ -478,9 +504,17 @@ fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), Client
             source: Box::new(ConfigSaveError::Write(source)),
         })?;
     }
-    std::fs::write(path, serialized).map_err(|source| ClientError::ConfigSave {
+    let temporary_path = path.with_extension(format!("toml.tmp-{}", std::process::id()));
+    std::fs::write(&temporary_path, serialized).map_err(|source| ClientError::ConfigSave {
         path: path.to_path_buf(),
         source: Box::new(ConfigSaveError::Write(source)),
+    })?;
+    std::fs::rename(&temporary_path, path).map_err(|source| {
+        let _ = std::fs::remove_file(&temporary_path);
+        ClientError::ConfigSave {
+            path: path.to_path_buf(),
+            source: Box::new(ConfigSaveError::Write(source)),
+        }
     })
 }
 
@@ -533,7 +567,37 @@ mod tests {
         let dir = scratch_dir();
         let config = load(&dir).expect("missing file is not an error");
         assert_eq!(config.keybindings.len(), LEADER_BINDINGS.len());
+        assert_eq!(config.keyboard, KeyboardSettings::default());
         assert_eq!(config.theme, Theme::default());
+    }
+
+    #[test]
+    fn keyboard_shortcut_base_loads_case_insensitively() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[keyboard]\nshortcut_base = \"B\"\n",
+        )
+        .unwrap();
+        let config = load(&dir).expect("valid keyboard config should load");
+        assert_eq!(config.keyboard.shortcut_base, ShortcutBase::B);
+    }
+
+    #[test]
+    fn keyboard_shortcut_base_rejects_non_letters() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[keyboard]\nshortcut_base = \"?\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidShortcutBase(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -759,5 +823,27 @@ mod tests {
             Some(keymap::Action::Quit)
         );
         assert_eq!(config.ui, UiSettings::default());
+    }
+
+    #[test]
+    fn save_keyboard_settings_round_trips_and_preserves_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ntree_width = 40\n[keybindings]\nquit = \"z\"\n",
+        )
+        .unwrap();
+        let keyboard = KeyboardSettings {
+            shortcut_base: ShortcutBase::B,
+        };
+        save_keyboard_settings(&dir, &keyboard).expect("keyboard save should succeed");
+
+        let config = load(&dir).expect("saved keyboard config should load back");
+        assert_eq!(config.keyboard, keyboard);
+        assert_eq!(config.ui.tree_width, 40);
+        assert_eq!(
+            keymap::action_for_table(&config.keybindings, 'z'),
+            Some(keymap::Action::Quit)
+        );
     }
 }

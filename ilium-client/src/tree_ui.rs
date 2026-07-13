@@ -91,7 +91,7 @@ const ROW_ACTION_WIDTH: u16 = 2;
 /// a hovered row (see `row_action_at`/`draw_row_actions`).
 const ROW_ACTION_COUNT: u16 = 5;
 
-/// Actions available from the hover-only tree toolbar.
+/// Actions available from the tree toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeToolbarAction {
     Shell,
@@ -100,19 +100,23 @@ pub enum TreeToolbarAction {
     Editor,
     Board,
     Group,
+    Split,
     Folder,
+    Settings,
 }
 
 impl TreeToolbarAction {
     /// Ordered set used for both rendering and hit testing.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Shell,
         Self::Claude,
         Self::Codex,
         Self::Editor,
         Self::Board,
         Self::Group,
+        Self::Split,
         Self::Folder,
+        Self::Settings,
     ];
 
     /// Single glyph shown on the button, reusing the same symbol the tree
@@ -126,7 +130,9 @@ impl TreeToolbarAction {
             Self::Editor => "\u{1F589}",
             Self::Board => "▦",
             Self::Group => "\u{1F4C1}",
+            Self::Split => "▥",
             Self::Folder => "\u{1F5C0}",
+            Self::Settings => "\u{2699}",
         }
     }
 
@@ -142,7 +148,9 @@ impl TreeToolbarAction {
             Self::Editor => Color::Magenta,
             Self::Board => Color::Cyan,
             Self::Group => Color::Rgb(0x7a, 0xa2, 0xf7),
+            Self::Split => Color::Rgb(0xbb, 0x9a, 0xf7),
             Self::Folder => Color::Cyan,
+            Self::Settings => Color::Gray,
         }
     }
 
@@ -156,7 +164,9 @@ impl TreeToolbarAction {
             Self::Editor => "new editor",
             Self::Board => "new board",
             Self::Group => "new group",
+            Self::Split => "new split view",
             Self::Folder => "open folder",
+            Self::Settings => "settings",
         }
     }
 }
@@ -301,7 +311,7 @@ fn build_item(
 ) -> TreeItem<'static, NodeId> {
     let flash_on = should_flash(node.id, recently_created, elapsed_ms);
     match &node.kind {
-        NodeKind::Container(_) => {
+        NodeKind::Container(container) => {
             let children = build_children(
                 tree,
                 node.id,
@@ -310,7 +320,12 @@ fn build_item(
                 recently_created,
                 panel_width,
             );
-            let label = node_label(Span::raw("\u{1F4C1}"), None, Span::raw(node.name.clone()));
+            let icon = match container.split_orientation() {
+                Some(ilium_core::SplitOrientation::Vertical) => "▥",
+                Some(ilium_core::SplitOrientation::Horizontal) => "▤",
+                None => "\u{1F4C1}",
+            };
+            let label = node_label(Span::raw(icon), None, Span::raw(node.name.clone()));
             let label = apply_recent_pulse(label, flash_on);
             // `NodeId`s are unique across the whole `Tree` (its own
             // invariant), so they can't collide among siblings here --
@@ -647,20 +662,41 @@ pub fn toolbar_area(area: Rect) -> Rect {
 
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn toolbar_action_at(area: Rect, position: Position) -> Option<TreeToolbarAction> {
+    toolbar_button_rects(area)
+        .into_iter()
+        .find_map(|(action, button_area)| button_area.contains(position).then_some(action))
+}
+
+/// Button rectangles shared by drawing and hit testing. Creation actions
+/// flow from the left; Settings is anchored at the far right and never moves
+/// as the panel expands. On a narrow panel, only left actions that fit before
+/// Settings are included.
+pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
+    const BUTTON_VISIBLE_WIDTH: u16 = TOOLBAR_BUTTON_WIDTH - 1;
     let toolbar = toolbar_area(area);
-    if !toolbar.contains(position) {
-        return None;
+    if toolbar.width < BUTTON_VISIBLE_WIDTH {
+        return Vec::new();
     }
-    let index = usize::from(position.x.saturating_sub(toolbar.x) / TOOLBAR_BUTTON_WIDTH);
-    // `draw_toolbar` stops drawing once a button's slot no longer fully fits
-    // in the toolbar's width (a narrow tree panel, e.g. `MIN_TREE_WIDTH`,
-    // can fit fewer than all five). Mirror that same fit check here so a
-    // click past the last actually-drawn button is a no-op instead of
-    // silently triggering an action with no visible button behind it.
-    if (index as u16 + 1) * TOOLBAR_BUTTON_WIDTH > toolbar.width {
-        return None;
+    let settings_area = Rect::new(
+        toolbar.right() - BUTTON_VISIBLE_WIDTH,
+        toolbar.y,
+        BUTTON_VISIBLE_WIDTH,
+        toolbar.height,
+    );
+    let mut buttons = Vec::with_capacity(TreeToolbarAction::ALL.len());
+    for (index, action) in TreeToolbarAction::ALL[..TreeToolbarAction::ALL.len() - 1]
+        .iter()
+        .enumerate()
+    {
+        let x = toolbar.x + index as u16 * TOOLBAR_BUTTON_WIDTH;
+        let button_area = Rect::new(x, toolbar.y, BUTTON_VISIBLE_WIDTH, toolbar.height);
+        if button_area.right() > settings_area.x {
+            break;
+        }
+        buttons.push((*action, button_area));
     }
-    TreeToolbarAction::ALL.get(index).copied()
+    buttons.push((TreeToolbarAction::Settings, settings_area));
+    buttons
 }
 
 /// Whether `id` has an automatic title source `TreeRowAction::Retitle` can
@@ -831,9 +867,15 @@ pub fn render(
     if let Some(hit) = options.hover.node {
         draw_row_actions(frame, area, hit.row, applicable_row_actions(tree, hit.id));
     }
-    if options.hover.toolbar_hovered {
+    if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
         draw_toolbar(frame, area, options.hover.toolbar_action);
     }
+}
+
+/// Footer actions stay visible whenever the tree has keyboard focus, or while
+/// the pointer is over the footer itself.
+const fn is_toolbar_visible(tree_focused: bool, toolbar_hovered: bool) -> bool {
+    tree_focused || toolbar_hovered
 }
 
 /// Produces the compact left-panel title from Ilium's product name and the
@@ -919,15 +961,10 @@ fn draw_row_actions(frame: &mut Frame, area: Rect, row: u16, actions: &[TreeRowA
 /// confirm exactly what a click would do before it happens.
 fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction>) {
     let toolbar = toolbar_area(area);
-    let icon_row = Rect::new(toolbar.x, toolbar.y, toolbar.width, 1);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
-    for (index, action) in TreeToolbarAction::ALL.iter().enumerate() {
-        let x = toolbar.x + index as u16 * TOOLBAR_BUTTON_WIDTH;
-        if x + TOOLBAR_BUTTON_WIDTH > icon_row.right() {
-            break;
-        }
-        let is_hovered = hovered == Some(*action);
+    for (action, button_area) in toolbar_button_rects(area) {
+        let is_hovered = hovered == Some(action);
         let style = if is_hovered {
             Style::new()
                 .fg(theme::accent_fg())
@@ -936,7 +973,6 @@ fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction
         } else {
             Style::new().fg(action.accent())
         };
-        let button_area = Rect::new(x, icon_row.y, TOOLBAR_BUTTON_WIDTH - 1, 1);
         let button = Paragraph::new(Line::from(Span::styled(
             format!(" {} ", action.glyph()),
             style,
@@ -1168,29 +1204,19 @@ mod tests {
     #[test]
     fn toolbar_hit_testing_maps_each_compact_icon() {
         let area = Rect::new(0, 0, 32, 12);
-        assert_eq!(
-            toolbar_action_at(area, Position::new(1, 10)),
-            Some(TreeToolbarAction::Shell)
-        );
-        assert_eq!(
-            toolbar_action_at(area, Position::new(9, 10)),
-            Some(TreeToolbarAction::Codex)
-        );
-        assert_eq!(
-            toolbar_action_at(area, Position::new(17, 10)),
-            Some(TreeToolbarAction::Board)
-        );
-        assert_eq!(toolbar_action_at(area, Position::new(29, 10)), None);
+        for (action, button_area) in toolbar_button_rects(area) {
+            assert_eq!(
+                toolbar_action_at(area, Position::new(button_area.x, button_area.y)),
+                Some(action)
+            );
+        }
     }
 
     #[test]
-    fn toolbar_hit_testing_ignores_dead_space_past_the_last_drawn_button_at_min_tree_width() {
+    fn toolbar_keeps_settings_right_aligned_without_overlapping_left_actions() {
         // `layout::MIN_TREE_WIDTH` (16) with a 1-cell border each side
-        // leaves a 14-column-wide toolbar -- room for only three 4-wide
-        // button slots (Shell, Claude, Codex); Editor and Group never get
-        // drawn. A click in the two dead-space columns past the last drawn
-        // button must not resolve to the button whose slot would have sat
-        // there if the toolbar were wide enough.
+        // leaves a 14-column-wide toolbar -- room for three left actions and
+        // the right-anchored settings button.
         let area = Rect::new(0, 0, 16, 12);
         let toolbar = toolbar_area(area);
         assert_eq!(toolbar.width, 14);
@@ -1201,12 +1227,34 @@ mod tests {
         );
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 12, toolbar.y)),
-            None
+            Some(TreeToolbarAction::Settings)
         );
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 13, toolbar.y)),
-            None
+            Some(TreeToolbarAction::Settings)
         );
+
+        let buttons = toolbar_button_rects(area);
+        let settings_area = buttons
+            .iter()
+            .find(|(action, _)| *action == TreeToolbarAction::Settings)
+            .map(|(_, area)| *area)
+            .unwrap();
+        assert_eq!(settings_area.right(), toolbar.right());
+        for (_, left_area) in buttons
+            .iter()
+            .filter(|(action, _)| *action != TreeToolbarAction::Settings)
+        {
+            assert!(left_area.right() <= settings_area.x);
+        }
+    }
+
+    #[test]
+    fn toolbar_is_visible_for_tree_focus_or_footer_hover() {
+        assert!(is_toolbar_visible(true, false));
+        assert!(is_toolbar_visible(false, true));
+        assert!(is_toolbar_visible(true, true));
+        assert!(!is_toolbar_visible(false, false));
     }
 
     #[test]

@@ -1490,6 +1490,7 @@ dependencies = [
  "ilium-core",
  "ilium-ipc",
  "ilium-kilo-gateway",
+ "ilium-sound",
  "image",
  "pulldown-cmark",
  "ratatui",
@@ -1532,6 +1533,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "ilium-core",
+ "ilium-sound",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -1569,6 +1571,7 @@ dependencies = [
  "ilium-detect",
  "ilium-ipc",
  "ilium-pty",
+ "ilium-sound",
  "libc",
  "notify-rust",
  "serde",
@@ -1581,6 +1584,15 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ilium-sound"
+version = "0.1.0"
+dependencies = [
+ "ilium-core",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

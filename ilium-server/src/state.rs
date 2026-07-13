@@ -16,11 +16,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ilium_core::{NodeId, Tree};
 use ilium_detect::AgentSignature;
 use ilium_ipc::ServerEvent;
+use ilium_sound::SoundSettings;
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
+use crate::sounds::PlaybackRequest;
 
 /// Capacity of the per-session broadcast channel. Sized generously for
 /// terminal output bursts (a `cat` of a large file can emit many
@@ -38,6 +40,12 @@ pub struct ServerState {
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
+    pub sound_settings: RwLock<ilium_sound::SoundSettings>,
+    pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
+    /// Live sound configuration, replaced atomically by the settings UI so
+    /// preview and future detection notifications share one server-owned
+    /// source of truth.
+    pub sound_settings: RwLock<SoundSettings>,
     /// User-configured agent signatures checked alongside `ilium-detect`'s
     /// built-in registry on every detection-loop tick (see
     /// `ilium_detect::identify_agent_with_extra`). Never mutated after
@@ -82,6 +90,8 @@ impl ServerState {
         snapshot_path: PathBuf,
         detection_config: DetectionConfig,
         notifications_config: NotificationsConfig,
+        sound_settings: ilium_sound::SoundSettings,
+        sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
         custom_signatures: Vec<AgentSignature>,
     ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -90,6 +100,9 @@ impl ServerState {
             snapshot_path,
             detection_config,
             notifications_config,
+            sound_settings: RwLock::new(sound_settings),
+            sound_requests,
+            sound_settings: RwLock::new(SoundSettings::default()),
             custom_signatures,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),

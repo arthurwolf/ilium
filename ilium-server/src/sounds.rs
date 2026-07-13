@@ -1,0 +1,178 @@
+//! Non-blocking server-owned sound playback and global config reload.
+//!
+//! Detection enqueues semantic events into one bounded actor per detached
+//! server. The actor serializes external player processes away from the
+//! detection and IPC loops, so a long sound or unavailable audio device can
+//! never hold the tree/pane locks or delay another status broadcast.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use ilium_sound::{SoundEvent, SoundSettings};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+
+use crate::state::ServerState;
+
+const SOUND_QUEUE_CAPACITY: usize = 64;
+const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Injectable blocking playback boundary. Production delegates to
+/// `ilium-sound`; tests use a recorder or no-op and never touch audio.
+pub trait SoundPlayer: Send + Sync {
+    fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError>;
+}
+
+/// Real operating-system player used by `ilium-server`'s binary entrypoint.
+pub struct SystemSoundPlayer;
+
+impl SoundPlayer for SystemSoundPlayer {
+    fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
+        ilium_sound::play(settings)
+    }
+}
+
+/// Silent player for integration tests whose subject is not audio.
+pub struct NoopSoundPlayer;
+
+impl SoundPlayer for NoopSoundPlayer {
+    fn play(&self, _settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlaybackRequest {
+    pub settings: SoundSettings,
+    pub event: Option<SoundEvent>,
+    pub pane_name: Option<String>,
+}
+
+/// Creates the actor's bounded sender and owned task.
+pub(crate) fn spawn(
+    player: Arc<dyn SoundPlayer>,
+) -> (mpsc::Sender<PlaybackRequest>, JoinHandle<()>) {
+    let (sender, mut receiver) = mpsc::channel::<PlaybackRequest>(SOUND_QUEUE_CAPACITY);
+    let task = tokio::spawn(async move {
+        while let Some(request) = receiver.recv().await {
+            let player = Arc::clone(&player);
+            let settings = request.settings;
+            let result = tokio::task::spawn_blocking(move || player.play(&settings)).await;
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::warn!(
+                    "sound playback failed for {:?} in pane {:?}: {error}",
+                    request.event,
+                    request.pane_name
+                ),
+                Err(error) => tracing::warn!(
+                    "sound playback task panicked for {:?} in pane {:?}: {error}",
+                    request.event,
+                    request.pane_name
+                ),
+            }
+        }
+    });
+    (sender, task)
+}
+
+/// Enqueues without awaiting capacity. A full audio queue must never turn a
+/// burst of agent transitions into backpressure on detection.
+pub(crate) fn enqueue(state: &ServerState, request: PlaybackRequest) {
+    if let Err(error) = state.sound_requests.try_send(request) {
+        tracing::warn!("dropping sound request because the playback queue is unavailable: {error}");
+    }
+}
+
+/// Polls the user-global config file for changes so all already-running
+/// project servers converge on settings changed in any attached client.
+/// Invalid/intermediate writes retain the last known-good value and retry on
+/// the next tick.
+pub(crate) fn spawn_config_watcher(
+    state: Arc<ServerState>,
+    config_path: PathBuf,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut observed_fingerprint = file_fingerprint(&config_path);
+        let mut interval = tokio::time::interval(CONFIG_POLL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            let fingerprint = file_fingerprint(&config_path);
+            if fingerprint == observed_fingerprint {
+                continue;
+            }
+            let Some(config_dir) = config_path.parent() else {
+                continue;
+            };
+            match crate::config::load(config_dir) {
+                Ok(config) => {
+                    *state.sound_settings.write().await = config.sound;
+                    observed_fingerprint = fingerprint;
+                }
+                Err(error) => tracing::warn!(
+                    "failed to reload sound settings from {:?}, keeping last valid settings: {error}",
+                    config_path
+                ),
+            }
+        }
+    })
+}
+
+fn file_fingerprint(path: &Path) -> Option<(SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct RecordingPlayer {
+        calls: Arc<Mutex<Vec<SoundSettings>>>,
+    }
+
+    impl SoundPlayer for RecordingPlayer {
+        fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
+            self.calls.lock().unwrap().push(settings.clone());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn actor_forwards_requests_in_order_without_real_audio() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let player = Arc::new(RecordingPlayer {
+            calls: Arc::clone(&calls),
+        });
+        let (sender, task) = spawn(player);
+        let mut first = SoundSettings::default();
+        first.file = Some(PathBuf::from("/first.oga"));
+        let mut second = first.clone();
+        second.file = Some(PathBuf::from("/second.oga"));
+
+        sender
+            .send(PlaybackRequest {
+                settings: first.clone(),
+                event: Some(SoundEvent::AgentFinished),
+                pane_name: Some("one".to_string()),
+            })
+            .await
+            .unwrap();
+        sender
+            .send(PlaybackRequest {
+                settings: second.clone(),
+                event: Some(SoundEvent::ApprovalRequired),
+                pane_name: Some("two".to_string()),
+            })
+            .await
+            .unwrap();
+        drop(sender);
+        task.await.unwrap();
+
+        assert_eq!(*calls.lock().unwrap(), vec![first, second]);
+    }
+}

@@ -22,6 +22,51 @@ const CREATE_GROUP_WIDTH: u16 = 54;
 /// nested groups than this scrolls the list (see `create_group_visible_window`)
 /// rather than growing the popup past a reasonable screen fraction.
 pub const CREATE_GROUP_MAX_VISIBLE: usize = 7;
+pub const CREATE_SPLIT_MEMBER_MAX_VISIBLE: usize = 9;
+
+pub fn create_split_orientation_dialog_area(screen_area: Rect) -> Rect {
+    centered_fixed_rect(54, 8, screen_area)
+}
+
+pub fn create_split_members_dialog_area(screen_area: Rect, choice_count: usize) -> Rect {
+    let visible_count = choice_count.clamp(1, CREATE_SPLIT_MEMBER_MAX_VISIBLE) as u16;
+    centered_fixed_rect(72, visible_count + 6, screen_area)
+}
+
+pub fn create_split_member_visible_window(
+    selected_index: usize,
+    choice_count: usize,
+) -> (usize, usize) {
+    let start = selected_index
+        .saturating_sub(CREATE_SPLIT_MEMBER_MAX_VISIBLE / 2)
+        .min(choice_count.saturating_sub(CREATE_SPLIT_MEMBER_MAX_VISIBLE));
+    (
+        start,
+        (start + CREATE_SPLIT_MEMBER_MAX_VISIBLE).min(choice_count),
+    )
+}
+
+pub fn create_split_member_row_at(
+    screen_area: Rect,
+    selected_index: usize,
+    choice_count: usize,
+    position: Position,
+) -> Option<usize> {
+    let popup = create_split_members_dialog_area(screen_area, choice_count);
+    let inner = Rect::new(
+        popup.x.saturating_add(1),
+        popup.y.saturating_add(1),
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    );
+    let first_choice_row = inner.y.saturating_add(2);
+    if position.x < inner.x || position.x >= inner.right() || position.y < first_choice_row {
+        return None;
+    }
+    let (start, end) = create_split_member_visible_window(selected_index, choice_count);
+    let index = start + usize::from(position.y.saturating_sub(first_choice_row));
+    (index < end).then_some(index)
+}
 
 /// Interior row layout of the create-group dialog, computed purely from its
 /// outer `area` -- shared by rendering (`ui::draw_create_group`) and mouse

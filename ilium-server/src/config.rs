@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use ilium_core::AgentClass;
 use ilium_detect::AgentSignature;
+use ilium_sound::SoundSettings;
 use serde::Deserialize;
 
 use crate::error::{ConfigLoadError, ServerError};
@@ -81,6 +82,7 @@ impl Default for NotificationsConfig {
 pub struct ServerConfig {
     pub detection: DetectionConfig,
     pub notifications: NotificationsConfig,
+    pub sound: SoundSettings,
     /// User-configured agent signatures (`[[detection.custom_signatures]]`)
     /// to check alongside `ilium-detect`'s built-in registry -- see
     /// `ilium_detect::identify_agent_with_extra`, the registry extension
@@ -100,6 +102,8 @@ struct RawConfig {
     detection: RawDetectionConfig,
     #[serde(default)]
     notifications: RawNotificationsConfig,
+    #[serde(default)]
+    sound: SoundSettings,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -234,6 +238,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
     Ok(ServerConfig {
         detection,
         notifications: NotificationsConfig::from_raw(raw.notifications),
+        sound: raw.sound,
         custom_signatures,
     })
 }
@@ -260,6 +265,7 @@ mod tests {
         // asserted field by field instead of via one struct comparison.
         assert_eq!(config.detection, DetectionConfig::default());
         assert_eq!(config.notifications, NotificationsConfig::default());
+        assert_eq!(config.sound, SoundSettings::default());
         assert!(config.custom_signatures.is_empty());
     }
 
@@ -337,6 +343,33 @@ mod tests {
         // The `[detection]` table was left unspecified entirely -- absence
         // of that whole table must not disturb its own defaults.
         assert_eq!(config.detection, DetectionConfig::default());
+    }
+
+    #[test]
+    fn sound_settings_are_loaded_with_partial_event_defaults() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[sound]\n",
+                "source = \"sound_file\"\n",
+                "file = \"/usr/share/sounds/example.oga\"\n",
+                "\n",
+                "[sound.events]\n",
+                "approval_required = true\n",
+            ),
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid sound config should load");
+        assert_eq!(config.sound.source, ilium_sound::SoundSourceKind::SoundFile);
+        assert_eq!(
+            config.sound.file,
+            Some(PathBuf::from("/usr/share/sounds/example.oga"))
+        );
+        assert!(config.sound.events.agent_finished);
+        assert!(config.sound.events.approval_required);
+        assert!(!config.sound.events.agent_started);
     }
 
     #[test]

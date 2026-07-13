@@ -16,6 +16,7 @@ handlebars = "6.3.2"
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-kilo-gateway = { version = "0.1.0", path = "../ilium-kilo-gateway" }
+ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 pulldown-cmark = "0.13"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }

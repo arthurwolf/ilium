@@ -23,10 +23,10 @@
 * [ ] Right click on a given agent to fork it into a new forked session using the stuff in claude code that lets us do that.
 * [ ] File navigation entry in the list.
 * [ ] File search entry in the list.
-* [ ] Support for themes, and import some themes from vs code and some other terminal-based goodies like oh-my-zsh
-* [ ] Desktop/OS notifications.
+* [x] Support for themes, and import some themes from vs code and some other terminal-based goodies like oh-my-zsh
+* [x] Desktop/OS notifications.
 * [ ] Full configuration screen with great user experience.
-* [ ] Kanban board tab/panel type (with cards on the left and details on the right and auto-resize based on focus with mouse/keyboard, plus keyboard navigation, and up/down/left/right arrows to move them around), with creation dialog that lets you have it either be file based (one file for each column) or folder based (one folder for each column, each entry is a file)
+* [-] Kanban board tab/panel type (with cards on the left and details on the right and auto-resize based on focus with mouse/keyboard, plus keyboard navigation, and up/down/left/right arrows to move them around), with creation dialog that lets you have it either be file based (one file for each column) or folder based (one folder for each column, each entry is a file)
 * [ ] Left-panel file explorer, and "drag file to agent" feature.
 * [ ] Optional git +32/-11 green/red dispaly next to the branch "second line" showing the additions/removals in git for this terminal/session/group/worktree/etc.
 * [ ] Worktree "groups"/folders have a special icon, and right click menu that lets us do things like commit/push with llm.
@@ -35,17 +35,17 @@
 * [ ] Explore https://github.com/doy/vt100-rust
 * [ ] Add support for gemini, opencode, and other agent types.
 * [ ] Create pull requests from a worktree (either a group or a terminal or agent etc)
-* [ ] Fix the project-wide ilium/ilium typo.
+* [x] Fix the project-wide ilium/ilium typo.
 * [ ] Docker sandboxes as an option for groups and for agents and for terminals, letting them "share"/enter an existing sandbox too, as part of the dialog/modal when creating a new agent/terminal/etc.
 * [ ] Spec/Plan creation and execution.
 * [ ] Machine control panel/tree entry, lets us use visual agents and screen caps to detect useful information from screen caps and click in interresting/useful places?
 * [ ] Voice dictation/input.
 * [ ] Fully voice navigation and user interface usage using the latest gpt models, including letting it re-organize everything.
-* [ ] « Magic »: LLM-based re-organizing and re-labelling of everything including giving the LLM screen caps of each terminal and asking it to sort them into folders and rename each thing.
+* [~] « Magic »: LLM-based re-organizing and re-labelling of everything including giving the LLM screen caps of each terminal and asking it to sort them into folders and rename each thing.
 * [ ] Make it a settings option if a worktree-associated group/folder can have terminals/things that use another worktree/none, or if that's forbidden.
 * [ ] Search through everything including terminal histories and agent histories, with a search result pane where if you click on a result it gets you to that pane/window at the right place etc.
 * [ ] Agent group chat, with each agent being given access to a chat group (in the form of a text file), and the user can monitor this.
-* [ ] Agent group chat -> agents know their session ID, can get their name from ilium with api calls, have a chat setup thing where we add instructiions to the project's CLAUDE.md/AGENTS.md to "set up" the group chat giving them the means to monitor it and opening a group chat monitoring "pane", with the main goal being that agents don't interfere with each other, or sending instructions to all agents.
+* [ ] Agent group chat -> agents know their session ID, can get their name from ilium with api calls, have a chat setup thing where we add instructiions to the project's CLAUDE.md/AGENTS.md to "set up" the group chat giving them the means to monitor it and opening a group chat monitoring "pane", with the main goal being that agents don't interfere with each other, or sending instructions to all agents. 
 * [ ] Agent group chat -> if possible add per-project (.claude/) hooks that tell the agent to check the group chat if it has changed etc, and to update it when it does something important, or with warnings for others, etc.
 * [ ] Todo file to kanban board tool (with llm and context)
 * [ ] Optionally, instead of using kilo-gateway for small llm tasks, use claude code with low instrumentation (no tools, no system prompt) and have us run the agent "in the background" giving it a simple task and asking it to answer with json to a /tmp/ file or something
@@ -62,3 +62,22 @@
 * [ ] In agents detect the pattern « ✔ Goal achieved (1h · 1 turn · 210.7k tokens) » (this one is for claude, figure out the codex one) and add a "goal" or "success" type flag/icon to that agent
 * [x] Save and restore the buffer/history of terminals.
 * [x] New "type" in the left panel, folder (not group) to navigate/see files on disk and easily/quickly open them.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
