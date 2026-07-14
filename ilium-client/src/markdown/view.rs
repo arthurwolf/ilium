@@ -30,14 +30,19 @@ pub fn max_scroll(document: &RenderedDocument, width: u16, viewport_height: u16)
     content_height(document, width).saturating_sub(viewport_height)
 }
 
+/// Builds the word-wrapped `Paragraph` for a `Text` block's lines. The one
+/// place that owns this wrap configuration, so `block_height` (measuring
+/// for a scroll-clamp pass) and `draw_block` (measuring immediately before
+/// drawing) can't drift apart on how a text block wraps.
+fn text_paragraph(lines: &[ratatui::text::Line<'static>]) -> Paragraph<'static> {
+    Paragraph::new(lines.to_vec()).wrap(Wrap { trim: false })
+}
+
 fn block_height(block: &RenderedBlock, width: u16) -> u16 {
     match block {
-        RenderedBlock::Text(lines) => u16::try_from(
-            Paragraph::new(lines.clone())
-                .wrap(Wrap { trim: false })
-                .line_count(width.max(1)),
-        )
-        .unwrap_or(u16::MAX),
+        RenderedBlock::Text(lines) => {
+            u16::try_from(text_paragraph(lines).line_count(width.max(1))).unwrap_or(u16::MAX)
+        }
         RenderedBlock::BlankLines(lines) => u16::try_from(lines.len()).unwrap_or(u16::MAX),
         RenderedBlock::Header(protocol) | RenderedBlock::Image(protocol) => protocol.size().height,
         RenderedBlock::Placeholder(_) => 1,
@@ -48,47 +53,90 @@ fn block_height(block: &RenderedBlock, width: u16) -> u16 {
 pub fn render(frame: &mut Frame, area: Rect, document: &RenderedDocument, scroll: u16) {
     let mut y = i64::from(area.y) - i64::from(scroll);
     for block in &document.blocks {
-        let height = block_height(block, area.width);
-        draw_block(frame, area, block, y, height);
-        y += i64::from(height);
+        y += draw_block(frame, area, block, y);
     }
 }
 
-fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64, height: u16) {
+/// Draws one block at running cursor `y` (clipped to `area`) and returns its
+/// full, unclipped height so the caller can advance past it regardless of
+/// how much -- if any -- was actually on screen.
+///
+/// A `Text` block's word-wrapped `Paragraph` is built exactly once here: the
+/// same owned clone of `lines` backs both the `line_count` height query and
+/// the widget actually handed to `render_widget`. Measuring and drawing used
+/// to build that `Paragraph` from a fresh `lines.clone()` each, which meant
+/// cloning every visible text block's content twice per frame -- and this
+/// runs on every frame a Rendered-mode markdown pane is on screen.
+fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64) -> i64 {
     let area_top = i64::from(area.y);
     let area_bottom = i64::from(area.bottom());
-    let visible_top = y.max(area_top);
-    let visible_bottom = (y + i64::from(height)).min(area_bottom);
-    if visible_bottom <= visible_top || height == 0 {
-        return;
-    }
-    let visible_height = (visible_bottom - visible_top) as u16;
-    let rect = Rect::new(area.x, visible_top as u16, area.width, visible_height);
 
     match block {
         RenderedBlock::Text(lines) => {
-            let skip = (visible_top - y) as u16;
-            let paragraph = Paragraph::new(lines.clone())
-                .wrap(Wrap { trim: false })
-                .scroll((skip, 0));
-            frame.render_widget(paragraph, rect);
+            let paragraph = text_paragraph(lines);
+            let height =
+                u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
+            let visible = visible_rect(area, area_top, area_bottom, y, height);
+            if let Some((visible_top, _, rect)) = visible {
+                let skip = (visible_top - y) as u16;
+                frame.render_widget(paragraph.scroll((skip, 0)), rect);
+            }
+            i64::from(height)
         }
         RenderedBlock::BlankLines(lines) => {
-            let skip = (visible_top - y) as u16;
-            frame.render_widget(Paragraph::new(lines.clone()).scroll((skip, 0)), rect);
+            let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+            let visible = visible_rect(area, area_top, area_bottom, y, height);
+            if let Some((visible_top, _, rect)) = visible {
+                let skip = (visible_top - y) as u16;
+                frame.render_widget(Paragraph::new(lines.clone()).scroll((skip, 0)), rect);
+            }
+            i64::from(height)
         }
         RenderedBlock::Placeholder(line) => {
-            frame.render_widget(Paragraph::new(line.clone()), rect);
+            let height: u16 = 1;
+            if let Some((_, _, rect)) = visible_rect(area, area_top, area_bottom, y, height) {
+                frame.render_widget(Paragraph::new(line.clone()), rect);
+            }
+            i64::from(height)
         }
         RenderedBlock::Header(protocol) | RenderedBlock::Image(protocol) => {
-            // Graphics protocols declare a fixed cell size and (mostly)
-            // can't partially render past it -- only draw once fully
-            // visible; it pops in as the user finishes scrolling to it.
-            if visible_top == y && visible_height == height {
-                frame.render_widget(Image::new(protocol), rect);
+            let height = protocol.size().height;
+            if let Some((visible_top, visible_height, rect)) =
+                visible_rect(area, area_top, area_bottom, y, height)
+            {
+                // Graphics protocols declare a fixed cell size and (mostly)
+                // can't partially render past it -- only draw once fully
+                // visible; it pops in as the user finishes scrolling to it.
+                if visible_top == y && visible_height == height {
+                    frame.render_widget(Image::new(protocol), rect);
+                }
             }
+            i64::from(height)
         }
     }
+}
+
+/// Clips a block spanning rows `[y, y + height)` to `area`'s visible rows,
+/// returning the visible top row, visible row count, and destination
+/// `Rect` -- or `None` when the block is entirely scrolled out of view.
+fn visible_rect(
+    area: Rect,
+    area_top: i64,
+    area_bottom: i64,
+    y: i64,
+    height: u16,
+) -> Option<(i64, u16, Rect)> {
+    if height == 0 {
+        return None;
+    }
+    let visible_top = y.max(area_top);
+    let visible_bottom = (y + i64::from(height)).min(area_bottom);
+    if visible_bottom <= visible_top {
+        return None;
+    }
+    let visible_height = (visible_bottom - visible_top) as u16;
+    let rect = Rect::new(area.x, visible_top as u16, area.width, visible_height);
+    Some((visible_top, visible_height, rect))
 }
 
 #[cfg(test)]

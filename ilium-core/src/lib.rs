@@ -1,4 +1,5 @@
-//! Pure domain model for ilium: a tree of Groups and Panes, no I/O.
+//! Pure domain model for ilium: a tree of containers, panes, and folder
+//! references, no I/O. Containers are normal groups or bounded split views.
 //!
 //! This crate has zero dependency on tokio, portable-pty, ratatui, or any
 //! other adapter. Everything here must stay unit-testable with plain
@@ -100,6 +101,24 @@ impl PaneTitleSource {
     }
 }
 
+/// One durable, server-owned input scheduled for a terminal pane. The tree
+/// carries the absolute deadline so every attached client renders the same
+/// countdown and a detached server can still execute it after the UI exits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledPaneInput {
+    pub execute_at_unix_millis: u64,
+    pub text: String,
+    pub send_enter: bool,
+}
+
+impl ScheduledPaneInput {
+    /// At least text or Enter must be present; otherwise the schedule would
+    /// wake the server only to perform an invisible no-op.
+    pub fn has_input(&self) -> bool {
+        !self.text.is_empty() || self.send_enter
+    }
+}
+
 pub const MAXIMUM_SPLIT_VIEW_PANES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +171,32 @@ impl ContainerNode {
             ContainerKind::SplitView { orientation } => Some(orientation),
         }
     }
+
+    /// Validates adding a pane to this container. `is_existing_child`
+    /// distinguishes a same-container reorder from a new member, because a
+    /// full split must still allow its existing panes to be reordered.
+    fn validate_pane_child(&self, is_existing_child: bool) -> Result<(), TreeError> {
+        if self.is_split_view()
+            && !is_existing_child
+            && self.children.len() >= MAXIMUM_SPLIT_VIEW_PANES
+        {
+            return Err(TreeError::SplitViewCapacityReached);
+        }
+        Ok(())
+    }
+
+    /// Enforces the child policy owned by this container abstraction. Normal
+    /// groups accept every domain node kind; split views accept panes only
+    /// and delegate their capacity rule to [`Self::validate_pane_child`].
+    fn validate_child(&self, child: &Node, is_existing_child: bool) -> Result<(), TreeError> {
+        if !self.is_split_view() {
+            return Ok(());
+        }
+        if !child.is_pane() {
+            return Err(TreeError::SplitViewOnlyAcceptsPanes);
+        }
+        self.validate_pane_child(is_existing_child)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -165,6 +210,11 @@ pub enum NodeKind {
         /// tree rather than a server runtime because boards have no PTY or
         /// background process to own.
         board_storage: Option<BoardStorage>,
+        /// At most one pending action per terminal pane. `serde(default)`
+        /// preserves crash-recovery compatibility with snapshots written
+        /// before scheduled input existed.
+        #[serde(default)]
+        scheduled_input: Option<ScheduledPaneInput>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -221,6 +271,10 @@ pub enum TreeError {
     NotAContainer(NodeId),
     #[error("node {0:?} is not a pane")]
     NotAPane(NodeId),
+    #[error("pane {0:?} is not a terminal")]
+    NotATerminal(NodeId),
+    #[error("scheduled input must contain text, Enter, or both")]
+    EmptyScheduledInput,
     #[error("cannot remove the root group")]
     CannotRemoveRoot,
     #[error("cannot move the root group")]
@@ -251,8 +305,8 @@ pub struct GroupListing {
     pub depth: usize,
 }
 
-/// Session tree: one root Group (id 0) containing an arbitrary-depth mix
-/// of Groups and Panes.
+/// Session tree: one root normal group (id 0) containing an arbitrary-depth
+/// mix of normal groups, split-view containers, panes, and folder roots.
 ///
 /// Derives `Serialize`/`Deserialize` so `ilium-server` can hand a full
 /// snapshot to `ilium-ipc` for the `TreeSnapshot` event and so the JSON
@@ -424,6 +478,7 @@ impl Tree {
                     status,
                     title_source: PaneTitleSource::Automatic,
                     board_storage: None,
+                    scheduled_input: None,
                 },
             },
         );
@@ -439,10 +494,7 @@ impl Tree {
         let NodeKind::Container(container) = &parent_node.kind else {
             return Err(TreeError::NotAContainer(parent));
         };
-        if container.is_split_view() && container.children.len() >= MAXIMUM_SPLIT_VIEW_PANES {
-            return Err(TreeError::SplitViewCapacityReached);
-        }
-        Ok(())
+        container.validate_pane_child(false)
     }
 
     /// Adds a board pane whose user-owned storage descriptor is persisted in
@@ -467,6 +519,7 @@ impl Tree {
                     status: PaneStatus::Board,
                     title_source: PaneTitleSource::Automatic,
                     board_storage: Some(storage),
+                    scheduled_input: None,
                 },
             },
         );
@@ -562,7 +615,7 @@ impl Tree {
         Ok(split_view_id)
     }
 
-    /// Removes a node. If it's a Group, removes its whole subtree.
+    /// Removes a node. If it is a container, removes its whole subtree.
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), TreeError> {
         if id == ROOT_ID {
             return Err(TreeError::CannotRemoveRoot);
@@ -661,6 +714,72 @@ impl Tree {
         }
     }
 
+    /// Replaces the pending input for one terminal pane. Replacement is
+    /// intentional: the context-menu action can be used again to move the
+    /// deadline or change the payload without stacking surprising actions.
+    pub fn schedule_pane_input(
+        &mut self,
+        id: NodeId,
+        scheduled_input: ScheduledPaneInput,
+    ) -> Result<(), TreeError> {
+        if !scheduled_input.has_input() {
+            return Err(TreeError::EmptyScheduledInput);
+        }
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            scheduled_input: pending_input,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        *pending_input = Some(scheduled_input);
+        Ok(())
+    }
+
+    /// Clears only the schedule the caller actually observed. This compare-
+    /// and-clear contract prevents an executor finishing an old action from
+    /// deleting a replacement submitted concurrently for the same pane.
+    pub fn clear_scheduled_pane_input_if_matches(
+        &mut self,
+        id: NodeId,
+        expected: &ScheduledPaneInput,
+    ) -> Result<bool, TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            scheduled_input, ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if scheduled_input.as_ref() != Some(expected) {
+            return Ok(false);
+        }
+        *scheduled_input = None;
+        Ok(true)
+    }
+
+    /// Every pending action in no particular order. Scheduling policy belongs
+    /// to `ilium-server`; the pure tree only exposes its durable domain state.
+    pub fn scheduled_pane_inputs(
+        &self,
+    ) -> impl Iterator<Item = (NodeId, &ScheduledPaneInput)> {
+        self.nodes.iter().filter_map(|(id, node)| {
+            let NodeKind::Pane {
+                scheduled_input: Some(scheduled_input),
+                ..
+            } = &node.kind
+            else {
+                return None;
+            };
+            Some((*id, scheduled_input))
+        })
+    }
+
     /// True if `ancestor` is `node` itself or a transitive parent of `node`.
     fn is_ancestor_of(&self, ancestor: NodeId, node: NodeId) -> bool {
         let mut current = Some(node);
@@ -707,16 +826,8 @@ impl Tree {
         if moving_node.is_split_view() && !destination.is_group() {
             return Err(TreeError::SplitViewRequiresGroup);
         }
-        if destination_container.is_split_view() {
-            if !moving_node.is_pane() {
-                return Err(TreeError::SplitViewOnlyAcceptsPanes);
-            }
-            if moving_node.parent != Some(new_parent)
-                && destination_container.children.len() >= MAXIMUM_SPLIT_VIEW_PANES
-            {
-                return Err(TreeError::SplitViewCapacityReached);
-            }
-        }
+        destination_container
+            .validate_child(moving_node, moving_node.parent == Some(new_parent))?;
         // A node can't be moved into itself or one of its own descendants.
         if self.is_ancestor_of(id, new_parent) {
             return Err(TreeError::CannotMoveIntoDescendant(id, new_parent));
@@ -1328,6 +1439,25 @@ mod tests {
     }
 
     #[test]
+    fn new_panes_can_be_created_directly_inside_a_split_until_capacity() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let split = tree
+            .create_split_view(group, "Vertical split", SplitOrientation::Vertical, &[])
+            .unwrap();
+
+        for index in 0..MAXIMUM_SPLIT_VIEW_PANES {
+            tree.add_pane(split, format!("pane {index}"), PaneContentKind::Terminal)
+                .unwrap();
+        }
+
+        assert!(matches!(
+            tree.add_pane(split, "overflow", PaneContentKind::Editor),
+            Err(TreeError::SplitViewCapacityReached)
+        ));
+    }
+
+    #[test]
     fn create_split_view_rejects_panes_already_in_a_split() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
@@ -1355,25 +1485,112 @@ mod tests {
             let group = tree.add_group(ROOT_ID, "work").unwrap();
             let panes = (0..pane_count)
                 .map(|index| {
-                    tree.add_pane(
-                        group,
-                        format!("pane {index}"),
-                        PaneContentKind::Terminal,
-                    )
-                    .unwrap()
+                    tree.add_pane(group, format!("pane {index}"), PaneContentKind::Terminal)
+                        .unwrap()
                 })
                 .collect::<Vec<_>>();
 
             let split = tree
-                .create_split_view(
-                    group,
-                    "split",
-                    SplitOrientation::Vertical,
-                    &panes,
-                )
+                .create_split_view(group, "split", SplitOrientation::Vertical, &panes)
                 .unwrap();
 
             assert_eq!(tree.children_of(split).unwrap().len(), pane_count);
         }
+    }
+
+    #[test]
+    fn removing_a_split_removes_its_member_panes_as_one_subtree() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let first = tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(group, "second", PaneContentKind::Editor)
+            .unwrap();
+        let split = tree
+            .create_split_view(
+                group,
+                "split",
+                SplitOrientation::Horizontal,
+                &[first, second],
+            )
+            .unwrap();
+
+        tree.remove_node(split).unwrap();
+
+        assert!(tree.get(split).is_none());
+        assert!(tree.get(first).is_none());
+        assert!(tree.get(second).is_none());
+        assert!(tree.children_of(group).unwrap().is_empty());
+    }
+
+    #[test]
+    fn scheduled_input_is_terminal_only_and_requires_a_real_payload() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+        let empty = ScheduledPaneInput {
+            execute_at_unix_millis: 1000,
+            text: String::new(),
+            send_enter: false,
+        };
+
+        assert!(matches!(
+            tree.schedule_pane_input(terminal, empty),
+            Err(TreeError::EmptyScheduledInput)
+        ));
+        assert!(matches!(
+            tree.schedule_pane_input(
+                editor,
+                ScheduledPaneInput {
+                    execute_at_unix_millis: 1000,
+                    text: "ignored".to_string(),
+                    send_enter: false,
+                }
+            ),
+            Err(TreeError::NotATerminal(id)) if id == editor
+        ));
+    }
+
+    #[test]
+    fn replacing_and_compare_clearing_scheduled_input_is_race_safe() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let original = ScheduledPaneInput {
+            execute_at_unix_millis: 1000,
+            text: "first".to_string(),
+            send_enter: true,
+        };
+        let replacement = ScheduledPaneInput {
+            execute_at_unix_millis: 2000,
+            text: "second".to_string(),
+            send_enter: false,
+        };
+
+        tree.schedule_pane_input(terminal, original.clone())
+            .unwrap();
+        tree.schedule_pane_input(terminal, replacement.clone())
+            .unwrap();
+
+        assert!(!tree
+            .clear_scheduled_pane_input_if_matches(terminal, &original)
+            .unwrap());
+        assert_eq!(
+            tree.scheduled_pane_inputs().collect::<Vec<_>>(),
+            vec![(terminal, &replacement)]
+        );
+        assert!(tree
+            .clear_scheduled_pane_input_if_matches(terminal, &replacement)
+            .unwrap());
+        assert_eq!(tree.scheduled_pane_inputs().count(), 0);
     }
 }

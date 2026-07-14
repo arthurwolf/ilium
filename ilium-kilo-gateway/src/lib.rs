@@ -232,7 +232,12 @@ impl ChatCompletionResponse {
             .into_iter()
             .next()
             .and_then(|choice| choice.message.content)
-            .filter(|content| !content.trim().is_empty())
+            // Trim before the emptiness check, not after: callers receive
+            // exactly the string that was validated as non-empty, so a
+            // whitespace-only reply can't slip through as e.g. a single
+            // trailing newline.
+            .map(|content| content.trim().to_string())
+            .filter(|content| !content.is_empty())
             .ok_or_else(|| {
                 GatewayError::InvalidResponse("missing non-empty assistant content".to_string())
             })

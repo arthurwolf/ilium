@@ -35,6 +35,7 @@ pub struct ProjectSession {
     pub project_root: PathBuf,
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
+    pub log_path: PathBuf,
 }
 
 /// One project-local session visible to `ilium ls`.
@@ -62,6 +63,11 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         path: snapshot_dir.clone(),
         source,
     })?;
+    let log_dir = project_root.join(".ilium").join("logs");
+    std::fs::create_dir_all(&log_dir).map_err(|source| CliError::SessionStorage {
+        path: log_dir.clone(),
+        source,
+    })?;
 
     let socket_dir = runtime_socket_dir()?;
     let socket_key = socket_key(&project_root, session_name);
@@ -75,6 +81,7 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         project_root,
         socket_path,
         snapshot_path: snapshot_dir.join(format!("{session_name}.json")),
+        log_path: log_dir.join(format!("{session_name}.log")),
     })
 }
 
@@ -235,6 +242,8 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
             session.snapshot_path.to_string_lossy().as_ref(),
             "--session-cwd",
             session.project_root.to_string_lossy().as_ref(),
+            "--log-path",
+            session.log_path.to_string_lossy().as_ref(),
         ])
         .current_dir(&session.project_root)
         .stdin(Stdio::null())
@@ -277,12 +286,19 @@ pub async fn ensure_server_running(session: &ProjectSession) -> Result<(), CliEr
 /// Replaces this session's running server, if any, with a server spawned by
 /// the current CLI executable. The old server's PID comes from the Unix
 /// socket peer credentials rather than a name-based process search, so a
-/// `--fresh` invocation can never terminate another project's session.
+/// restart can never terminate another project's session.
 ///
 /// `SIGTERM` deliberately leaves the project snapshot in place. The newly
 /// spawned server restores that snapshot, retaining the session layout while
 /// replacing the server executable during development.
 pub async fn replace_server(session: &ProjectSession) -> Result<(), CliError> {
+    stop_server(session).await?;
+    ensure_server_running(session).await
+}
+
+/// Stops only this project session's live server. The caller chooses whether
+/// to preserve or remove its durable snapshot before starting a replacement.
+async fn stop_server(session: &ProjectSession) -> Result<(), CliError> {
     if let Some(server_pid) = server_process_id(&session.socket_path).await? {
         // A current server saves its live tree before it exits. Older dev
         // servers do not recognize this appended IPC variant, so a bounded
@@ -301,7 +317,35 @@ pub async fn replace_server(session: &ProjectSession) -> Result<(), CliError> {
         // cannot unlink a listener owned by another live server.
         let _ = std::fs::remove_file(&session.socket_path);
     }
+    Ok(())
+}
+
+/// Deletes this one project's session snapshot and starts an empty server.
+/// Unlike `replace_server`, this is intentionally destructive and only runs
+/// when the CLI caller explicitly requested a reset.
+pub async fn reset_session(session: &ProjectSession) -> Result<(), CliError> {
+    stop_server(session).await?;
+    for path in reset_storage_paths(session) {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => return Err(CliError::SessionStorage { path, source }),
+        }
+    }
     ensure_server_running(session).await
+}
+
+/// Returns the durable artifacts an explicit reset must remove. Kept pure so
+/// default-session compatibility cleanup cannot silently regress.
+fn reset_storage_paths(session: &ProjectSession) -> Vec<PathBuf> {
+    let mut reset_paths = vec![session.snapshot_path.clone()];
+    // The pre-client/server workspace had one project-wide YAML file and
+    // maps only to the default native session. Leaving it behind would make
+    // an explicit default reset silently recreate the very state it removed.
+    if session.name == DEFAULT_SESSION_NAME {
+        reset_paths.push(session.project_root.join(".ilium").join("sessions.yml"));
+    }
+    reset_paths
 }
 
 /// Asks a compatible server to flush its snapshot and terminate. The caller
@@ -399,8 +443,11 @@ mod tests {
 
         assert_ne!(first_session.socket_path, second_session.socket_path);
         assert_ne!(first_session.snapshot_path, second_session.snapshot_path);
+        assert_ne!(first_session.log_path, second_session.log_path);
         assert!(first_session.snapshot_path.starts_with(&first));
         assert!(second_session.snapshot_path.starts_with(&second));
+        assert!(first_session.log_path.starts_with(&first));
+        assert!(second_session.log_path.starts_with(&second));
     }
 
     #[test]
@@ -410,6 +457,26 @@ mod tests {
             resolve_project_session(root.path(), "../other"),
             Err(CliError::InvalidSessionName(_))
         ));
+    }
+
+    #[test]
+    fn resetting_default_removes_its_legacy_migration_source() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let default_session =
+            resolve_project_session(root.path(), DEFAULT_SESSION_NAME).expect("default session");
+        let paths = reset_storage_paths(&default_session);
+
+        assert!(paths.contains(&default_session.snapshot_path));
+        assert!(paths.contains(&root.path().join(".ilium").join("sessions.yml")));
+    }
+
+    #[test]
+    fn resetting_a_named_session_keeps_the_default_legacy_migration_source() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let named_session = resolve_project_session(root.path(), "review").expect("named session");
+        let paths = reset_storage_paths(&named_session);
+
+        assert_eq!(paths, vec![named_session.snapshot_path]);
     }
 
     #[test]

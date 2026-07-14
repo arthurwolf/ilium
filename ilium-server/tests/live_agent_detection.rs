@@ -46,11 +46,13 @@
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ilium_core::{PaneStatus, ROOT_ID};
 use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
 use ilium_server::config::DetectionConfig;
+use ilium_server::SoundPlayer;
 
 mod common;
 use common::{expect_event, TestServer};
@@ -68,6 +70,17 @@ const WORKING_PHASE_SECONDS: u32 = 4;
 /// slow CI runner without ever being so long a genuine regression would
 /// make this test slow to fail.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+
+struct RecordingSoundPlayer {
+    calls: Arc<Mutex<Vec<ilium_sound::SoundSettings>>>,
+}
+
+impl SoundPlayer for RecordingSoundPlayer {
+    fn play(&self, settings: &ilium_sound::SoundSettings) -> Result<(), ilium_sound::SoundError> {
+        self.calls.lock().unwrap().push(settings.clone());
+        Ok(())
+    }
+}
 
 /// Writes an executable POSIX shell script named exactly `claude` into
 /// `bin_dir` and returns its absolute path -- never the real system
@@ -121,9 +134,18 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
     };
-    let server =
-        TestServer::start_with_detection_config("live-agent-detection-test", detection_config)
-            .await;
+    let sound_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut initially_disabled_sound = ilium_sound::SoundSettings::default();
+    initially_disabled_sound.events.agent_finished = false;
+    let server = TestServer::start_with_sound_player(
+        "live-agent-detection-test",
+        detection_config,
+        initially_disabled_sound,
+        Arc::new(RecordingSoundPlayer {
+            calls: Arc::clone(&sound_calls),
+        }),
+    )
+    .await;
     let mut client = server.connect().await;
 
     write_frame(
@@ -138,6 +160,14 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
         matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::UpdateSoundSettings {
+            settings: ilium_sound::SoundSettings::default(),
+        },
+    )
+    .await
+    .expect("enable finished sounds through the live IPC settings path");
 
     // `TerminalOrigin::Command` runs `$SHELL -c "<command_line>"` (see
     // `ilium-server::pane::spawn_terminal_session`); passing the fake
@@ -194,6 +224,10 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
         matches!(status, PaneStatus::Agent(ilium_core::AgentClass::Claude, _)),
         "expected the real process tree walk to identify this pane as Claude, got {status:?}"
     );
+    assert!(
+        sound_calls.lock().unwrap().is_empty(),
+        "the first Working classification is not a completed turn and must stay silent"
+    );
 
     // Structural assertion #2: once the script clears the screen and
     // stops printing the marker, the real, unmodified pipeline must
@@ -227,6 +261,20 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
         status,
         PaneStatus::Agent(ilium_core::AgentClass::Claude, ilium_core::AgentActivity::Done),
         "expected a real Working -> Done transition (this client never focused the pane), got {status:?}"
+    );
+
+    let sound_dispatched = common::wait_until(
+        || sound_calls.lock().unwrap().len() == 1,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(
+        sound_dispatched,
+        "expected exactly one server-owned sound after the real Working -> Done transition"
+    );
+    assert_eq!(
+        sound_calls.lock().unwrap()[0].source,
+        ilium_sound::SoundSourceKind::SystemBeep
     );
 
     write_frame(&mut client, &ClientRequest::KillSession)

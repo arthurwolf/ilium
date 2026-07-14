@@ -38,6 +38,17 @@ pub enum EditorViewMode {
 /// elements read as one visual language.
 const CHROME_FG: Color = Color::DarkGray;
 
+/// Converts a buffer position (`ratatui_textarea` addresses rows/columns as
+/// `usize` internally, with no cap) into the `u16` this pane's scroll-mirror
+/// fields use, saturating rather than truncating. A plain `as u16` would
+/// silently wrap for a buffer past 65535 lines or a line past 65535
+/// columns (large logs, generated/minified files), turning "scroll to the
+/// cursor" into "scroll to an unrelated nearby-looking row" instead of the
+/// graceful "can't address past here" a saturating cap gives.
+fn saturating_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
 /// Cached Source-mode syntax highlighting -- see
 /// `EditorPane::highlighted_lines`. Keyed on both the buffer's
 /// `content_revision` and `path`: a Save As to a different-language file
@@ -344,14 +355,18 @@ impl EditorPane {
     /// follows the insertion point, while wheel navigation remains an
     /// independent reading position until the next keyboard action.
     pub fn update_source_scroll_mirror(&self, viewport_height: u16) {
-        let cursor_row = self.textarea.cursor().0 as u16;
+        let cursor_row = saturating_u16(self.textarea.cursor().0);
         let previous_top = self.source_scroll_row.get();
-        let max_top = (self.textarea.lines().len() as u16).saturating_sub(viewport_height);
+        let max_top = saturating_u16(self.textarea.lines().len()).saturating_sub(viewport_height);
         let next_top = if self.source_scroll_should_follow_cursor.replace(false) {
             if cursor_row < previous_top {
                 cursor_row
             } else if previous_top.saturating_add(viewport_height) <= cursor_row {
-                cursor_row + 1 - viewport_height
+                // `cursor_row >= viewport_height` here (the branch above
+                // guarantees it), so the subtraction can't underflow; the
+                // trailing `saturating_add(1)` only matters at the extreme
+                // edge where `cursor_row` is already `u16::MAX`.
+                (cursor_row - viewport_height).saturating_add(1)
             } else {
                 previous_top
             }
@@ -376,17 +391,20 @@ impl EditorPane {
     /// scroll shifts the line-number gutter along with the text rather
     /// than keeping it pinned.
     pub fn update_source_scroll_col_mirror(&self, viewport_width: u16) {
-        let mut cursor_col = self.textarea.screen_cursor().col as u16;
+        let mut cursor_col = saturating_u16(self.textarea.screen_cursor().col);
         if self.show_line_numbers {
             let gutter =
                 crate::editor_highlight::line_number_gutter_width(self.textarea.lines().len());
-            cursor_col += gutter;
+            cursor_col = cursor_col.saturating_add(gutter);
         }
         let previous_left = self.source_scroll_col.get();
         let next_left = if cursor_col < previous_left {
             cursor_col
         } else if previous_left.saturating_add(viewport_width) <= cursor_col {
-            cursor_col + 1 - viewport_width
+            // Same reasoning as `update_source_scroll_mirror`: the branch
+            // above guarantees `cursor_col >= viewport_width`, so only the
+            // `+ 1` can overflow, at the `cursor_col == u16::MAX` edge.
+            (cursor_col - viewport_width).saturating_add(1)
         } else {
             previous_left
         };
@@ -428,7 +446,8 @@ impl EditorPane {
     /// last line by `TextArea` itself) -- used by a minimap click-to-jump
     /// in Source mode, where the click maps straight to a cursor position.
     pub fn jump_to_line(&mut self, line: usize) {
-        self.textarea.move_cursor(CursorMove::Jump(line as u16, 0));
+        self.textarea
+            .move_cursor(CursorMove::Jump(saturating_u16(line), 0));
         self.source_scroll_should_follow_cursor.set(true);
     }
 
@@ -442,7 +461,7 @@ impl EditorPane {
         // through `editor_highlight` instead of the widget itself.
         self.textarea.scroll((delta, 0));
 
-        let max_top = (self.textarea.lines().len() as u16).saturating_sub(viewport_height);
+        let max_top = saturating_u16(self.textarea.lines().len()).saturating_sub(viewport_height);
         let current = self.source_scroll_row.get();
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
@@ -460,8 +479,10 @@ impl EditorPane {
     /// (rather than rebuilding the line) so undo history and the cursor's
     /// own position stay meaningful.
     pub fn toggle_checkbox(&mut self, row: usize, bracket_col: usize, currently_checked: bool) {
-        self.textarea
-            .move_cursor(CursorMove::Jump(row as u16, (bracket_col + 1) as u16));
+        self.textarea.move_cursor(CursorMove::Jump(
+            saturating_u16(row),
+            saturating_u16(bracket_col + 1),
+        ));
         self.textarea.delete_next_char();
         self.textarea
             .insert_char(if currently_checked { ' ' } else { 'x' });

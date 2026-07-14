@@ -16,7 +16,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ilium_core::{NodeId, Tree};
 use ilium_detect::AgentSignature;
 use ilium_ipc::ServerEvent;
-use ilium_sound::SoundSettings;
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 
@@ -42,10 +41,6 @@ pub struct ServerState {
     pub notifications_config: NotificationsConfig,
     pub sound_settings: RwLock<ilium_sound::SoundSettings>,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
-    /// Live sound configuration, replaced atomically by the settings UI so
-    /// preview and future detection notifications share one server-owned
-    /// source of truth.
-    pub sound_settings: RwLock<SoundSettings>,
     /// User-configured agent signatures checked alongside `ilium-detect`'s
     /// built-in registry on every detection-loop tick (see
     /// `ilium_detect::identify_agent_with_extra`). Never mutated after
@@ -68,6 +63,11 @@ pub struct ServerState {
     /// `request_snapshot_save` calls that land faster than the writer's
     /// debounce window collapse into one wakeup.
     pub snapshot_requested: Notify,
+    /// Wakes the single scheduled-input executor whenever the nearest
+    /// deadline may have changed (new schedule, replacement, or pane close).
+    /// One coalesced permit is sufficient because the executor always scans
+    /// the authoritative tree again before deciding what to wait for.
+    pub scheduled_input_changed: Notify,
     /// Broadcast to every currently-attached client. Connection tasks each
     /// hold their own `subscribe()`d receiver; this crate never reads from
     /// this sender's own channel, only sends into it.
@@ -102,13 +102,13 @@ impl ServerState {
             notifications_config,
             sound_settings: RwLock::new(sound_settings),
             sound_requests,
-            sound_settings: RwLock::new(SoundSettings::default()),
             custom_signatures,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),
             snapshot_write_lock: Mutex::new(()),
             snapshot_dirty: AtomicBool::new(false),
             snapshot_requested: Notify::new(),
+            scheduled_input_changed: Notify::new(),
             events,
             shutdown: Notify::new(),
             connection_tasks: std::sync::Mutex::new(Vec::new()),

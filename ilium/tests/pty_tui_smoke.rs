@@ -10,7 +10,7 @@
 //!    enters raw mode) that spawns this test's session's server and adds
 //!    one terminal pane to it, then exits. This is the "create state
 //!    without a TUI" half.
-//! 2. `ilium --fresh --cwd <dir>` -- the actual attaching form, explicitly
+//! 2. `ilium --restart-server --cwd <dir>` -- the actual attaching form, explicitly
 //!    replacing phase 1's server -- run inside a real pty at a fixed size.
 //!    Its first rendered frame is
 //!    asserted to contain structural chrome (the sidebar title from
@@ -133,7 +133,7 @@ impl IsolatedXdgDirs {
 /// session owns, run from `Drop` so it still fires when a test panics (a
 /// failed `assert!`) partway through -- before reaching its own explicit,
 /// awaited `kill-session` call further down. Without this, a panic between
-/// spawning the server (phase 1's `new-pane`, or `--fresh` in phase 2) and
+/// spawning the server (phase 1's `new-pane`, or `--restart-server` in phase 2) and
 /// that explicit cleanup leaves the server running forever: it's a
 /// deliberately detached daemon (see `ilium-server`'s "one process per
 /// session" design), not something that dies with this test process.
@@ -178,20 +178,43 @@ impl Drop for KillSessionOnDrop<'_> {
             loop {
                 match child.try_wait() {
                     Ok(Some(_)) => break,
-                    Ok(None) if std::time::Instant::now() >= deadline => break,
+                    Ok(None) if std::time::Instant::now() >= deadline => {
+                        // `std::process::Child` has no `kill_on_drop`
+                        // (that's a tokio-only feature): simply letting
+                        // `child` fall out of scope here would leak the
+                        // still-running `kill-session` process as an
+                        // orphan (and a zombie once it does exit, since
+                        // nothing would ever reap it). Kill it and reap
+                        // it explicitly before giving up.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
                     Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                    Err(_) => break,
+                    Err(_) => {
+                        // `try_wait` itself failing (rather than reporting
+                        // "still running") doesn't mean the child is gone --
+                        // best-effort kill+reap here too, so an OS-level
+                        // wait error can't silently leak a still-running
+                        // `kill-session` process the same way the deadline
+                        // branch above already guards against.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
                 }
             }
         }
     }
 }
 
-/// Path to the `ilium` binary this test itself was built alongside --
-/// Cargo sets this for every integration test in a package that also has
-/// a `[[bin]]` (or, as here, the implicit `src/main.rs` binary) target.
-fn ilium_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_ilium")
+/// Resolves the `ilium` binary under test. Cargo's adjacent test binary is
+/// the default, while `ILIUM_PTY_SMOKE_BINARY` lets the same isolated flow
+/// prove a release-installed client and its sibling server after deployment.
+fn ilium_binary() -> String {
+    std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
+        .map(|binary_path| binary_path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_ilium").to_string())
 }
 
 /// Runs a one-shot `ilium` subcommand (`new-pane`/`kill-session`) to
@@ -299,7 +322,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // size -- exactly the technique `ilium-pty/tests/pty_integration.rs`
     // uses for a trivial command, applied to the real CLI/TUI binary.
     let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
-        .arg("--fresh")
+        .arg("--restart-server")
         .arg("--cwd")
         .arg(project_dir.to_string_lossy().to_string());
     let attach_command = xdg
@@ -350,17 +373,23 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("writing Ctrl+B then t (FocusTree)");
     tui.write(b"\x1b[B").expect("writing Down arrow"); // selects the first tree entry
     tui.write(b"\x1b[C").expect("writing Right arrow"); // expands it
-    let pane_listed = wait_until(|| tui.screen_text().contains("cat"), WAIT_TIMEOUT).await;
+    let pane_listed = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("cat") && screen.contains("📟")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
     assert!(
         pane_listed,
         "expected the \"cat\" pane to appear in the tree after expanding its group, got: {:?}",
         tui.screen_text()
     );
-    let focused_footer_shown =
-        wait_until(|| tui.screen_text().contains('\u{2699}'), WAIT_TIMEOUT).await;
+    let focused_footer_shown = wait_until(|| tui.screen_text().contains("🎚️"), WAIT_TIMEOUT).await;
     assert!(
         focused_footer_shown,
-        "expected the settings gear to be visible while the tree has keyboard focus, got: {:?}",
+        "expected the settings sliders to be visible while the tree has keyboard focus, got: {:?}",
         tui.screen_text()
     );
 
@@ -388,11 +417,21 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    // Exercise the real full-screen settings path too: open it with the
-    // configured base, switch to Keyboard, select a custom warned letter,
-    // then restore the tmux preset. These assertions cover the actual
-    // rendered labels rather than only config/keymap units.
+    // Exercise the real full-screen settings path too: configure the tree's
+    // agent identifier and both per-agent icons, then switch to Keyboard,
+    // select a custom warned letter, and restore the tmux preset. These
+    // assertions cover actual rendered controls and persisted config rather
+    // than only config/keymap units.
     tui.write(b"\x1b").expect("closing Help with Esc");
+    let help_closed = wait_until(
+        || !tui.screen_text().contains("keyboard reference"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        help_closed,
+        "expected Help to close before opening Settings"
+    );
     tui.write(b"\x02S")
         .expect("opening Settings with Ctrl+B then S");
     let settings_shown = wait_until(
@@ -403,6 +442,60 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     assert!(
         settings_shown,
         "expected Settings to open, got: {:?}",
+        tui.screen_text()
+    );
+    let agent_controls_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Agent identifier")
+                && screen.contains("Full name")
+                && screen.contains("Claude icon")
+                && screen.contains("🧠 Brain")
+                && screen.contains("Codex icon")
+                && screen.contains("⚙️")
+                && screen.contains("Gear")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        agent_controls_shown,
+        "expected all agent identifier controls in User Appearance, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\x1b[B\x1b[C\x1b[C\x1b[B\x1b[C\x1b[B\x1b[C")
+        .expect("selecting icon mode, Claude magic wand, and Codex tools");
+    let agent_controls_persisted = wait_until(
+        || {
+            let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .unwrap_or_default();
+            config.contains("agent_identifier_mode = \"icon\"")
+                && config.contains("claude_agent_icon = \"magic_wand\"")
+                && config.contains("codex_agent_icon = \"tools\"")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        agent_controls_persisted,
+        "expected agent identifier choices to persist, config={:?}",
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+    );
+    let selected_icons_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Selected icon")
+                && screen.contains("🪄")
+                && screen.contains("Magic wand")
+                && screen.contains("🛠️")
+                && screen.contains("Tools")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        selected_icons_shown,
+        "expected selected agent icon controls to update live, got: {:?}",
         tui.screen_text()
     );
     tui.write(b"\t")
@@ -453,6 +546,45 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the restored Ctrl+B preset to persist, got: {persisted_config:?}"
     );
 
+    // One more Tab enters the new Sound settings surface. Exercise a real
+    // event checkbox without activating Preview, so this remains a silent
+    // automated test while proving rendering, keyboard interaction, atomic
+    // config persistence, and live request dispatch all occur in the real TUI.
+    tui.write(b"\t")
+        .expect("switching to the Sound settings tab");
+    let sound_tab_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Sound source")
+                && screen.contains("System beep")
+                && screen.contains("Agent finished")
+                && screen.contains("Discovered system sound folders")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        sound_tab_shown,
+        "expected the Sound settings tab, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\x1b[B\x1b[B ")
+        .expect("moving to and toggling Agent finished");
+    let sound_event_disabled = wait_until(
+        || {
+            let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .unwrap_or_default();
+            config.contains("agent_finished = false")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        sound_event_disabled,
+        "expected Agent finished sound checkbox to persist as disabled, config={:?}",
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+    );
+
     // Cleanup: reuse the CLI's own graceful `kill-session` subcommand
     // (see this file's module docs) rather than killing the pty-attached
     // process directly -- its own exit, awaited below, is this test's
@@ -486,6 +618,168 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 }
 
+/// Drives split creation, multi-pane rendering, and focus-specific input
+/// through the real CLI, detached server, IPC connection, PTYs, and TUI.
+/// Unit tests pin exact rectangles; this test proves those layers remain
+/// connected when two live terminal streams share the right panel.
+#[tokio::test]
+async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("split-project");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&project_dir);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    for pane_number in 1..=2 {
+        let output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+        assert!(
+            output.status.success(),
+            "creating split fixture pane {pane_number} failed: stdout={:?} stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--restart-server")
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn split-view TUI under a PTY");
+
+    let group_rendered = wait_until(|| tui.screen_text().contains("default"), WAIT_TIMEOUT).await;
+    assert!(
+        group_rendered,
+        "default group did not render: {:?}",
+        tui.screen_text()
+    );
+
+    // Focus and expand the default group, then open the split dialog from
+    // the real default leader binding (Ctrl+A, Shift+W).
+    tui.write(b"\x01t").expect("focus tree");
+    tui.write(b"\x1b[B").expect("select default group");
+    tui.write(b"\x1b[C").expect("expand default group");
+    let both_fixture_panes = wait_until(
+        || tui.screen_text().matches("cat").count() >= 2,
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        both_fixture_panes,
+        "two fixture panes did not render in the tree: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x01W").expect("open split orientation dialog");
+    let orientation_dialog = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("New split view") && screen.contains("Vertical")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        orientation_dialog,
+        "split orientation dialog did not render"
+    );
+
+    // Keep the default vertical orientation, select both eligible panes in
+    // the optional checkbox dialog, and commit one atomic creation request.
+    tui.write(b"\r").expect("continue to split member selector");
+    let member_dialog = wait_until(
+        || tui.screen_text().contains("Add panes to split"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(member_dialog, "split member dialog did not render");
+    tui.write(b" ").expect("select first split pane");
+    tui.write(b"\x1b[B").expect("select second split pane row");
+    tui.write(b" ").expect("select second split pane");
+    tui.write(b"\r").expect("create split view");
+    let split_created = wait_until(
+        || tui.screen_text().contains("Vertical split"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(split_created, "created split did not appear in the tree");
+
+    // The group remains selected after the server snapshot. Move to its new
+    // split child and display it; both live right-panel viewport titles must
+    // be present even while the split row itself remains collapsed.
+    tui.write(b"\x1b[B").expect("select split view");
+    tui.write(b"\r").expect("display split view");
+    let both_viewports = wait_until(
+        || tui.screen_text().matches("cat").count() >= 2,
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        both_viewports,
+        "two live split viewports did not render: {:?}",
+        tui.screen_text()
+    );
+
+    // Expand the selected split before descending into its children. Select
+    // each child through the tree and type a distinct marker. Since
+    // both markers remain visible together, the active child receives input
+    // while split presentation continues rendering every member.
+    tui.write(b"\x1b[C").expect("expand selected split view");
+    let split_children_visible = wait_until(
+        || tui.screen_text().matches("cat").count() >= 4,
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(split_children_visible, "split child rows did not render");
+    tui.write(b"\x1b[B").expect("select first split child");
+    tui.write(b"\r").expect("focus first split child");
+    tui.write(b"left-route\r")
+        .expect("type into first split child");
+    let first_routed = wait_until(|| tui.screen_text().contains("left-route"), WAIT_TIMEOUT).await;
+    assert!(first_routed, "first split child did not receive input");
+
+    tui.write(b"\x01t").expect("return focus to split tree");
+    tui.write(b"\x1b[B").expect("select second split child");
+    tui.write(b"\r").expect("focus second split child");
+    tui.write(b"right-route\r")
+        .expect("type into second split child");
+    let both_routed = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("left-route") && screen.contains("right-route")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        both_routed,
+        "split input was not independently routed: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(
+        kill_output.status.success(),
+        "split test session cleanup failed"
+    );
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill split-view TUI");
+    }
+    assert!(exited, "split-view TUI did not exit after session cleanup");
+}
+
 /// Every 0-based row whose text contains `needle`, in top-to-bottom order
 /// -- used to locate a specific pane's row in the rendered tree panel so
 /// its cells can be inspected for the creation-pulse flash, which
@@ -513,6 +807,17 @@ fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
 fn row_has_inverse_cell(screen: &vt100::Screen, row: u16) -> bool {
     let cols = screen.size().1;
     (0..cols).any(|col| screen.cell(row, col).is_some_and(vt100::Cell::inverse))
+}
+
+/// Encodes one xterm SGR mouse-button press using crossterm's expected
+/// one-based wire coordinates. Button `0` is left and `2` is right.
+fn sgr_mouse_down(button: u8, column: u16, row: u16) -> Vec<u8> {
+    format!(
+        "\x1b[<{button};{};{}M",
+        column.saturating_add(1),
+        row.saturating_add(1)
+    )
+    .into_bytes()
 }
 
 /// Covers the feature this file's other test doesn't: a freshly created
@@ -605,11 +910,11 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
 
-    // A `PlainShell` pane row is `>` (node icon, padded to
+    // A `PlainShell` pane row is `📟` (node icon, padded to
     // `tree_ui::NODE_ICON_COLUMN_WIDTH`) + an empty activity-icon column
-    // (padded to `tree_ui::ACTIVITY_ICON_COLUMN_WIDTH`) + the name -- four
-    // spaces between `>` and `shell`, not one, per `tree_ui::node_label`.
-    let rows = tui.with_screen(|screen| rows_containing(screen, ">    shell"));
+    // (padded to `tree_ui::ACTIVITY_ICON_COLUMN_WIDTH`) + the name. Match
+    // that fixed-width label rather than the toolbar's separate 📟 button.
+    let rows = tui.with_screen(|screen| rows_containing(screen, "📟   shell"));
     assert_eq!(
         rows.len(),
         2,
@@ -688,5 +993,193 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         attached_process_exited,
         "the pty-attached `ilium` process should exit on its own once `kill-session` \
          closes the connection, not need a force kill"
+    );
+}
+
+/// Drives the full editor-line workflow through the real TUI and detached
+/// server. A fake `codex` executable records stdin locally, so this proves the
+/// modal's selected agent, generated prompt, and final Enter reached the live
+/// child process without invoking any real installed agent or network access.
+#[tokio::test]
+async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("project");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&project_dir);
+    let source_path = project_dir.join("task.txt");
+    std::fs::write(
+        &source_path,
+        "first line\nCREATE_AGENT_TARGET_LINE\nlast line\n",
+    )
+    .expect("write source file");
+
+    let fake_bin_dir = temp_root.path().join("fake-bin");
+    std::fs::create_dir_all(&fake_bin_dir).expect("create fake bin dir");
+    let fake_codex_path = fake_bin_dir.join("codex");
+    let fake_output_path = temp_root.path().join("fake-codex-input.txt");
+    std::fs::write(
+        &fake_codex_path,
+        format!(
+            "#!/bin/sh\nprintf 'STARTED' > '{}'\nIFS= read -r line\nprintf '%s' \"$line\" > '{}'\nsleep 30\n",
+            fake_output_path.display(),
+            fake_output_path.display(),
+        ),
+    )
+    .expect("write fake codex executable");
+    let mut permissions = std::fs::metadata(&fake_codex_path)
+        .expect("stat fake codex executable")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&fake_codex_path, permissions).expect("make fake codex executable");
+    let fake_shell_path = fake_bin_dir.join("test-shell");
+    std::fs::write(
+        &fake_shell_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = '-c' ] && [ \"$2\" = 'codex' ]; then exec '{}'; fi\nexec /bin/sh \"$@\"\n",
+            fake_codex_path.display()
+        ),
+    )
+    .expect("write fake shell executable");
+    let mut permissions = std::fs::metadata(&fake_shell_path)
+        .expect("stat fake shell executable")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&fake_shell_path, permissions).expect("make fake shell executable");
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let fake_path = format!("{}:{inherited_path}", fake_bin_dir.display());
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string())
+        .env("PATH", fake_path)
+        .env("SHELL", fake_shell_path.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn ilium under a pty");
+
+    assert!(
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await,
+        "expected initial TUI frame, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x01e").expect("open editor file picker");
+    assert!(
+        wait_until(|| tui.screen_text().contains("task.txt"), WAIT_TIMEOUT).await,
+        "expected task.txt in file picker, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\r")
+        .expect("select task.txt below the parent entry");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("CREATE_AGENT_TARGET_LINE"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected source file in editor, got: {:?}",
+        tui.screen_text()
+    );
+
+    let target_rows = tui.with_screen(|screen| rows_containing(screen, "CREATE_AGENT_TARGET_LINE"));
+    assert_eq!(
+        target_rows.len(),
+        1,
+        "expected one visible target source line"
+    );
+    let target_row = target_rows[0];
+    let context_column = 70;
+    tui.write(&sgr_mouse_down(2, context_column, target_row))
+        .expect("right-click target source line");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Line actions") && screen.contains("Create agent from line")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected editor line context menu, got: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(&sgr_mouse_down(0, context_column + 1, target_row + 1))
+        .expect("click create-agent line action");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Create agent from line")
+                    && screen.contains("Claude")
+                    && screen.contains("Codex")
+                    && screen.contains("Task prompt")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected create-agent modal, got: {:?}",
+        tui.screen_text()
+    );
+
+    let dialog = ilium_client::agent_from_line::dialog_layout_for_size(120, 40);
+    tui.write(&sgr_mouse_down(
+        0,
+        dialog.agent_row.x + 24,
+        dialog.agent_row.y,
+    ))
+    .expect("select Codex in the modal");
+    assert!(
+        wait_until(|| tui.screen_text().contains("(●) Codex"), WAIT_TIMEOUT).await,
+        "expected Codex selection, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_down(
+        0,
+        dialog.create_button.x + dialog.create_button.width / 2,
+        dialog.create_button.y,
+    ))
+    .expect("click Create agent");
+
+    let prompt_submitted = wait_until(
+        || {
+            std::fs::read_to_string(&fake_output_path).is_ok_and(|input| {
+                input.starts_with("/goal please do the following task:")
+                    && input.contains("CREATE_AGENT_TARGET_LINE")
+                    && input.contains(&source_path.display().to_string())
+                    && input.contains("at line 2")
+            })
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        prompt_submitted,
+        "fake Codex should receive the generated prompt plus Enter; recorded={:?}, screen={:?}",
+        std::fs::read_to_string(&fake_output_path),
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill create-agent TUI");
+    }
+    assert!(
+        exited,
+        "create-agent TUI did not exit after session cleanup"
     );
 }

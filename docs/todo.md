@@ -16,7 +16,9 @@
 * [ ] Option for a given folder to "be" a worktree/be associated with a worktree (option in folder creation dialog)
 * [ ] Docker sandboxing, isolating workers/agents in containers with shared auth (idea from aoe)
 * [ ] Git review panel/entry in the tree that lets us see the current git status, and review diffs, and automagically create commits using LLMs based on the data we have.
+* [ ] Do our docs need to include information about setting up OpenMoji since we rely on emojis quite a bit?
 * [-] Sound notifications, configurable.
+* [ ] Have a startup time wizard that shows icons and asks if we want nicer icons and offers to install them (on ubuntu at least)
 * [ ] Add support for more than claude and codex, have nice abstractions (object oriented) in the code, have support for the resume stuff, the detection stuff, etc.
 * [ ] Support for displaying useful status information like notifications about stuff that needs attention in user tmux bar.
 * [ ] Kubernetes control/orchestration with control from the agents (?)

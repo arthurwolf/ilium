@@ -25,7 +25,7 @@ pub const CREATE_GROUP_MAX_VISIBLE: usize = 7;
 pub const CREATE_SPLIT_MEMBER_MAX_VISIBLE: usize = 9;
 
 pub fn create_split_orientation_dialog_area(screen_area: Rect) -> Rect {
-    centered_fixed_rect(54, 8, screen_area)
+    centered_fixed_rect(62, 9, screen_area)
 }
 
 pub fn create_split_members_dialog_area(screen_area: Rect, choice_count: usize) -> Rect {

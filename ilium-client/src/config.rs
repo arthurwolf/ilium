@@ -14,16 +14,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use ilium_sound::SoundSettings;
 use ratatui::style::Color;
 use serde::Deserialize;
-use ilium_sound::SoundSettings;
 
 use crate::error::ClientError;
 use crate::keymap::{self, KeyBinding, ShortcutBase, LEADER_BINDINGS};
 use crate::layout::{DEFAULT_TREE_WIDTH, MAX_TREE_WIDTH, MIN_TREE_WIDTH};
 use crate::theme::{ColorScheme, Theme};
 
-/// The three client-side config tables, already validated. What [`load`]
+/// The four client-side config tables, already validated. What [`load`]
 /// returns; a config file that fails to load falls back to
 /// [`ClientConfig::default`] at the call site (`crate::run`) rather than
 /// this module hardcoding that fallback here -- mirrors
@@ -64,6 +64,149 @@ pub struct KeyboardSettings {
     pub shortcut_base: ShortcutBase,
 }
 
+/// How a detected agent's type is identified in the left tree panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentIdentifierMode {
+    #[default]
+    FullName,
+    Letter,
+    Icon,
+    Hidden,
+}
+
+impl AgentIdentifierMode {
+    pub const ALL: [Self; 4] = [Self::FullName, Self::Letter, Self::Icon, Self::Hidden];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FullName => "Full name",
+            Self::Letter => "Single letter",
+            Self::Icon => "Selected icon",
+            Self::Hidden => "Nothing",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Claude-specific icon choices. A closed enum prevents hand-edited config
+/// from introducing an empty, over-wide, or otherwise unstable tree glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClaudeAgentIcon {
+    #[default]
+    Brain,
+    MagicWand,
+    Compass,
+    Thread,
+    Crab,
+    Lobster,
+}
+
+impl ClaudeAgentIcon {
+    pub const ALL: [Self; 6] = [
+        Self::Brain,
+        Self::MagicWand,
+        Self::Compass,
+        Self::Thread,
+        Self::Crab,
+        Self::Lobster,
+    ];
+
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::Brain => "🧠",
+            Self::MagicWand => "🪄",
+            Self::Compass => "🧭",
+            Self::Thread => "🧵",
+            Self::Crab => "🦀",
+            Self::Lobster => "🦞",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Brain => "🧠 Brain",
+            Self::MagicWand => "🪄 Magic wand",
+            Self::Compass => "🧭 Compass",
+            Self::Thread => "🧵 Thread",
+            Self::Crab => "🦀 Crab",
+            Self::Lobster => "🦞 Lobster",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Codex-specific icon choices, kept separate from Claude's choices so an
+/// impossible cross-agent selection cannot be represented in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodexAgentIcon {
+    #[default]
+    Gear,
+    Tools,
+    Dna,
+    Book,
+    CrossMark,
+}
+
+impl CodexAgentIcon {
+    pub const ALL: [Self; 5] = [
+        Self::Gear,
+        Self::Tools,
+        Self::Dna,
+        Self::Book,
+        Self::CrossMark,
+    ];
+
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::Gear => "⚙️",
+            Self::Tools => "🛠️",
+            Self::Dna => "🧬",
+            Self::Book => "📖",
+            Self::CrossMark => "❎",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Gear => "⚙️ Gear",
+            Self::Tools => "🛠️ Tools",
+            Self::Dna => "🧬 DNA",
+            Self::Book => "📖 Book",
+            Self::CrossMark => "❎ Cross mark",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Complete, validated agent-identifier presentation contract consumed by
+/// the settings screen and tree renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AgentIdentifierSettings {
+    pub mode: AgentIdentifierMode,
+    pub claude_icon: ClaudeAgentIcon,
+    pub codex_icon: CodexAgentIcon,
+}
+
+/// Cycles one value in a small ordered settings registry, wrapping in either
+/// direction. Every caller passes an enum's non-empty `ALL` array.
+fn stepped_value<T: Copy + PartialEq>(values: &[T], current: T, direction: i32) -> T {
+    let index = values
+        .iter()
+        .position(|value| *value == current)
+        .unwrap_or(0);
+    let offset = if direction < 0 { values.len() - 1 } else { 1 };
+    values[(index + offset) % values.len()]
+}
+
 /// `[ui]`'s settings, already validated -- what the settings screen reads
 /// from and writes to (via `App`'s live copy, persisted with
 /// [`save_ui_settings`]). Read this crate's `CLAUDE.md`-style reminder in
@@ -81,6 +224,9 @@ pub struct UiSettings {
     /// width -- `crate::layout::TreeWidthAnimation`'s base width.
     pub tree_width: u16,
     pub color_scheme: ColorScheme,
+    /// Agent-type representation in the left tree. Activity remains a
+    /// separate, always-visible status column regardless of this choice.
+    pub agent_identifiers: AgentIdentifierSettings,
 }
 
 impl Default for UiSettings {
@@ -89,6 +235,7 @@ impl Default for UiSettings {
             auto_resize_tree_on_focus: true,
             tree_width: DEFAULT_TREE_WIDTH,
             color_scheme: ColorScheme::Dark,
+            agent_identifiers: AgentIdentifierSettings::default(),
         }
     }
 }
@@ -131,6 +278,9 @@ struct RawUiConfig {
     /// `"dark"` or `"light"` (case-insensitive) -- see
     /// [`parse_color_scheme`].
     color_scheme: Option<String>,
+    agent_identifier_mode: Option<String>,
+    claude_agent_icon: Option<String>,
+    codex_agent_icon: Option<String>,
 }
 
 /// `[theme]`'s color overrides, each an optional `"#rrggbb"` (or `rrggbb`)
@@ -179,6 +329,17 @@ pub enum ConfigLoadError {
     /// `ui.color_scheme` isn't `"dark"` or `"light"`.
     #[error("ui.color_scheme = {0:?} must be \"dark\" or \"light\"")]
     InvalidColorScheme(String),
+    /// `ui.agent_identifier_mode` is outside the closed display-mode set.
+    #[error(
+        "ui.agent_identifier_mode = {0:?} must be \"full_name\", \"letter\", \"icon\", or \"hidden\""
+    )]
+    InvalidAgentIdentifierMode(String),
+    /// `ui.claude_agent_icon` is not one of the curated Claude choices.
+    #[error("ui.claude_agent_icon = {0:?} is not a supported Claude icon")]
+    InvalidClaudeAgentIcon(String),
+    /// `ui.codex_agent_icon` is not one of the curated Codex choices.
+    #[error("ui.codex_agent_icon = {0:?} is not a supported Codex icon")]
+    InvalidCodexAgentIcon(String),
 }
 
 /// Why persisting a settings-screen change to `config.toml` failed -- see
@@ -195,7 +356,8 @@ pub enum ConfigSaveError {
     Write(std::io::Error),
 }
 
-/// Loads `<config_dir>/config.toml`'s `[keybindings]`/`[theme]` tables. A
+/// Loads `<config_dir>/config.toml`'s `[keybindings]`, `[keyboard]`, `[theme]`,
+/// and `[ui]` tables. A
 /// missing file is not an error -- most users never create one -- and
 /// loads as [`ClientConfig::default`]. A file that exists but fails to
 /// read, parse, or validate *is* a [`ClientError::ConfigLoad`]; the caller
@@ -269,13 +431,70 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         Some(value) => parse_color_scheme(&value)?,
         None => defaults.color_scheme,
     };
+    let mode = match raw.agent_identifier_mode {
+        Some(value) => parse_agent_identifier_mode(&value)?,
+        None => defaults.agent_identifiers.mode,
+    };
+    let claude_icon = match raw.claude_agent_icon {
+        Some(value) => parse_claude_agent_icon(&value)?,
+        None => defaults.agent_identifiers.claude_icon,
+    };
+    let codex_icon = match raw.codex_agent_icon {
+        Some(value) => parse_codex_agent_icon(&value)?,
+        None => defaults.agent_identifiers.codex_icon,
+    };
     Ok(UiSettings {
         auto_resize_tree_on_focus: raw
             .auto_resize_tree_on_focus
             .unwrap_or(defaults.auto_resize_tree_on_focus),
         tree_width,
         color_scheme,
+        agent_identifiers: AgentIdentifierSettings {
+            mode,
+            claude_icon,
+            codex_icon,
+        },
     })
+}
+
+/// Parses the stable on-disk name for the tree's agent identifier mode.
+fn parse_agent_identifier_mode(value: &str) -> Result<AgentIdentifierMode, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "full_name" => Ok(AgentIdentifierMode::FullName),
+        "letter" => Ok(AgentIdentifierMode::Letter),
+        "icon" => Ok(AgentIdentifierMode::Icon),
+        "hidden" => Ok(AgentIdentifierMode::Hidden),
+        _ => Err(ConfigLoadError::InvalidAgentIdentifierMode(
+            value.to_string(),
+        )),
+    }
+}
+
+/// Parses a curated Claude icon by semantic name rather than embedding emoji
+/// in `config.toml`, keeping hand-edited config readable across fonts.
+fn parse_claude_agent_icon(value: &str) -> Result<ClaudeAgentIcon, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "brain" => Ok(ClaudeAgentIcon::Brain),
+        "magic_wand" => Ok(ClaudeAgentIcon::MagicWand),
+        "compass" => Ok(ClaudeAgentIcon::Compass),
+        "thread" => Ok(ClaudeAgentIcon::Thread),
+        "crab" => Ok(ClaudeAgentIcon::Crab),
+        "lobster" => Ok(ClaudeAgentIcon::Lobster),
+        _ => Err(ConfigLoadError::InvalidClaudeAgentIcon(value.to_string())),
+    }
+}
+
+/// Parses a curated Codex icon by semantic name; see
+/// [`parse_claude_agent_icon`] for the storage rationale.
+fn parse_codex_agent_icon(value: &str) -> Result<CodexAgentIcon, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "gear" => Ok(CodexAgentIcon::Gear),
+        "tools" => Ok(CodexAgentIcon::Tools),
+        "dna" => Ok(CodexAgentIcon::Dna),
+        "book" => Ok(CodexAgentIcon::Book),
+        "cross_mark" => Ok(CodexAgentIcon::CrossMark),
+        _ => Err(ConfigLoadError::InvalidCodexAgentIcon(value.to_string())),
+    }
 }
 
 /// Parses `[ui].color_scheme`'s string value, case-insensitively.
@@ -294,6 +513,36 @@ fn color_scheme_name(scheme: ColorScheme) -> &'static str {
     match scheme {
         ColorScheme::Dark => "dark",
         ColorScheme::Light => "light",
+    }
+}
+
+fn agent_identifier_mode_name(mode: AgentIdentifierMode) -> &'static str {
+    match mode {
+        AgentIdentifierMode::FullName => "full_name",
+        AgentIdentifierMode::Letter => "letter",
+        AgentIdentifierMode::Icon => "icon",
+        AgentIdentifierMode::Hidden => "hidden",
+    }
+}
+
+fn claude_agent_icon_name(icon: ClaudeAgentIcon) -> &'static str {
+    match icon {
+        ClaudeAgentIcon::Brain => "brain",
+        ClaudeAgentIcon::MagicWand => "magic_wand",
+        ClaudeAgentIcon::Compass => "compass",
+        ClaudeAgentIcon::Thread => "thread",
+        ClaudeAgentIcon::Crab => "crab",
+        ClaudeAgentIcon::Lobster => "lobster",
+    }
+}
+
+fn codex_agent_icon_name(icon: CodexAgentIcon) -> &'static str {
+    match icon {
+        CodexAgentIcon::Gear => "gear",
+        CodexAgentIcon::Tools => "tools",
+        CodexAgentIcon::Dna => "dna",
+        CodexAgentIcon::Book => "book",
+        CodexAgentIcon::CrossMark => "cross_mark",
     }
 }
 
@@ -409,7 +658,7 @@ fn parse_hex_color(field: &'static str, value: &str) -> Result<Color, ConfigLoad
 }
 
 /// Persists `ui` into `<config_dir>/config.toml`'s `[ui]` table, preserving
-/// every other table (`[keybindings]`, `[theme]`) the file already has
+/// every other table (`[keybindings]`, `[keyboard]`, `[theme]`) the file already has
 /// rather than overwriting the whole document. Called by `App` every time
 /// the settings screen changes a value (`crate::app::Mode::Settings`), so a
 /// choice made in one session survives into the next without the user ever
@@ -457,10 +706,7 @@ pub fn save_keyboard_settings(
 /// either the client or server. The server receives the same typed value over
 /// IPC for immediate application; this file is the restart/global-session
 /// source of truth.
-pub fn save_sound_settings(
-    config_dir: &Path,
-    sound: &SoundSettings,
-) -> Result<(), ClientError> {
+pub fn save_sound_settings(config_dir: &Path, sound: &SoundSettings) -> Result<(), ClientError> {
     let path = config_dir.join("config.toml");
     let mut document = read_toml_document(&path)?;
     let table = document
@@ -536,6 +782,18 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "color_scheme".to_string(),
         toml::Value::String(color_scheme_name(ui.color_scheme).to_string()),
     );
+    table.insert(
+        "agent_identifier_mode".to_string(),
+        toml::Value::String(agent_identifier_mode_name(ui.agent_identifiers.mode).to_string()),
+    );
+    table.insert(
+        "claude_agent_icon".to_string(),
+        toml::Value::String(claude_agent_icon_name(ui.agent_identifiers.claude_icon).to_string()),
+    );
+    table.insert(
+        "codex_agent_icon".to_string(),
+        toml::Value::String(codex_agent_icon_name(ui.agent_identifiers.codex_icon).to_string()),
+    );
     toml::Value::Table(table)
 }
 
@@ -569,6 +827,7 @@ mod tests {
         assert_eq!(config.keybindings.len(), LEADER_BINDINGS.len());
         assert_eq!(config.keyboard, KeyboardSettings::default());
         assert_eq!(config.theme, Theme::default());
+        assert_eq!(config.sound, SoundSettings::default());
     }
 
     #[test]
@@ -734,6 +993,89 @@ mod tests {
             UiSettings::default().auto_resize_tree_on_focus
         );
         assert_eq!(config.ui.color_scheme, ColorScheme::Dark);
+        assert_eq!(
+            config.ui.agent_identifiers,
+            AgentIdentifierSettings::default()
+        );
+    }
+
+    #[test]
+    fn agent_identifier_settings_load_every_curated_choice() {
+        for mode in AgentIdentifierMode::ALL {
+            assert_eq!(
+                parse_agent_identifier_mode(agent_identifier_mode_name(mode)).unwrap(),
+                mode
+            );
+        }
+        for icon in ClaudeAgentIcon::ALL {
+            assert_eq!(
+                parse_claude_agent_icon(claude_agent_icon_name(icon)).unwrap(),
+                icon
+            );
+        }
+        for icon in CodexAgentIcon::ALL {
+            assert_eq!(
+                parse_codex_agent_icon(codex_agent_icon_name(icon)).unwrap(),
+                icon
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_agent_identifier_values_are_clear_config_errors() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nagent_identifier_mode = \"emoji_soup\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidAgentIdentifierMode(_),
+                ..
+            })
+        ));
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nclaude_agent_icon = \"robot\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidClaudeAgentIcon(_),
+                ..
+            })
+        ));
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ncodex_agent_icon = \"robot\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidCodexAgentIcon(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn agent_identifier_controls_wrap_in_both_directions() {
+        assert_eq!(
+            AgentIdentifierMode::FullName.stepped(-1),
+            AgentIdentifierMode::Hidden
+        );
+        assert_eq!(
+            AgentIdentifierMode::Hidden.stepped(1),
+            AgentIdentifierMode::FullName
+        );
+        assert_eq!(ClaudeAgentIcon::Brain.stepped(-1), ClaudeAgentIcon::Lobster);
+        assert_eq!(CodexAgentIcon::CrossMark.stepped(1), CodexAgentIcon::Gear);
     }
 
     #[test]
@@ -803,6 +1145,11 @@ mod tests {
             auto_resize_tree_on_focus: false,
             tree_width: 24,
             color_scheme: ColorScheme::Light,
+            agent_identifiers: AgentIdentifierSettings {
+                mode: AgentIdentifierMode::Icon,
+                claude_icon: ClaudeAgentIcon::Lobster,
+                codex_icon: CodexAgentIcon::Dna,
+            },
         };
         save_ui_settings(&dir, &ui).expect("save should succeed");
 
@@ -845,5 +1192,55 @@ mod tests {
             keymap::action_for_table(&config.keybindings, 'z'),
             Some(keymap::Action::Quit)
         );
+    }
+
+    #[test]
+    fn sound_config_loads_partial_events_from_defaults() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[sound]\n",
+                "source = \"sound_file\"\n",
+                "file = \"/usr/share/sounds/complete.oga\"\n",
+                "[sound.events]\n",
+                "approval_required = true\n",
+            ),
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid sound config should load");
+        assert_eq!(config.sound.source, ilium_sound::SoundSourceKind::SoundFile);
+        assert!(config.sound.events.agent_finished);
+        assert!(config.sound.events.approval_required);
+        assert!(!config.sound.events.agent_started);
+    }
+
+    #[test]
+    fn save_sound_settings_round_trips_and_preserves_server_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 3\n[notifications]\nenabled = false\n",
+        )
+        .unwrap();
+        let sound = SoundSettings {
+            source: ilium_sound::SoundSourceKind::SoundFile,
+            file: Some(std::path::PathBuf::from(
+                "/usr/share/sounds/freedesktop/stereo/complete.oga",
+            )),
+            events: ilium_sound::SoundEventSettings {
+                approval_required: true,
+                ..ilium_sound::SoundEventSettings::default()
+            },
+        };
+
+        save_sound_settings(&dir, &sound).expect("sound save should succeed");
+
+        let config = load(&dir).expect("saved sound config should load back");
+        assert_eq!(config.sound, sound);
+        let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(raw.contains("working_poll_seconds = 3"));
+        assert!(raw.contains("enabled = false"));
     }
 }

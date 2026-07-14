@@ -252,6 +252,9 @@ where
         }
 
         let blank_symbol = " ".repeat(self.highlight_symbol.width());
+        // Reused across every visible row instead of allocating a fresh
+        // `String` per row/frame via `.repeat()` inside the render loop.
+        let mut indent_buf = String::new();
 
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
@@ -294,10 +297,14 @@ where
                 // with the item's text color.
                 let depth = flattened.depth();
                 let indent_style = Style::new().fg(Color::DarkGray);
+                indent_buf.clear();
+                for _ in 0..depth {
+                    indent_buf.push('\u{203a}');
+                }
                 let (after_indent_x, _) = buf.set_stringn(
                     after_highlight_symbol_x,
                     y,
-                    "\u{203a}".repeat(depth),
+                    &indent_buf,
                     depth,
                     indent_style,
                 );
@@ -329,10 +336,13 @@ where
                 .last_rendered_identifiers
                 .push((area.y, identifier.clone()));
         }
-        state.last_identifiers = visible
-            .into_iter()
-            .map(|flattened| flattened.identifier)
-            .collect();
+        // Reuse the existing Vec's allocation across renders (this runs every
+        // frame in a TUI redraw loop) instead of dropping it and collecting
+        // into a brand-new Vec each time.
+        state.last_identifiers.clear();
+        state
+            .last_identifiers
+            .extend(visible.into_iter().map(|flattened| flattened.identifier));
     }
 }
 

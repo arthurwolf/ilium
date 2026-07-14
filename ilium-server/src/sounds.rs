@@ -7,7 +7,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::{hash::DefaultHasher, hash::Hash, hash::Hasher};
 
 use ilium_sound::{SoundEvent, SoundSettings};
 use tokio::sync::mpsc;
@@ -93,9 +94,17 @@ pub(crate) fn spawn_config_watcher(
     state: Arc<ServerState>,
     config_path: PathBuf,
 ) -> JoinHandle<()> {
+    spawn_config_watcher_with_interval(state, config_path, CONFIG_POLL_INTERVAL)
+}
+
+fn spawn_config_watcher_with_interval(
+    state: Arc<ServerState>,
+    config_path: PathBuf,
+    poll_interval: Duration,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut observed_fingerprint = file_fingerprint(&config_path);
-        let mut interval = tokio::time::interval(CONFIG_POLL_INTERVAL);
+        let mut interval = tokio::time::interval(poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -121,9 +130,11 @@ pub(crate) fn spawn_config_watcher(
     })
 }
 
-fn file_fingerprint(path: &Path) -> Option<(SystemTime, u64)> {
-    let metadata = std::fs::metadata(path).ok()?;
-    Some((metadata.modified().ok()?, metadata.len()))
+fn file_fingerprint(path: &Path) -> Option<u64> {
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 #[cfg(test)]
@@ -149,8 +160,10 @@ mod tests {
             calls: Arc::clone(&calls),
         });
         let (sender, task) = spawn(player);
-        let mut first = SoundSettings::default();
-        first.file = Some(PathBuf::from("/first.oga"));
+        let first = SoundSettings {
+            file: Some(PathBuf::from("/first.oga")),
+            ..SoundSettings::default()
+        };
         let mut second = first.clone();
         second.file = Some(PathBuf::from("/second.oga"));
 
@@ -174,5 +187,48 @@ mod tests {
         task.await.unwrap();
 
         assert_eq!(*calls.lock().unwrap(), vec![first, second]);
+    }
+
+    #[tokio::test]
+    async fn config_watcher_updates_an_already_running_server() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("config.toml");
+        std::fs::write(&config_path, "[sound]\nsource = \"system_beep\"\n").unwrap();
+        let (sound_requests, playback_task) = spawn(Arc::new(NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(
+            "watcher-test".to_string(),
+            directory.path().join("snapshot.json"),
+            crate::config::DetectionConfig::default(),
+            crate::config::NotificationsConfig::default(),
+            SoundSettings::default(),
+            sound_requests,
+            Vec::new(),
+        ));
+        let watcher = spawn_config_watcher_with_interval(
+            Arc::clone(&state),
+            config_path.clone(),
+            Duration::from_millis(20),
+        );
+
+        // Let the watcher record the initial config before testing a subsequent edit.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        std::fs::write(&config_path, "[sound.events]\napproval_required = true\n").unwrap();
+        let updated = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if state.sound_settings.read().await.events.approval_required {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+
+        watcher.abort();
+        playback_task.abort();
+        assert!(
+            updated.is_ok(),
+            "watcher did not apply the changed sound table"
+        );
     }
 }

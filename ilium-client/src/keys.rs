@@ -7,9 +7,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ilium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
 use ilium_ipc::ClientRequest;
 
+use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
     App, AppearanceRow, BoardRenameTarget, BoardStorageKind, CreateBoardState, FocusTarget, Mode,
-    SettingsState, SettingsTab,
+    SettingsState, SettingsTab, SoundRow,
 };
 use crate::keymap::{self, Action, ShortcutBase};
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
@@ -36,6 +37,10 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::CommandPrompt(state) => handle_command_prompt_event(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
+        Mode::EditorLineContextMenu(menu) => {
+            handle_editor_line_context_menu_event(app, menu, &event)
+        }
+        Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
         Mode::CreateSplitOrientation(state) => {
             handle_create_split_orientation_event(app, state, &event)
@@ -357,16 +362,16 @@ fn compute_indent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usiz
     let siblings = tree.children_of(parent).ok()?;
     let own_index = siblings.iter().position(|&sibling| sibling == id)?;
     let moving_is_pane = tree.get(id).is_some_and(ilium_core::Node::is_pane);
-    let preceding_container = siblings[..own_index]
-        .iter()
-        .rev()
-        .find(|&&candidate| match tree.get(candidate).map(|node| &node.kind) {
-            Some(NodeKind::Container(container)) if container.is_group() => true,
-            Some(NodeKind::Container(container)) if container.is_split_view() => {
-                moving_is_pane
-                    && container.children.len() < ilium_core::MAXIMUM_SPLIT_VIEW_PANES
+    let preceding_container =
+        siblings[..own_index].iter().rev().find(|&&candidate| {
+            match tree.get(candidate).map(|node| &node.kind) {
+                Some(NodeKind::Container(container)) if container.is_group() => true,
+                Some(NodeKind::Container(container)) if container.is_split_view() => {
+                    moving_is_pane
+                        && container.children.len() < ilium_core::MAXIMUM_SPLIT_VIEW_PANES
+                }
+                _ => false,
             }
-            _ => false,
         })?;
     Some((*preceding_container, None))
 }
@@ -388,8 +393,12 @@ fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usi
         tree.get(id).map(|node| &node.kind),
         Some(NodeKind::Pane { .. })
     );
-    let is_split_view = tree.get(id).is_some_and(ilium_core::Node::is_split_view);
-    if grandparent == ROOT_ID && (is_pane || is_split_view) {
+    // Split views are exempt: `Tree::move_node`/`create_split_view` only
+    // require the new parent to satisfy `is_group()`, and the session root
+    // itself does (see `ilium_core::Tree`'s "one root normal group" doc
+    // comment) -- only panes are specifically barred from sitting directly
+    // under `ROOT_ID`.
+    if grandparent == ROOT_ID && is_pane {
         return None;
     }
     let group_siblings = tree.children_of(grandparent).ok()?;
@@ -654,6 +663,7 @@ fn handle_create_split_orientation_event(
             app.mode = Mode::CreateSplitOrientation(state);
         }
         KeyCode::Enter => app.continue_create_split(state.orientation),
+        KeyCode::Char('e') | KeyCode::Char('E') => app.commit_empty_split(state.orientation),
         _ => app.mode = Mode::CreateSplitOrientation(state),
     }
 }
@@ -721,6 +731,98 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
     }
 }
 
+/// Source-line menus use the same keyboard contract as tree menus while
+/// dispatching their file-line target through a separate action boundary.
+fn handle_editor_line_context_menu_event(
+    app: &mut App,
+    mut menu: EditorLineContextMenu,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::EditorLineContextMenu(menu);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::EditorLineContextMenu(menu);
+        return;
+    }
+
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Up | KeyCode::Char('k') => {
+            menu.selected_index = menu.selected_index.saturating_sub(1);
+            app.mode = Mode::EditorLineContextMenu(menu);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            menu.selected_index =
+                (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
+            app.mode = Mode::EditorLineContextMenu(menu);
+        }
+        KeyCode::Enter => {
+            let action = menu.actions[menu.selected_index];
+            app.execute_editor_line_context_action(action, menu.source);
+        }
+        _ => app.mode = Mode::EditorLineContextMenu(menu),
+    }
+}
+
+/// Edits the multi-line prompt, changes the selected agent, or commits the
+/// creation dialog. Enter remains a real textarea newline; Ctrl+Enter and the
+/// focused Create button are the explicit keyboard submission paths.
+fn handle_create_agent_from_line_event(
+    app: &mut App,
+    mut state: Box<CreateAgentFromLineState>,
+    event: &Event,
+) {
+    use crossterm::event::KeyModifiers;
+
+    let Event::Key(key) = event else {
+        app.mode = Mode::CreateAgentFromLine(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::CreateAgentFromLine(state);
+        return;
+    }
+    if key.code == KeyCode::Esc {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.commit_create_agent_from_line(state);
+        return;
+    }
+
+    match key.code {
+        KeyCode::Tab => state.focus = state.focus.next(),
+        KeyCode::BackTab => state.focus = state.focus.previous(),
+        KeyCode::Left | KeyCode::Char('h') if state.focus == CreateAgentFocus::AgentType => {
+            state.agent_type = state.agent_type.stepped(-1)
+        }
+        KeyCode::Right | KeyCode::Char('l') if state.focus == CreateAgentFocus::AgentType => {
+            state.agent_type = state.agent_type.stepped(1)
+        }
+        KeyCode::Char('c') if state.focus == CreateAgentFocus::AgentType => {
+            state.agent_type = crate::agent_from_line::AgentLaunchType::Claude
+        }
+        KeyCode::Char('x') if state.focus == CreateAgentFocus::AgentType => {
+            state.agent_type = crate::agent_from_line::AgentLaunchType::Codex
+        }
+        KeyCode::Enter if state.focus == CreateAgentFocus::AgentType => {
+            state.focus = CreateAgentFocus::Prompt
+        }
+        KeyCode::Enter if state.focus == CreateAgentFocus::CreateButton => {
+            app.commit_create_agent_from_line(state);
+            return;
+        }
+        _ if state.focus == CreateAgentFocus::Prompt => {
+            state.prompt.input(event.clone());
+        }
+        _ => {}
+    }
+    app.mode = Mode::CreateAgentFromLine(state);
+}
+
 /// How many lines `PageUp`/`PageDown` scroll the settings screen's content
 /// panel per press -- a fixed step rather than a full page, since a page
 /// height varies wildly with terminal size and the content itself is short.
@@ -750,10 +852,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Tab => {
             state.tab = state.tab.next();
+            state.selected_row = 0;
             state.scroll = 0;
         }
         KeyCode::BackTab => {
             state.tab = state.tab.previous();
+            state.selected_row = 0;
             state.scroll = 0;
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Appearance => {
@@ -796,6 +900,25 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_set_shortcut_base(shortcut_base);
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Sound => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Sound => {
+            state.selected_row =
+                (state.selected_row + 1).min(SoundRow::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Sound => {
+            if let Some(row) = SoundRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_sound_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Sound =>
+        {
+            if let Some(row) = SoundRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_sound_row(row, 1);
+            }
+        }
         KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(SETTINGS_PAGE_SCROLL_LINES),
         KeyCode::PageDown => state.scroll = state.scroll.saturating_add(SETTINGS_PAGE_SCROLL_LINES),
         _ => {}
@@ -806,6 +929,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         state.tab,
         &app.ui_settings,
         &app.keyboard_settings,
+        &app.sound_settings,
+        &app.sound_discovery,
         state.selected_row,
         content_area,
     );
@@ -850,6 +975,30 @@ mod indent_outdent_tests {
     }
 
     #[test]
+    fn split_orientation_dialog_can_skip_the_optional_member_picker() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree_state.select(vec![group]);
+        app.open_create_split_dialog();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)),
+        );
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::CreateSplitView {
+                parent_group,
+                orientation: ilium_core::SplitOrientation::Vertical,
+                pane_ids,
+                ..
+            }] if *parent_group == group && pane_ids.is_empty()
+        ));
+    }
+
+    #[test]
     fn indent_moves_into_the_nearest_preceding_sibling_group() {
         let (tree, _top, sibling_group, pane, _other) = sample_tree();
         assert_eq!(
@@ -890,6 +1039,23 @@ mod indent_outdent_tests {
     fn outdent_at_the_top_level_is_a_no_op() {
         let (tree, top, ..) = sample_tree();
         assert_eq!(compute_outdent_target(&tree, top), None);
+    }
+
+    #[test]
+    fn outdent_allows_a_split_view_out_of_a_top_level_group_to_the_root() {
+        // ROOT -> top (group) -> sv (split view, no panes yet). The root
+        // itself is a group (`ilium_core::Tree`'s doc comment), so a split
+        // view landing directly under it is a request `Tree::move_node`
+        // actually accepts -- only panes are barred from the bare root.
+        let mut tree = Tree::new();
+        let top = tree.add_group(ROOT_ID, "top").unwrap();
+        let split_view = tree
+            .create_split_view(top, "split", ilium_core::SplitOrientation::Vertical, &[])
+            .unwrap();
+        assert_eq!(
+            compute_outdent_target(&tree, split_view),
+            Some((ROOT_ID, Some(1)))
+        );
     }
 
     #[test]

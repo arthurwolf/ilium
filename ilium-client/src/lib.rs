@@ -29,6 +29,7 @@
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
 
+pub mod agent_from_line;
 pub mod app;
 pub mod board;
 pub mod config;
@@ -53,6 +54,7 @@ pub mod paths;
 pub mod project_config;
 pub mod project_naming;
 pub mod render_cache;
+pub mod scheduled_input;
 pub mod session_naming;
 pub mod session_transcript;
 pub mod settings_ui;
@@ -134,11 +136,12 @@ pub async fn run(options: RunOptions) -> Result<(), ClientError> {
     // the settings screen (`crate::app::Mode::Settings`) needs it later to
     // persist a change (`crate::config::save_ui_settings`).
     let (config, config_dir) = init_config();
+    let sound_discovery = ilium_sound::discover_system_sounds();
 
     // `TerminalGuard::drop` restores the terminal whether this function
     // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
     let guard = TerminalGuard::enter()?;
-    let result = run_inner(options, &socket_path, config, config_dir).await;
+    let result = run_inner(options, &socket_path, config, config_dir, sound_discovery).await;
     drop(guard);
     result
 }
@@ -182,6 +185,7 @@ async fn run_inner(
     socket_path: &std::path::Path,
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
+    sound_discovery: ilium_sound::SoundDiscovery,
 ) -> Result<(), ClientError> {
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
@@ -189,6 +193,8 @@ async fn run_inner(
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.apply_ui_settings(config.ui);
     app.keyboard_settings = config.keyboard;
+    app.apply_sound_settings(config.sound);
+    app.sound_discovery = sound_discovery;
     app.config_dir = config_dir;
     let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
     app.set_screen_area(Rect::new(0, 0, initial_size.width, initial_size.height));
@@ -234,9 +240,20 @@ async fn run_inner(
         };
 
         tokio::select! {
-            Some(event) = input_rx.recv() => {
-                dispatch_input_event(&mut app, &mut naming_workers, home_dir.as_deref(), event);
-                needs_redraw = true;
+            input_event = input_rx.recv() => {
+                match input_event {
+                    Some(event) => {
+                        dispatch_input_event(&mut app, &mut naming_workers, home_dir.as_deref(), event);
+                        needs_redraw = true;
+                    }
+                    // The input-reading thread ended (a crossterm read
+                    // error -- see `spawn_input_forwarder`); keyboard and
+                    // mouse are the only way `should_quit` ever gets set
+                    // (see `keys.rs`), so without this the client would
+                    // otherwise keep running forever, fully unresponsive to
+                    // the user, until something external kills the process.
+                    None => break,
+                }
             }
             server_event = connection.events.recv() => {
                 match server_event {

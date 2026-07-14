@@ -9,8 +9,9 @@
 
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use ilium_core::{NodeId, NodeKind, Tree, ROOT_ID};
-use ratatui::layout::Position;
+use ratatui::layout::{Position, Rect};
 
+use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{App, ContextMenu, CreateGroupState, Mode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
@@ -70,6 +71,22 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::ContextMenu above");
         };
         handle_context_menu_mouse(app, menu, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::EditorLineContextMenu(_)) {
+        let Mode::EditorLineContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::EditorLineContextMenu above");
+        };
+        handle_editor_line_context_menu_mouse(app, menu, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::CreateAgentFromLine(_)) {
+        let Mode::CreateAgentFromLine(state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::CreateAgentFromLine above");
+        };
+        handle_create_agent_from_line_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::ExplorerFileMenu(_)) {
@@ -191,6 +208,7 @@ fn handle_create_split_orientation_mouse(
         app.mode = Mode::CreateSplitOrientation(state);
         return;
     }
+    let position = Position::new(mouse.column, mouse.row);
     let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
     let orientation = match mouse.row {
         row if row == popup.y.saturating_add(3) => Some(ilium_core::SplitOrientation::Vertical),
@@ -199,6 +217,8 @@ fn handle_create_split_orientation_mouse(
     };
     if let Some(orientation) = orientation {
         app.continue_create_split(orientation);
+    } else if mouse.row == popup.y.saturating_add(6) && popup.contains(position) {
+        app.commit_empty_split(state.orientation);
     } else {
         app.mode = Mode::CreateSplitOrientation(state);
     }
@@ -506,6 +526,82 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
     app.execute_context_action(menu.actions[item_row], menu.target);
 }
 
+/// Handles the source-line popup independently from tree selection state.
+fn handle_editor_line_context_menu_mouse(
+    app: &mut App,
+    mut menu: EditorLineContextMenu,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::EditorLineContextMenu(menu);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    if !menu.area.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    let content_top = menu.area.y.saturating_add(1);
+    if position.y < content_top {
+        app.mode = Mode::EditorLineContextMenu(menu);
+        return;
+    }
+    let item_row = usize::from(position.y - content_top);
+    if item_row >= menu.actions.len() {
+        app.mode = Mode::EditorLineContextMenu(menu);
+        return;
+    }
+    menu.selected_index = item_row;
+    app.execute_editor_line_context_action(menu.actions[item_row], menu.source);
+}
+
+/// Handles direct manipulation of the agent selector, textarea, and explicit
+/// Create button. The layout comes from the same module the renderer uses.
+fn handle_create_agent_from_line_mouse(
+    app: &mut App,
+    mut state: Box<CreateAgentFromLineState>,
+    mouse: MouseEvent,
+) {
+    use ratatui_textarea::CursorMove;
+
+    let layout = crate::agent_from_line::dialog_layout(app.layout.screen_area);
+    let position = Position::new(mouse.column, mouse.row);
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::CreateAgentFromLine(state);
+        return;
+    }
+    if !layout.popup.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if let Some(agent_type) = crate::agent_from_line::agent_type_at(layout.agent_row, position) {
+        state.agent_type = agent_type;
+        state.focus = CreateAgentFocus::AgentType;
+        app.mode = Mode::CreateAgentFromLine(state);
+        return;
+    }
+    let prompt_inner = Rect::new(
+        layout.prompt_area.x.saturating_add(1),
+        layout.prompt_area.y.saturating_add(1),
+        layout.prompt_area.width.saturating_sub(2),
+        layout.prompt_area.height.saturating_sub(2),
+    );
+    if prompt_inner.contains(position) {
+        let row = position.y.saturating_sub(prompt_inner.y);
+        let column = position.x.saturating_sub(prompt_inner.x);
+        state.prompt.move_cursor(CursorMove::Jump(row, column));
+        state.focus = CreateAgentFocus::Prompt;
+        app.mode = Mode::CreateAgentFromLine(state);
+        return;
+    }
+    if layout.create_button.contains(position) {
+        state.focus = CreateAgentFocus::CreateButton;
+        app.commit_create_agent_from_line(state);
+        return;
+    }
+    app.mode = Mode::CreateAgentFromLine(state);
+}
+
 /// Mouse handling for the create-group dialog: clicking a destination row
 /// immediately creates the group there, clicking outside cancels.
 fn handle_create_group_mouse(app: &mut App, state: CreateGroupState, mouse: MouseEvent) {
@@ -600,12 +696,39 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.settings_adjust_row(row, direction);
                 }
             } else if state.tab == crate::app::SettingsTab::Keyboard {
-                if let Some(direction) = crate::settings_ui::keyboard_content_hit(
+                if let Some(shortcut_base) = crate::settings_ui::keyboard_preset_at(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                ) {
+                    app.settings_set_shortcut_base(shortcut_base);
+                } else if let Some(direction) = crate::settings_ui::keyboard_content_hit(
                     layout.content_area,
                     state.scroll,
                     position,
                 ) {
                     app.settings_adjust_shortcut_base(direction);
+                }
+            } else if state.tab == crate::app::SettingsTab::Sound {
+                match crate::settings_ui::sound_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    &app.sound_discovery,
+                ) {
+                    Some(crate::settings_ui::SoundContentHit::Row { row, direction }) => {
+                        if let Some(index) = crate::app::SoundRow::ALL
+                            .iter()
+                            .position(|candidate| *candidate == row)
+                        {
+                            state.selected_row = index;
+                        }
+                        app.settings_adjust_sound_row(row, direction);
+                    }
+                    Some(crate::settings_ui::SoundContentHit::File(index)) => {
+                        app.settings_select_sound_file(index);
+                    }
+                    None => {}
                 }
             }
         }
@@ -622,6 +745,8 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         state.tab,
         &app.ui_settings,
         &app.keyboard_settings,
+        &app.sound_settings,
+        &app.sound_discovery,
         state.selected_row,
         layout.content_area,
     );
@@ -770,6 +895,62 @@ mod drop_target_tests {
 }
 
 #[cfg(test)]
+mod agent_from_line_mouse_tests {
+    use super::*;
+    use crate::agent_from_line::{CreateAgentFromLineState, EditorSourceLine};
+    use crate::app::App;
+    use crossterm::event::KeyModifiers;
+    use ilium_core::PaneContentKind;
+    use std::path::PathBuf;
+
+    #[test]
+    fn clicking_create_submits_the_dialog_prompt() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "main.rs", PaneContentKind::Editor)
+            .unwrap();
+        app.mode = Mode::CreateAgentFromLine(Box::new(CreateAgentFromLineState::new(
+            EditorSourceLine {
+                pane_id: editor_id,
+                path: PathBuf::from("/work/main.rs"),
+                line_number: 3,
+                text: "do_work();".to_string(),
+            },
+            group,
+        )));
+        app.take_outbound_requests();
+        let layout = crate::agent_from_line::dialog_layout(app.layout.screen_area);
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: layout.create_button.x + layout.create_button.width / 2,
+                row: layout.create_button.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::NewPane {
+                parent_group,
+                kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
+                    command_line,
+                    initial_input,
+                },
+            }] if *parent_group == group
+                && command_line == "claude"
+                && initial_input.contains("do_work();")
+        ));
+    }
+}
+
+#[cfg(test)]
 mod row_action_click_tests {
     use super::*;
     use crate::app::App;
@@ -791,8 +972,12 @@ mod row_action_click_tests {
             .expect("row must be visible in the rendered tree list");
 
         let list = tree_ui::list_area(area);
-        let controls_start = list.right() - ROW_ACTION_WIDTH_FOR_TESTS;
-        let click_pos = ratatui::layout::Position::new(controls_start + 4 * 2, row);
+        let controls_start = list.right() - tree_ui::ROW_ACTION_WIDTH * tree_ui::ROW_ACTION_COUNT;
+        let retitle_index = TreeRowAction::ALL.len() as u16 - 1;
+        let click_pos = ratatui::layout::Position::new(
+            controls_start + retitle_index * tree_ui::ROW_ACTION_WIDTH,
+            row,
+        );
 
         for kind in [
             MouseEventKind::Moved,
@@ -809,9 +994,6 @@ mod row_action_click_tests {
             );
         }
     }
-
-    // Mirrors `tree_ui`'s private `ROW_ACTION_WIDTH * ROW_ACTION_COUNT`.
-    const ROW_ACTION_WIDTH_FOR_TESTS: u16 = 2 * 5;
 
     fn test_app() -> App {
         let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));

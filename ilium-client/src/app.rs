@@ -24,6 +24,9 @@ use ilium_ipc::ClientRequest;
 use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
+use crate::agent_from_line::{
+    CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
+};
 use crate::board::BoardPane;
 use crate::config::{KeyboardSettings, UiSettings};
 use crate::editor_pane::{EditorPane, EditorViewMode};
@@ -113,6 +116,10 @@ pub enum Mode {
     FolderExplorer(Box<ExplorerOverlay>, NodeId),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
+    /// A mouse-anchored action menu for one physical editor source line.
+    EditorLineContextMenu(EditorLineContextMenu),
+    /// Agent selector and editable task prompt opened from an editor line.
+    CreateAgentFromLine(Box<CreateAgentFromLineState>),
     /// The "New group" destination picker is open.
     CreateGroup(CreateGroupState),
     CreateSplitOrientation(CreateSplitOrientationState),
@@ -136,23 +143,25 @@ pub enum Mode {
 
 /// Which tab is selected in the full-screen settings view. Add a new
 /// variant here -- and a matching arm in every `match` over this type --
-/// before adding a third tab; see `crate::settings_ui`'s module doc comment
+/// before adding another tab; see `crate::settings_ui`'s module doc comment
 /// for the tab-list-left/content-right layout this drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Appearance,
     Keyboard,
+    Sound,
     About,
 }
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 3] = [Self::Appearance, Self::Keyboard, Self::About];
+    pub const ALL: [SettingsTab; 4] = [Self::Appearance, Self::Keyboard, Self::Sound, Self::About];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "User Appearance",
             Self::Keyboard => "Keyboard",
+            Self::Sound => "Sound",
             Self::About => "About",
         }
     }
@@ -184,23 +193,56 @@ impl SettingsTab {
 pub enum AppearanceRow {
     AutoResizeTree,
     TreeWidth,
+    AgentIdentifierMode,
+    ClaudeAgentIcon,
+    CodexAgentIcon,
     ColorScheme,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 3] = [Self::AutoResizeTree, Self::TreeWidth, Self::ColorScheme];
+    pub const ALL: [AppearanceRow; 6] = [
+        Self::AutoResizeTree,
+        Self::TreeWidth,
+        Self::AgentIdentifierMode,
+        Self::ClaudeAgentIcon,
+        Self::CodexAgentIcon,
+        Self::ColorScheme,
+    ];
 }
 
-/// Rows in the Keyboard tab. The single row is deliberately modeled as an
-/// enum/`ALL` list so navigation and hit testing keep the same extension
-/// point as Appearance when per-action remapping is exposed in this view.
+/// Rows in the Sound tab. Keeping source, selected file, preview, and event
+/// toggles in one registry makes keyboard and mouse interaction exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyboardRow {
-    ShortcutBase,
+pub enum SoundRow {
+    Source,
+    File,
+    Preview,
+    AgentFinished,
+    ApprovalRequired,
+    AgentStarted,
+    WaitingBackground,
 }
 
-impl KeyboardRow {
-    pub const ALL: [KeyboardRow; 1] = [Self::ShortcutBase];
+impl SoundRow {
+    pub const ALL: [SoundRow; 7] = [
+        Self::Source,
+        Self::File,
+        Self::Preview,
+        Self::AgentFinished,
+        Self::ApprovalRequired,
+        Self::AgentStarted,
+        Self::WaitingBackground,
+    ];
+
+    pub const fn event(self) -> Option<ilium_sound::SoundEvent> {
+        match self {
+            Self::AgentFinished => Some(ilium_sound::SoundEvent::AgentFinished),
+            Self::ApprovalRequired => Some(ilium_sound::SoundEvent::ApprovalRequired),
+            Self::AgentStarted => Some(ilium_sound::SoundEvent::AgentStarted),
+            Self::WaitingBackground => Some(ilium_sound::SoundEvent::WaitingBackground),
+            Self::Source | Self::File | Self::Preview => None,
+        }
+    }
 }
 
 /// Full-screen settings view state (`Mode::Settings`).
@@ -218,16 +260,17 @@ impl KeyboardRow {
 /// > no separation "bars"/lines, feeling more "aerated" than the main view.
 ///
 /// Concretely: every control here is a live, self-applying toggle/stepper
-/// (see `App::apply_and_persist_ui_settings`) -- there is no buffered
+/// (see `App::apply_and_persist_ui_settings` and
+/// `App::apply_and_persist_keyboard_settings`) -- there is no buffered
 /// "Cancel" path, so a value changes the instant it's touched, the same way
 /// a rename or a theme hex edit in `config.toml` would. `tab`/`selected_row`
 /// are pure navigation state; the actual settings values live in
-/// `App::ui_settings`, not here, so nothing here needs its own persistence.
+/// `App::ui_settings`/`App::keyboard_settings`, not here, so nothing here
+/// needs its own persistence.
 pub struct SettingsState {
     pub tab: SettingsTab,
-    /// Selected row within the active tab's list (an `AppearanceRow::ALL`
-    /// index) -- meaningless while `tab == SettingsTab::About`, which has no
-    /// rows to select.
+    /// Selected row within the active tab's list. Appearance currently has
+    /// three rows and Keyboard one; About has none.
     pub selected_row: usize,
     /// Vertical scroll offset into the active tab's content -- for a
     /// terminal too short to show every row at once. See
@@ -453,6 +496,10 @@ pub struct App {
     /// This session's live shortcut-base setting. Input dispatch and every
     /// displayed shortcut label read this same value.
     pub keyboard_settings: KeyboardSettings,
+    /// Live user-global sound choices and the system catalog discovered once
+    /// before the terminal enters raw mode.
+    pub sound_settings: ilium_sound::SoundSettings,
+    pub sound_discovery: ilium_sound::SoundDiscovery,
     /// Where to write `config.toml` when a setting changes -- `None` when
     /// `crate::paths::config_dir` couldn't be resolved at startup, in which
     /// case settings changes still apply live but can't be persisted (see
@@ -590,6 +637,8 @@ impl App {
             ),
             ui_settings: UiSettings::default(),
             keyboard_settings: KeyboardSettings::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_discovery: ilium_sound::SoundDiscovery::default(),
             config_dir: None,
             pointer_position: None,
             is_terminal_focused: true,
@@ -859,6 +908,122 @@ impl App {
         self.settings_set_shortcut_base(self.keyboard_settings.shortcut_base.stepped(direction));
     }
 
+    /// Installs startup sound settings without emitting an IPC update. The
+    /// server has loaded the same global config before the client connects.
+    pub fn apply_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
+        self.sound_settings = sound;
+    }
+
+    /// Applies, persists, and sends one live update to the current detached
+    /// server. Other project servers observe the atomic config-file change
+    /// through their owned watchers.
+    fn apply_and_persist_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
+        self.sound_settings = sound;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_sound_settings(&config_dir, &self.sound_settings)
+            {
+                self.status_message = Some(format!("Could not save sound settings: {error}"));
+            }
+        }
+        self.queue_request(ClientRequest::UpdateSoundSettings {
+            settings: self.sound_settings.clone(),
+        });
+    }
+
+    /// Switches between the portable system beep and a discovered sound file.
+    pub fn settings_toggle_sound_source(&mut self) {
+        let mut sound = self.sound_settings.clone();
+        sound.source = match sound.source {
+            ilium_sound::SoundSourceKind::SystemBeep => {
+                if sound.file.is_none() {
+                    sound.file = self
+                        .sound_discovery
+                        .sounds
+                        .first()
+                        .map(|entry| entry.path.clone());
+                }
+                ilium_sound::SoundSourceKind::SoundFile
+            }
+            ilium_sound::SoundSourceKind::SoundFile => ilium_sound::SoundSourceKind::SystemBeep,
+        };
+        self.apply_and_persist_sound_settings(sound);
+    }
+
+    /// Cycles through the actual sound files discovered on this machine.
+    pub fn settings_adjust_sound_file(&mut self, direction: i32) {
+        if self.sound_discovery.sounds.is_empty() {
+            self.status_message = Some("No system sound files were found".to_string());
+            return;
+        }
+        let current_index = self
+            .sound_settings
+            .file
+            .as_ref()
+            .and_then(|path| {
+                self.sound_discovery
+                    .sounds
+                    .iter()
+                    .position(|entry| &entry.path == path)
+            })
+            .unwrap_or(0);
+        let count = self.sound_discovery.sounds.len() as i32;
+        let next_index = (current_index as i32 + direction.signum()).rem_euclid(count) as usize;
+        self.settings_select_sound_file(next_index);
+    }
+
+    /// Selects one catalog entry directly, used by mouse clicks on the
+    /// discovered-sounds list.
+    pub fn settings_select_sound_file(&mut self, index: usize) {
+        let Some(entry) = self.sound_discovery.sounds.get(index) else {
+            return;
+        };
+        let mut sound = self.sound_settings.clone();
+        sound.source = ilium_sound::SoundSourceKind::SoundFile;
+        sound.file = Some(entry.path.clone());
+        self.apply_and_persist_sound_settings(sound);
+    }
+
+    pub fn settings_toggle_sound_event(&mut self, event: ilium_sound::SoundEvent) {
+        let mut sound = self.sound_settings.clone();
+        sound.events.toggle(event);
+        self.apply_and_persist_sound_settings(sound);
+    }
+
+    /// Asks the server-owned sound actor to play once. Preview uses the same
+    /// backend and selected path as real transition alerts.
+    pub fn settings_preview_sound(&mut self) {
+        if self.sound_settings.source == ilium_sound::SoundSourceKind::SoundFile
+            && !self
+                .sound_settings
+                .file
+                .as_ref()
+                .is_some_and(|path| path.is_file())
+        {
+            self.status_message =
+                Some("Cannot preview: select an available sound file first".to_string());
+            return;
+        }
+        self.queue_request(ClientRequest::PreviewSound {
+            source: self.sound_settings.source,
+            file: self.sound_settings.file.clone(),
+        });
+        self.status_message = Some("Playing sound preview".to_string());
+    }
+
+    pub fn settings_adjust_sound_row(&mut self, row: SoundRow, direction: i32) {
+        match row {
+            SoundRow::Source => self.settings_toggle_sound_source(),
+            SoundRow::File => self.settings_adjust_sound_file(direction),
+            SoundRow::Preview => self.settings_preview_sound(),
+            event_row => {
+                if let Some(event) = event_row.event() {
+                    self.settings_toggle_sound_event(event);
+                }
+            }
+        }
+    }
+
     /// Opens the full-screen settings view. See `Mode::Settings`'s and
     /// `SettingsState`'s doc comments for the UI/UX brief this screen (and
     /// every setting added to it) must keep matching.
@@ -898,6 +1063,28 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Cycles among full names, single letters, chosen icons, and no agent
+    /// identifier. The activity column remains visible in every mode.
+    pub fn settings_adjust_agent_identifier_mode(&mut self, direction: i32) {
+        let mut ui = self.ui_settings;
+        ui.agent_identifiers.mode = ui.agent_identifiers.mode.stepped(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Selects which curated Claude glyph the tree uses in icon mode.
+    pub fn settings_adjust_claude_agent_icon(&mut self, direction: i32) {
+        let mut ui = self.ui_settings;
+        ui.agent_identifiers.claude_icon = ui.agent_identifiers.claude_icon.stepped(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Selects which curated Codex glyph the tree uses in icon mode.
+    pub fn settings_adjust_codex_agent_icon(&mut self, direction: i32) {
+        let mut ui = self.ui_settings;
+        ui.agent_identifiers.codex_icon = ui.agent_identifiers.codex_icon.stepped(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Dispatches a keyboard/mouse "adjust this row" gesture to the right
     /// per-row action, per `AppearanceRow`'s doc comment. `direction` is
     /// `-1`/`+1` (decrement/increment); for the two-state rows
@@ -908,6 +1095,11 @@ impl App {
         match row {
             AppearanceRow::AutoResizeTree => self.settings_toggle_auto_resize_tree(),
             AppearanceRow::TreeWidth => self.settings_adjust_tree_width(direction),
+            AppearanceRow::AgentIdentifierMode => {
+                self.settings_adjust_agent_identifier_mode(direction)
+            }
+            AppearanceRow::ClaudeAgentIcon => self.settings_adjust_claude_agent_icon(direction),
+            AppearanceRow::CodexAgentIcon => self.settings_adjust_codex_agent_icon(direction),
             AppearanceRow::ColorScheme => self.settings_toggle_color_scheme(),
         }
     }
@@ -975,14 +1167,14 @@ impl App {
     }
 
     /// Whether any wall-clock-driven visual (the tree-width hover
-    /// animation, a "Working" spinner, a "Done" bell pulse, a
-    /// recently-created flash, or the project-name/pane-title loading
-    /// spinner) is currently active -- i.e. whether the next scheduled
-    /// tick still needs to force a redraw even though no event actually
-    /// changed anything. See `crate::tick::on_tick`, which is the only
-    /// caller: everything else that changes visible state (input, a
-    /// `ServerEvent`, a finished naming worker) already marks the frame
-    /// dirty on its own.
+    /// animation, a "Working" spinner, a waiting-background clock, a "Done"
+    /// bell pulse, a recently-created flash, or the project-name/pane-title
+    /// loading spinner) is currently active -- i.e. whether the next
+    /// scheduled tick still needs to force a redraw even though no event
+    /// actually changed anything. See `crate::tick::on_tick`, which is the
+    /// only caller: everything else that changes visible state (input, a
+    /// `ServerEvent`, a finished naming worker) already marks the frame dirty
+    /// on its own.
     pub fn has_active_animation(&self) -> bool {
         if self.is_layout_animating() {
             return true;
@@ -998,7 +1190,12 @@ impl App {
             matches!(
                 node.kind,
                 NodeKind::Pane {
-                    status: PaneStatus::Agent(_, AgentActivity::Working | AgentActivity::Done),
+                    status: PaneStatus::Agent(
+                        _,
+                        AgentActivity::Working
+                            | AgentActivity::WaitingBackground
+                            | AgentActivity::Done
+                    ),
                     ..
                 }
             )
@@ -1271,8 +1468,7 @@ impl App {
                 return None;
             }
             match self.tree.get(id).map(|node| &node.kind) {
-                Some(NodeKind::Container(container)) if container.is_group() => Some(id),
-                Some(NodeKind::Container(_)) => self.tree.parent_of(id),
+                Some(NodeKind::Container(_)) => Some(id),
                 Some(NodeKind::Pane { .. }) => self.tree.parent_of(id),
                 Some(NodeKind::Folder { .. }) => self.tree.parent_of(id),
                 None => None,
@@ -1322,6 +1518,24 @@ impl App {
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
+        });
+    }
+
+    /// Queues one server-owned spawn-and-submit operation. Keeping the first
+    /// input in the same request removes the race where the client would need
+    /// a new pane id before it could address the prompt's `KeyInput` frames.
+    pub fn request_new_command_pane_with_input(
+        &mut self,
+        parent_group: NodeId,
+        command_line: String,
+        initial_input: String,
+    ) {
+        self.queue_request(ClientRequest::NewPane {
+            parent_group,
+            kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
+                command_line,
+                initial_input,
+            },
         });
     }
 
@@ -1726,6 +1940,31 @@ impl App {
         names.join(" / ")
     }
 
+    /// Produces the stable user-facing pane category shown beside each path
+    /// in the split member picker. Agent terminals are identified separately
+    /// because that distinction is useful when assembling a mixed view.
+    fn split_choice_kind_label(&self, pane_id: NodeId) -> &'static str {
+        match self.tree.get(pane_id).map(|node| &node.kind) {
+            Some(NodeKind::Pane {
+                status: PaneStatus::Agent(_, _),
+                ..
+            }) => "agent",
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                ..
+            }) => "terminal",
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Editor,
+                ..
+            }) => "editor",
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Board,
+                ..
+            }) => "board",
+            _ => "pane",
+        }
+    }
+
     pub fn continue_create_split(&mut self, orientation: SplitOrientation) {
         let choices = self
             .tree
@@ -1739,7 +1978,11 @@ impl App {
             })
             .map(|pane_id| SplitPaneChoice {
                 pane_id,
-                label: self.pane_tree_path_label(pane_id),
+                label: format!(
+                    "[{}] {}",
+                    self.split_choice_kind_label(pane_id),
+                    self.pane_tree_path_label(pane_id)
+                ),
                 selected: false,
             })
             .collect();
@@ -1749,6 +1992,13 @@ impl App {
             choices,
             selected_index: 0,
         });
+    }
+
+    /// Creates a split without opening the optional pane picker. This is
+    /// deliberately a first-class path rather than a synthetic empty picker
+    /// state, so the orientation dialog can truthfully offer both workflows.
+    pub fn commit_empty_split(&mut self, orientation: SplitOrientation) {
+        self.queue_create_split(self.split_parent_group(), orientation, Vec::new());
     }
 
     pub fn toggle_create_split_member(&mut self, state: &mut CreateSplitMembersState) {
@@ -1774,14 +2024,26 @@ impl App {
             .filter(|choice| choice.selected)
             .map(|choice| choice.pane_id)
             .collect();
-        let name = match state.orientation {
+        self.queue_create_split(state.parent_group, state.orientation, pane_ids);
+    }
+
+    /// Queues the single atomic server mutation shared by the empty and
+    /// member-picker creation paths, keeping naming and modal teardown in one
+    /// place so the two paths cannot drift.
+    fn queue_create_split(
+        &mut self,
+        parent_group: NodeId,
+        orientation: SplitOrientation,
+        pane_ids: Vec<NodeId>,
+    ) {
+        let name = match orientation {
             SplitOrientation::Vertical => "Vertical split",
             SplitOrientation::Horizontal => "Horizontal split",
         };
         self.queue_request(ClientRequest::CreateSplitView {
-            parent_group: state.parent_group,
+            parent_group,
             name: name.to_string(),
-            orientation: state.orientation,
+            orientation,
             pane_ids,
         });
         self.mode = Mode::Normal;
@@ -1806,6 +2068,71 @@ impl App {
             actions,
             selected_index: 0,
         });
+    }
+
+    /// Opens the dedicated one-line editor menu at the right-click position.
+    pub fn open_editor_line_context_menu(
+        &mut self,
+        source: EditorSourceLine,
+        column: u16,
+        row: u16,
+    ) {
+        let actions = vec![EditorLineContextAction::CreateAgentFromLine];
+        let width = 34.min(self.layout.screen_area.width.max(1));
+        let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let max_x = self.layout.screen_area.right().saturating_sub(width);
+        let max_y = self.layout.screen_area.bottom().saturating_sub(height);
+        self.mode = Mode::EditorLineContextMenu(EditorLineContextMenu {
+            source,
+            area: Rect::new(column.min(max_x), row.min(max_y), width, height),
+            actions,
+            selected_index: 0,
+        });
+    }
+
+    /// Executes a source-line context action without routing through tree
+    /// selection, because the originating editor may not be selected there.
+    pub fn execute_editor_line_context_action(
+        &mut self,
+        action: EditorLineContextAction,
+        source: EditorSourceLine,
+    ) {
+        match action {
+            EditorLineContextAction::CreateAgentFromLine => {
+                let parent_group = self
+                    .tree
+                    .parent_of(source.pane_id)
+                    .unwrap_or_else(|| self.group_for_new_node());
+                self.mode = Mode::CreateAgentFromLine(Box::new(CreateAgentFromLineState::new(
+                    source,
+                    parent_group,
+                )));
+            }
+        }
+    }
+
+    /// Validates and queues the dialog's selected agent plus edited prompt.
+    pub fn commit_create_agent_from_line(&mut self, state: Box<CreateAgentFromLineState>) {
+        let initial_input = state.prompt_text();
+        if initial_input.trim().is_empty() {
+            self.status_message = Some("Agent task cannot be empty".to_string());
+            self.mode = Mode::CreateAgentFromLine(state);
+            return;
+        }
+
+        let agent_type = state.agent_type;
+        self.request_new_command_pane_with_input(
+            state.parent_group,
+            agent_type.command_line().to_string(),
+            initial_input,
+        );
+        self.status_message = Some(format!(
+            "Creating {} agent from {}:{}",
+            agent_type.label(),
+            state.source.path.display(),
+            state.source.line_number
+        ));
+        self.mode = Mode::Normal;
     }
 
     /// The node-appropriate command set for a context menu. `ROOT_ID`
@@ -1999,10 +2326,15 @@ impl App {
     /// there, then queues a `RenameNode` so the sidebar and pane title
     /// reflect the new file name once the server confirms it.
     pub fn action_save_as(&mut self, id: NodeId, new_path: String) {
-        if new_path.trim().is_empty() {
+        let new_path = new_path.trim();
+        if new_path.is_empty() {
             self.status_message = Some("Save As: no filename given".to_string());
             return;
         }
+        // Built from the already-trimmed string -- otherwise a leading space
+        // survives into the saved filename, and a leading space before a
+        // leading `/` defeats `is_absolute()` entirely, silently nesting an
+        // intended-absolute path under `session_cwd` instead.
         let path = PathBuf::from(new_path);
         let path = if path.is_absolute() {
             path
@@ -2460,7 +2792,9 @@ impl App {
         let id = viewport.pane_id;
         if matches!(
             mouse.kind,
-            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+            crossterm::event::MouseEventKind::Down(
+                crossterm::event::MouseButton::Left | crossterm::event::MouseButton::Right
+            )
         ) {
             self.focus_pane(id);
         }
@@ -2543,8 +2877,20 @@ impl App {
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some((source_column, source_card)) = board.drag_source.take() {
+                    // `source_column`/`source_card` were captured on the matching
+                    // mouse-down and may no longer be valid indices by the time the
+                    // button is released (a keypress in between -- e.g. deleting a
+                    // column, or `r` reloading the board from a since-changed file --
+                    // can shrink `board.columns` underneath a held drag), so this must
+                    // re-validate against the current state rather than indexing
+                    // directly, or a stale index would panic instead of just
+                    // cancelling the drop.
+                    let source_card_count = board
+                        .columns
+                        .get(source_column)
+                        .map(|column| column.cards.len());
                     if source_column != column_index
-                        && source_card < board.columns[source_column].cards.len()
+                        && source_card_count.is_some_and(|count| source_card < count)
                     {
                         let card = board.columns[source_column].cards.remove(source_card);
                         board.columns[column_index].cards.push(card);
@@ -2592,6 +2938,33 @@ impl App {
         }
 
         if !chrome.content_area.contains(position) {
+            return;
+        }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+            if editor.view_mode != EditorViewMode::Source {
+                self.status_message =
+                    Some("Switch to Source view to select a physical file line".to_string());
+                return;
+            }
+            let source_row = usize::from(editor.source_scroll_row())
+                + usize::from(position.y.saturating_sub(chrome.content_area.y));
+            let Some(line_text) = editor.textarea.lines().get(source_row).cloned() else {
+                return;
+            };
+            let Some(path) = editor.path.clone() else {
+                self.status_message = Some("This editor has no file path".to_string());
+                return;
+            };
+            self.open_editor_line_context_menu(
+                EditorSourceLine {
+                    pane_id: id,
+                    path,
+                    line_number: source_row + 1,
+                    text: line_text,
+                },
+                mouse.column,
+                mouse.row,
+            );
             return;
         }
         // The source editor owns its own viewport: wheel events must be
@@ -2826,6 +3199,24 @@ mod tests {
         assert!(app.tree.children_of(ROOT_ID).unwrap().is_empty());
         assert_eq!(app.active_pane_id(), None);
         assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn waiting_background_keeps_wall_clock_animation_redraws_active() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground),
+            )
+            .unwrap();
+
+        assert!(app.has_active_animation());
     }
 
     #[test]
@@ -3178,6 +3569,19 @@ mod tests {
     }
 
     #[test]
+    fn group_for_new_node_uses_a_selected_split_as_the_pane_container() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let split = app
+            .tree
+            .create_split_view(group, "Vertical split", SplitOrientation::Vertical, &[])
+            .unwrap();
+        app.tree_state.select(vec![group, split]);
+
+        assert_eq!(app.group_for_new_node(), split);
+    }
+
+    #[test]
     fn focusing_a_split_child_displays_every_member_and_activates_only_that_child() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -3213,6 +3617,64 @@ mod tests {
     }
 
     #[test]
+    fn split_target_reconciliation_clears_a_member_moved_by_another_client() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(second),
+        };
+
+        app.tree.move_node(second, group, None).unwrap();
+        app.reconcile_right_panel_target();
+
+        assert_eq!(
+            app.right_panel_target,
+            RightPanelTarget::SplitView {
+                split_id: split,
+                active_pane_id: None,
+            }
+        );
+        assert_eq!(app.displayed_pane_ids(), vec![first]);
+    }
+
+    #[test]
+    fn split_target_reconciliation_clears_a_removed_split() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let split = app
+            .tree
+            .create_split_view(group, "Vertical split", SplitOrientation::Vertical, &[])
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: None,
+        };
+
+        app.tree.remove_node(split).unwrap();
+        app.reconcile_right_panel_target();
+
+        assert_eq!(app.right_panel_target, RightPanelTarget::Empty);
+    }
+
+    #[test]
     fn split_creation_choices_exclude_panes_already_in_a_split() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -3240,6 +3702,7 @@ mod tests {
         };
         assert_eq!(state.choices.len(), 1);
         assert_eq!(state.choices[0].pane_id, available);
+        assert_eq!(state.choices[0].label, "[editor] work / available");
     }
 
     #[test]
@@ -3260,6 +3723,27 @@ mod tests {
                 parent_group: group,
                 name: "Horizontal split".to_string(),
                 orientation: SplitOrientation::Horizontal,
+                pane_ids: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn skipping_the_member_picker_queues_an_empty_split_directly() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree_state.select(vec![group]);
+        app.open_create_split_dialog();
+
+        app.commit_empty_split(SplitOrientation::Vertical);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::CreateSplitView {
+                parent_group: group,
+                name: "Vertical split".to_string(),
+                orientation: SplitOrientation::Vertical,
                 pane_ids: Vec::new(),
             }]
         );
@@ -3322,5 +3806,207 @@ mod tests {
         assert!(!resize_requests
             .iter()
             .any(|(pane_id, _, _)| *pane_id == hidden));
+    }
+
+    #[test]
+    fn split_slot_click_focuses_that_member_and_uses_slot_relative_coordinates() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        for pane_id in [first, second] {
+            app.panes.insert(
+                pane_id,
+                PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+            );
+        }
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(first),
+        };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let second_viewport = app.pane_viewport(second).unwrap();
+        app.take_outbound_requests();
+        let position = Position::new(
+            second_viewport.content_area.x + 5,
+            second_viewport.content_area.y + 4,
+        );
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        assert_eq!(app.active_pane_id(), Some(second));
+        assert!(app.take_outbound_requests().iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::MouseInput {
+                    pane_id,
+                    column: 5,
+                    row: 4,
+                    ..
+                } if *pane_id == second
+            )
+        }));
+    }
+
+    #[test]
+    fn editor_right_click_captures_the_physical_source_line_and_opens_its_menu() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "main.rs", PaneContentKind::Editor)
+            .unwrap();
+        let mut editor = EditorPane::empty();
+        editor.path = Some(PathBuf::from("/work/src/main.rs"));
+        editor.textarea = ratatui_textarea::TextArea::from([
+            "first();",
+            "create_the_agent_from_this();",
+            "third();",
+        ]);
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: editor_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.take_outbound_requests();
+        let viewport = app.pane_viewport(editor_id).unwrap();
+        let content = crate::editor_chrome::compute(viewport.content_area, true).content_area;
+        let position = Position::new(content.x + 5, content.y + 1);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        let Mode::EditorLineContextMenu(menu) = &app.mode else {
+            panic!("right-click should open a source-line context menu");
+        };
+        assert_eq!(menu.source.pane_id, editor_id);
+        assert_eq!(menu.source.line_number, 2);
+        assert_eq!(menu.source.text, "create_the_agent_from_this();");
+        assert_eq!(menu.source.path, PathBuf::from("/work/src/main.rs"));
+    }
+
+    #[test]
+    fn create_agent_dialog_queues_selected_command_prompt_and_submission() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "main.rs", PaneContentKind::Editor)
+            .unwrap();
+        let source = EditorSourceLine {
+            pane_id: editor_id,
+            path: PathBuf::from("/work/src/main.rs"),
+            line_number: 7,
+            text: "repair_authentication();".to_string(),
+        };
+        app.execute_editor_line_context_action(
+            EditorLineContextAction::CreateAgentFromLine,
+            source,
+        );
+        let Mode::CreateAgentFromLine(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("line action should open the create-agent dialog");
+        };
+        assert!(state.prompt_text().contains("repair_authentication();"));
+        assert!(state.prompt_text().contains("/work/src/main.rs at line 7"));
+        state.agent_type = crate::agent_from_line::AgentLaunchType::Codex;
+        state.prompt = ratatui_textarea::TextArea::from(["/goal custom task"]);
+
+        app.commit_create_agent_from_line(state);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::NewPane {
+                parent_group: group,
+                kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
+                    command_line: "codex".to_string(),
+                    initial_input: "/goal custom task".to_string(),
+                },
+            }]
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn settings_tabs_cycle_through_sound_before_about() {
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Sound);
+        assert_eq!(SettingsTab::Sound.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
+        assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
+    }
+
+    #[test]
+    fn sound_changes_persist_and_queue_one_live_server_update() {
+        let config_dir = std::env::temp_dir()
+            .join("ilium-app-sound-settings-tests")
+            .join(format!("{:?}", std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut app = app();
+        app.config_dir = Some(config_dir.clone());
+        app.sound_discovery = ilium_sound::SoundDiscovery {
+            sounds: vec![ilium_sound::SystemSound {
+                path: PathBuf::from("/usr/share/sounds/complete.oga"),
+                display_name: "complete".to_string(),
+                collection: "freedesktop".to_string(),
+            }],
+            ..ilium_sound::SoundDiscovery::default()
+        };
+        app.settings_toggle_sound_source();
+
+        assert_eq!(
+            app.sound_settings.source,
+            ilium_sound::SoundSourceKind::SoundFile
+        );
+        assert_eq!(
+            app.sound_settings.file,
+            Some(PathBuf::from("/usr/share/sounds/complete.oga"))
+        );
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::UpdateSoundSettings { settings }]
+                if settings == &app.sound_settings
+        ));
+        let persisted = crate::config::load(&config_dir).unwrap();
+        assert_eq!(persisted.sound, app.sound_settings);
+
+        let _ = std::fs::remove_dir_all(config_dir);
     }
 }

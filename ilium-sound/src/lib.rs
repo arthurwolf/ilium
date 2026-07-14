@@ -10,7 +10,8 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use ilium_core::{AgentActivity, PaneStatus};
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,7 @@ const MAX_DISCOVERED_SOUNDS: usize = 4_096;
 /// Sound themes are shallow in practice. This avoids recursively exploring a
 /// misplaced or cyclic mount even though directory symlinks are not followed.
 const MAX_DISCOVERY_DEPTH: usize = 8;
+const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Which playback source the user selected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -188,6 +190,8 @@ pub enum SoundError {
     },
     #[error("{program} exited unsuccessfully ({status})")]
     Unsuccessful { program: String, status: ExitStatus },
+    #[error("{program} did not finish within {PLAYBACK_TIMEOUT:?}")]
+    TimedOut { program: String },
 }
 
 /// Maps a real status change to at most one semantic sound event.
@@ -376,7 +380,12 @@ fn existing_sound_directories() -> Vec<SoundDirectory> {
 #[cfg(target_os = "linux")]
 fn platform_sound_directories() -> Vec<SoundDirectory> {
     let mut directories = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+        directories.push(sound_directory(
+            PathBuf::from(data_home).join("sounds"),
+            "User sounds",
+        ));
+    } else if let Some(home) = std::env::var_os("HOME") {
         directories.push(sound_directory(
             PathBuf::from(&home).join(".local/share/sounds"),
             "User sounds",
@@ -430,8 +439,18 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
     }
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
         directories.push(sound_directory(
-            PathBuf::from(local_app_data).join("Microsoft/Windows/Sounds"),
+            PathBuf::from(&local_app_data).join("Microsoft/Windows/Sounds"),
             "User Windows sounds",
+        ));
+        directories.push(sound_directory(
+            PathBuf::from(local_app_data).join("Microsoft/Windows/Themes"),
+            "Local Windows themes",
+        ));
+    }
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        directories.push(sound_directory(
+            PathBuf::from(app_data).join("Microsoft/Windows/Themes"),
+            "Roaming Windows themes",
         ));
     }
     directories
@@ -585,48 +604,67 @@ impl<'a> OwnedCommandSpec<'a> {
 }
 
 fn run_first_available(commands: &[CommandSpec<'_>]) -> Result<(), SoundError> {
+    let mut last_error = None;
     for command in commands {
-        match run_command(
-            command.program,
-            command
-                .arguments
-                .iter()
-                .map(|argument| OsStr::new(argument)),
-        ) {
-            Err(SoundError::Launch { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound => {}
-            result => return result,
+        match run_command(command.program, command.arguments.iter().map(OsStr::new)) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
         }
     }
-    Err(SoundError::NoPlaybackBackend)
+    Err(last_error.unwrap_or(SoundError::NoPlaybackBackend))
 }
 
 fn run_first_available_owned(commands: &[OwnedCommandSpec<'_>]) -> Result<(), SoundError> {
+    let mut last_error = None;
     for command in commands {
         match run_command(command.program, command.arguments.iter().copied()) {
-            Err(SoundError::Launch { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound => {}
-            result => return result,
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
         }
     }
-    Err(SoundError::NoPlaybackBackend)
+    Err(last_error.unwrap_or(SoundError::NoPlaybackBackend))
 }
 
-fn run_command<I, S>(
-    program: &str,
-    arguments: I,
-) -> Result<(), SoundError>
+fn run_command<I, S>(program: &str, arguments: I) -> Result<(), SoundError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let status = Command::new(program)
+    let mut child = Command::new(program)
         .args(arguments)
-        .status()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|source| SoundError::Launch {
             program: program.to_string(),
             source,
         })?;
+    let deadline = Instant::now() + PLAYBACK_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SoundError::TimedOut {
+                    program: program.to_string(),
+                });
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(source) => {
+                // `try_wait` failed but the child may still be alive and
+                // unreaped; `Child` does not wait-on-drop, so an early
+                // return here without reaping would leak a zombie process.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SoundError::Launch {
+                    program: program.to_string(),
+                    source,
+                });
+            }
+        }
+    };
     if status.success() {
         Ok(())
     } else {

@@ -290,6 +290,18 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Indentation for a line that continues the innermost active list
+    /// item's content without repeating its marker -- a loose item's second
+    /// paragraph, or a line following a hard break inside an item. Matches
+    /// the two-space-per-depth indent `Tag::Item` bakes into its own marker
+    /// line, stepped one level deeper so continuation text lines up under
+    /// where the marker's own text began. `None` outside any list, so a
+    /// plain top-level continuation line stays unindented.
+    fn list_item_continuation_indent(&self) -> Option<Span<'static>> {
+        let depth = self.lists.last()?.depth;
+        Some(Span::raw("  ".repeat(depth as usize + 1)))
+    }
+
     fn push_text(&mut self, text: &str) {
         if let Some((_, lines)) = self.code_block.as_mut() {
             let mut parts = text.split('\n');
@@ -363,7 +375,10 @@ impl<'a> Builder<'a> {
                 self.code -= 1;
             }
             Event::SoftBreak => self.push_text(" "),
-            Event::HardBreak => self.start_line_with_prefix(None),
+            Event::HardBreak => {
+                let continuation_indent = self.list_item_continuation_indent();
+                self.start_line_with_prefix(continuation_indent);
+            }
             Event::Rule => {
                 self.flush_text_block();
                 self.blocks
@@ -400,7 +415,7 @@ impl<'a> Builder<'a> {
                             .push(Span::styled("│ ", Style::new().fg(QUOTE_FG)));
                     }
                 } else {
-                    self.start_line_with_prefix(None);
+                    self.start_line_with_prefix(self.list_item_continuation_indent());
                 }
                 self.paragraph_is_lone_image = Some(true);
             }
@@ -1015,6 +1030,41 @@ mod tests {
             panic!("expected one text block, got {:?}", document.blocks);
         };
         assert_eq!(line_text(&lines[0]), "• │ quoted");
+    }
+
+    #[test]
+    fn loose_list_items_second_paragraph_stays_indented_under_the_marker() {
+        // Only the marker line bakes in its own indent; a second paragraph
+        // in the same item has no marker to reuse, so it must independently
+        // pick up the same depth-based indent or it reads as if it had
+        // fallen back out of the list entirely.
+        let document = parse("- first\n\n  second para", Path::new("/tmp"));
+
+        let Block::Text(first_item) = &document.blocks[0] else {
+            panic!(
+                "expected first item's paragraph, got {:?}",
+                document.blocks[0]
+            );
+        };
+        assert_eq!(line_text(&first_item[0]), "• first");
+        let Block::Text(second_paragraph) = &document.blocks[2] else {
+            panic!(
+                "expected the item's second paragraph, got {:?}",
+                document.blocks[2]
+            );
+        };
+        assert_eq!(line_text(&second_paragraph[0]), "  second para");
+    }
+
+    #[test]
+    fn hard_break_inside_a_list_item_keeps_the_marker_indent() {
+        let document = parse("- first  \nsecond", Path::new("/tmp"));
+
+        let Block::Text(lines) = &document.blocks[0] else {
+            panic!("expected one text block, got {:?}", document.blocks);
+        };
+        assert_eq!(line_text(&lines[0]), "• first");
+        assert_eq!(line_text(&lines[1]), "  second");
     }
 
     /// Concatenates styled spans without losing the visible text contract

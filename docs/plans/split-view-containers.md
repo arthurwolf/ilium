@@ -6,8 +6,9 @@ Add persistent vertical and horizontal split views to ilium. A split view is
 a tree container that displays zero to four existing panes in the right panel.
 It can contain terminals, agent terminals, editors, and boards.
 
-This plan deliberately covers design only. It does not authorize an
-implementation change.
+This document records the design implemented by the split-view feature. The
+domain, IPC, client presentation, shared geometry, UI, and verification work
+below are kept together so future extensions preserve the same boundaries.
 
 ## User-visible behaviour
 

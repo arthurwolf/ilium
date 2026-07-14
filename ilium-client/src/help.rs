@@ -60,9 +60,11 @@ pub fn render(frame: &mut Frame, area: Rect, shortcut_base: keymap::ShortcutBase
     lines.push(Line::from(
         "focus or hover the tree panel to reveal its footer actions",
     ));
-    lines.push(Line::from(
-        "hover a tree row for ✎/↑/↓ controls; ✎ renames, pane arrows cross into adjacent groups at boundaries",
-    ));
+    lines.push(Line::from(format!(
+        "hover a tree row for {}/↑/↓ controls; {} renames, pane arrows cross into adjacent groups at boundaries",
+        theme::PEN_ICON,
+        theme::PEN_ICON,
+    )));
     lines.push(Line::from(
         "click the terminal to focus it; mouse-aware terminal apps receive their mouse input",
     ));
@@ -112,6 +114,7 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("Ctrl+B then ?"));
         assert!(rendered.contains("press Ctrl+B ? again"));
+        assert!(rendered.contains(theme::PEN_ICON));
         assert!(!rendered.contains("Ctrl+A then ?"));
     }
 }

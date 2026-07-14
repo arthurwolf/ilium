@@ -28,6 +28,13 @@ pub enum NewPaneKind {
     Command(String),
     /// Open a file in the built-in editor pane.
     Editor(PathBuf),
+    /// Spawn `command_line`, write `initial_input` into its PTY, then submit
+    /// it with Enter. Appended so existing bincode variant indexes remain
+    /// stable for clients and detached servers built from an earlier source.
+    CommandWithInitialInput {
+        command_line: String,
+        initial_input: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +206,15 @@ pub enum ClientRequest {
     PreviewSound {
         source: SoundSourceKind,
         file: Option<PathBuf>,
+    },
+    /// Replaces any pending input for `pane_id` and starts a detached-server
+    /// countdown. The server converts this relative delay to one absolute
+    /// deadline before broadcasting the authoritative tree snapshot.
+    SchedulePaneInput {
+        pane_id: NodeId,
+        delay_seconds: u64,
+        text: String,
+        send_enter: bool,
     },
 }
 

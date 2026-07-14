@@ -76,6 +76,17 @@ async fn attach_to_the_wrong_session_name_gets_an_error() {
         matches!(event, ServerEvent::Error { .. }),
         "expected an Error reply for a session-name mismatch, got {event:?}"
     );
+
+    // `KillSession` is handled regardless of whether `Attach` ever
+    // succeeded on this connection (see `ipc::handlers::handle_request`),
+    // so use it here too -- otherwise the server task spawned by
+    // `TestServer::start` would keep running (holding its UDS listener
+    // and detection loop alive) for the rest of this test binary's
+    // process, since `TestServer` has no `Drop` that aborts it.
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
 }
 
 #[tokio::test]
@@ -132,6 +143,55 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+}
+
+#[tokio::test]
+async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
+    let server = TestServer::start("initial-input-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "initial-input-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            // This process emits its marker only after `read` receives the
+            // final Enter, proving both writes in the new server path landed.
+            kind: NewPaneKind::CommandWithInitialInput {
+                command_line: "IFS= read -r line; printf 'submitted:<%s>\\n' \"$line\"".to_string(),
+                initial_input: "/goal inspect the selected line".to_string(),
+            },
+        },
+    )
+    .await
+    .expect("create command pane with initial input");
+
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::ScreenUpdate { bytes, .. }
+                if String::from_utf8_lossy(bytes)
+                    .contains("submitted:</goal inspect the selected line>")
+        )
+    })
+    .await;
+    assert!(matches!(event, ServerEvent::ScreenUpdate { .. }));
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
 }
 
@@ -206,13 +266,98 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
 
     let snapshot_written = common::wait_until(
         || {
-            std::fs::read_to_string(&server.snapshot_path)
-                .is_ok_and(|contents| contents.contains("Vertical split"))
+            std::fs::read_to_string(&server.snapshot_path).is_ok_and(|contents| {
+                contents.contains("Vertical split") && contents.contains("\"Vertical\"")
+            })
         },
         Duration::from_secs(5),
     )
     .await;
     assert!(snapshot_written, "split orientation was not persisted");
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+}
+
+#[tokio::test]
+async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
+    let server = TestServer::start("invalid-split-view-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "invalid-split-view-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewGroup {
+            parent_group: ROOT_ID,
+            name: "work".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let created = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(ROOT_ID).is_ok_and(|children| children.len() == 1))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree_before) = created else {
+        unreachable!();
+    };
+    let group_id = tree_before.children_of(ROOT_ID).unwrap()[0];
+
+    // A group is not an eligible split member. The domain validates every
+    // requested member before inserting the split, so this must fail as one
+    // transaction rather than leave an empty split behind.
+    write_frame(
+        &mut client,
+        &ClientRequest::CreateSplitView {
+            parent_group: group_id,
+            name: "Invalid split".to_string(),
+            orientation: SplitOrientation::Horizontal,
+            pane_ids: vec![group_id],
+        },
+    )
+    .await
+    .unwrap();
+    let error = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::Error { .. })
+    })
+    .await;
+    assert!(matches!(error, ServerEvent::Error { .. }));
+
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "invalid-split-view-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let snapshot = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree_after) = snapshot else {
+        unreachable!();
+    };
+    assert_eq!(tree_after, tree_before);
+    assert!(
+        tree_after
+            .all_ids()
+            .all(|node_id| tree_after.split_orientation(node_id).is_none()),
+        "the rejected request must not leave a split container behind"
+    );
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

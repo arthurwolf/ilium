@@ -88,14 +88,17 @@ fn render_block(
 }
 
 fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -> RenderedBlock {
-    let ImagePath::Local(path) = path else {
-        let ImagePath::Unsupported(url) = path else {
-            unreachable!("the only other ImagePath variant is Local, matched above");
-        };
-        return RenderedBlock::Placeholder(Line::styled(
-            format!("[image: {alt} -- remote images aren't loaded ({url})]"),
-            Style::new().fg(Color::DarkGray).italic(),
-        ));
+    // A `match` (not nested let-else + unreachable!) so a future third
+    // `ImagePath` variant fails to compile here instead of panicking at
+    // runtime the first time this function runs against it.
+    let path = match path {
+        ImagePath::Local(path) => path,
+        ImagePath::Unsupported(url) => {
+            return RenderedBlock::Placeholder(Line::styled(
+                format!("[image: {alt} -- remote images aren't loaded ({url})]"),
+                Style::new().fg(Color::DarkGray).italic(),
+            ));
+        }
     };
 
     let dyn_image = image::ImageReader::open(path)

@@ -33,7 +33,11 @@ where
 {
     let mut result = Vec::new();
     for item in items {
-        let mut child_identifier = current.to_vec();
+        // Reserve the exact capacity up front so pushing the child's own
+        // identifier never forces a reallocation/copy on top of the clone
+        // `to_vec()` already performed.
+        let mut child_identifier = Vec::with_capacity(current.len() + 1);
+        child_identifier.extend_from_slice(current);
         child_identifier.push(item.identifier.clone());
 
         let child_result = open_identifiers

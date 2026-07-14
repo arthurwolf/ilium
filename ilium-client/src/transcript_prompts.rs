@@ -9,6 +9,7 @@
 //! turning transcript bytes into a short list of plain-text prompt strings.
 
 use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use ilium_core::AgentClass;
@@ -42,28 +43,47 @@ pub fn recent_user_prompts(
     if matches!(class, AgentClass::Other(_)) {
         return Ok(Vec::new());
     }
-    let contents = std::fs::read_to_string(transcript_path)?;
-    let prompts = extract_user_prompts(class, &contents);
-    let recent_start = prompts.len().saturating_sub(RECENT_PROMPT_COUNT);
-    Ok(prompts[recent_start..]
+    // Stream the transcript line-by-line instead of `read_to_string`-ing the
+    // whole file: a long-running session's transcript can grow to many tens
+    // or hundreds of megabytes (tool output, pasted file contents), and this
+    // function only ever keeps the last `RECENT_PROMPT_COUNT` prompts, so
+    // peak memory should scale with that bounded window, not with total
+    // transcript size. A line that isn't valid UTF-8 is skipped rather than
+    // aborting the whole read, matching the existing "ignore malformed
+    // lines" behavior for lines that fail JSON parsing.
+    let file = std::fs::File::open(transcript_path)?;
+    // `map_while(Result::ok)` (clippy's default suggestion for this pattern)
+    // would stop at the first line that fails to decode, silently truncating
+    // the read partway through the transcript -- the opposite of the
+    // "skip malformed lines" behavior documented above. `read_line` runs its
+    // byte read first and only fails UTF-8 validation after consuming those
+    // bytes, so the reader advances past a bad line rather than re-reading
+    // it -- the lint's "repeated Err forever" scenario is about a persistent
+    // I/O read error (failing disk, dropped mount), not the malformed-UTF-8
+    // case this transcript reader actually hits.
+    #[allow(clippy::lines_filter_map_ok)]
+    let lines = BufReader::new(file).lines().filter_map(Result::ok);
+    let prompts = extract_user_prompts(class, lines);
+    Ok(prompts
         .iter()
         .map(|prompt| compact_prompt(prompt, PROMPT_MAX_LINES))
         .collect())
 }
 
-/// Pure extraction over already-read transcript text, in transcript order
-/// (oldest first) -- split out from `recent_user_prompts` so parsing logic
-/// is testable without touching a filesystem. Already bounded to at most
-/// `RECENT_PROMPT_COUNT` entries by the underlying parser (see
-/// `take_last`): a long-running session's transcript can carry many
-/// thousands of user turns, and materializing every one of them just to
-/// keep the last handful would make this allocation scale with the whole
-/// session's lifetime instead of with the bounded window the caller
-/// actually needs.
-fn extract_user_prompts(class: &AgentClass, contents: &str) -> Vec<String> {
+/// Pure extraction over a transcript's lines, in transcript order (oldest
+/// first) -- split out from `recent_user_prompts` so parsing logic is
+/// testable without touching a filesystem. Takes an iterator rather than
+/// the whole file's text so the caller can stream from a `BufReader`:
+/// already bounded to at most `RECENT_PROMPT_COUNT` entries by the
+/// underlying parser (see `take_last`), a long-running session's transcript
+/// can carry many thousands of user turns, and materializing either the
+/// whole file or every matching turn just to keep the last handful would
+/// make memory use scale with the whole session's lifetime instead of with
+/// the bounded window the caller actually needs.
+fn extract_user_prompts(class: &AgentClass, lines: impl Iterator<Item = String>) -> Vec<String> {
     match class {
-        AgentClass::Claude => claude_user_prompts(contents),
-        AgentClass::Codex => codex_user_prompts(contents),
+        AgentClass::Claude => claude_user_prompts(lines),
+        AgentClass::Codex => codex_user_prompts(lines),
         AgentClass::Other(_) => Vec::new(),
     }
 }
@@ -93,11 +113,10 @@ fn take_last(texts: impl Iterator<Item = String>, cap: usize) -> Vec<String> {
 /// tool-result turns are also `"type":"user"` but their `content` is
 /// always a JSON array, never a plain string, which is what tells the two
 /// apart here.
-fn claude_user_prompts(contents: &str) -> Vec<String> {
+fn claude_user_prompts(lines: impl Iterator<Item = String>) -> Vec<String> {
     take_last(
-        contents
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        lines
+            .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
             .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("user"))
             .filter(|entry| {
                 !entry
@@ -130,11 +149,10 @@ fn claude_user_prompts(contents: &str) -> Vec<String> {
 /// `response_item` records (also `role: "user"`), neither of these carries
 /// Codex's own injected `AGENTS.md`/environment-context boilerplate ahead
 /// of the real prompt.
-fn codex_user_prompts(contents: &str) -> Vec<String> {
+fn codex_user_prompts(lines: impl Iterator<Item = String>) -> Vec<String> {
     take_last(
-        contents
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        lines
+            .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
             .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("event_msg"))
             .filter_map(|entry| {
                 let payload = entry.get("payload")?;
@@ -184,6 +202,14 @@ fn compact_prompt(text: &str, max_lines: usize) -> String {
 mod tests {
     use super::*;
 
+    /// Test-only helper mirroring how `recent_user_prompts` feeds a
+    /// `BufReader`'s line iterator to the parsers in production -- keeps
+    /// every test call site free of the `.lines().map(String::from)`
+    /// boilerplate.
+    fn lines_of(text: &str) -> impl Iterator<Item = String> + '_ {
+        text.lines().map(str::to_string)
+    }
+
     #[test]
     fn claude_prompts_keep_typed_user_text_and_skip_tool_results_and_sidechains() {
         let contents = [
@@ -196,7 +222,7 @@ mod tests {
         .join("\n");
 
         assert_eq!(
-            claude_user_prompts(&contents),
+            claude_user_prompts(lines_of(&contents)),
             vec![
                 "first prompt".to_string(),
                 "second prompt, no isSidechain field".to_string(),
@@ -214,7 +240,7 @@ mod tests {
         .join("\n");
 
         assert_eq!(
-            codex_user_prompts(&contents),
+            codex_user_prompts(lines_of(&contents)),
             vec!["write a fibonacci function".to_string()]
         );
     }
@@ -232,7 +258,7 @@ mod tests {
         .join("\n");
 
         assert_eq!(
-            codex_user_prompts(&contents),
+            codex_user_prompts(lines_of(&contents)),
             vec!["add a hourly proxy-sync task".to_string()]
         );
     }
@@ -264,10 +290,11 @@ mod tests {
 
     #[test]
     fn other_agent_class_yields_no_prompts() {
-        assert!(
-            extract_user_prompts(&AgentClass::Other("opencode".to_string()), "irrelevant")
-                .is_empty()
-        );
+        assert!(extract_user_prompts(
+            &AgentClass::Other("opencode".to_string()),
+            lines_of("irrelevant")
+        )
+        .is_empty());
     }
 
     #[test]

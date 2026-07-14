@@ -5,13 +5,16 @@
 //! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
 
 use ilium_core::{AgentClass, NodeId, NodeKind, PaneStatus, ROOT_ID};
-use ratatui::layout::{Position, Rect};
+use ratatui::layout::{Alignment, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 use tui_term::widget::PseudoTerminal;
 
+use crate::agent_from_line::{
+    AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu,
+};
 use crate::app::{
     App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind, ContextMenu, CreateBoardState,
     CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState, FocusTarget, Mode,
@@ -57,6 +60,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             is_project_name_loading: app.is_project_name_loading,
             titles_loading: &app.titles_loading,
             recently_created: &app.recently_created,
+            agent_identifiers: &app.ui_settings.agent_identifiers,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
@@ -99,6 +103,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
     if let Mode::ContextMenu(menu) = &app.mode {
         draw_context_menu(frame, menu);
+    }
+    if let Mode::EditorLineContextMenu(menu) = &app.mode {
+        draw_editor_line_context_menu(frame, menu);
+    }
+    if let Mode::CreateAgentFromLine(state) = &app.mode {
+        draw_create_agent_from_line(frame, area, state);
     }
     if let Mode::CreateGroup(state) = &app.mode {
         draw_create_group(frame, app, state);
@@ -200,7 +210,11 @@ fn draw_create_split_orientation(
             Line::from(format!("{horizontal_marker} ▤  Horizontal — stacked")),
             Line::from(""),
             Line::from(Span::styled(
-                "←/→ choose · Enter continue · Esc cancel",
+                "E  Create empty with this orientation",
+                Style::new().fg(Color::Cyan),
+            )),
+            Line::from(Span::styled(
+                "←/→ choose · Enter choose panes · E create empty · Esc cancel",
                 Style::new().add_modifier(Modifier::DIM),
             )),
         ]),
@@ -290,6 +304,104 @@ fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu) {
     let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(title)));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
+}
+
+/// Draws the line-specific right-click action without implying that its file
+/// target is the currently selected tree node.
+fn draw_editor_line_context_menu(frame: &mut Frame, menu: &EditorLineContextMenu) {
+    let lines: Vec<Line> = menu
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| {
+            let style = if index == menu.selected_index {
+                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            Line::from(Span::styled(format!(" {}", action.label()), style))
+        })
+        .collect();
+    let widget =
+        Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title("Line actions")));
+    frame.render_widget(Clear, menu.area);
+    frame.render_widget(widget, menu.area);
+}
+
+/// Draws the agent selector, editable multi-line prompt, and explicit submit
+/// button using geometry shared with `crate::mouse`.
+fn draw_create_agent_from_line(
+    frame: &mut Frame,
+    screen_area: Rect,
+    state: &CreateAgentFromLineState,
+) {
+    let layout = crate::agent_from_line::dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title("Create agent from line")),
+        layout.popup,
+    );
+
+    let selector_style = if state.focus == CreateAgentFocus::AgentType {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    let agent_option = |agent_type: AgentLaunchType| {
+        let marker = if state.agent_type == agent_type {
+            "(●)"
+        } else {
+            "( )"
+        };
+        Span::styled(
+            format!("{marker} {}", agent_type.label()),
+            if state.agent_type == agent_type {
+                selector_style.add_modifier(Modifier::BOLD)
+            } else {
+                selector_style
+            },
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Agent: ", Style::new().add_modifier(Modifier::DIM)),
+            agent_option(AgentLaunchType::Claude),
+            Span::raw("   "),
+            agent_option(AgentLaunchType::Codex),
+        ])),
+        layout.agent_row,
+    );
+
+    let prompt_border_style = if state.focus == CreateAgentFocus::Prompt {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    let prompt_block = theme::block(state.focus == CreateAgentFocus::Prompt)
+        .title(theme::chrome_title("Task prompt"))
+        .border_style(prompt_border_style);
+    let prompt_inner = prompt_block.inner(layout.prompt_area);
+    frame.render_widget(prompt_block, layout.prompt_area);
+    frame.render_widget(&state.prompt, prompt_inner);
+
+    let button_style = if state.focus == CreateAgentFocus::CreateButton {
+        Style::new()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled("[ Create agent ]", button_style)).alignment(Alignment::Center),
+        layout.create_button,
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field · Enter newline · Ctrl+Enter create · Esc cancel")
+            .style(Style::new().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        layout.hint_row,
+    );
 }
 
 /// Uses the target identifier only as context; the menu labels make the
@@ -743,36 +855,42 @@ fn agent_class_title(class: &AgentClass) -> &str {
 /// each side, with a powerline round-cap glyph closing off each end --
 /// rather than a bar that runs flush into the screen's edges.
 fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let mode_label = match &app.mode {
-        Mode::Normal => "NORMAL".to_string(),
-        Mode::LeaderPending => "LEADER (press a letter — ? for help)".to_string(),
-        Mode::Move => "MOVE".to_string(),
+    // Every arm here is a compile-time-constant label -- borrowing a
+    // `&'static str` instead of building a fresh owned `String` avoids a
+    // needless heap allocation on every single render frame (this function
+    // runs on the redraw hot path, potentially many times per second).
+    let mode_label: &'static str = match &app.mode {
+        Mode::Normal => "NORMAL",
+        Mode::LeaderPending => "LEADER (press a letter — ? for help)",
+        Mode::Move => "MOVE",
         // The buffer itself is shown in the modal popup (see `draw`), not
         // here -- the status bar only names the mode while one is open.
-        Mode::Rename(_) => "RENAME".to_string(),
-        Mode::CommandPrompt(_) => "RUN COMMAND".to_string(),
-        Mode::SaveAs(..) => "SAVE AS".to_string(),
-        Mode::Help => "HELP".to_string(),
-        Mode::Explorer(..) => "FILE PICKER".to_string(),
-        Mode::ExplorerFileMenu(_) => "FILE ACTIONS".to_string(),
-        Mode::FolderExplorer(..) => "FOLDER PICKER".to_string(),
-        Mode::ContextMenu(..) => "TREE ACTIONS".to_string(),
-        Mode::CreateGroup(_) => "NEW GROUP".to_string(),
-        Mode::CreateSplitOrientation(_) => "NEW SPLIT".to_string(),
-        Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES".to_string(),
-        Mode::CreateBoard(_) => "NEW BOARD".to_string(),
-        Mode::BoardPathPicker(_, _) => "BOARD PATH".to_string(),
-        Mode::BoardCardPrompt(_, _) => "NEW CARD".to_string(),
-        Mode::BoardColumnPrompt(_, _) => "NEW COLUMN".to_string(),
-        Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM".to_string(),
-        Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM".to_string(),
-        Mode::ConfirmClose(_) => "CONFIRM CLOSE".to_string(),
+        Mode::Rename(_) => "RENAME",
+        Mode::CommandPrompt(_) => "RUN COMMAND",
+        Mode::SaveAs(..) => "SAVE AS",
+        Mode::Help => "HELP",
+        Mode::Explorer(..) => "FILE PICKER",
+        Mode::ExplorerFileMenu(_) => "FILE ACTIONS",
+        Mode::FolderExplorer(..) => "FOLDER PICKER",
+        Mode::ContextMenu(..) => "TREE ACTIONS",
+        Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
+        Mode::CreateAgentFromLine(..) => "CREATE AGENT",
+        Mode::CreateGroup(_) => "NEW GROUP",
+        Mode::CreateSplitOrientation(_) => "NEW SPLIT",
+        Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES",
+        Mode::CreateBoard(_) => "NEW BOARD",
+        Mode::BoardPathPicker(_, _) => "BOARD PATH",
+        Mode::BoardCardPrompt(_, _) => "NEW CARD",
+        Mode::BoardColumnPrompt(_, _) => "NEW COLUMN",
+        Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
+        Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
+        Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
         // whole screen, status bar included). Kept as a real arm rather
         // than a wildcard so this stays exhaustive if that early return is
         // ever removed.
-        Mode::Settings(_) => "SETTINGS".to_string(),
+        Mode::Settings(_) => "SETTINGS",
     };
 
     let bar_style = theme::statusbar_style();
@@ -782,7 +900,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     ];
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));
-        spans.push(Span::raw(message.clone()));
+        // Borrow rather than `message.clone()` -- `app` outlives this
+        // function's local `spans`, so there is no need to allocate a new
+        // `String` copy of the status message on every render frame.
+        spans.push(Span::raw(message.as_str()));
     }
 
     let cap_style = theme::statusbar_cap_style();
@@ -842,6 +963,37 @@ mod tests {
             (0..4).all(|row| buffer[(11, row)].symbol() == " "),
             "fitting source should not render a scrollbar"
         );
+    }
+
+    #[test]
+    fn create_agent_dialog_renders_selector_editable_prompt_and_button() {
+        let state = CreateAgentFromLineState::new(
+            crate::agent_from_line::EditorSourceLine {
+                pane_id: NodeId(2),
+                path: PathBuf::from("/work/main.rs"),
+                line_number: 9,
+                text: "finish_feature();".to_string(),
+            },
+            NodeId(1),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+        terminal
+            .draw(|frame| draw_create_agent_from_line(frame, frame.area(), &state))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Create agent from line"));
+        assert!(rendered.contains("Claude"));
+        assert!(rendered.contains("Codex"));
+        assert!(rendered.contains("/goal please do the following task"));
+        assert!(rendered.contains("[ Create agent ]"));
     }
 
     #[test]

@@ -140,4 +140,18 @@ mod tests {
             Some(NodeId(2))
         );
     }
+
+    #[test]
+    fn tiny_areas_saturate_content_geometry_without_panicking() {
+        let viewports = allocate_viewports(
+            Rect::new(u16::MAX, u16::MAX, 1, 1),
+            SplitOrientation::Horizontal,
+            &ids(4),
+        );
+
+        assert_eq!(viewports.len(), 4);
+        assert!(viewports
+            .iter()
+            .all(|viewport| viewport.content_area.width == 0 && viewport.content_area.height == 0));
+    }
 }

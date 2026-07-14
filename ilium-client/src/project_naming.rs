@@ -125,9 +125,23 @@ fn root_listing(cwd: &Path) -> anyhow::Result<String> {
         .join("\n"))
 }
 
+/// Reads at most `DOCUMENT_MAX_LINES` lines of `path` without materializing
+/// the whole file in memory first. CLAUDE.md/README.md are user-controlled
+/// project content and may be arbitrarily large, so this streams line-by-line
+/// and stops as soon as the cap is reached instead of buffering the entire
+/// file (which `read_to_string` followed by truncation would do).
 fn read_document_or_marker(path: &Path) -> anyhow::Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => Ok(first_lines(&contents, DOCUMENT_MAX_LINES)),
+    use std::io::BufRead;
+
+    match std::fs::File::open(path) {
+        Ok(file) => {
+            let reader = std::io::BufReader::new(file);
+            let mut lines = Vec::with_capacity(DOCUMENT_MAX_LINES.min(256));
+            for line in reader.lines().take(DOCUMENT_MAX_LINES) {
+                lines.push(line?);
+            }
+            Ok(lines.join("\n"))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok("[not present]".to_string())
         }
@@ -135,6 +149,10 @@ fn read_document_or_marker(path: &Path) -> anyhow::Result<String> {
     }
 }
 
+// Only exercised directly by unit tests below; production cropping now
+// happens inline in `read_document_or_marker` via a bounded line iterator
+// so large files are never fully buffered in memory first.
+#[cfg(test)]
 fn first_lines(contents: &str, maximum: usize) -> String {
     contents
         .lines()

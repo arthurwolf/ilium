@@ -28,6 +28,10 @@ const BORDER_TYPE: BorderType = BorderType::Rounded;
 /// a `┬`/`┴`/`┼`) instead of drawing two borders on top of each other.
 const BORDER_MERGE: MergeStrategy = MergeStrategy::Fuzzy;
 
+/// Shared pen glyph for editor panes, creation controls, rename controls,
+/// and help text so those surfaces cannot drift to different symbols.
+pub const PEN_ICON: &str = "✏️";
+
 /// The ilium color palette every bordered/accented widget reads from.
 /// `Theme::default()` reproduces the exact hardcoded values this crate
 /// shipped with before config support existed -- a user with no

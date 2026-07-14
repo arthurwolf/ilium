@@ -473,9 +473,10 @@ async fn run_due_panes(
                 }
             }
 
-            let pane_titles_before_update = tree
+            let (pane_name_before_update, short_pane_name_before_update) = tree
                 .get(pane_id)
-                .map(|node| (node.name.clone(), node.short_name.clone()));
+                .map(|node| (Some(node.name.clone()), node.short_name.clone()))
+                .unwrap_or_default();
 
             if let Err(error) = tree.set_pane_status(pane_id, new_status.clone()) {
                 // A pane present in the registry but missing from the tree
@@ -494,19 +495,11 @@ async fn run_due_panes(
             if state.notifications_config.enabled
                 && notifications::is_finished_transition(previous_status.as_ref(), &new_status)
             {
-                let (long_pane_name, short_pane_name) =
-                    pane_titles_before_update.unwrap_or_default();
                 pending_notifications.push(PendingNotification::from_pane_titles(
                     state.session_name.clone(),
-                    long_pane_name,
-                    short_pane_name,
+                    pane_name_before_update.clone().unwrap_or_default(),
+                    short_pane_name_before_update,
                 ));
-            }
-
-            state.broadcast(ServerEvent::PaneStatusChanged {
-                pane_id,
-                status: new_status,
-                });
             }
 
             if let Some(event) =
@@ -520,6 +513,12 @@ async fn run_due_panes(
                     });
                 }
             }
+
+            state.broadcast(ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: new_status,
+            });
+        }
     }
 
     for pending in pending_notifications {

@@ -50,11 +50,15 @@ struct Cli {
     #[arg(long, global = true, default_value = ".")]
     cwd: PathBuf,
 
-    /// Replace this project's running server before attaching. The restored
-    /// server uses this executable's sibling `ilium-server`, which is useful
-    /// while developing a new build.
+    /// Replace this project's running server before attaching while retaining
+    /// its snapshot. Useful after installing a new server binary.
     #[arg(long, global = true)]
-    fresh: bool,
+    restart_server: bool,
+
+    /// Delete this project's named session snapshot and start it empty. This
+    /// is intentionally destructive and never affects another project.
+    #[arg(long, global = true, conflicts_with = "restart_server")]
+    reset_session: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -95,8 +99,18 @@ async fn main() -> ExitCode {
 
 async fn dispatch(cli: Cli) -> Result<(), CliError> {
     match cli.command {
-        None => attach_or_create(session::DEFAULT_SESSION_NAME, &cli.cwd, cli.fresh).await,
-        Some(Command::NewSession { name }) => attach_or_create(&name, &cli.cwd, cli.fresh).await,
+        None => {
+            attach_or_create(
+                session::DEFAULT_SESSION_NAME,
+                &cli.cwd,
+                cli.restart_server,
+                cli.reset_session,
+            )
+            .await
+        }
+        Some(Command::NewSession { name }) => {
+            attach_or_create(&name, &cli.cwd, cli.restart_server, cli.reset_session).await
+        }
         Some(Command::Ls) => list_sessions(&cli.cwd),
         Some(Command::KillSession { name }) => kill_session(&name, &cli.cwd).await,
         Some(Command::NewPane { session_name, cmd }) => {
@@ -108,9 +122,16 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
 /// The bare-invocation and `new-session` paths: ensure the session's
 /// server is running, then hand off to the TUI until the user quits or
 /// the connection drops.
-async fn attach_or_create(session_name: &str, cwd: &Path, is_fresh: bool) -> Result<(), CliError> {
+async fn attach_or_create(
+    session_name: &str,
+    cwd: &Path,
+    should_restart_server: bool,
+    should_reset_session: bool,
+) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
-    if is_fresh {
+    if should_reset_session {
+        session::reset_session(&project_session).await?;
+    } else if should_restart_server {
         session::replace_server(&project_session).await?;
     } else {
         session::ensure_server_running(&project_session).await?;

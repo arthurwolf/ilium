@@ -24,11 +24,12 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_ipc::{read_frame, ServerEvent};
 use ilium_server::config::{DetectionConfig, NotificationsConfig};
-use ilium_server::{run, ServerOptions};
+use ilium_server::{run, NoopSoundPlayer, ServerOptions, SoundPlayer};
 use tokio::net::UnixStream;
 
 /// Polls `condition` until it's true or `timeout` elapses, without a fixed
@@ -105,6 +106,23 @@ impl TestServer {
         session_name: &str,
         detection_config: DetectionConfig,
     ) -> Self {
+        Self::start_with_sound_player(
+            session_name,
+            detection_config,
+            ilium_sound::SoundSettings::default(),
+            Arc::new(NoopSoundPlayer),
+        )
+        .await
+    }
+
+    /// Starts a server with an injected player, allowing the live detection
+    /// integration test to prove dispatch without producing real audio.
+    pub async fn start_with_sound_player(
+        session_name: &str,
+        detection_config: DetectionConfig,
+        sound_settings: ilium_sound::SoundSettings,
+        sound_player: Arc<dyn SoundPlayer>,
+    ) -> Self {
         let dir = tempfile::tempdir().expect("create tempdir");
         let socket_path = dir.path().join(format!("{session_name}.sock"));
         let snapshot_path = dir.path().join(format!("{session_name}.snapshot.json"));
@@ -115,16 +133,26 @@ impl TestServer {
             snapshot_path: snapshot_path.clone(),
             session_cwd: dir.path().to_path_buf(),
             detection_config,
-            notifications_config: NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            notifications_config: NotificationsConfig { enabled: false },
+            sound_settings,
             sound_config_path: None,
-            sound_player: std::sync::Arc::new(ilium_server::NoopSoundPlayer),
+            sound_player,
             custom_signatures: Vec::new(),
         };
 
         let server_task = tokio::spawn(run(options));
 
         let bound = wait_until(|| socket_path.exists(), Duration::from_secs(5)).await;
+        if !bound {
+            // Bail out before the task's `JoinHandle` is ever stored
+            // anywhere reachable -- without this, a bind timeout would
+            // leave the spawned server task (PTYs, detection loop, socket
+            // listener and all) running forever in the background with no
+            // handle left to abort it, since the handle about to be
+            // dropped by this `assert!` unwinding does not cancel the task
+            // it points to.
+            server_task.abort();
+        }
         assert!(bound, "server did not bind its socket in time");
 
         Self {

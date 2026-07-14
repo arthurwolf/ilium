@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ilium_core::{
-    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, Tree, TreeError,
+    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
+    ScheduledPaneInput, Tree, TreeError,
 };
 use ilium_ipc::{ClientRequest, NewPaneKind, ServerEvent};
 use ilium_pty::PtyError;
@@ -78,26 +79,6 @@ pub async fn handle_request(
                     .map(|_id| ())
             })
             .await;
-            false
-        }
-        ClientRequest::UpdateSoundSettings { settings } => {
-            *state.sound_settings.write().await = settings;
-            false
-        }
-        ClientRequest::PreviewSound { source, file } => {
-            let settings = ilium_sound::SoundSettings {
-                source,
-                file,
-                ..ilium_sound::SoundSettings::default()
-            };
-            match tokio::task::spawn_blocking(move || ilium_sound::play(&settings)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => send_direct_error(direct_tx, error.to_string()).await,
-                Err(error) => {
-                    send_direct_error(direct_tx, format!("sound preview task failed: {error}"))
-                        .await
-                }
-            }
             false
         }
         ClientRequest::ClosePane { pane_id } => {
@@ -200,6 +181,23 @@ pub async fn handle_request(
             );
             false
         }
+        ClientRequest::SchedulePaneInput {
+            pane_id,
+            delay_seconds,
+            text,
+            send_enter,
+        } => {
+            handle_schedule_pane_input(
+                state,
+                pane_id,
+                delay_seconds,
+                text,
+                send_enter,
+                direct_tx,
+            )
+            .await;
+            false
+        }
     }
 }
 
@@ -243,10 +241,47 @@ async fn tree_snapshot(state: &ServerState) -> Tree {
 /// after dropping any tree/pane write-lock guard their own mutation held,
 /// so this function's read-locked clone can never contend with a pending
 /// writer (see `ServerState`'s lock-ordering docs).
-async fn broadcast_and_persist(state: &Arc<ServerState>) {
+pub(crate) async fn broadcast_and_persist(state: &Arc<ServerState>) {
     let snapshot = tree_snapshot(state).await;
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
+}
+
+/// Validates and persists one timer before waking the detached executor. The
+/// absolute deadline is server-derived so all clients and crash recovery share
+/// one clock instead of trusting whichever UI happened to create the action.
+async fn handle_schedule_pane_input(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    delay_seconds: u64,
+    text: String,
+    send_enter: bool,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let execute_at_unix_millis = match crate::scheduled_input::deadline_from_delay(delay_seconds) {
+        Ok(deadline) => deadline,
+        Err(message) => {
+            send_direct_error(direct_tx, message).await;
+            return;
+        }
+    };
+    let result = {
+        let mut tree = state.tree.write().await;
+        tree.schedule_pane_input(
+            pane_id,
+            ScheduledPaneInput {
+                execute_at_unix_millis,
+                text,
+                send_enter,
+            },
+        )
+    };
+    if let Err(error) = result {
+        send_direct_error(direct_tx, format!("failed to schedule pane input: {error}")).await;
+        return;
+    }
+    broadcast_and_persist(state).await;
+    state.scheduled_input_changed.notify_one();
 }
 
 async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sender<ServerEvent>) {
@@ -453,39 +488,79 @@ fn default_pane_cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
-/// Turns a client's `NewPaneKind` into the `PaneSnapshotKind` that both
-/// `spawn_and_register_pane` and the tree's initial name/content-kind
-/// choice need -- the one place a `NewPane` request's shape is translated
-/// into the shape this crate spawns/persists from.
-fn pane_snapshot_kind_for(kind: NewPaneKind) -> (PaneSnapshotKind, String, PaneContentKind) {
+/// Fully-resolved server work for one pane-creation request. Initial input is
+/// deliberately transient: crash recovery should relaunch the agent session,
+/// never re-submit the original task a second time.
+struct NewPanePlan {
+    spawn_kind: PaneSnapshotKind,
+    name: String,
+    content_kind: PaneContentKind,
+    initial_input: Option<String>,
+}
+
+/// Turns a client's `NewPaneKind` into the one server-owned creation plan used
+/// for spawning, persistence identity, tree presentation, and optional first
+/// submission.
+fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
     match kind {
         NewPaneKind::Editor(path) => {
             let name = editor_pane_name(&path);
-            (
-                PaneSnapshotKind::Editor { path: Some(path) },
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Editor { path: Some(path) },
                 name,
-                PaneContentKind::Editor,
-            )
+                content_kind: PaneContentKind::Editor,
+                initial_input: None,
+            }
         }
         NewPaneKind::PlainShell => {
             let origin = TerminalOrigin::PlainShell;
             let name = origin.default_pane_name().to_string();
-            (
-                PaneSnapshotKind::Terminal(origin),
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Terminal(origin),
                 name,
-                PaneContentKind::Terminal,
-            )
+                content_kind: PaneContentKind::Terminal,
+                initial_input: None,
+            }
         }
         NewPaneKind::Command(command_line) => {
             let origin = TerminalOrigin::Command(command_line);
             let name = origin.default_pane_name().to_string();
-            (
-                PaneSnapshotKind::Terminal(origin),
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Terminal(origin),
                 name,
-                PaneContentKind::Terminal,
-            )
+                content_kind: PaneContentKind::Terminal,
+                initial_input: None,
+            }
+        }
+        NewPaneKind::CommandWithInitialInput {
+            command_line,
+            initial_input,
+        } => {
+            let origin = TerminalOrigin::Command(command_line);
+            let name = origin.default_pane_name().to_string();
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Terminal(origin),
+                name,
+                content_kind: PaneContentKind::Terminal,
+                initial_input: Some(initial_input),
+            }
         }
     }
+}
+
+/// Encodes multi-line textarea content as one bracketed paste so embedded
+/// newlines remain part of the agent prompt; the final Enter is sent
+/// separately by `handle_new_pane` and remains the only submission keystroke.
+fn initial_input_bytes(initial_input: &str) -> Vec<u8> {
+    if !initial_input.contains('\n') {
+        return initial_input.as_bytes().to_vec();
+    }
+
+    let mut bytes = Vec::with_capacity(initial_input.len() + 12);
+    bytes.extend_from_slice(b"\x1b[200~");
+    bytes.extend_from_slice(initial_input.as_bytes());
+    bytes.extend_from_slice(b"\x1b[201~");
+    bytes
 }
 
 async fn handle_new_pane(
@@ -494,11 +569,11 @@ async fn handle_new_pane(
     kind: NewPaneKind,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let (spawn_kind, name, content_kind) = pane_snapshot_kind_for(kind);
+    let plan = new_pane_plan(kind);
 
     let mut tree = state.tree.write().await;
     let parent_group = resolve_parent_group(&mut tree, parent_group);
-    let pane_id = match tree.add_pane(parent_group, name, content_kind) {
+    let pane_id = match tree.add_pane(parent_group, plan.name, plan.content_kind) {
         Ok(id) => id,
         Err(error) => {
             drop(tree);
@@ -511,7 +586,7 @@ async fn handle_new_pane(
     // eventual broadcast snapshot's O(n) clone -- see `broadcast_and_persist`.
     drop(tree);
 
-    if let Err(error) = spawn_and_register_pane(state, pane_id, spawn_kind).await {
+    if let Err(error) = spawn_and_register_pane(state, pane_id, plan.spawn_kind).await {
         // The tree node exists (created just above) but has no resource
         // behind it -- nothing was broadcast yet, so no attached client has
         // seen it; remove it rather than leaving a phantom node no client
@@ -522,6 +597,12 @@ async fn handle_new_pane(
         drop(tree);
         send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
         return;
+    }
+
+    if let Some(initial_input) = plan.initial_input {
+        let bytes = initial_input_bytes(&initial_input);
+        handle_key_input(state, pane_id, &bytes, direct_tx).await;
+        handle_key_input(state, pane_id, b"\r", direct_tx).await;
     }
 
     broadcast_and_persist(state).await;
@@ -661,6 +742,7 @@ async fn handle_close_pane(
     drop(panes);
 
     broadcast_and_persist(state).await;
+    state.scheduled_input_changed.notify_one();
 }
 
 async fn handle_resize_pane(
@@ -699,6 +781,20 @@ async fn handle_key_input(
     bytes: &[u8],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
+    if let Err(message) = write_key_input(state, pane_id, bytes).await {
+        send_direct_error(direct_tx, message).await;
+    }
+}
+
+/// Writes terminal bytes through the same title-tracking and detection path
+/// for both live client keys and server-scheduled input. Keeping one input
+/// boundary prevents delayed Enter from behaving differently from a key the
+/// user pressed directly.
+pub(crate) async fn write_key_input(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    bytes: &[u8],
+) -> Result<(), String> {
     // A cheap read-lock check up front: only an automatic-title
     // plain-shell pane can ever need this keystroke to touch the tree at
     // all. Escalating straight to `tree.write()` on every keystroke (as
@@ -730,10 +826,9 @@ async fn handle_key_input(
     // below, rather than waiting up to one base tick.
     // As with the read lock above: compute the outcome (including any
     // error message) while holding the write lock, then drop it before
-    // awaiting `send_direct` -- this is `state.panes`' write lock, held by
-    // every pane's key/mouse/resize handling, so awaiting a possibly-full
-    // direct-reply channel while still holding it would stall the whole
-    // server's input handling on this one connection's slow client.
+    // returning an error -- this is `state.panes`' write lock, held by every
+    // pane's key/mouse/resize handling, so no caller may await unrelated work
+    // while it remains held.
     let mut panes = state.panes.write().await;
     let mut observed_title = None;
     let error_message = match panes.get_mut(&pane_id) {
@@ -781,7 +876,7 @@ async fn handle_key_input(
     drop(panes);
 
     if let Some(message) = error_message {
-        send_direct_error(direct_tx, message).await;
+        return Err(message);
     }
 
     // Escalate to the tree write lock only for the rare keystroke that
@@ -791,7 +886,7 @@ async fn handle_key_input(
     // the pre-existing "tree before panes" nested pattern other handlers
     // use when they genuinely need both together).
     let Some(title) = observed_title else {
-        return;
+        return Ok(());
     };
     let title_changed = {
         let mut tree = state.tree.write().await;
@@ -809,6 +904,7 @@ async fn handle_key_input(
     if title_changed {
         broadcast_and_persist(state).await;
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -894,4 +990,22 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     // where connection tasks get aborted, after a short grace period --
     // see its comments.
     state.shutdown.notify_waiters();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_initial_input_is_written_verbatim() {
+        assert_eq!(initial_input_bytes("/goal one line"), b"/goal one line");
+    }
+
+    #[test]
+    fn multiline_initial_input_uses_one_bracketed_paste() {
+        assert_eq!(
+            initial_input_bytes("/goal first\nsecond"),
+            b"\x1b[200~/goal first\nsecond\x1b[201~"
+        );
+    }
 }

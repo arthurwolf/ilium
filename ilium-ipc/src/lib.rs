@@ -55,6 +55,13 @@ mod tests {
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Editor(PathBuf::from("/tmp/notes.md")),
             },
+            ClientRequest::NewPane {
+                parent_group: NodeId(1),
+                kind: NewPaneKind::CommandWithInitialInput {
+                    command_line: "codex".to_string(),
+                    initial_input: "/goal inspect this line".to_string(),
+                },
+            },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
             ClientRequest::MoveNode {
                 node_id: NodeId(2),
@@ -148,6 +155,12 @@ mod tests {
             ClientRequest::PreviewSound {
                 source: SoundSourceKind::SoundFile,
                 file: Some(PathBuf::from("/usr/share/sounds/example.oga")),
+            },
+            ClientRequest::SchedulePaneInput {
+                pane_id: NodeId(2),
+                delay_seconds: 3661,
+                text: "cargo test".to_string(),
+                send_enter: true,
             },
         ]
     }

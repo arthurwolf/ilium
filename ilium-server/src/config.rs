@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(config.sound.source, ilium_sound::SoundSourceKind::SoundFile);
         assert_eq!(
             config.sound.file,
-            Some(PathBuf::from("/usr/share/sounds/example.oga"))
+            Some(std::path::PathBuf::from("/usr/share/sounds/example.oga"))
         );
         assert!(config.sound.events.agent_finished);
         assert!(config.sound.events.approval_required);

@@ -14,7 +14,7 @@
 //! [`appearance_row_label`]/[`appearance_row_description`]/
 //! [`appearance_row_value`] and `App::settings_adjust_row` -- row count,
 //! scroll bounds, and mouse hit-testing all fall out of `AppearanceRow::ALL`
-//! automatically, nothing else here needs to change. Adding a third *tab*
+//! automatically, nothing else here needs to change. Adding another *tab*
 //! is a bigger change: extend `crate::app::SettingsTab::ALL` and add a
 //! render/hit-test branch here for it.
 //!
@@ -29,7 +29,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
-use crate::app::{App, AppearanceRow, SettingsState, SettingsTab};
+use crate::app::{App, AppearanceRow, SettingsState, SettingsTab, SoundRow};
 use crate::config::{KeyboardSettings, UiSettings};
 use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::theme::{self, ColorScheme};
@@ -129,6 +129,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         SettingsTab::Keyboard => {
             let lines = keyboard_lines(&app.keyboard_settings);
+            render_scrollable(frame, layout.content_area, lines, state.scroll);
+        }
+        SettingsTab::Sound => {
+            let lines = sound_lines(
+                &app.sound_settings,
+                &app.sound_discovery,
+                state.selected_row,
+            );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::About => {
@@ -246,15 +254,214 @@ pub fn max_scroll(
     tab: SettingsTab,
     ui: &UiSettings,
     keyboard: &KeyboardSettings,
+    sound: &ilium_sound::SoundSettings,
+    discovery: &ilium_sound::SoundDiscovery,
     selected_row: usize,
     content_area: Rect,
 ) -> u16 {
     let total_lines = match tab {
         SettingsTab::Appearance => appearance_lines(ui, selected_row).len() as u16,
         SettingsTab::Keyboard => keyboard_lines(keyboard).len() as u16,
+        SettingsTab::Sound => sound_lines(sound, discovery, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+fn sound_row_label(row: SoundRow) -> &'static str {
+    match row {
+        SoundRow::Source => "Sound source",
+        SoundRow::File => "Selected sound file",
+        SoundRow::Preview => "Preview",
+        SoundRow::AgentFinished => "Agent finished",
+        SoundRow::ApprovalRequired => "Agent needs approval",
+        SoundRow::AgentStarted => "Agent started working",
+        SoundRow::WaitingBackground => "Agent waits for background work",
+    }
+}
+
+fn sound_row_description(row: SoundRow) -> &'static str {
+    match row {
+        SoundRow::Source => "Use the operating system beep or a discovered sound file.",
+        SoundRow::File => "Left/Right cycles through files found in the folders listed below.",
+        SoundRow::Preview => "Play the current choice once through the detached server.",
+        SoundRow::AgentFinished => "A busy agent completed its turn and is waiting for you.",
+        SoundRow::ApprovalRequired => "An agent entered a confirmation or approval prompt.",
+        SoundRow::AgentStarted => "An idle or finished agent began a new turn.",
+        SoundRow::WaitingBackground => "An agent is waiting for background workers it started.",
+    }
+}
+
+fn selected_sound_label(
+    settings: &ilium_sound::SoundSettings,
+    discovery: &ilium_sound::SoundDiscovery,
+) -> String {
+    let Some(path) = settings.file.as_ref() else {
+        return if discovery.sounds.is_empty() {
+            "No sound files found".to_string()
+        } else {
+            "Not selected".to_string()
+        };
+    };
+    discovery
+        .sounds
+        .iter()
+        .find(|sound| &sound.path == path)
+        .map(|sound| format!("{} — {}", sound.collection, sound.display_name))
+        .unwrap_or_else(|| format!("{} (unavailable)", path.display()))
+}
+
+fn sound_row_value(
+    row: SoundRow,
+    settings: &ilium_sound::SoundSettings,
+    discovery: &ilium_sound::SoundDiscovery,
+) -> String {
+    match row {
+        SoundRow::Source => format!("‹ {} ›", settings.source.label()),
+        SoundRow::File => format!("‹ {} ›", selected_sound_label(settings, discovery)),
+        SoundRow::Preview => "[ Play ]".to_string(),
+        event_row => event_row
+            .event()
+            .map(|event| {
+                if settings.events.is_enabled(event) {
+                    "[x] Enabled".to_string()
+                } else {
+                    "[ ] Disabled".to_string()
+                }
+            })
+            .unwrap_or_default(),
+    }
+}
+
+/// Sound-tab content: fixed controls first, then the exact existing folders
+/// and files discovered for this operating system. The catalog both proves
+/// where options came from and lets mouse users select a file directly.
+fn sound_lines(
+    settings: &ilium_sound::SoundSettings,
+    discovery: &ilium_sound::SoundDiscovery,
+    selected_row: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from("")];
+    for (index, row) in SoundRow::ALL.into_iter().enumerate() {
+        let label = sound_row_label(row);
+        let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+        let label_style = if index == selected_row {
+            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::new()
+        };
+        let value_style = if index == selected_row {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled(label, label_style),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(sound_row_value(row, settings, discovery), value_style),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("    {}", sound_row_description(row)),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "Discovered system sound folders",
+        Style::new().add_modifier(Modifier::BOLD),
+    )));
+    let truncation = if discovery.was_truncated {
+        " (scan limit reached)"
+    } else {
+        ""
+    };
+    lines.push(Line::from(format!(
+        "  {}: {} playable files across {} existing folders{truncation}",
+        discovery.platform,
+        discovery.sounds.len(),
+        discovery.directories.len()
+    )));
+    for directory in &discovery.directories {
+        lines.push(Line::from(format!(
+            "  • {} — {}",
+            directory.origin,
+            directory.path.display()
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Available system sounds (click one, or use the selector above)",
+        Style::new().add_modifier(Modifier::BOLD),
+    )));
+    if discovery.sounds.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No supported sound files were found in the common folders on this system.",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    } else {
+        for sound in &discovery.sounds {
+            let is_selected = settings.file.as_ref() == Some(&sound.path);
+            let marker = if is_selected { "[x]" } else { "[ ]" };
+            let style = if is_selected {
+                theme::selected_style().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {marker} {} — {}", sound.collection, sound.display_name),
+                style,
+            )));
+        }
+    }
+    lines
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoundContentHit {
+    Row { row: SoundRow, direction: i32 },
+    File(usize),
+}
+
+/// Hit-tests fixed controls and dynamic discovered-file rows against the same
+/// line arithmetic used by [`sound_lines`].
+pub fn sound_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    discovery: &ilium_sound::SoundDiscovery,
+) -> Option<SoundContentHit> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line_index =
+        usize::try_from(i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll))
+            .ok()?;
+    if line_index >= usize::from(APPEARANCE_TOP_PADDING) {
+        let row_offset = line_index - usize::from(APPEARANCE_TOP_PADDING);
+        if row_offset % usize::from(APPEARANCE_ROW_HEIGHT) == 0 {
+            let row_index = row_offset / usize::from(APPEARANCE_ROW_HEIGHT);
+            if let Some(row) = SoundRow::ALL.get(row_index).copied() {
+                let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+                if position.x >= control_start_x {
+                    let direction = if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+                        -1
+                    } else {
+                        1
+                    };
+                    return Some(SoundContentHit::Row { row, direction });
+                }
+            }
+        }
+    }
+
+    let first_sound_line = usize::from(APPEARANCE_TOP_PADDING)
+        + SoundRow::ALL.len() * usize::from(APPEARANCE_ROW_HEIGHT)
+        + 4
+        + discovery.directories.len();
+    let sound_index = line_index.checked_sub(first_sound_line)?;
+    (sound_index < discovery.sounds.len()).then_some(SoundContentHit::File(sound_index))
 }
 
 /// Keyboard-tab content: one live selector, explicit A/B presets, and the
@@ -334,11 +541,15 @@ pub fn keyboard_content_hit(content_area: Rect, scroll: u16, position: Position)
     if !content_area.contains(position) {
         return None;
     }
-    let selector_y = content_area
-        .y
-        .saturating_add(APPEARANCE_TOP_PADDING)
-        .saturating_sub(scroll);
-    if position.y != selector_y {
+    // Map screen position back to a content line index (the same
+    // scroll-aware direction `appearance_content_hit` uses) rather than
+    // projecting the selector's fixed content line forward onto the screen
+    // -- the forward direction underflows via `saturating_sub` once `scroll`
+    // exceeds `content_area.y + APPEARANCE_TOP_PADDING`, clamping to 0 and
+    // producing a false-positive hit on whatever content has scrolled into
+    // the first on-screen row.
+    let line_index = i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll);
+    if line_index != i32::from(APPEARANCE_TOP_PADDING) {
         return None;
     }
     let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
@@ -352,10 +563,32 @@ pub fn keyboard_content_hit(content_area: Rect, scroll: u16, position: Position)
     })
 }
 
+/// Returns the explicit A/B preset whose rendered row was clicked.
+pub fn keyboard_preset_at(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+) -> Option<ShortcutBase> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line_index = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    // `keyboard_lines`: blank, selector, description, blank, heading, then
+    // one row per preset.
+    let preset_index = usize::from(line_index.checked_sub(5)?);
+    SHORTCUT_BASE_PRESETS.get(preset_index).copied()
+}
+
 fn appearance_row_label(row: AppearanceRow) -> &'static str {
     match row {
         AppearanceRow::AutoResizeTree => "Auto-resize tree panel on focus",
         AppearanceRow::TreeWidth => "Tree panel width",
+        AppearanceRow::AgentIdentifierMode => "Agent identifier",
+        AppearanceRow::ClaudeAgentIcon => "Claude icon",
+        AppearanceRow::CodexAgentIcon => "Codex icon",
         AppearanceRow::ColorScheme => "Color theme",
     }
 }
@@ -366,6 +599,15 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Widen the tree panel while it has mouse or keyboard focus, then ease back."
         }
         AppearanceRow::TreeWidth => "Collapsed width of the tree panel, in terminal columns.",
+        AppearanceRow::AgentIdentifierMode => {
+            "Show each agent type as its full name, one letter, a chosen icon, or nothing."
+        }
+        AppearanceRow::ClaudeAgentIcon => {
+            "Icon used for Claude panes when Agent identifier is Selected icon."
+        }
+        AppearanceRow::CodexAgentIcon => {
+            "Icon used for Codex panes when Agent identifier is Selected icon."
+        }
         AppearanceRow::ColorScheme => "ilium's built-in color presets.",
     }
 }
@@ -380,6 +622,9 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             }
         }
         AppearanceRow::TreeWidth => ui.tree_width.to_string(),
+        AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
+        AppearanceRow::ClaudeAgentIcon => ui.agent_identifiers.claude_icon.label().to_string(),
+        AppearanceRow::CodexAgentIcon => ui.agent_identifiers.codex_icon.label().to_string(),
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
             ColorScheme::Light => "Light".to_string(),
@@ -510,7 +755,8 @@ mod tests {
             tab_at(area, Position::new(2, 3)),
             Some(SettingsTab::Keyboard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::Sound));
+        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
@@ -560,6 +806,26 @@ mod tests {
     }
 
     #[test]
+    fn appearance_lines_expose_agent_mode_and_both_icon_selectors() {
+        let mut ui = UiSettings::default();
+        ui.agent_identifiers.mode = crate::config::AgentIdentifierMode::Icon;
+        ui.agent_identifiers.claude_icon = crate::config::ClaudeAgentIcon::MagicWand;
+        ui.agent_identifiers.codex_icon = crate::config::CodexAgentIcon::Tools;
+
+        let rendered = appearance_lines(&ui, 2)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("Agent identifier"));
+        assert!(rendered.contains("Selected icon"));
+        assert!(rendered.contains("Claude icon"));
+        assert!(rendered.contains("🪄 Magic wand"));
+        assert!(rendered.contains("Codex icon"));
+        assert!(rendered.contains("🛠️ Tools"));
+    }
+
+    #[test]
     fn keyboard_content_hit_finds_both_stepper_directions() {
         let area = Rect::new(0, 0, 60, 20);
         let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
@@ -576,6 +842,20 @@ mod tests {
             Some(1)
         );
         assert_eq!(keyboard_content_hit(area, 0, Position::new(2, 1)), None);
+    }
+
+    #[test]
+    fn keyboard_preset_hit_testing_maps_the_two_rendered_rows() {
+        let area = Rect::new(0, 0, 60, 20);
+        assert_eq!(
+            keyboard_preset_at(area, 0, Position::new(2, 5)),
+            Some(ShortcutBase::A)
+        );
+        assert_eq!(
+            keyboard_preset_at(area, 0, Position::new(2, 6)),
+            Some(ShortcutBase::B)
+        );
+        assert_eq!(keyboard_preset_at(area, 0, Position::new(2, 4)), None);
     }
 
     #[test]
@@ -604,9 +884,19 @@ mod tests {
     fn max_scroll_is_zero_when_content_already_fits() {
         let ui = UiSettings::default();
         let keyboard = KeyboardSettings::default();
+        let sound = ilium_sound::SoundSettings::default();
+        let discovery = ilium_sound::SoundDiscovery::default();
         let area = Rect::new(0, 0, 60, 40);
         assert_eq!(
-            max_scroll(SettingsTab::Appearance, &ui, &keyboard, 0, area),
+            max_scroll(
+                SettingsTab::Appearance,
+                &ui,
+                &keyboard,
+                &sound,
+                &discovery,
+                0,
+                area,
+            ),
             0
         );
     }
@@ -615,8 +905,80 @@ mod tests {
     fn max_scroll_is_positive_when_content_overflows_a_short_terminal() {
         let ui = UiSettings::default();
         let keyboard = KeyboardSettings::default();
+        let sound = ilium_sound::SoundSettings::default();
+        let discovery = ilium_sound::SoundDiscovery::default();
         let area = Rect::new(0, 0, 60, 3);
-        assert!(max_scroll(SettingsTab::Appearance, &ui, &keyboard, 0, area) > 0);
+        assert!(
+            max_scroll(
+                SettingsTab::Appearance,
+                &ui,
+                &keyboard,
+                &sound,
+                &discovery,
+                0,
+                area,
+            ) > 0
+        );
+    }
+
+    fn sound_discovery_fixture() -> ilium_sound::SoundDiscovery {
+        ilium_sound::SoundDiscovery {
+            platform: "Linux",
+            directories: vec![ilium_sound::SoundDirectory {
+                path: std::path::PathBuf::from("/usr/share/sounds"),
+                origin: "XDG sound themes".to_string(),
+            }],
+            sounds: vec![ilium_sound::SystemSound {
+                path: std::path::PathBuf::from("/usr/share/sounds/complete.oga"),
+                display_name: "freedesktop / stereo / complete".to_string(),
+                collection: "XDG sound themes".to_string(),
+            }],
+            was_truncated: false,
+        }
+    }
+
+    #[test]
+    fn sound_lines_show_source_events_and_real_discovery_evidence() {
+        let settings = ilium_sound::SoundSettings::default();
+        let rendered = sound_lines(&settings, &sound_discovery_fixture(), 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("System beep"));
+        assert!(rendered.contains("[x] Enabled"));
+        assert!(rendered.contains("Agent needs approval"));
+        assert!(rendered.contains("/usr/share/sounds"));
+        assert!(rendered.contains("freedesktop / stereo / complete"));
+    }
+
+    #[test]
+    fn sound_hit_testing_handles_controls_catalog_and_scroll() {
+        let discovery = sound_discovery_fixture();
+        let area = Rect::new(0, 0, 100, 40);
+        let control_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+        assert_eq!(
+            sound_content_hit(area, 0, Position::new(control_x, 1), &discovery),
+            Some(SoundContentHit::Row {
+                row: SoundRow::Source,
+                direction: -1
+            })
+        );
+        let first_sound_line = 1
+            + SoundRow::ALL.len() as u16 * APPEARANCE_ROW_HEIGHT
+            + 4
+            + discovery.directories.len() as u16;
+        assert_eq!(
+            sound_content_hit(area, 0, Position::new(2, first_sound_line), &discovery),
+            Some(SoundContentHit::File(0))
+        );
+        assert_eq!(
+            sound_content_hit(area, 3, Position::new(control_x, 1), &discovery),
+            Some(SoundContentHit::Row {
+                row: SoundRow::File,
+                direction: -1
+            })
+        );
     }
 
     #[test]
