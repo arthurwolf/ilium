@@ -7,29 +7,46 @@
 //! which belong in a pure classification crate (see
 //! `ilium_detect::AgentIdentity`'s doc comment).
 //!
-//! Five tiers, tried in order, cheapest/most-certain first. Tiers 1-3 are
-//! inherently unambiguous (they read something scoped to this exact pid);
-//! tiers 4-5 exist for when all three miss (most commonly: two or more
-//! Claude Code panes open on the *same project directory* at once -- in
-//! practice tier 3 essentially never fires for Claude Code at all, since it
-//! does not keep its transcript file's fd open between writes (confirmed by
-//! polling `/proc/<pid>/fd` against a real running session), so a fresh,
-//! not-yet-resumed pane depends on tiers 4-5 from the moment it starts).
+//! Four tiers, tried in order, cheapest/most-certain first.
 //!
 //! Every tier here upholds one invariant: return the right session ID, or
 //! return none at all -- **never** a wrong one. A tier that is merely
 //! "probably right" is not good enough, because a wrong answer here doesn't
 //! surface as an error, it silently mislabels a pane with a *different*
-//! agent's title. Tiers 1-3 satisfy this by construction (each reads
-//! something scoped to this exact pid). Tiers 4-5 satisfy it by declining
+//! agent's title.
+//!
+//! There used to be a second tier here, `from_environment`, trusting a
+//! handful of plausible-sounding session-ID environment variables
+//! (`CLAUDE_CODE_SESSION_ID` and siblings). It has been removed: environment
+//! variables are inherited down the *entire* process tree from any
+//! ancestor, not scoped to the pid that happens to be asking, so nothing
+//! about "this variable is set" ever implies "this specific CLI process set
+//! it for its own session." This was not a theoretical concern -- running a
+//! real, freshly spawned, actively-in-conversation `claude` pane and
+//! reading its own `/proc/<pid>/environ` showed `CLAUDE_CODE_SESSION_ID`
+//! still holding a completely unrelated, *inherited* session ID from an
+//! ancestor shell the whole time, never overwritten with the pane's own
+//! genuine session ID. A tier built on that variable doesn't just risk
+//! being wrong occasionally -- it is guaranteed wrong every time a pane is
+//! spawned from an environment that happens to carry one of these variables
+//! for an unrelated reason (nested/chained agent tooling, a leftover
+//! variable in a long-lived shell, CI runners that export similar names),
+//! and it had no ambiguity check at all to catch that, unlike tiers 3-4
+//! below. Command-line arguments (tier 1) and open file descriptors (tier
+//! 2) don't have this problem: neither is inherited across `exec` the way
+//! environment variables are, so both genuinely describe only the process
+//! being asked about.
+//!
+//! Tiers 1-2 satisfy the invariant by construction (each reads something
+//! genuinely scoped to this exact pid). Tiers 3-4 satisfy it by declining
 //! (falling through to `None`) whenever more than one transcript is a
 //! plausible candidate, rather than picking one -- an earlier version of
-//! tier 5 picked the most-recently-modified candidate when several were
+//! tier 4 picked the most-recently-modified candidate when several were
 //! eligible, which is a guess, and a demonstrably wrong one: whichever
 //! pane's discovery happens to run first in an unordered per-tick batch
 //! would claim whatever is newest in the directory, even when that file
-//! belongs to a different, not-yet-resolved sibling pane. Both tiers 4 and
-//! 5 lean on one thing the caller (`crate::detection::run_due_panes`)
+//! belongs to a different, not-yet-resolved sibling pane. Both tiers 3 and
+//! 4 lean on one thing the caller (`crate::detection::run_due_panes`)
 //! guarantees across the whole detection loop: no session ID already
 //! claimed by a *different* pane (`excluded_session_ids`, rebuilt every
 //! tick from every pane's *persisted* session ID, not just this tick's) is
@@ -45,16 +62,18 @@
 //! 1. [`from_arguments`] -- an explicit `--resume <id>`/`resume <id>` (or a
 //!    handful of generic `--session`/`--thread` spellings) on the command
 //!    line, present only when this pane resumed a prior session.
-//! 2. [`from_environment`] -- a known session-ID environment variable.
-//! 3. [`from_open_files`] (Linux only, via `/proc/<pid>/fd`) -- whichever
+//! 2. [`from_open_files`] (Linux only, via `/proc/<pid>/fd`) -- whichever
 //!    transcript file this exact process currently holds open. Unambiguous
 //!    even with several concurrent panes of the same class, since it reads
 //!    *this* pid's own file descriptors rather than guessing from directory
-//!    contents. In practice rarely the tier that actually resolves a Claude
-//!    Code pane (see above), but harmless and unambiguous when it does fire
-//!    (e.g. for CLIs that do keep the fd open), so it stays first of the
-//!    two directory-scanning tiers.
-//! 4. [`from_content_match`] -- Claude Code only: this exact pane's own
+//!    contents. In practice this rarely ends up being the tier that
+//!    resolves a Claude Code pane -- confirmed by polling `/proc/<pid>/fd`
+//!    against a real running session, Claude Code does not keep its
+//!    transcript file's fd open between writes -- so a fresh, not-yet-resumed
+//!    pane usually depends on tiers 3-4 from the moment it starts. Still
+//!    worth keeping first of the two directory-scanning tiers: harmless and
+//!    unambiguous on the CLIs/situations where it does fire.
+//! 3. [`from_content_match`] -- Claude Code only: this exact pane's own
 //!    most recently submitted line, reconstructed from raw PTY input
 //!    (`pane::TerminalPaneRuntime::input_fingerprint_tracker`, the same
 //!    line-editing reconstruction `shell_title::ShellCommandTracker` uses
@@ -67,7 +86,7 @@
 //!    nothing was typed recently enough, the candidate text is too short
 //!    to be a trustworthy fingerprint, or more than one transcript
 //!    contains it.
-//! 5. [`from_sole_unclaimed_project_transcript`] -- Claude Code only,
+//! 4. [`from_sole_unclaimed_project_transcript`] -- Claude Code only,
 //!    genuine last resort: the *one* eligible transcript under this
 //!    project's `~/.claude/projects/<slug>/` directory that isn't excluded
 //!    and was modified no earlier than this process's own start time (so
@@ -77,7 +96,7 @@
 //!    is never acceptable here, even as a last resort.
 //!
 //! Codex has no per-project session directory (`~/.codex/sessions/` is
-//! organized by date, not by cwd), so tiers 4-5 are skipped for it; tier 3
+//! organized by date, not by cwd), so tiers 3-4 are skipped for it; tier 2
 //! fires for both classes equally on Linux the moment either CLI opens its
 //! own transcript file, and the caller retries discovery every tick rather
 //! than giving up after one miss.
@@ -163,13 +182,6 @@ pub fn discover(
         .collect();
 
     from_arguments(&arguments)
-        .or_else(|| {
-            process
-                .environ()
-                .iter()
-                .filter_map(|entry| entry.to_str())
-                .find_map(from_environment)
-        })
         .or_else(|| from_open_files(pid.as_u32()))
         .or_else(|| {
             if !guess_tiers_eligible(class, already_resolved) {
@@ -259,20 +271,6 @@ fn from_arguments(arguments: &[String]) -> Option<String> {
         }
     }
     None
-}
-
-/// Reads session/thread IDs propagated explicitly through the environment.
-fn from_environment(entry: &str) -> Option<String> {
-    const SESSION_ENVIRONMENT_NAMES: &[&str] = &[
-        "CLAUDE_CODE_SESSION_ID",
-        "CLAUDE_SESSION_ID",
-        "CODEX_SESSION_ID",
-        "CODEX_THREAD_ID",
-        "AGENT_SESSION_ID",
-    ];
-    let (name, value) = entry.split_once('=')?;
-    (SESSION_ENVIRONMENT_NAMES.contains(&name) && is_session_identifier(value))
-        .then(|| value.to_string())
 }
 
 /// Scans `/proc/<pid>/fd` for an open file matching a known agent CLI's
@@ -421,33 +419,56 @@ fn from_content_match(
 /// non-sidechain, plain-string `message.content` -- so this only ever
 /// matches text the user actually typed, not a tool result or an
 /// assistant's echo of it.
+///
+/// Reads `path` one line at a time via `BufReader` rather than
+/// `std::fs::read_to_string` -- a long-running Claude Code session's own
+/// transcript is unbounded, user-controlled growth (checked in every tick
+/// this pane's session ID is still unresolved, against every eligible
+/// transcript in the project directory), so buffering the whole file into
+/// one `String` just to scan it line-by-line would scale memory use with
+/// conversation length for no benefit; a streaming line reader bounds peak
+/// memory to a single line regardless of how large the transcript has
+/// grown.
 fn transcript_message_contains(path: &Path, needle: &str) -> bool {
-    let Ok(contents) = std::fs::read_to_string(path) else {
+    let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
-    contents.lines().any(|line| {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
-            return false;
-        };
-        if entry.get("type").and_then(serde_json::Value::as_str) != Some("user") {
-            return false;
-        }
-        if entry
-            .get("isSidechain")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            return false;
-        }
-        let Some(text) = entry
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .and_then(serde_json::Value::as_str)
-        else {
-            return false;
-        };
-        normalize_whitespace(text).contains(needle)
-    })
+    // `map_while(Result::ok)` (clippy's default suggestion for this pattern)
+    // would stop scanning at the first line that fails to decode, silently
+    // truncating the search partway through the transcript. We want the
+    // opposite: skip a single malformed (non-UTF-8) line and keep scanning
+    // the rest. `read_line` runs its byte read first and only fails UTF-8
+    // validation after consuming those bytes, so the reader advances past a
+    // bad line rather than re-reading it -- the lint's "repeated Err forever"
+    // scenario is about a persistent I/O read error (failing disk, dropped
+    // mount), not the malformed-UTF-8 case this transcript reader actually
+    // hits.
+    #[allow(clippy::lines_filter_map_ok)]
+    std::io::BufRead::lines(std::io::BufReader::new(file))
+        .filter_map(Result::ok)
+        .any(|line| {
+            let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
+                return false;
+            };
+            if entry.get("type").and_then(serde_json::Value::as_str) != Some("user") {
+                return false;
+            }
+            if entry
+                .get("isSidechain")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                return false;
+            }
+            let Some(text) = entry
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(serde_json::Value::as_str)
+            else {
+                return false;
+            };
+            normalize_whitespace(text).contains(needle)
+        })
 }
 
 /// Collapses whitespace runs (including newlines) to single spaces, the
@@ -586,15 +607,6 @@ mod tests {
             ]),
             None
         );
-    }
-
-    #[test]
-    fn environment_reads_known_variable_names_only() {
-        assert_eq!(
-            from_environment("CLAUDE_CODE_SESSION_ID=95fd0645-3331-408b-a7e5-36e6007bfb78"),
-            Some("95fd0645-3331-408b-a7e5-36e6007bfb78".to_string())
-        );
-        assert_eq!(from_environment("PATH=/usr/bin"), None);
     }
 
     #[test]
