@@ -418,8 +418,8 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         source: SnapshotError::Json(source),
     })?;
 
-    let to_snapshot_io_error = |source: std::io::Error| ServerError::Snapshot {
-        operation: "write",
+    let to_snapshot_io_error = |operation: &'static str, source: std::io::Error| ServerError::Snapshot {
+        operation,
         path: path.to_path_buf(),
         source: SnapshotError::Io(source),
     };
@@ -427,7 +427,7 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     tokio::fs::create_dir_all(parent)
         .await
-        .map_err(to_snapshot_io_error)?;
+        .map_err(|source| to_snapshot_io_error("create directory for", source))?;
     let temp_path = parent.join(format!(
         ".{}.tmp-{}",
         path.file_name()
@@ -435,12 +435,22 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
             .unwrap_or_else(|| "snapshot".to_string()),
         std::process::id()
     ));
-    tokio::fs::write(&temp_path, &json)
-        .await
-        .map_err(to_snapshot_io_error)?;
-    tokio::fs::rename(&temp_path, path)
-        .await
-        .map_err(to_snapshot_io_error)?;
+    if let Err(error) = tokio::fs::write(&temp_path, &json).await {
+        // A write that fails partway (e.g. disk full, permission change
+        // mid-write) can still have created the temp file. This writer
+        // loops for the server's entire lifetime (`spawn_snapshot_writer`),
+        // so leaving a stray temp file behind on every failed write would
+        // accumulate unbounded cruft on disk across a long-running server;
+        // clean it up (best-effort) before surfacing the original error.
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(to_snapshot_io_error("write", error));
+    }
+    if let Err(error) = tokio::fs::rename(&temp_path, path).await {
+        // Same reasoning: don't leave the temp file behind if the rename
+        // itself fails.
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(to_snapshot_io_error("rename", error));
+    }
     Ok(())
 }
 

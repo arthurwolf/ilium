@@ -23,6 +23,7 @@ mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
+mod scheduled_input;
 mod session_id;
 mod shell_title;
 mod sounds;
@@ -106,6 +107,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     let detection_task = detection::spawn(Arc::clone(&state));
+    let scheduled_input_task = scheduled_input::spawn(Arc::clone(&state));
     let snapshot_writer_task = persistence::spawn_snapshot_writer(Arc::clone(&state));
     let sound_config_watcher_task = options
         .sound_config_path
@@ -120,6 +122,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     detection_task.abort();
+    scheduled_input_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }
@@ -242,6 +245,14 @@ async fn restore_snapshot(state: &Arc<ServerState>, snapshot: persistence::Sessi
             state.session_name,
             failed_pane_ids.len()
         );
+        // The in-memory tree just diverged from the on-disk snapshot (it
+        // no longer contains the pane(s) that failed to respawn), and
+        // nothing else on this startup path mutates the tree again to
+        // naturally trigger a save. Without this, a server that crashes
+        // again before any user-driven mutation would leave the stale,
+        // still-failing pane(s) in the persisted snapshot forever,
+        // repeating this same failed respawn on every future restart.
+        state.request_snapshot_save();
     }
 }
 
