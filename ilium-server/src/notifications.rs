@@ -30,9 +30,14 @@ pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -
     matches!(
         previous,
         PaneStatus::Agent(_, AgentActivity::Working | AgentActivity::WaitingBackground)
+            | PaneStatus::AgentWithGoal(
+                _,
+                AgentActivity::Working | AgentActivity::WaitingBackground
+            )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done)
     )
 }
 

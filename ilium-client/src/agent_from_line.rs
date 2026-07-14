@@ -6,49 +6,16 @@
 
 use std::path::{Path, PathBuf};
 
-use ilium_core::NodeId;
+use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
+use unicode_width::UnicodeWidthStr;
 
-/// Agent CLIs that the create-from-line dialog can launch today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentLaunchType {
-    Claude,
-    Codex,
-}
-
-impl AgentLaunchType {
-    // TODO: Add future supported agent CLIs here; rendering, selection, and
-    // launch behavior all walk this registry rather than branching elsewhere.
-    pub const ALL: [Self; 2] = [Self::Claude, Self::Codex];
-
-    /// Human-readable selector label.
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-        }
-    }
-
-    /// Literal command line handed to the server's command-pane adapter.
-    pub const fn command_line(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
-
-    /// Selects the adjacent registry entry, wrapping at both ends.
-    pub fn stepped(self, direction: i32) -> Self {
-        let index = Self::ALL
-            .iter()
-            .position(|candidate| *candidate == self)
-            .unwrap_or(0) as i32;
-        let count = Self::ALL.len() as i32;
-        Self::ALL[(index + direction.signum()).rem_euclid(count) as usize]
-    }
-}
+/// The shared provider registry drives every launch control. This local alias
+/// preserves the dialog's focused intent while ensuring it cannot drift from
+/// process detection or snapshot-resume support.
+pub type AgentLaunchType = BuiltinAgentProvider;
 
 /// Which control receives keyboard input in the creation dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,8 +89,8 @@ pub struct CreateAgentFromLineState {
 }
 
 impl CreateAgentFromLineState {
-    /// Builds the dialog with Claude selected and the requested contextual
-    /// `/goal` prompt ready for editing.
+    /// Builds the dialog with the first registered provider selected and the
+    /// requested contextual `/goal` prompt ready for editing.
     pub fn new(source: EditorSourceLine, parent_group: NodeId) -> Self {
         let default_prompt = default_agent_prompt(&source.path, source.line_number, &source.text);
         let mut prompt = TextArea::from([default_prompt]);
@@ -140,7 +107,7 @@ impl CreateAgentFromLineState {
         Self {
             source,
             parent_group,
-            agent_type: AgentLaunchType::Claude,
+            agent_type: AgentLaunchType::ALL[0],
             prompt,
             // The textarea starts active so the prefilled instruction can be
             // edited immediately; the selector remains one Tab/Shift-Tab away.
@@ -213,12 +180,17 @@ pub fn agent_type_at(area: Rect, position: Position) -> Option<AgentLaunchType> 
     if !area.contains(position) {
         return None;
     }
-    let relative_column = position.x.saturating_sub(area.x);
-    match relative_column {
-        7..=16 => Some(AgentLaunchType::Claude),
-        20..=28 => Some(AgentLaunchType::Codex),
-        _ => None,
+    let mut column = usize::from(area.x) + 7;
+    let position_column = usize::from(position.x);
+    for agent_type in AgentLaunchType::ALL {
+        let option = format!("( ) {}", agent_type.label());
+        let option_width = UnicodeWidthStr::width(option.as_str());
+        if (column..column.saturating_add(option_width)).contains(&position_column) {
+            return Some(agent_type);
+        }
+        column = column.saturating_add(option_width + 3);
     }
+    None
 }
 
 #[cfg(test)]
@@ -236,10 +208,20 @@ mod tests {
     }
 
     #[test]
-    fn agent_registry_steps_both_directions_and_wraps() {
+    fn agent_registry_steps_through_every_provider_and_wraps() {
         assert_eq!(AgentLaunchType::Claude.stepped(1), AgentLaunchType::Codex);
-        assert_eq!(AgentLaunchType::Claude.stepped(-1), AgentLaunchType::Codex);
-        assert_eq!(AgentLaunchType::Codex.stepped(1), AgentLaunchType::Claude);
+        assert_eq!(
+            AgentLaunchType::Codex.stepped(1),
+            AgentLaunchType::Antigravity
+        );
+        assert_eq!(
+            AgentLaunchType::Antigravity.stepped(1),
+            AgentLaunchType::Claude
+        );
+        assert_eq!(
+            AgentLaunchType::Claude.stepped(-1),
+            AgentLaunchType::Antigravity
+        );
     }
 
     #[test]

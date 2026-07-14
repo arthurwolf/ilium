@@ -55,7 +55,279 @@ pub enum TreeMoveDirection {
 pub enum AgentClass {
     Claude,
     Codex,
+    /// Google's Antigravity CLI. Its executable is `agy`; `antimatter` is
+    /// also accepted as a process-name alias for the terminology used in the
+    /// original feature request.
+    Antigravity,
     Other(String),
+}
+
+impl AgentClass {
+    /// Returns the built-in provider represented by this class. Custom
+    /// signatures deliberately remain `Other`: they have no verified launch,
+    /// resume, or local-transcript contract until a provider is added.
+    pub const fn provider(&self) -> Option<BuiltinAgentProvider> {
+        match self {
+            Self::Claude => Some(BuiltinAgentProvider::Claude),
+            Self::Codex => Some(BuiltinAgentProvider::Codex),
+            Self::Antigravity => Some(BuiltinAgentProvider::Antigravity),
+            Self::Other(_) => None,
+        }
+    }
+
+    /// Stable user-facing label shared by presentation and naming layers.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Claude => AgentProvider::label(BuiltinAgentProvider::Claude),
+            Self::Codex => AgentProvider::label(BuiltinAgentProvider::Codex),
+            Self::Antigravity => AgentProvider::label(BuiltinAgentProvider::Antigravity),
+            Self::Other(name) => name,
+        }
+    }
+
+    /// Stable type ordering for tree presentation. Unknown providers stay
+    /// after the built-ins, while terminal/editor/board ordering remains a
+    /// client concern.
+    pub fn type_sort_rank(&self) -> u8 {
+        self.provider()
+            .map(BuiltinAgentProvider::type_sort_rank)
+            .unwrap_or(6)
+    }
+}
+
+/// The complete built-in provider registry. New built-in agent support is one
+/// additional variant plus this trait implementation; all cross-layer
+/// behavior (launch, identity, resume syntax, labels, and ordering) then
+/// flows from the same definition rather than from parallel Claude/Codex
+/// branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum BuiltinAgentProvider {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+/// Provider-specific behavior that is pure and safe to share across every
+/// layer. Filesystem transcript formats remain in `ilium-agent-session`, and
+/// process polling remains in `ilium-server`; this trait owns only the stable
+/// contract each layer needs to identify or invoke an installed CLI.
+pub trait AgentProvider {
+    /// The wire/domain class emitted after this provider is identified.
+    fn class(self) -> AgentClass;
+    /// Human-readable, stable product name.
+    fn label(self) -> &'static str;
+    /// Literal command used for a fresh interactive pane.
+    fn command_line(self) -> &'static str;
+    /// Lowercase executable-name substrings that identify this provider.
+    fn process_name_substrings(self) -> &'static [&'static str];
+    /// Builds the provider's exact resume command around a shell-quoted id.
+    fn resume_command(self, quoted_session_id: &str) -> String;
+    /// Parses one current process command line into a provider session id.
+    fn session_id_from_arguments(self, arguments: &[String]) -> Option<String>;
+}
+
+impl BuiltinAgentProvider {
+    /// Registry order drives create-agent selector order and is deliberately
+    /// stable for keyboard wrapping and deterministic tree type ordering.
+    pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::Antigravity];
+
+    /// Selects an adjacent provider in the registry, wrapping in either
+    /// direction for keyboard and mouse controls.
+    pub fn stepped(self, direction: i32) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|candidate| *candidate == self)
+            .unwrap_or(0) as i32;
+        Self::ALL[(index + direction.signum()).rem_euclid(Self::ALL.len() as i32) as usize]
+    }
+
+    /// Parses a persisted command only when it is exactly one of ilium's own
+    /// known resume forms. Arbitrary user shell commands remain opaque.
+    pub fn resume_binding(command: &str) -> Option<(Self, String)> {
+        Self::ALL.into_iter().find_map(|provider| {
+            let session_id = provider.session_id_from_resume_command(command)?;
+            Some((provider, session_id))
+        })
+    }
+
+    /// Converts a configuration class name into the matching built-in
+    /// provider. `antimatter` remains a compatibility alias for the requested
+    /// name; the actual Google product and installed CLI are Antigravity/agy.
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "claude" => Some(Self::Claude),
+            "codex" => Some(Self::Codex),
+            "antigravity" | "antimatter" => Some(Self::Antigravity),
+            _ => None,
+        }
+    }
+
+    /// Resolves the exact fresh-launch command from a persisted pane origin.
+    pub fn from_command_line(command_line: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|provider| provider.command_line() == command_line)
+    }
+
+    pub const fn type_sort_rank(self) -> u8 {
+        match self {
+            Self::Claude => 3,
+            Self::Codex => 4,
+            Self::Antigravity => 5,
+        }
+    }
+
+    fn session_id_from_resume_command(self, command: &str) -> Option<String> {
+        let raw_session_id = match self {
+            Self::Claude => command.strip_prefix("claude --resume ")?,
+            Self::Codex => command.strip_prefix("codex resume ")?,
+            Self::Antigravity => command.strip_prefix("agy --conversation ")?,
+        };
+        unquoted_uuid(raw_session_id)
+    }
+}
+
+impl AgentProvider for BuiltinAgentProvider {
+    fn class(self) -> AgentClass {
+        match self {
+            Self::Claude => AgentClass::Claude,
+            Self::Codex => AgentClass::Codex,
+            Self::Antigravity => AgentClass::Antigravity,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+            Self::Antigravity => "Antigravity",
+        }
+    }
+
+    fn command_line(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Antigravity => "agy",
+        }
+    }
+
+    fn process_name_substrings(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &["claude"],
+            Self::Codex => &["codex"],
+            Self::Antigravity => &["agy", "antigravity", "antimatter"],
+        }
+    }
+
+    fn resume_command(self, quoted_session_id: &str) -> String {
+        match self {
+            Self::Claude => format!("claude --resume {quoted_session_id}"),
+            Self::Codex => format!("codex resume {quoted_session_id}"),
+            Self::Antigravity => format!("agy --conversation {quoted_session_id}"),
+        }
+    }
+
+    fn session_id_from_arguments(self, arguments: &[String]) -> Option<String> {
+        match self {
+            Self::Claude => claude_session_id_from_arguments(arguments),
+            Self::Codex => codex_session_id_from_arguments(arguments),
+            Self::Antigravity => antigravity_session_id_from_arguments(arguments),
+        }
+    }
+}
+
+fn claude_session_id_from_arguments(arguments: &[String]) -> Option<String> {
+    const SESSION_FLAGS: &[&str] = &["--resume", "-r", "--session-id"];
+    let option_arguments_end = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(arguments.len());
+    let option_arguments = &arguments[..option_arguments_end];
+    if option_arguments
+        .iter()
+        .any(|argument| argument == "--fork-session")
+    {
+        return None;
+    }
+    let mut candidates = std::collections::BTreeSet::new();
+    for (index, argument) in option_arguments.iter().enumerate() {
+        if let Some((flag, value)) = argument.split_once('=') {
+            if SESSION_FLAGS.contains(&flag) && looks_like_uuid(value) {
+                candidates.insert(value.to_string());
+            }
+        } else if SESSION_FLAGS.contains(&argument.as_str()) {
+            if let Some(value) = option_arguments
+                .get(index + 1)
+                .filter(|value| looks_like_uuid(value))
+            {
+                candidates.insert(value.clone());
+            }
+        }
+    }
+    (candidates.len() == 1).then(|| candidates.into_iter().next().unwrap())
+}
+
+fn codex_session_id_from_arguments(arguments: &[String]) -> Option<String> {
+    let executable_index = arguments.iter().position(|argument| {
+        std::path::Path::new(argument)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("codex")
+    })?;
+    arguments
+        .get(executable_index + 1)
+        .filter(|argument| *argument == "resume")?;
+    arguments
+        .get(executable_index + 2)
+        .filter(|candidate| looks_like_uuid(candidate))
+        .cloned()
+}
+
+fn antigravity_session_id_from_arguments(arguments: &[String]) -> Option<String> {
+    let executable_index = arguments.iter().position(|argument| {
+        matches!(
+            std::path::Path::new(argument)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("agy") | Some("antigravity") | Some("antimatter")
+        )
+    })?;
+    let arguments = &arguments[executable_index + 1..];
+    for (index, argument) in arguments.iter().enumerate() {
+        if let Some(value) = argument.strip_prefix("--conversation=") {
+            if looks_like_uuid(value) {
+                return Some(value.to_string());
+            }
+        }
+        if argument == "--conversation" {
+            return arguments
+                .get(index + 1)
+                .filter(|candidate| looks_like_uuid(candidate))
+                .cloned();
+        }
+    }
+    None
+}
+
+fn unquoted_uuid(value: &str) -> Option<String> {
+    let value = value
+        .strip_prefix('\'')
+        .and_then(|quoted| quoted.strip_suffix('\''))
+        .unwrap_or(value);
+    (!value.chars().any(char::is_whitespace) && looks_like_uuid(value)).then(|| value.to_string())
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    const HYPHEN_INDICES: [usize; 4] = [8, 13, 18, 23];
+    value.len() == 36
+        && value.chars().enumerate().all(|(index, character)| {
+            if HYPHEN_INDICES.contains(&index) {
+                character == '-'
+            } else {
+                character.is_ascii_hexdigit()
+            }
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +355,10 @@ pub enum PaneStatus {
     PlainShell,
     /// Terminal pane running a detected agent CLI.
     Agent(AgentClass, AgentActivity),
+    /// Terminal pane running a detected agent CLI with a visible persistent
+    /// task goal. Kept distinct so goal state travels through the existing
+    /// snapshot/status-change contract without parallel client-local state.
+    AgentWithGoal(AgentClass, AgentActivity),
     /// Editor pane; `true` means it has unsaved changes.
     Editor { dirty: bool },
     /// A client-local kanban board backed by a user-selected path.
@@ -293,6 +569,8 @@ pub enum TreeError {
     PaneAlreadyInSplitView(NodeId),
     #[error("pane {0:?} was selected more than once")]
     DuplicateSplitViewPane(NodeId),
+    #[error("board storage is already open at {}", .0.display())]
+    BoardStorageAlreadyOpen(PathBuf),
 }
 
 /// One entry in the flattened, top-level-first listing returned by
@@ -436,6 +714,7 @@ impl Tree {
             return Err(TreeError::NotAGroup(parent));
         }
         let id = self.alloc_id();
+        self.push_child(parent, id)?;
         self.nodes.insert(
             id,
             Node {
@@ -446,7 +725,6 @@ impl Tree {
                 kind: NodeKind::Container(ContainerNode::group()),
             },
         );
-        self.push_child(parent, id)?;
         Ok(id)
     }
 
@@ -466,6 +744,7 @@ impl Tree {
             PaneContentKind::Editor => PaneStatus::Editor { dirty: false },
             PaneContentKind::Board => PaneStatus::Board,
         };
+        self.push_child(parent, id)?;
         self.nodes.insert(
             id,
             Node {
@@ -482,7 +761,6 @@ impl Tree {
                 },
             },
         );
-        self.push_child(parent, id)?;
         Ok(id)
     }
 
@@ -506,7 +784,21 @@ impl Tree {
         storage: BoardStorage,
     ) -> Result<NodeId, TreeError> {
         self.validate_new_pane_parent(parent)?;
+        if self.panes().any(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    board_storage: Some(existing_storage),
+                    ..
+                } if existing_storage.path() == storage.path()
+            )
+        }) {
+            return Err(TreeError::BoardStorageAlreadyOpen(
+                storage.path().to_path_buf(),
+            ));
+        }
         let id = self.alloc_id();
+        self.push_child(parent, id)?;
         self.nodes.insert(
             id,
             Node {
@@ -523,7 +815,6 @@ impl Tree {
                 },
             },
         );
-        self.push_child(parent, id)?;
         Ok(id)
     }
 
@@ -543,6 +834,7 @@ impl Tree {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
         let id = self.alloc_id();
+        self.push_child(parent, id)?;
         self.nodes.insert(
             id,
             Node {
@@ -553,7 +845,6 @@ impl Tree {
                 kind: NodeKind::Folder { path },
             },
         );
-        self.push_child(parent, id)?;
         Ok(id)
     }
 
@@ -623,7 +914,7 @@ impl Tree {
         let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
         let parent = node.parent;
 
-        // Collect the whole subtree first (BFS), then remove it in one pass.
+        // Collect the whole subtree first (DFS), then remove it in one pass.
         let mut to_remove = vec![id];
         let mut frontier = vec![id];
         while let Some(current) = frontier.pop() {
@@ -638,11 +929,11 @@ impl Tree {
                 }
             }
         }
-        for node_id in &to_remove {
-            self.nodes.remove(node_id);
-        }
         if let Some(parent) = parent {
             self.remove_child(parent, id)?;
+        }
+        for node_id in &to_remove {
+            self.nodes.remove(node_id);
         }
         Ok(())
     }
@@ -765,9 +1056,7 @@ impl Tree {
 
     /// Every pending action in no particular order. Scheduling policy belongs
     /// to `ilium-server`; the pure tree only exposes its durable domain state.
-    pub fn scheduled_pane_inputs(
-        &self,
-    ) -> impl Iterator<Item = (NodeId, &ScheduledPaneInput)> {
+    pub fn scheduled_pane_inputs(&self) -> impl Iterator<Item = (NodeId, &ScheduledPaneInput)> {
         self.nodes.iter().filter_map(|(id, node)| {
             let NodeKind::Pane {
                 scheduled_input: Some(scheduled_input),
@@ -931,8 +1220,10 @@ impl Tree {
                 let Some(pos) = container.children.iter().position(|c| *c == id) else {
                     return Ok(());
                 };
-                let new_pos =
-                    (pos as i32 + delta).clamp(0, container.children.len() as i32 - 1) as usize;
+                let pos_i64 = pos as i64;
+                let delta_i64 = delta as i64;
+                let len_i64 = container.children.len() as i64;
+                let new_pos = (pos_i64 + delta_i64).clamp(0, len_i64 - 1) as usize;
                 container.children.remove(pos);
                 container.children.insert(new_pos, id);
                 Ok(())
@@ -943,11 +1234,12 @@ impl Tree {
         }
     }
 
-    /// Moves a node one visible step in its tree ordering. Within a group it
-    /// reorders siblings. At a pane's group boundary it transfers the pane
-    /// into the nearest preceding/following group, appending on an upward
-    /// move and inserting at index zero on a downward move. This preserves
-    /// the invariant that panes are always children of a Group.
+    /// Moves a node one visible step in its tree ordering. Within a container
+    /// it reorders siblings. At a nested container boundary, a pane exits into
+    /// the parent group immediately before/after that container. At a
+    /// top-level group boundary, it transfers into the nearest adjacent group,
+    /// appending on an upward move and prepending on a downward move. This
+    /// preserves the invariant that panes are never children of the root.
     ///
     /// Groups themselves only reorder among their current siblings: moving a
     /// boundary group into another group would change the hierarchy rather
@@ -980,6 +1272,11 @@ impl Tree {
             return Ok(false);
         }
 
+        if let Some((parent_group, index)) = self.pane_boundary_exit_target(parent, direction) {
+            self.move_node(id, parent_group, Some(index))?;
+            return Ok(true);
+        }
+
         let Some(adjacent_group) = self.adjacent_group(parent, direction) else {
             return Ok(false);
         };
@@ -989,6 +1286,31 @@ impl Tree {
         };
         self.move_node(id, adjacent_group, index)?;
         Ok(true)
+    }
+
+    /// Returns where a boundary pane lands when its current container is
+    /// nested inside a normal group. Up places it immediately before the
+    /// container; down places it immediately after. Top-level groups return
+    /// `None` because a pane may never become a direct child of the root.
+    fn pane_boundary_exit_target(
+        &self,
+        container: NodeId,
+        direction: TreeMoveDirection,
+    ) -> Option<(NodeId, usize)> {
+        let parent_group = self.parent_of(container)?;
+        if parent_group == ROOT_ID || !self.get(parent_group)?.is_group() {
+            return None;
+        }
+        let container_position = self
+            .children_of(parent_group)
+            .ok()?
+            .iter()
+            .position(|sibling| *sibling == container)?;
+        let index = match direction {
+            TreeMoveDirection::Up => container_position,
+            TreeMoveDirection::Down => container_position + 1,
+        };
+        Some((parent_group, index))
     }
 
     /// Finds the nearest sibling group before/after `group`, walking out of
@@ -1001,16 +1323,32 @@ impl Tree {
             let position = siblings
                 .iter()
                 .position(|sibling| *sibling == current_group)?;
-            let candidates: Box<dyn Iterator<Item = &NodeId>> = match direction {
-                TreeMoveDirection::Up => Box::new(siblings[..position].iter().rev()),
-                TreeMoveDirection::Down => Box::new(siblings[position + 1..].iter()),
-            };
-            if let Some(group_id) = candidates.copied().find(|candidate| {
-                matches!(
-                    self.get(*candidate).map(|node| &node.kind),
-                    Some(NodeKind::Container(container)) if container.is_group()
-                )
-            }) {
+            let mut found = None;
+            match direction {
+                TreeMoveDirection::Up => {
+                    for candidate in siblings[..position].iter().rev() {
+                        if matches!(
+                            self.get(*candidate).map(|node| &node.kind),
+                            Some(NodeKind::Container(container)) if container.is_group()
+                        ) {
+                            found = Some(*candidate);
+                            break;
+                        }
+                    }
+                }
+                TreeMoveDirection::Down => {
+                    for candidate in siblings[position + 1..].iter() {
+                        if matches!(
+                            self.get(*candidate).map(|node| &node.kind),
+                            Some(NodeKind::Container(container)) if container.is_group()
+                        ) {
+                            found = Some(*candidate);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(group_id) = found {
                 return Some(group_id);
             }
             if parent == ROOT_ID {
@@ -1235,6 +1573,86 @@ mod tests {
     }
 
     #[test]
+    fn pane_arrow_exits_a_nested_group_at_its_boundaries() {
+        let mut tree = Tree::new();
+        let outer = tree.add_group(ROOT_ID, "outer").unwrap();
+        let before = tree
+            .add_pane(outer, "before", PaneContentKind::Terminal)
+            .unwrap();
+        let nested = tree.add_group(outer, "nested").unwrap();
+        let first = tree
+            .add_pane(nested, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let last = tree
+            .add_pane(nested, "last", PaneContentKind::Terminal)
+            .unwrap();
+        let after = tree
+            .add_pane(outer, "after", PaneContentKind::Terminal)
+            .unwrap();
+
+        assert!(tree
+            .move_node_one_step(first, TreeMoveDirection::Up)
+            .unwrap());
+        assert_eq!(tree.parent_of(first), Some(outer));
+        assert_eq!(
+            tree.children_of(outer).unwrap(),
+            &[before, first, nested, after]
+        );
+        assert_eq!(tree.children_of(nested).unwrap(), &[last]);
+
+        assert!(tree
+            .move_node_one_step(last, TreeMoveDirection::Down)
+            .unwrap());
+        assert_eq!(tree.parent_of(last), Some(outer));
+        assert_eq!(
+            tree.children_of(outer).unwrap(),
+            &[before, first, nested, last, after]
+        );
+        assert_eq!(tree.children_of(nested).unwrap(), &[]);
+    }
+
+    #[test]
+    fn pane_arrow_exits_a_split_view_at_its_boundaries() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "group").unwrap();
+        let before = tree
+            .add_pane(group, "before", PaneContentKind::Terminal)
+            .unwrap();
+        let first = tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let last = tree
+            .add_pane(group, "last", PaneContentKind::Terminal)
+            .unwrap();
+        let split = tree
+            .create_split_view(group, "split", SplitOrientation::Vertical, &[first, last])
+            .unwrap();
+        let after = tree
+            .add_pane(group, "after", PaneContentKind::Terminal)
+            .unwrap();
+
+        assert!(tree
+            .move_node_one_step(first, TreeMoveDirection::Up)
+            .unwrap());
+        assert_eq!(tree.parent_of(first), Some(group));
+        assert_eq!(
+            tree.children_of(group).unwrap(),
+            &[before, first, split, after]
+        );
+        assert_eq!(tree.children_of(split).unwrap(), &[last]);
+
+        assert!(tree
+            .move_node_one_step(last, TreeMoveDirection::Down)
+            .unwrap());
+        assert_eq!(tree.parent_of(last), Some(group));
+        assert_eq!(
+            tree.children_of(group).unwrap(),
+            &[before, first, split, last, after]
+        );
+        assert_eq!(tree.children_of(split).unwrap(), &[]);
+    }
+
+    #[test]
     fn group_arrow_stops_at_its_sibling_boundary() {
         let mut tree = Tree::new();
         let first = tree.add_group(ROOT_ID, "first").unwrap();
@@ -1295,6 +1713,33 @@ mod tests {
                 ..
             }) if saved_storage == &storage
         ));
+    }
+
+    #[test]
+    fn add_board_rejects_a_second_pane_for_the_same_storage_path() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let path = PathBuf::from("/tmp/shared-board.md");
+        tree.add_board(
+            group,
+            "First".to_string(),
+            BoardStorage::MarkdownFile { path: path.clone() },
+        )
+        .unwrap();
+
+        let error = tree
+            .add_board(
+                group,
+                "Second".to_string(),
+                BoardStorage::MarkdownFile { path: path.clone() },
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            TreeError::BoardStorageAlreadyOpen(existing_path) if existing_path == path
+        ));
+        assert_eq!(tree.panes().count(), 1);
     }
 
     #[test]
@@ -1592,5 +2037,31 @@ mod tests {
             .clear_scheduled_pane_input_if_matches(terminal, &replacement)
             .unwrap());
         assert_eq!(tree.scheduled_pane_inputs().count(), 0);
+    }
+
+    #[test]
+    fn provider_registry_owns_antigravity_launch_resume_and_argument_syntax() {
+        let session_id = "a1111111-1111-4111-8111-111111111111";
+        let provider = BuiltinAgentProvider::Antigravity;
+
+        assert_eq!(provider.class(), AgentClass::Antigravity);
+        assert_eq!(provider.command_line(), "agy");
+        assert_eq!(
+            provider.resume_command(session_id),
+            format!("agy --conversation {session_id}")
+        );
+        assert!(provider.process_name_substrings().contains(&"antimatter"));
+        assert_eq!(
+            provider.session_id_from_arguments(&[
+                "/home/developer/.local/bin/agy".to_string(),
+                "--conversation".to_string(),
+                session_id.to_string(),
+            ]),
+            Some(session_id.to_string())
+        );
+        assert_eq!(
+            BuiltinAgentProvider::resume_binding(&format!("agy --conversation {session_id}")),
+            Some((provider, session_id.to_string()))
+        );
     }
 }

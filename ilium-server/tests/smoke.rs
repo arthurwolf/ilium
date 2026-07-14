@@ -196,6 +196,95 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
 }
 
 #[tokio::test]
+async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown() {
+    let server = TestServer::start("scheduled-input-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "scheduled-input-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(
+                "IFS= read -r line; printf 'scheduled:<%s>\\n' \"$line\"".to_string(),
+            ),
+        },
+    )
+    .await
+    .unwrap();
+    let created_tree = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = created_tree else {
+        unreachable!("predicate only returns a tree snapshot");
+    };
+    let pane_id = tree.panes().next().unwrap().id;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::SchedulePaneInput {
+            pane_id,
+            delay_seconds: 1,
+            text: "detached payload".to_string(),
+            send_enter: true,
+        },
+    )
+    .await
+    .unwrap();
+    let scheduled_tree = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.scheduled_pane_inputs().count() == 1)
+    })
+    .await;
+    assert!(matches!(scheduled_tree, ServerEvent::TreeSnapshot(_)));
+    drop(client);
+
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+
+    let mut reattached = server.connect().await;
+    write_frame(
+        &mut reattached,
+        &ClientRequest::Attach {
+            session: "scheduled-input-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let cleared_tree = expect_event(&mut reattached, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.scheduled_pane_inputs().count() == 0)
+    })
+    .await;
+    assert!(matches!(cleared_tree, ServerEvent::TreeSnapshot(_)));
+    let replay = expect_event(&mut reattached, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+                if *event_pane_id == pane_id
+                    && String::from_utf8_lossy(bytes).contains("scheduled:<detached payload>")
+        )
+    })
+    .await;
+    assert!(matches!(replay, ServerEvent::TerminalReplay { .. }));
+
+    write_frame(&mut reattached, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+}
+
+#[tokio::test]
 async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
     let server = TestServer::start("split-view-test").await;
     let mut client = server.connect().await;

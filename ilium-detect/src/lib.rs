@@ -20,7 +20,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use ilium_core::{AgentActivity, AgentClass};
+use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// One entry in the agent-identity registry: a lowercase substring to
@@ -61,19 +61,11 @@ pub struct AgentSignature {
     pub class_of: fn(matched_name: &str) -> AgentClass,
 }
 
-/// Known agent CLI signatures, in match-priority order (first match wins
-/// when a process name could match more than one entry). Checked before
-/// any caller-supplied `extra_signatures` -- see
-/// [`identify_agent_with_extra`].
-const AGENT_SIGNATURES: &[AgentSignature] = &[
-    AgentSignature {
-        name_substring: Cow::Borrowed("claude"),
-        class_of: |_matched_name| AgentClass::Claude,
-    },
-    AgentSignature {
-        name_substring: Cow::Borrowed("codex"),
-        class_of: |_matched_name| AgentClass::Codex,
-    },
+/// Built-in generic signatures that do not expose a launch/resume/session
+/// contract. First-party providers live in `BuiltinAgentProvider::ALL`, so a
+/// new supported CLI is registered exactly once in `ilium-core` rather than
+/// being copied into detection, launch, and persistence tables.
+const GENERIC_AGENT_SIGNATURES: &[AgentSignature] = &[
     AgentSignature {
         name_substring: Cow::Borrowed("opencode"),
         class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
@@ -133,6 +125,31 @@ pub fn classify_activity(screen_text: &str) -> AgentActivity {
     AgentActivity::Idle
 }
 
+/// Returns whether an agent's persistent task goal is visible on screen.
+///
+/// Codex represents a configured goal as a non-empty `Goal:` status row.
+/// Matching its label rather than any occurrence of "goal" avoids false
+/// positives from ordinary agent prose, markdown, and Codex's explicit
+/// no-goal response. The server calls this only after a pane has already
+/// been identified as an agent process.
+pub fn has_visible_goal(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        // A terminal may preserve the leading checkered-flag/icon cell from
+        // Codex's own row, so ignore decoration but retain the anchored label.
+        let trimmed = line
+            .trim_start()
+            .trim_start_matches(|character: char| !character.is_alphanumeric());
+        let Some(goal_value) = trimmed
+            .get(..5)
+            .filter(|label| label.eq_ignore_ascii_case("goal:"))
+            .and_then(|_| trimmed.get(5..))
+        else {
+            return false;
+        };
+        !goal_value.trim().is_empty()
+    })
+}
+
 /// True if a line reads as "the agent is waiting on background
 /// subagents/tasks it dispatched" -- e.g. Claude Code's
 /// `"✻ Waiting for 2 background agents to finish"`. Requires "waiting for"
@@ -178,7 +195,8 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 /// digits immediately followed by a single 's' or 'm' unit suffix and
 /// nothing else (so "6s" and "12m" match, but "s" or "class" don't).
 fn is_elapsed_time_token(token: &str) -> bool {
-    let Some(digits) = token.strip_suffix(['s', 'm']) else {
+    let trimmed = token.trim_matches(|c: char| !c.is_alphanumeric());
+    let Some(digits) = trimmed.strip_suffix(['s', 'm']) else {
         return false;
     };
     !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
@@ -377,6 +395,11 @@ pub fn identify_agent_with_extra(
     visited.insert(shell_pid);
 
     while let Some((pid, depth)) = queue.pop_front() {
+        if let Some(((best_depth, _), _, _)) = &best {
+            if depth > *best_depth {
+                break;
+            }
+        }
         if let Some(process) = system.process(pid) {
             if let Some(class) = classify_process_name_with_extra(
                 &process.name().to_string_lossy().to_lowercase(),
@@ -408,19 +431,35 @@ pub fn identify_agent_with_extra(
     })
 }
 
-/// Classifies a single (already-lowercased) process name against the
-/// built-in [`AGENT_SIGNATURES`] table followed by `extra_signatures`, in
-/// that order -- so a user-configured signature can add coverage for a new
-/// agent CLI, but never silently shadows a built-in one.
+/// Classifies a single (already-lowercased) process name against the shared
+/// first-party provider registry, generic built-ins, then `extra_signatures`.
+/// That order lets configuration add coverage without silently shadowing an
+/// agent whose launch/resume semantics ilium already knows.
 fn classify_process_name_with_extra(
     lowercase_name: &str,
     extra_signatures: &[AgentSignature],
 ) -> Option<AgentClass> {
-    AGENT_SIGNATURES
-        .iter()
-        .chain(extra_signatures.iter())
-        .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
-        .map(|signature| (signature.class_of)(lowercase_name))
+    BuiltinAgentProvider::ALL
+        .into_iter()
+        .find(|provider| {
+            provider
+                .process_name_substrings()
+                .iter()
+                .any(|substring| lowercase_name.contains(substring))
+        })
+        .map(AgentProvider::class)
+        .or_else(|| {
+            GENERIC_AGENT_SIGNATURES
+                .iter()
+                .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
+                .map(|signature| (signature.class_of)(lowercase_name))
+        })
+        .or_else(|| {
+            extra_signatures
+                .iter()
+                .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
+                .map(|signature| (signature.class_of)(lowercase_name))
+        })
 }
 
 #[cfg(test)]
@@ -546,6 +585,17 @@ mod tests {
     }
 
     #[test]
+    fn visible_goal_row_is_detected_without_matching_goal_prose() {
+        assert!(has_visible_goal("  🏁 Goal: Finish the detection pass"));
+        assert!(has_visible_goal("gOaL: keep the goal paused"));
+        assert!(!has_visible_goal(
+            "This thread does not currently have a goal."
+        ));
+        assert!(!has_visible_goal("Goal:"));
+        assert!(!has_visible_goal("The project's goal: keep tests green."));
+    }
+
+    #[test]
     fn classify_process_name_matches_known_signatures() {
         assert_eq!(
             classify_process_name_with_extra("claude", &[]),
@@ -554,6 +604,14 @@ mod tests {
         assert_eq!(
             classify_process_name_with_extra("codex", &[]),
             Some(AgentClass::Codex)
+        );
+        assert_eq!(
+            classify_process_name_with_extra("agy", &[]),
+            Some(AgentClass::Antigravity)
+        );
+        assert_eq!(
+            classify_process_name_with_extra("antimatter", &[]),
+            Some(AgentClass::Antigravity)
         );
         assert_eq!(
             classify_process_name_with_extra("opencode", &[]),

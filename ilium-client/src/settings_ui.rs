@@ -29,8 +29,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
-use crate::app::{App, AppearanceRow, SettingsState, SettingsTab, SoundRow};
-use crate::config::{KeyboardSettings, UiSettings};
+use crate::app::{App, AppearanceRow, KanbanBoardRow, SettingsState, SettingsTab, SoundRow};
+use crate::config::{KanbanBoardSettings, KeyboardSettings, UiSettings};
 use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::theme::{self, ColorScheme};
 
@@ -129,6 +129,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         SettingsTab::Keyboard => {
             let lines = keyboard_lines(&app.keyboard_settings);
+            render_scrollable(frame, layout.content_area, lines, state.scroll);
+        }
+        SettingsTab::KanbanBoard => {
+            let lines = kanban_board_lines(&app.kanban_board_settings, state.selected_row);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::Sound => {
@@ -250,22 +254,112 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 /// The largest valid `scroll` value for `tab` at `content_area`'s current
 /// height -- callers (`crate::keys`/`crate::mouse`) clamp scroll-wheel and
 /// keyboard scrolling to this so the view can never scroll past its own end.
-pub fn max_scroll(
-    tab: SettingsTab,
-    ui: &UiSettings,
-    keyboard: &KeyboardSettings,
-    sound: &ilium_sound::SoundSettings,
-    discovery: &ilium_sound::SoundDiscovery,
-    selected_row: usize,
-    content_area: Rect,
-) -> u16 {
+pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     let total_lines = match tab {
-        SettingsTab::Appearance => appearance_lines(ui, selected_row).len() as u16,
-        SettingsTab::Keyboard => keyboard_lines(keyboard).len() as u16,
-        SettingsTab::Sound => sound_lines(sound, discovery, selected_row).len() as u16,
+        SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
+        SettingsTab::Keyboard => keyboard_lines(&app.keyboard_settings).len() as u16,
+        SettingsTab::KanbanBoard => {
+            kanban_board_lines(&app.kanban_board_settings, selected_row).len() as u16
+        }
+        SettingsTab::Sound => {
+            sound_lines(&app.sound_settings, &app.sound_discovery, selected_row).len() as u16
+        }
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+fn kanban_board_row_label(row: KanbanBoardRow) -> &'static str {
+    match row {
+        KanbanBoardRow::CardPreviewLines => "Card preview lines",
+        KanbanBoardRow::MinimumColumnWidth => "Minimum column width",
+    }
+}
+
+fn kanban_board_row_description(row: KanbanBoardRow) -> &'static str {
+    match row {
+        KanbanBoardRow::CardPreviewLines => {
+            "Number of wrapped text lines shown on each card, from 1 to 10."
+        }
+        KanbanBoardRow::MinimumColumnWidth => {
+            "Minimum terminal columns per board column before horizontal scrolling is used."
+        }
+    }
+}
+
+fn kanban_board_row_value(row: KanbanBoardRow, settings: &KanbanBoardSettings) -> String {
+    match row {
+        KanbanBoardRow::CardPreviewLines => format!("‹ {} ›", settings.card_preview_lines),
+        KanbanBoardRow::MinimumColumnWidth => {
+            format!("‹ {} ›", settings.minimum_column_width)
+        }
+    }
+}
+
+/// Kanban Board tab content. Both controls are client-global presentation
+/// settings, so board-owned Markdown/folder data remains purely domain data.
+fn kanban_board_lines(settings: &KanbanBoardSettings, selected_row: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from("")];
+    for (index, row) in KanbanBoardRow::ALL.into_iter().enumerate() {
+        let label = kanban_board_row_label(row);
+        let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+        let label_style = if index == selected_row {
+            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::new()
+        };
+        let value_style = if index == selected_row {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled(label, label_style),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(kanban_board_row_value(row, settings), value_style),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("    {}", kanban_board_row_description(row)),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Click a card to open and edit it in the board's right-hand panel.",
+        Style::new().add_modifier(Modifier::DIM),
+    )));
+    lines
+}
+
+/// Returns the row plus decrement/increment direction for either Kanban
+/// Board stepper using the same three-line row geometry as rendering.
+pub fn kanban_board_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+) -> Option<(KanbanBoardRow, i32)> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line_index =
+        usize::try_from(i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll))
+            .ok()?;
+    let row_offset = line_index.checked_sub(usize::from(APPEARANCE_TOP_PADDING))?;
+    if row_offset % usize::from(APPEARANCE_ROW_HEIGHT) != 0 {
+        return None;
+    }
+    let row = *KanbanBoardRow::ALL.get(row_offset / usize::from(APPEARANCE_ROW_HEIGHT))?;
+    let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+    if position.x < control_start_x {
+        return None;
+    }
+    let direction = if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+        -1
+    } else {
+        1
+    };
+    Some((row, direction))
 }
 
 fn sound_row_label(row: SoundRow) -> &'static str {
@@ -586,9 +680,11 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
     match row {
         AppearanceRow::AutoResizeTree => "Auto-resize tree panel on focus",
         AppearanceRow::TreeWidth => "Tree panel width",
+        AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ClaudeAgentIcon => "Claude icon",
         AppearanceRow::CodexAgentIcon => "Codex icon",
+        AppearanceRow::AntigravityAgentIcon => "Antigravity icon",
         AppearanceRow::ColorScheme => "Color theme",
     }
 }
@@ -599,6 +695,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Widen the tree panel while it has mouse or keyboard focus, then ease back."
         }
         AppearanceRow::TreeWidth => "Collapsed width of the tree panel, in terminal columns.",
+        AppearanceRow::TreeOrder => {
+            "Order entries independently inside each group; split-view placement stays fixed."
+        }
         AppearanceRow::AgentIdentifierMode => {
             "Show each agent type as its full name, one letter, a chosen icon, or nothing."
         }
@@ -607,6 +706,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::CodexAgentIcon => {
             "Icon used for Codex panes when Agent identifier is Selected icon."
+        }
+        AppearanceRow::AntigravityAgentIcon => {
+            "Icon used for Antigravity panes when Agent identifier is Selected icon."
         }
         AppearanceRow::ColorScheme => "ilium's built-in color presets.",
     }
@@ -622,9 +724,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             }
         }
         AppearanceRow::TreeWidth => ui.tree_width.to_string(),
+        AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
         AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
         AppearanceRow::ClaudeAgentIcon => ui.agent_identifiers.claude_icon.label().to_string(),
         AppearanceRow::CodexAgentIcon => ui.agent_identifiers.codex_icon.label().to_string(),
+        AppearanceRow::AntigravityAgentIcon => {
+            ui.agent_identifiers.antigravity_icon.label().to_string()
+        }
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
             ColorScheme::Light => "Light".to_string(),
@@ -726,7 +832,9 @@ fn about_lines() -> Vec<Line<'static>> {
         Line::from(format!("Version {}", env!("CARGO_PKG_VERSION"))),
         Line::from(""),
         Line::from("A terminal multiplexer with a tree-structured pane list and AI"),
-        Line::from("coding agent awareness (Claude Code, Codex CLI, and similar tools)."),
+        Line::from(
+            "coding agent awareness (Claude Code, Codex CLI, Antigravity CLI, and similar tools).",
+        ),
     ]
 }
 
@@ -755,8 +863,12 @@ mod tests {
             tab_at(area, Position::new(2, 3)),
             Some(SettingsTab::Keyboard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::Sound));
-        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::About));
+        assert_eq!(
+            tab_at(area, Position::new(2, 5)),
+            Some(SettingsTab::KanbanBoard)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Sound));
+        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
@@ -807,16 +919,24 @@ mod tests {
 
     #[test]
     fn appearance_lines_expose_agent_mode_and_both_icon_selectors() {
-        let mut ui = UiSettings::default();
-        ui.agent_identifiers.mode = crate::config::AgentIdentifierMode::Icon;
-        ui.agent_identifiers.claude_icon = crate::config::ClaudeAgentIcon::MagicWand;
-        ui.agent_identifiers.codex_icon = crate::config::CodexAgentIcon::Tools;
+        let ui = UiSettings {
+            tree_order: crate::config::TreeOrder::AgeAscending,
+            agent_identifiers: crate::config::AgentIdentifierSettings {
+                mode: crate::config::AgentIdentifierMode::Icon,
+                claude_icon: crate::config::ClaudeAgentIcon::MagicWand,
+                codex_icon: crate::config::CodexAgentIcon::Tools,
+                antigravity_icon: crate::config::AntigravityAgentIcon::Orbit,
+            },
+            ..UiSettings::default()
+        };
 
-        let rendered = appearance_lines(&ui, 2)
+        let rendered = appearance_lines(&ui, 3)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
+        assert!(rendered.contains("Tree order"));
+        assert!(rendered.contains("Age up (newest first)"));
         assert!(rendered.contains("Agent identifier"));
         assert!(rendered.contains("Selected icon"));
         assert!(rendered.contains("Claude icon"));
@@ -842,6 +962,38 @@ mod tests {
             Some(1)
         );
         assert_eq!(keyboard_content_hit(area, 0, Position::new(2, 1)), None);
+    }
+
+    #[test]
+    fn kanban_board_tab_renders_and_hits_both_layout_steppers() {
+        let settings = KanbanBoardSettings {
+            card_preview_lines: 3,
+            minimum_column_width: 20,
+        };
+        let rendered = kanban_board_lines(&settings, 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let area = Rect::new(0, 0, 70, 20);
+        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+
+        assert!(rendered.contains("Card preview lines"));
+        assert!(rendered.contains("‹ 3 ›"));
+        assert!(rendered.contains("Minimum column width"));
+        assert!(rendered.contains("‹ 20 ›"));
+        assert_eq!(
+            kanban_board_content_hit(area, 0, Position::new(control_start_x, 1)),
+            Some((KanbanBoardRow::CardPreviewLines, -1))
+        );
+        assert_eq!(
+            kanban_board_content_hit(area, 0, Position::new(control_start_x + 3, 1)),
+            Some((KanbanBoardRow::CardPreviewLines, 1))
+        );
+        assert_eq!(
+            kanban_board_content_hit(area, 0, Position::new(control_start_x + 3, 4)),
+            Some((KanbanBoardRow::MinimumColumnWidth, 1))
+        );
     }
 
     #[test]
@@ -882,43 +1034,22 @@ mod tests {
 
     #[test]
     fn max_scroll_is_zero_when_content_already_fits() {
-        let ui = UiSettings::default();
-        let keyboard = KeyboardSettings::default();
-        let sound = ilium_sound::SoundSettings::default();
-        let discovery = ilium_sound::SoundDiscovery::default();
-        let area = Rect::new(0, 0, 60, 40);
-        assert_eq!(
-            max_scroll(
-                SettingsTab::Appearance,
-                &ui,
-                &keyboard,
-                &sound,
-                &discovery,
-                0,
-                area,
-            ),
-            0
+        let app = App::new(
+            "settings-test".to_string(),
+            std::path::PathBuf::from("/tmp"),
         );
+        let area = Rect::new(0, 0, 60, 40);
+        assert_eq!(max_scroll(SettingsTab::Appearance, &app, 0, area), 0);
     }
 
     #[test]
     fn max_scroll_is_positive_when_content_overflows_a_short_terminal() {
-        let ui = UiSettings::default();
-        let keyboard = KeyboardSettings::default();
-        let sound = ilium_sound::SoundSettings::default();
-        let discovery = ilium_sound::SoundDiscovery::default();
-        let area = Rect::new(0, 0, 60, 3);
-        assert!(
-            max_scroll(
-                SettingsTab::Appearance,
-                &ui,
-                &keyboard,
-                &sound,
-                &discovery,
-                0,
-                area,
-            ) > 0
+        let app = App::new(
+            "settings-test".to_string(),
+            std::path::PathBuf::from("/tmp"),
         );
+        let area = Rect::new(0, 0, 60, 3);
+        assert!(max_scroll(SettingsTab::Appearance, &app, 0, area) > 0);
     }
 
     fn sound_discovery_fixture() -> ilium_sound::SoundDiscovery {

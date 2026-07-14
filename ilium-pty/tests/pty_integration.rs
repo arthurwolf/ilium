@@ -75,6 +75,40 @@ fn resize_does_not_error_and_updates_screen_size() {
 }
 
 #[test]
+fn resize_truncating_wide_character_keeps_reader_parser_usable() {
+    let command = PtyCommand::new("sh", std::env::temp_dir(), 2, 216)
+        .arg("-c")
+        .arg("printf '\\033[215G界'; read answer; printf '\\033[0Jreader-alive'");
+    let session = PtySession::spawn(command).expect("spawning the resize fixture should succeed");
+
+    let saw_wide_character = wait_until(
+        || session.with_screen(|screen| screen.cell(0, 214).is_some_and(vt100::Cell::is_wide)),
+        Duration::from_secs(5),
+    );
+    assert!(
+        saw_wide_character,
+        "fixture must place a wide character across the old row boundary"
+    );
+
+    session
+        .resize(2, 215)
+        .expect("shrinking across the wide character should succeed");
+    session
+        .write(b"\n")
+        .expect("releasing the fixture should let it emit the erase sequence");
+
+    let parser_remained_usable = wait_until(
+        || session.screen_text().contains("reader-alive"),
+        Duration::from_secs(5),
+    );
+    assert!(
+        parser_remained_usable,
+        "the PTY reader must survive the erase sequence after the resize"
+    );
+    assert_eq!(session.with_screen(|screen| screen.size()), (2, 215));
+}
+
+#[test]
 fn process_id_is_reported_for_a_spawned_child() {
     let command = PtyCommand::new("cat", std::env::temp_dir(), 24, 80);
     let session = PtySession::spawn(command).expect("spawning cat should succeed");

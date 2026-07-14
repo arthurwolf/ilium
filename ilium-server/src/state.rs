@@ -34,8 +34,27 @@ const EVENT_CHANNEL_CAPACITY: usize = 1024;
 
 pub type PaneRegistry = HashMap<NodeId, PaneResource>;
 
+/// Construction-time values for one project-session server. Keeping this as
+/// one explicit contract prevents positional path/config arguments from being
+/// swapped as the state gains another project-scoped dependency.
+pub struct ServerStateOptions {
+    pub session_name: String,
+    pub session_cwd: PathBuf,
+    pub home_dir: PathBuf,
+    pub snapshot_path: PathBuf,
+    pub detection_config: DetectionConfig,
+    pub notifications_config: NotificationsConfig,
+    pub sound_settings: ilium_sound::SoundSettings,
+    pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
+    pub custom_signatures: Vec<AgentSignature>,
+}
+
 pub struct ServerState {
     pub session_name: String,
+    /// Canonical project boundary shared by every pane in this server.
+    pub session_cwd: PathBuf,
+    /// Home containing the local built-in provider transcript stores.
+    pub home_dir: PathBuf,
     pub snapshot_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
@@ -49,6 +68,11 @@ pub struct ServerState {
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
     pub snapshot_write_lock: Mutex<()>,
+    /// Serializes schedule replacement with the executor's final freshness
+    /// check and PTY write. Lock ordering is this mutex, then `tree`, then
+    /// `panes`; no other workflow acquires it, so a replaced timer cannot fire
+    /// after its replacement was accepted.
+    pub scheduled_input_transaction: Mutex<()>,
     /// `true` when the on-disk crash-recovery snapshot no longer matches
     /// `tree`/`panes` and needs rewriting. Request handlers
     /// (`crate::ipc::handlers`) set this via `request_snapshot_save`
@@ -85,27 +109,22 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub fn new(
-        session_name: String,
-        snapshot_path: PathBuf,
-        detection_config: DetectionConfig,
-        notifications_config: NotificationsConfig,
-        sound_settings: ilium_sound::SoundSettings,
-        sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
-        custom_signatures: Vec<AgentSignature>,
-    ) -> Self {
+    pub fn new(options: ServerStateOptions) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
-            session_name,
-            snapshot_path,
-            detection_config,
-            notifications_config,
-            sound_settings: RwLock::new(sound_settings),
-            sound_requests,
-            custom_signatures,
+            session_name: options.session_name,
+            session_cwd: options.session_cwd,
+            home_dir: options.home_dir,
+            snapshot_path: options.snapshot_path,
+            detection_config: options.detection_config,
+            notifications_config: options.notifications_config,
+            sound_settings: RwLock::new(options.sound_settings),
+            sound_requests: options.sound_requests,
+            custom_signatures: options.custom_signatures,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),
             snapshot_write_lock: Mutex::new(()),
+            scheduled_input_transaction: Mutex::new(()),
             snapshot_dirty: AtomicBool::new(false),
             snapshot_requested: Notify::new(),
             scheduled_input_changed: Notify::new(),

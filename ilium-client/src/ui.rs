@@ -4,13 +4,14 @@
 //! active. It consumes the shared animated `App::layout`; everything it
 //! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
 
-use ilium_core::{AgentClass, NodeId, NodeKind, PaneStatus, ROOT_ID};
+use ilium_core::{AgentClass, AgentProvider, NodeId, NodeKind, PaneStatus, ROOT_ID};
 use ratatui::layout::{Alignment, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 use tui_term::widget::PseudoTerminal;
+use unicode_width::UnicodeWidthStr;
 
 use crate::agent_from_line::{
     AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu,
@@ -21,14 +22,20 @@ use crate::app::{
     PaneRuntime, RightPanelTarget,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
+use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
     editor_chrome, editor_highlight, editor_toolbar, explorer_overlay, help, markdown, minimap,
-    modal, terminal_view, theme, tree_ui,
+    modal, search_ui, terminal_view, theme, tree_ui,
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let layout = app.layout;
+
+    if let Mode::Search(state) = &app.mode {
+        search_ui::render(frame, area, state);
+        return;
+    }
 
     // The full-screen settings view replaces everything else this frame --
     // see `crate::settings_ui`'s module doc comment ("the **entire** screen
@@ -56,11 +63,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         tree_ui::TreeRenderOptions {
             focused: tree_focused,
             elapsed_ms: app.started_at.elapsed().as_millis(),
+            current_unix_millis: crate::scheduled_input::unix_millis_now(),
             project_name: app.project_name.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
             titles_loading: &app.titles_loading,
             recently_created: &app.recently_created,
+            transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
+            tree_order: app.ui_settings.tree_order,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
@@ -102,7 +112,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         help::render(frame, area, app.keyboard_settings.shortcut_base);
     }
     if let Mode::ContextMenu(menu) = &app.mode {
-        draw_context_menu(frame, menu);
+        draw_context_menu(frame, menu, app.ui_settings.tree_order);
+    }
+    if let Mode::SchedulePaneInput(state) = &app.mode {
+        draw_scheduled_input_dialog(frame, area, app, state);
     }
     if let Mode::EditorLineContextMenu(menu) = &app.mode {
         draw_editor_line_context_menu(frame, menu);
@@ -175,7 +188,7 @@ fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
         Line::from(Span::styled("[ Browse… ]", Style::new().fg(Color::Cyan))),
         Line::from(""),
         Line::from(Span::styled(
-            "Tab field · p browse · Enter create · Esc cancel",
+            "Tab field · Ctrl+P browse · Enter create · Esc cancel",
             Style::new().add_modifier(Modifier::DIM),
         )),
     ];
@@ -286,7 +299,11 @@ fn draw_confirm_close(frame: &mut Frame, area: Rect, app: &App, target: NodeId) 
 
 /// Draws the actionable right-click popup. It is intentionally opaque and
 /// rendered after panels so no terminal content leaks through its commands.
-fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu) {
+fn draw_context_menu(
+    frame: &mut Frame,
+    menu: &ContextMenu,
+    current_tree_order: crate::config::TreeOrder,
+) {
     let lines: Vec<Line> = menu
         .actions
         .iter()
@@ -304,6 +321,161 @@ fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu) {
     let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(title)));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
+
+    let Some(submenu) = &menu.tree_order_submenu else {
+        return;
+    };
+    let lines: Vec<Line> = crate::config::TreeOrder::ALL
+        .iter()
+        .enumerate()
+        .map(|(index, tree_order)| {
+            let style = if index == submenu.selected_index {
+                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            let check = if *tree_order == current_tree_order {
+                "✓"
+            } else {
+                " "
+            };
+            Line::from(Span::styled(
+                format!(" {check} {}", tree_order.label()),
+                style,
+            ))
+        })
+        .collect();
+    let widget =
+        Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title("Order by")));
+    frame.render_widget(Clear, submenu.area);
+    frame.render_widget(widget, submenu.area);
+}
+
+/// Renders a deliberately spacious form: duration first, then payload, then
+/// the Enter policy and one explicit confirmation button. The same geometry
+/// drives `crate::mouse`, so every visible control has an exact hit target.
+fn draw_scheduled_input_dialog(
+    frame: &mut Frame,
+    screen_area: Rect,
+    app: &App,
+    state: &ScheduledInputDialogState,
+) {
+    let layout = crate::scheduled_input::dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title("Hit key(s) X time from now")),
+        layout.popup,
+    );
+    let pane_name = app
+        .tree
+        .get(state.pane_id)
+        .map_or("terminal", |node| node.name.as_str());
+    frame.render_widget(
+        Paragraph::new(format!("Schedule input for {pane_name}"))
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        layout.subtitle,
+    );
+    frame.render_widget(
+        Paragraph::new("WHEN").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        layout.duration_label,
+    );
+    draw_scheduled_input_field(
+        frame,
+        layout.hours,
+        "Hours",
+        &state.hours,
+        state.focus == ScheduledInputFocus::Hours,
+    );
+    draw_scheduled_input_field(
+        frame,
+        layout.minutes,
+        "Minutes",
+        &state.minutes,
+        state.focus == ScheduledInputFocus::Minutes,
+    );
+    draw_scheduled_input_field(
+        frame,
+        layout.seconds,
+        "Seconds",
+        &state.seconds,
+        state.focus == ScheduledInputFocus::Seconds,
+    );
+    frame.render_widget(
+        Paragraph::new("WHAT TO HIT")
+            .style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        layout.payload_label,
+    );
+    draw_scheduled_input_field(
+        frame,
+        layout.text,
+        "Text (optional)",
+        &state.text,
+        state.focus == ScheduledInputFocus::Text,
+    );
+
+    let checkbox_style = if state.focus == ScheduledInputFocus::SendEnter {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    let checkbox = if state.send_enter { "[x]" } else { "[ ]" };
+    frame.render_widget(
+        Paragraph::new(format!("{checkbox} Send Enter after the text")).style(checkbox_style),
+        layout.send_enter,
+    );
+
+    let button_style = if state.focus == ScheduledInputFocus::ScheduleButton {
+        Style::new()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    };
+    frame.render_widget(
+        Paragraph::new("[ Schedule input ]")
+            .style(button_style)
+            .alignment(Alignment::Center),
+        layout.schedule_button,
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field · Space toggle · Ctrl+Enter schedule · Esc cancel")
+            .style(Style::new().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        layout.hint,
+    );
+}
+
+fn draw_scheduled_input_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    state: &crate::text_prompt::TextPromptState,
+    focused: bool,
+) {
+    let border_style = if focused {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    let block = theme::block(focused)
+        .title(theme::chrome_title(label))
+        .border_style(border_style);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(state.buf.as_str()), inner);
+    if !focused || inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let prefix: String = state.buf.chars().take(state.cursor).collect();
+    let cursor_offset = u16::try_from(prefix.width()).unwrap_or(u16::MAX);
+    frame.set_cursor_position(Position::new(
+        inner
+            .x
+            .saturating_add(cursor_offset)
+            .min(inner.right().saturating_sub(1)),
+        inner.y,
+    ));
 }
 
 /// Draws the line-specific right-click action without implying that its file
@@ -362,15 +534,17 @@ fn draw_create_agent_from_line(
             },
         )
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Agent: ", Style::new().add_modifier(Modifier::DIM)),
-            agent_option(AgentLaunchType::Claude),
-            Span::raw("   "),
-            agent_option(AgentLaunchType::Codex),
-        ])),
-        layout.agent_row,
-    );
+    let mut agent_spans = vec![Span::styled(
+        "Agent: ",
+        Style::new().add_modifier(Modifier::DIM),
+    )];
+    for (index, agent_type) in AgentLaunchType::ALL.into_iter().enumerate() {
+        if index > 0 {
+            agent_spans.push(Span::raw("   "));
+        }
+        agent_spans.push(agent_option(agent_type));
+    }
+    frame.render_widget(Paragraph::new(Line::from(agent_spans)), layout.agent_row);
 
     let prompt_border_style = if state.focus == CreateAgentFocus::Prompt {
         Style::new().fg(Color::Cyan)
@@ -578,113 +752,15 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
             let inner = block.inner(viewport.outer_area);
             frame.render_widget(block, viewport.outer_area);
-            draw_board(frame, inner, board.as_ref());
-        }
-    }
-}
-
-fn draw_board(frame: &mut Frame, area: Rect, board: &crate::board::BoardPane) {
-    use ratatui::layout::{Constraint, Direction, Layout};
-    use ratatui::widgets::Block;
-    if board.columns.is_empty() {
-        frame.render_widget(
-            Paragraph::new("No columns yet. Press c to create one."),
-            area,
-        );
-        return;
-    }
-    let constraints = vec![Constraint::Ratio(1, board.columns.len() as u32); board.columns.len()];
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(area);
-    for (index, (column, column_area)) in board.columns.iter().zip(columns.iter()).enumerate() {
-        let is_selected_column = index == board.selected_column;
-        let title_style = if is_selected_column {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().add_modifier(Modifier::BOLD)
-        };
-        let block = Block::bordered()
-            .border_style(if is_selected_column {
-                theme::border_style(true)
-            } else {
-                theme::border_style(false)
-            })
-            .title(Line::from(vec![
-                Span::styled(format!(" {} ", column.title), title_style),
-                Span::styled(
-                    format!("{}", column.cards.len()),
-                    Style::new().add_modifier(Modifier::DIM),
-                ),
-            ]));
-        let inner = block.inner(*column_area);
-        frame.render_widget(block, *column_area);
-        if column.cards.is_empty() {
-            frame.render_widget(
-                Paragraph::new(Span::styled(
-                    "drop a card here",
-                    Style::new().add_modifier(Modifier::DIM | Modifier::ITALIC),
-                )),
+            crate::board_ui::render(
+                frame,
                 inner,
-            );
-            continue;
-        }
-
-        // Each card gets a compact, independent block instead of reading as
-        // one uninterrupted paragraph. The blank row between cards gives the
-        // dense terminal grid enough air without wasting a full column.
-        let mut constraints = Vec::with_capacity(column.cards.len() * 2);
-        for _ in &column.cards {
-            constraints.push(Constraint::Length(3));
-            constraints.push(Constraint::Length(1));
-        }
-        let card_areas = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(constraints)
-            .split(inner);
-        for (card_index, card) in column.cards.iter().enumerate() {
-            let is_selected_card = is_selected_column && card_index == board.selected_card;
-            let card_style = if is_selected_card {
-                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            let card_block = Block::bordered()
-                .border_style(if is_selected_card {
-                    theme::border_style(true)
-                } else {
-                    theme::border_style(false)
-                })
-                .title(Span::styled(
-                    if is_selected_card {
-                        " selected "
-                    } else {
-                        " card "
-                    },
-                    card_style,
-                ));
-            frame.render_widget(
-                Paragraph::new(card.title.as_str())
-                    .block(card_block)
-                    .wrap(ratatui::widgets::Wrap { trim: true }),
-                card_areas[card_index * 2],
+                board.as_ref(),
+                app.kanban_board_settings.card_preview_lines,
+                app.kanban_board_settings.minimum_column_width,
             );
         }
     }
-    let hint = Rect::new(
-        area.x.saturating_add(1),
-        area.bottom().saturating_sub(1),
-        area.width.saturating_sub(2),
-        1,
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "←/→ column · ↑/↓ card · n card · c column · e rename · d delete · Shift+←/→ move · drag cards",
-            Style::new().add_modifier(Modifier::DIM),
-        )),
-        hint,
-    );
 }
 
 /// Draws a vertical scrollbar merged into the terminal pane block's right
@@ -834,7 +910,7 @@ fn pane_title(app: &App, id: NodeId) -> String {
     };
     match &node.kind {
         NodeKind::Pane {
-            status: PaneStatus::Agent(class, _),
+            status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
             ..
         } => format!("{} — {}", node.name, agent_class_title(class)),
         _ => node.name.clone(),
@@ -843,11 +919,7 @@ fn pane_title(app: &App, id: NodeId) -> String {
 
 /// Compact, stable class name for the selected-terminal title.
 fn agent_class_title(class: &AgentClass) -> &str {
-    match class {
-        AgentClass::Claude => "Claude",
-        AgentClass::Codex => "Codex",
-        AgentClass::Other(name) => name,
-    }
+    class.label()
 }
 
 /// Draws the one-line status bar: the current mode, plus any pending
@@ -873,6 +945,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ExplorerFileMenu(_) => "FILE ACTIONS",
         Mode::FolderExplorer(..) => "FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
+        Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateGroup(_) => "NEW GROUP",
@@ -885,6 +958,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
+        Mode::Search(_) => "SEARCH",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
         // whole screen, status bar included). Kept as a real arm rather
@@ -994,6 +1068,66 @@ mod tests {
         assert!(rendered.contains("Codex"));
         assert!(rendered.contains("/goal please do the following task"));
         assert!(rendered.contains("[ Create agent ]"));
+    }
+
+    #[test]
+    fn tree_order_submenu_renders_one_check_before_the_active_option() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.ui_settings.tree_order = crate::config::TreeOrder::AgeDescending;
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("context menu should be open");
+        };
+        app.open_context_tree_order_submenu(&mut menu);
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+        terminal
+            .draw(|frame| draw_context_menu(frame, &menu, crate::config::TreeOrder::AgeDescending))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("✓ Age down (oldest first)"));
+        assert_eq!(rendered.matches('✓').count(), 1);
+    }
+
+    #[test]
+    fn scheduled_input_dialog_renders_all_aerated_controls() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "release shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.mode = Mode::SchedulePaneInput(Box::new(
+            crate::scheduled_input::ScheduledInputDialogState::new(pane_id),
+        ));
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Hit key(s) X time from now"));
+        assert!(rendered.contains("Schedule input for release shell"));
+        assert!(rendered.contains("Hours"));
+        assert!(rendered.contains("Minutes"));
+        assert!(rendered.contains("Seconds"));
+        assert!(rendered.contains("Text (optional)"));
+        assert!(rendered.contains("[x] Send Enter after the text"));
+        assert!(rendered.contains("[ Schedule input ]"));
     }
 
     #[test]

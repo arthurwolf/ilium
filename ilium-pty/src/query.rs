@@ -79,7 +79,9 @@ impl vt100::Callbacks for TerminalQueryResponder {
             // instead of hanging.
             (None, 'n') if params.first().and_then(|p| p.first()) == Some(&6) => {
                 let (row, col) = screen.cursor_position();
-                self.reply(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes());
+                self.reply(
+                    format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1)).as_bytes(),
+                );
             }
             _ => {}
         }

@@ -13,12 +13,12 @@
 //! one writable tree (the server's) -- see the crate's module docs.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
 use ilium_core::{
-    AgentActivity, AgentClass, GroupListing, Node, NodeId, NodeKind, PaneContentKind, PaneStatus,
-    SplitOrientation, Tree, ROOT_ID,
+    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId,
+    NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
 };
 use ilium_ipc::ClientRequest;
 use ratatui::layout::{Position, Rect};
@@ -28,22 +28,49 @@ use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
 use crate::board::BoardPane;
-use crate::config::{KeyboardSettings, UiSettings};
+use crate::config::{KanbanBoardSettings, KeyboardSettings, TreeOrder, UiSettings};
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
+use crate::scheduled_input::ScheduledInputDialogState;
+use crate::search_ui::{
+    self, SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
+    WorkspaceSearchRequest, WorkspaceSearchSource, WorkspaceSearchText,
+};
+use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
 use crate::terminal_title_inference;
 use crate::terminal_view::{self, TerminalView};
 use crate::text_prompt::TextPromptState;
 use crate::theme::{self, ColorScheme, Theme};
+use crate::tree_transitions::TreeTransitions;
 use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
 /// amount elsewhere in this crate.
 const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
+
+/// Collapses lexical `.` and `..` components without requiring the target to
+/// exist. Board creation needs a stable absolute identity before it creates a
+/// new backing file, while `std::fs::canonicalize` can only handle paths that
+/// already exist.
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
 
 /// Upper bound on `App::pending_editor_opens` -- see that field's doc
 /// comment for why an entry can otherwise outlive its request forever (a
@@ -116,6 +143,8 @@ pub enum Mode {
     FolderExplorer(Box<ExplorerOverlay>, NodeId),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
+    /// Form for one server-owned terminal input countdown.
+    SchedulePaneInput(Box<ScheduledInputDialogState>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -139,6 +168,17 @@ pub enum Mode {
     /// Reached via `Action::Settings`, the tree footer's settings button, or
     /// `ContextMenuAction::Settings` (right-click the tree panel).
     Settings(SettingsState),
+    /// Full-screen finder over terminal replay and locally-open buffers.
+    Search(Box<SearchState>),
+}
+
+/// Why the interactive client event loop should return to the CLI wrapper.
+/// Keeping restart distinct from an ordinary quit lets the wrapper replace
+/// only this process without ever expressing a server lifecycle operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientExitReason {
+    Quit,
+    RestartRequested,
 }
 
 /// Which tab is selected in the full-screen settings view. Add a new
@@ -149,18 +189,26 @@ pub enum Mode {
 pub enum SettingsTab {
     Appearance,
     Keyboard,
+    KanbanBoard,
     Sound,
     About,
 }
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 4] = [Self::Appearance, Self::Keyboard, Self::Sound, Self::About];
+    pub const ALL: [SettingsTab; 5] = [
+        Self::Appearance,
+        Self::Keyboard,
+        Self::KanbanBoard,
+        Self::Sound,
+        Self::About,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "User Appearance",
             Self::Keyboard => "Keyboard",
+            Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
             Self::About => "About",
         }
@@ -193,21 +241,38 @@ impl SettingsTab {
 pub enum AppearanceRow {
     AutoResizeTree,
     TreeWidth,
+    TreeOrder,
     AgentIdentifierMode,
     ClaudeAgentIcon,
     CodexAgentIcon,
+    AntigravityAgentIcon,
     ColorScheme,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 6] = [
+    pub const ALL: [AppearanceRow; 8] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
+        Self::TreeOrder,
         Self::AgentIdentifierMode,
         Self::ClaudeAgentIcon,
         Self::CodexAgentIcon,
+        Self::AntigravityAgentIcon,
         Self::ColorScheme,
     ];
+}
+
+/// One live-persisted layout control in the Kanban Board settings tab.
+/// Keeping both controls in this registry gives keyboard and mouse input the
+/// same selected-row contract as the Appearance and Sound tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KanbanBoardRow {
+    CardPreviewLines,
+    MinimumColumnWidth,
+}
+
+impl KanbanBoardRow {
+    pub const ALL: [KanbanBoardRow; 2] = [Self::CardPreviewLines, Self::MinimumColumnWidth];
 }
 
 /// Rows in the Sound tab. Keeping source, selected file, preview, and event
@@ -309,10 +374,16 @@ impl Default for SettingsState {
 /// protocol gap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuAction {
+    /// Opens full-screen workspace search regardless of the clicked node.
+    Search,
     FocusPane,
+    CreateBoardFromMarkdown,
+    SchedulePaneInput,
     ShowSplitView,
     ToggleGroup,
     NewTerminal,
+    /// Launches a registered first-party agent under the selected group.
+    NewAgent(BuiltinAgentProvider),
     NewEditor,
     NewGroup,
     NewSplitView,
@@ -321,6 +392,11 @@ pub enum ContextMenuAction {
     MoveUp,
     MoveDown,
     Close,
+    /// Opens the adjacent checked ordering submenu.
+    OrderBy,
+    /// Replaces only the attached client process. The detached server keeps
+    /// its PTYs and authoritative session tree alive throughout the handoff.
+    Restart,
     /// Opens the full-screen settings view -- present in every right-click
     /// menu regardless of what was clicked (a pane, a group, or empty tree
     /// space), since it isn't a per-node action. This is deliberately the
@@ -331,23 +407,44 @@ pub enum ContextMenuAction {
 
 impl ContextMenuAction {
     /// The concise label rendered in the popup menu.
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::FocusPane => "Focus pane",
-            Self::ShowSplitView => "Show split view",
-            Self::ToggleGroup => "Expand / collapse",
-            Self::NewTerminal => "New terminal here",
-            Self::NewEditor => "New editor here",
-            Self::NewGroup => "New group\u{2026}",
-            Self::NewSplitView => "New split view\u{2026}",
-            Self::NewFolder => "Open folder\u{2026}",
-            Self::Rename => "Rename",
-            Self::MoveUp => "Move up",
-            Self::MoveDown => "Move down",
-            Self::Close => "Close",
-            Self::Settings => "Settings\u{2026}",
+            Self::Search => "Search workspace…".to_string(),
+            Self::FocusPane => "Focus pane".to_string(),
+            Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
+            Self::SchedulePaneInput => "Hit key(s) X time from now".to_string(),
+            Self::ShowSplitView => "Show split view".to_string(),
+            Self::ToggleGroup => "Expand / collapse".to_string(),
+            Self::NewTerminal => "New terminal here".to_string(),
+            Self::NewAgent(provider) => format!("New {} agent here", provider.label()),
+            Self::NewEditor => "New editor here".to_string(),
+            Self::NewGroup => "New group\u{2026}".to_string(),
+            Self::NewSplitView => "New split view\u{2026}".to_string(),
+            Self::NewFolder => "Open folder\u{2026}".to_string(),
+            Self::Rename => "Rename".to_string(),
+            Self::MoveUp => "Move up".to_string(),
+            Self::MoveDown => "Move down".to_string(),
+            Self::Close => "Close".to_string(),
+            Self::OrderBy => "Order by  ▸".to_string(),
+            Self::Restart => "Restart".to_string(),
+            Self::Settings => "Settings\u{2026}".to_string(),
         }
     }
+
+    /// Actions that apply to the client/tree view as a whole rather than the
+    /// node under the pointer. One registry keeps every menu target in sync.
+    const GLOBAL_ACTIONS: [Self; 4] = [Self::Search, Self::OrderBy, Self::Restart, Self::Settings];
+
+    /// Materializes provider-driven creation entries for any tree menu.
+    fn new_agent_actions() -> impl Iterator<Item = Self> {
+        BuiltinAgentProvider::ALL.into_iter().map(Self::NewAgent)
+    }
+}
+
+/// Adjacent submenu state for the closed [`TreeOrder`] registry.
+pub struct TreeOrderSubmenu {
+    pub area: Rect,
+    pub selected_index: usize,
 }
 
 /// State of a context menu: its tree target, screen position, and keyboard
@@ -358,6 +455,7 @@ pub struct ContextMenu {
     pub area: Rect,
     pub actions: Vec<ContextMenuAction>,
     pub selected_index: usize,
+    pub tree_order_submenu: Option<TreeOrderSubmenu>,
 }
 
 pub struct ExplorerFileMenu {
@@ -400,6 +498,7 @@ pub enum BoardStorageKind {
     MarkdownFile,
 }
 
+#[derive(Debug, Clone)]
 pub struct CreateBoardState {
     pub name: TextPromptState,
     pub path: TextPromptState,
@@ -478,9 +577,15 @@ pub struct App {
     pub focus: FocusTarget,
     pub mode: Mode,
     pub status_message: Option<String>,
-    pub should_quit: bool,
+    /// Set by input dispatch when the client should leave its event loop.
+    /// `None` keeps rendering; the concrete reason controls whether the CLI
+    /// exits normally or re-execs a fresh client binary afterward.
+    pub exit_reason: Option<ClientExitReason>,
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
+    /// Structural row transitions live beside the render-cache mirror, never
+    /// in the authoritative server tree or the IPC protocol.
+    pub(crate) tree_transitions: TreeTransitions,
     /// (rows, cols) of the pane *content* area last reported by the event
     /// loop. Freshly created panes are asked for at this size, so a pane
     /// created after startup doesn't wait for the next resize event.
@@ -496,6 +601,8 @@ pub struct App {
     /// This session's live shortcut-base setting. Input dispatch and every
     /// displayed shortcut label read this same value.
     pub keyboard_settings: KeyboardSettings,
+    /// Live card-preview settings shared by every board pane in this client.
+    pub kanban_board_settings: KanbanBoardSettings,
     /// Live user-global sound choices and the system catalog discovered once
     /// before the terminal enters raw mode.
     pub sound_settings: ilium_sound::SoundSettings,
@@ -542,16 +649,16 @@ pub struct App {
     pub markdown_picker: ratatui_image::picker::Picker,
     pub markdown_rasterizer: crate::markdown::raster::HeaderRasterizer,
     /// Creation-pulse bookkeeping: node id -> `started_at`-relative offset
-    /// (ms) at which this client first observed it existing. Read by
-    /// `tree_ui` to flash a freshly created node so a click (or a
-    /// multi-create burst) is obviously followed by something appearing;
+    /// (ms) at which its insertion slide settles. Read by `tree_ui` to flash
+    /// a freshly created node *after* it has moved into place, so a click (or
+    /// a multi-create burst) is obviously followed by something appearing;
     /// pruned by `prune_recently_created` once its flash window elapses or
-    /// the node is gone. See `track_newly_created_nodes` for why the very
+    /// the node is gone. See `track_tree_snapshot_change` for why the very
     /// first tree snapshot after attaching never populates this (a
     /// boot-time restore of a whole persisted session must not flash every
     /// node at once).
     pub recently_created: HashMap<NodeId, u128>,
-    /// Whether `track_newly_created_nodes` has processed at least one
+    /// Whether `track_tree_snapshot_change` has processed at least one
     /// snapshot yet -- see that method's doc comment.
     has_applied_first_snapshot: bool,
     /// Agent pane session/thread IDs the server has discovered (see
@@ -603,11 +710,11 @@ pub struct App {
     /// only reads each item's identifier/nesting, so it always builds with
     /// the same fixed `elapsed_ms: 0` and empty loading/recently-created
     /// inputs (see `tree_ui::node_at_position`'s previous direct call).
-    /// That means the built items are fully determined by tree structure
-    /// alone, so it's safe to reuse them across every mouse-move hit test
-    /// until `tree_version` actually changes, instead of re-walking the
-    /// whole tree and re-allocating a fresh label per node on every mouse
-    /// move.
+    /// The built items are determined by tree structure plus `TreeOrder`.
+    /// `TreeItemCache` keys both inputs; status events also bump
+    /// `tree_version` because Type ordering distinguishes agent terminals
+    /// from plain shells. This keeps mouse hit rows aligned with rendering
+    /// without rebuilding labels on every pointer move.
     tree_hit_test_cache: tree_ui::TreeItemCache,
 }
 
@@ -627,8 +734,9 @@ impl App {
             focus: FocusTarget::Pane,
             mode: Mode::Normal,
             status_message: None,
-            should_quit: false,
+            exit_reason: None,
             started_at,
+            tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             layout: UiLayout::default(),
             tree_width_animation: TreeWidthAnimation::new(
@@ -637,6 +745,7 @@ impl App {
             ),
             ui_settings: UiSettings::default(),
             keyboard_settings: KeyboardSettings::default(),
+            kanban_board_settings: KanbanBoardSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             config_dir: None,
@@ -672,24 +781,30 @@ impl App {
         }
     }
 
-    /// Updates creation-pulse bookkeeping ahead of `render_cache` swapping in
-    /// `new_tree`: any node id it carries that wasn't already in `self.tree`
-    /// gets a flash start time recorded, *except* on the very first snapshot
-    /// this client ever applies -- a boot-time restore of a whole persisted
-    /// session must not flash every node in it at once. Multiple nodes
-    /// created in the same snapshot (a multi-create burst) all get recorded
-    /// together here, so each still flashes independently once rendered.
-    pub(crate) fn track_newly_created_nodes(&mut self, new_tree: &Tree) {
-        if self.has_applied_first_snapshot {
-            let previous_ids: HashSet<NodeId> = self.tree.all_ids().collect();
-            let created_offset_ms = self.started_at.elapsed().as_millis();
-            for id in new_tree.all_ids() {
-                if !previous_ids.contains(&id) {
-                    self.recently_created.entry(id).or_insert(created_offset_ms);
-                }
-            }
+    /// Starts client-only row transitions ahead of `render_cache` swapping in
+    /// `new_tree`. The first snapshot is deliberately adopted without motion:
+    /// attaching to a restored session must not animate the whole tree as new.
+    pub(crate) fn track_tree_snapshot_change(&mut self, new_tree: &Tree) {
+        let now_offset_ms = self.started_at.elapsed().as_millis();
+        self.track_tree_snapshot_change_at(new_tree, now_offset_ms);
+    }
+
+    /// Deterministic form of [`Self::track_tree_snapshot_change`] for focused
+    /// tests of sequencing and pulse timing.
+    fn track_tree_snapshot_change_at(&mut self, new_tree: &Tree, now_offset_ms: u128) {
+        if !self.has_applied_first_snapshot {
+            self.has_applied_first_snapshot = true;
+            return;
         }
-        self.has_applied_first_snapshot = true;
+
+        let pulse_starts =
+            self.tree_transitions
+                .observe_snapshot_change(&self.tree, new_tree, now_offset_ms);
+        for (node_id, pulse_started_offset_ms) in pulse_starts {
+            self.recently_created
+                .entry(node_id)
+                .or_insert(pulse_started_offset_ms);
+        }
     }
 
     /// Invalidates `tree_hit_test_cache` -- called once per
@@ -725,6 +840,13 @@ impl App {
     /// last drain, for the caller to actually send over the connection.
     pub fn take_outbound_requests(&mut self) -> Vec<ClientRequest> {
         std::mem::take(&mut self.outbox)
+    }
+
+    /// Detaches this connection cleanly and records how the CLI wrapper should
+    /// proceed once the terminal has been restored by `TerminalGuard`.
+    pub fn request_client_exit(&mut self, reason: ClientExitReason) {
+        self.queue_request(ClientRequest::Detach);
+        self.exit_reason = Some(reason);
     }
 
     /// Drains every `PendingRetitleRequest` queued since the last drain,
@@ -817,6 +939,26 @@ impl App {
         };
     }
 
+    /// Activates the surviving sidebar row chosen after a close. Panes and
+    /// split views reopen their right-panel content; ordinary containers and
+    /// folder roots become the tree selection without changing expansion.
+    pub(crate) fn activate_tree_successor(&mut self, node_id: NodeId) {
+        let Some(node) = self.tree.get(node_id) else {
+            return;
+        };
+        let is_split_view = node.is_split_view();
+        let is_pane = node.is_pane();
+
+        if is_split_view {
+            self.show_split_view(node_id);
+        } else if is_pane {
+            self.focus_pane(node_id);
+        } else {
+            self.select_node(node_id);
+            self.leave_pane_focus();
+        }
+    }
+
     /// Updates the geometry shared by rendering, hit-testing, and pane
     /// sizing, and queues a `ResizePane` request for every terminal pane
     /// whose size actually changed.
@@ -906,6 +1048,53 @@ impl App {
     /// Cycles the current shortcut base through all allowed letters.
     pub fn settings_adjust_shortcut_base(&mut self, direction: i32) {
         self.settings_set_shortcut_base(self.keyboard_settings.shortcut_base.stepped(direction));
+    }
+
+    /// Applies and persists the global card-preview height used by all boards.
+    pub fn settings_adjust_card_preview_lines(&mut self, direction: i32) {
+        let current = i32::from(self.kanban_board_settings.card_preview_lines);
+        let card_preview_lines = (current + direction).clamp(
+            i32::from(crate::config::MIN_CARD_PREVIEW_LINES),
+            i32::from(crate::config::MAX_CARD_PREVIEW_LINES),
+        ) as u16;
+        self.kanban_board_settings.card_preview_lines = card_preview_lines;
+        self.persist_kanban_board_settings();
+    }
+
+    /// Applies and persists the minimum terminal width shared by every board
+    /// column before horizontal scrolling takes over.
+    pub fn settings_adjust_board_column_width(&mut self, direction: i32) {
+        let current = i32::from(self.kanban_board_settings.minimum_column_width);
+        let minimum_column_width = (current + direction).clamp(
+            i32::from(crate::config::MIN_BOARD_COLUMN_WIDTH),
+            i32::from(crate::config::MAX_BOARD_COLUMN_WIDTH),
+        ) as u16;
+        self.kanban_board_settings.minimum_column_width = minimum_column_width;
+        self.persist_kanban_board_settings();
+    }
+
+    /// Writes the complete Kanban presentation table after either live
+    /// control changes, preserving unrelated global configuration tables.
+    fn persist_kanban_board_settings(&mut self) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_kanban_board_settings(&config_dir, &self.kanban_board_settings)
+            {
+                self.status_message =
+                    Some(format!("Could not save Kanban Board settings: {error}"));
+            }
+        }
+    }
+
+    /// Adjusts the selected Kanban row without duplicating persistence logic
+    /// in keyboard and mouse dispatch.
+    pub fn settings_adjust_kanban_board_row(&mut self, row: KanbanBoardRow, direction: i32) {
+        match row {
+            KanbanBoardRow::CardPreviewLines => self.settings_adjust_card_preview_lines(direction),
+            KanbanBoardRow::MinimumColumnWidth => {
+                self.settings_adjust_board_column_width(direction)
+            }
+        }
     }
 
     /// Installs startup sound settings without emitting an IPC update. The
@@ -1031,6 +1220,196 @@ impl App {
         self.mode = Mode::Settings(SettingsState::new());
     }
 
+    /// Opens the full-screen workspace finder. Its index is intentionally
+    /// built only after the user pauses typing, so opening the finder and
+    /// every query edit remain immediate even with large retained journals.
+    pub fn action_open_search(&mut self) {
+        self.mode = Mode::Search(Box::default());
+    }
+
+    /// Starts one debounced background scan when the active finder has been
+    /// quiet for at least `SEARCH_DEBOUNCE`. The worker receives immutable
+    /// snapshots and never borrows `App`, leaving the event loop free to
+    /// render each key immediately.
+    pub fn tick_workspace_search(&mut self, now: Instant, workers: &mut SearchWorkers) -> bool {
+        if !workers.is_idle() {
+            return false;
+        }
+        let Mode::Search(mut state) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            return false;
+        };
+        let Some((revision, query)) = state.take_due_search(now) else {
+            self.mode = Mode::Search(state);
+            return false;
+        };
+        let request = WorkspaceSearchRequest {
+            revision,
+            query,
+            sources: self.workspace_search_sources(),
+        };
+        let started = match workers.start(request) {
+            Ok(()) => true,
+            Err(error) => {
+                state.cancel_in_flight_search(revision);
+                self.status_message = Some(format!("Could not start workspace search: {error}"));
+                false
+            }
+        };
+        self.mode = Mode::Search(state);
+        started
+    }
+
+    /// Receives one owned worker result. A revision mismatch is expected when
+    /// the user continued typing while a previous scan was still running.
+    pub fn apply_workspace_search_result(&mut self, event: SearchWorkerEvent) -> bool {
+        let Mode::Search(mut state) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            return false;
+        };
+        let changed = state.complete_search(event.revision, event.results);
+        self.mode = Mode::Search(state);
+        changed
+    }
+
+    /// Synchronous helper retained for focused unit tests. Interactive
+    /// search uses `tick_workspace_search` and `SearchWorkers` instead.
+    pub fn refresh_search_results(&self, state: &mut SearchState) {
+        let query = state.query.buf.trim();
+        if query.is_empty() {
+            state.replace_results(Vec::new());
+            return;
+        }
+
+        let request = WorkspaceSearchRequest {
+            revision: 0,
+            query: query.to_string(),
+            sources: self.workspace_search_sources(),
+        };
+        state.replace_results(search_ui::search_workspace(&request, || false));
+    }
+
+    /// Captures all searchable client-owned state. The terminal half is an
+    /// O(1) `Arc` snapshot of server-replayed history; editor and board text
+    /// is copied only after the debounce has elapsed and on a background scan.
+    fn workspace_search_sources(&self) -> Vec<WorkspaceSearchSource> {
+        let mut sources = Vec::new();
+        for (pane_id, runtime) in &self.panes {
+            let Some(node) = self.tree.get(*pane_id) else {
+                continue;
+            };
+            let NodeKind::Pane {
+                content,
+                status,
+                title_source,
+                board_storage,
+                ..
+            } = &node.kind
+            else {
+                continue;
+            };
+            let automatic_title =
+                (*title_source == PaneTitleSource::Automatic).then(|| node.name.clone());
+
+            match (content, runtime) {
+                (PaneContentKind::Terminal, PaneRuntime::Terminal(view)) => {
+                    let kind = if matches!(
+                        status,
+                        PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
+                    ) {
+                        SearchObjectKind::Agent
+                    } else {
+                        SearchObjectKind::Shell
+                    };
+                    sources.push(WorkspaceSearchSource {
+                        pane_id: *pane_id,
+                        kind,
+                        object_name: node.name.clone(),
+                        automatic_title,
+                        path: None,
+                        // Terminal parsing belongs exclusively to the worker;
+                        // extracting this metadata here would rescan retained
+                        // output on the input/UI thread.
+                        last_command: None,
+                        content: WorkspaceSearchContent::Terminal(
+                            view.searchable_history_snapshot(),
+                        ),
+                    });
+                }
+                (PaneContentKind::Editor, PaneRuntime::Editor(editor)) => {
+                    let path = editor
+                        .path
+                        .clone()
+                        .or_else(|| self.restored_editor_paths.get(pane_id).cloned());
+                    let text = editor
+                        .textarea
+                        .lines()
+                        .iter()
+                        .enumerate()
+                        .map(|(line, text)| WorkspaceSearchText {
+                            text: text.clone(),
+                            location: SearchLocation::Editor { line },
+                        })
+                        .collect();
+                    sources.push(WorkspaceSearchSource {
+                        pane_id: *pane_id,
+                        kind: SearchObjectKind::File,
+                        object_name: node.name.clone(),
+                        automatic_title,
+                        path,
+                        last_command: None,
+                        content: WorkspaceSearchContent::Text(text),
+                    });
+                }
+                (PaneContentKind::Board, PaneRuntime::Board(board)) => {
+                    let path = board_storage
+                        .as_ref()
+                        .map(|storage| storage.path().to_path_buf());
+                    let text = board
+                        .columns
+                        .iter()
+                        .flat_map(|column| {
+                            column.cards.iter().map(move |card| WorkspaceSearchText {
+                                text: format!("{}\n{}\n{}", column.title, card.title, card.body),
+                                location: SearchLocation::Board,
+                            })
+                        })
+                        .collect();
+                    sources.push(WorkspaceSearchSource {
+                        pane_id: *pane_id,
+                        kind: SearchObjectKind::Board,
+                        object_name: node.name.clone(),
+                        automatic_title,
+                        path,
+                        last_command: None,
+                        content: WorkspaceSearchContent::Text(text),
+                    });
+                }
+                _ => {}
+            }
+        }
+        sources
+    }
+
+    /// Leaves search and navigates to the selected pane at the exact recorded
+    /// editor line or terminal-history byte position.
+    pub fn activate_search_result(&mut self, result: SearchResult) {
+        self.mode = Mode::Normal;
+        self.focus_pane(result.pane_id);
+        match result.location {
+            SearchLocation::Terminal { history_end_byte } => {
+                if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&result.pane_id) {
+                    view.jump_to_history_byte(history_end_byte);
+                }
+            }
+            SearchLocation::Editor { line } => {
+                if let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&result.pane_id) {
+                    editor.jump_to_line(line);
+                }
+            }
+            SearchLocation::Board => {}
+        }
+        self.status_message = Some(format!("Opened search result in {}", result.object_name));
+    }
+
     /// Flips the "auto-resize tree panel on focus" toggle -- the Appearance
     /// tab's first row.
     pub fn settings_toggle_auto_resize_tree(&mut self) {
@@ -1063,6 +1442,19 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Selects the tree's presentation order immediately and persists it in
+    /// `[ui]`, shared by the settings row and context-menu submenu.
+    pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
+        let mut ui = self.ui_settings;
+        ui.tree_order = tree_order;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Cycles through every registered tree-order mode.
+    pub fn settings_adjust_tree_order(&mut self, direction: i32) {
+        self.settings_set_tree_order(self.ui_settings.tree_order.stepped(direction));
+    }
+
     /// Cycles among full names, single letters, chosen icons, and no agent
     /// identifier. The activity column remains visible in every mode.
     pub fn settings_adjust_agent_identifier_mode(&mut self, direction: i32) {
@@ -1085,6 +1477,14 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Selects which curated Antigravity glyph the tree uses in icon mode.
+    pub fn settings_adjust_antigravity_agent_icon(&mut self, direction: i32) {
+        let mut ui = self.ui_settings;
+        ui.agent_identifiers.antigravity_icon =
+            ui.agent_identifiers.antigravity_icon.stepped(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Dispatches a keyboard/mouse "adjust this row" gesture to the right
     /// per-row action, per `AppearanceRow`'s doc comment. `direction` is
     /// `-1`/`+1` (decrement/increment); for the two-state rows
@@ -1095,11 +1495,15 @@ impl App {
         match row {
             AppearanceRow::AutoResizeTree => self.settings_toggle_auto_resize_tree(),
             AppearanceRow::TreeWidth => self.settings_adjust_tree_width(direction),
+            AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
             AppearanceRow::AgentIdentifierMode => {
                 self.settings_adjust_agent_identifier_mode(direction)
             }
             AppearanceRow::ClaudeAgentIcon => self.settings_adjust_claude_agent_icon(direction),
             AppearanceRow::CodexAgentIcon => self.settings_adjust_codex_agent_icon(direction),
+            AppearanceRow::AntigravityAgentIcon => {
+                self.settings_adjust_antigravity_agent_icon(direction)
+            }
             AppearanceRow::ColorScheme => self.settings_toggle_color_scheme(),
         }
     }
@@ -1166,6 +1570,22 @@ impl App {
         self.tree_width_animation.is_animating()
     }
 
+    /// Whether a transition benefits from the event loop's 16 ms cadence.
+    /// Spinners and pulses intentionally remain on the ordinary 50 ms tick;
+    /// spatial movement needs finer frames to read as motion rather than jumps.
+    pub fn is_spatial_animation_active(&self) -> bool {
+        self.is_layout_animating()
+            || self
+                .tree_transitions
+                .is_active(self.started_at.elapsed().as_millis())
+    }
+
+    /// Prunes completed entry/exit presentation state after its final frame.
+    pub fn tick_tree_transitions(&mut self, now: Instant) -> bool {
+        let now_offset_ms = now.saturating_duration_since(self.started_at).as_millis();
+        self.tree_transitions.prune(now_offset_ms, &self.tree)
+    }
+
     /// Whether any wall-clock-driven visual (the tree-width hover
     /// animation, a "Working" spinner, a waiting-background clock, a "Done"
     /// bell pulse, a recently-created flash, or the project-name/pane-title
@@ -1183,6 +1603,9 @@ impl App {
             return true;
         }
         let elapsed_ms = self.started_at.elapsed().as_millis();
+        if self.tree_transitions.is_active(elapsed_ms) {
+            return true;
+        }
         if tree_ui::any_recently_created_within_window(&self.recently_created, elapsed_ms) {
             return true;
         }
@@ -1195,7 +1618,18 @@ impl App {
                         AgentActivity::Working
                             | AgentActivity::WaitingBackground
                             | AgentActivity::Done
+                    ) | PaneStatus::AgentWithGoal(
+                        _,
+                        AgentActivity::Working
+                            | AgentActivity::WaitingBackground
+                            | AgentActivity::Done
                     ),
+                    ..
+                }
+            ) || matches!(
+                node.kind,
+                NodeKind::Pane {
+                    scheduled_input: Some(_),
                     ..
                 }
             )
@@ -1275,16 +1709,20 @@ impl App {
     /// focused pane a user is actively looking at doesn't stay `Done`)
     /// and broadcast the authoritative `PaneStatusChanged` in time.
     fn mark_seen(&mut self, id: NodeId) {
-        if let Some(NodeKind::Pane {
-            status: PaneStatus::Agent(class, ilium_core::AgentActivity::Done),
-            ..
-        }) = self.tree.get(id).map(|node| &node.kind)
-        {
-            let class = class.clone();
-            let _ = self.tree.set_pane_status(
-                id,
-                PaneStatus::Agent(class, ilium_core::AgentActivity::Idle),
-            );
+        if let Some(NodeKind::Pane { status, .. }) = self.tree.get(id).map(|node| &node.kind) {
+            let cleared_status = match status {
+                PaneStatus::Agent(class, ilium_core::AgentActivity::Done) => Some(
+                    PaneStatus::Agent(class.clone(), ilium_core::AgentActivity::Idle),
+                ),
+                PaneStatus::AgentWithGoal(class, ilium_core::AgentActivity::Done) => Some(
+                    PaneStatus::AgentWithGoal(class.clone(), ilium_core::AgentActivity::Idle),
+                ),
+                _ => None,
+            };
+            let Some(cleared_status) = cleared_status else {
+                return;
+            };
+            let _ = self.tree.set_pane_status(id, cleared_status);
         }
     }
 
@@ -1386,14 +1824,36 @@ impl App {
         path
     }
 
+    /// Selects a complete widget identifier path (does not change focus),
+    /// opening every ancestor so the selection is actually visible. Virtual
+    /// folder descendants use paths that cannot be reconstructed from the
+    /// server-owned tree alone, so callers that already have one must use
+    /// this rather than reducing it to its synthetic final ID.
+    pub(crate) fn select_tree_path(&mut self, path: Vec<NodeId>) {
+        let mut expanded_any_ancestor = false;
+        for depth in 1..path.len() {
+            expanded_any_ancestor |= self.tree_state.open(path[..depth].to_vec());
+        }
+        self.tree_state.select(path);
+        if expanded_any_ancestor {
+            self.bump_tree_version();
+        }
+    }
+
     /// Selects `id` in the tree widget's state (does not change focus),
     /// opening every ancestor so the selection is actually visible.
     pub(crate) fn select_node(&mut self, id: NodeId) {
-        let path = self.path_to(id);
-        for depth in 1..path.len() {
-            self.tree_state.open(path[..depth].to_vec());
+        self.select_tree_path(self.path_to(id));
+    }
+
+    /// Toggles the selected tree path and invalidates virtual folder hit
+    /// testing when the set of materialized descendants changes.
+    pub(crate) fn toggle_selected_tree_node(&mut self) -> bool {
+        let changed = self.tree_state.toggle_selected();
+        if changed {
+            self.bump_tree_version();
         }
-        self.tree_state.select(path);
+        changed
     }
 
     pub(crate) fn selected_node_id(&self) -> Option<NodeId> {
@@ -1427,7 +1887,14 @@ impl App {
             .into_iter()
             .filter(|path| match path.last() {
                 None => true,
-                Some(leaf) => self.tree.get(*leaf).is_none() || self.path_to(*leaf) != *path,
+                Some(leaf) => {
+                    if self.tree.get(*leaf).is_some() {
+                        self.path_to(*leaf) != *path
+                    } else {
+                        crate::tree_ui::folder_entry(&self.tree, *leaf)
+                            .is_none_or(|entry| entry.identifier_path != *path)
+                    }
+                }
             })
             .collect();
         for path in stale_paths {
@@ -1513,7 +1980,7 @@ impl App {
     }
 
     /// Queues a `NewPane` request for a specific command line (e.g.
-    /// `claude`, `codex`) under `parent_group`.
+    /// `claude`, `codex`, `agy`) under `parent_group`.
     pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) {
         self.queue_request(ClientRequest::NewPane {
             parent_group,
@@ -1568,6 +2035,7 @@ impl App {
     }
 
     pub fn request_move(&mut self, node_id: NodeId, direction: ilium_core::TreeMoveDirection) {
+        self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::MoveNode { node_id, direction });
     }
 
@@ -1578,11 +2046,21 @@ impl App {
     /// server confirms it via the next `TreeSnapshot`, same as every other
     /// structural request.
     pub fn request_reparent(&mut self, node_id: NodeId, new_parent: NodeId, index: Option<usize>) {
+        self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::ReparentNode {
             node_id,
             new_parent,
             index,
         });
+    }
+
+    /// Every direct tree-order mutation opts out of an automatic view first.
+    /// Centralizing this in the two structural request methods covers row
+    /// arrows, context actions, drag/drop, and keyboard move mode uniformly.
+    fn restore_manual_tree_order_for_mutation(&mut self) {
+        if self.ui_settings.tree_order != TreeOrder::Manual {
+            self.settings_set_tree_order(TreeOrder::Manual);
+        }
     }
 
     /// `short_title` is the short-form alternative shown when the tree
@@ -1597,12 +2075,12 @@ impl App {
         });
     }
 
-    /// Queues a title proposed by a background automatic source (e.g.
-    /// `crate::title_inference`'s LLM session-title inference). Unlike
+    /// Queues a title proposed by an automatic source with no agent-session
+    /// dependency (currently the plain-shell command titler). Unlike
     /// `request_rename`, the server applies it only while the pane hasn't
     /// been genuinely user-renamed, and it never marks the pane
     /// user-specified -- see `ilium_ipc::ClientRequest::SetAutomaticPaneTitle`.
-    /// `short_title` mirrors `request_rename`'s field.
+    /// Session-derived LLM titles use `request_session_pane_title` instead.
     pub fn request_automatic_pane_title(
         &mut self,
         pane_id: NodeId,
@@ -1613,6 +2091,26 @@ impl App {
             pane_id,
             title,
             short_title,
+        });
+    }
+
+    /// Queues an agent-session title with an expected-ID compare-and-set.
+    /// The detached server, not client event ordering, decides whether the
+    /// summarized session is still current when the result arrives.
+    pub fn request_session_pane_title(
+        &mut self,
+        pane_id: NodeId,
+        expected_session_id: String,
+        title: String,
+        short_title: Option<String>,
+        title_source: ilium_core::PaneTitleSource,
+    ) {
+        self.queue_request(ClientRequest::SetSessionPaneTitle {
+            pane_id,
+            expected_session_id,
+            title,
+            short_title,
+            title_source,
         });
     }
 
@@ -1635,6 +2133,18 @@ impl App {
     /// not modified while creating the pane; the board adapter reads the
     /// existing headings/bullets on the next tree snapshot.
     pub fn request_new_markdown_board(&mut self, parent_group: NodeId, path: PathBuf) {
+        let path = self.resolve_board_path(path);
+        if let Some(existing_pane) = self.board_pane_for_path(&path) {
+            self.focus_pane(existing_pane);
+            self.status_message = Some("That board file is already open".to_string());
+            return;
+        }
+        if let Err(error) =
+            BoardPane::load(ilium_core::BoardStorage::MarkdownFile { path: path.clone() })
+        {
+            self.status_message = Some(format!("Could not open board: {error}"));
+            return;
+        }
         let name = path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -1645,6 +2155,34 @@ impl App {
             name,
             storage: ilium_core::BoardStorage::MarkdownFile { path },
         });
+    }
+
+    /// Creates a board beside an existing Markdown editor, first flushing
+    /// any unsaved editor buffer so the board reads the exact contents the
+    /// user sees instead of an older on-disk revision.
+    pub fn request_board_from_markdown_editor(&mut self, editor_pane_id: NodeId) {
+        let path = match self.panes.get_mut(&editor_pane_id) {
+            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() => {
+                if editor.dirty {
+                    if let Err(error) = editor.save() {
+                        self.status_message = Some(format!(
+                            "Could not save Markdown before opening board: {error}"
+                        ));
+                        return;
+                    }
+                }
+                editor.path.clone()
+            }
+            _ => self.restored_editor_paths.get(&editor_pane_id).cloned(),
+        };
+        let Some(path) = path.filter(|path| crate::editor_pane::is_markdown_path(path)) else {
+            self.status_message = Some("This editor is not backed by a Markdown file".to_string());
+            return;
+        };
+        let parent_group = self
+            .normal_group_for_node(editor_pane_id)
+            .unwrap_or(ROOT_ID);
+        self.request_new_markdown_board(parent_group, path);
     }
 
     pub fn open_explorer_file_menu(
@@ -1673,11 +2211,20 @@ impl App {
     }
 
     pub fn open_create_board_dialog(&mut self) {
-        let default_path = self
-            .session_cwd
-            .join(".ilium")
-            .join("boards")
-            .join("board.md");
+        let board_directory = self.session_cwd.join(".ilium").join("boards");
+        let mut suffix = 1_u32;
+        let default_path = loop {
+            let filename = if suffix == 1 {
+                "board.md".to_string()
+            } else {
+                format!("board-{suffix}.md")
+            };
+            let candidate = board_directory.join(filename);
+            if !candidate.exists() && self.board_pane_for_path(&candidate).is_none() {
+                break candidate;
+            }
+            suffix = suffix.saturating_add(1);
+        };
         self.mode = Mode::CreateBoard(CreateBoardState {
             name: TextPromptState::new("Board"),
             path: TextPromptState::new(default_path.display().to_string()),
@@ -1688,15 +2235,33 @@ impl App {
 
     pub fn commit_create_board(&mut self, state: &CreateBoardState) {
         use ilium_core::BoardStorage;
-        let path = PathBuf::from(state.path.buf.trim());
-        if path.as_os_str().is_empty() {
+        let entered_path = PathBuf::from(state.path.buf.trim());
+        if entered_path.as_os_str().is_empty() {
             self.status_message = Some("Board storage path is required".to_string());
+            self.mode = Mode::CreateBoard(state.clone());
             return;
         }
+        let path = self.resolve_board_path(entered_path);
         let storage = match state.storage_kind {
             BoardStorageKind::Folder => BoardStorage::Folder { path },
             BoardStorageKind::MarkdownFile => BoardStorage::MarkdownFile { path },
         };
+        if let Some(existing_pane) = self.board_pane_for_path(storage.path()) {
+            self.focus_pane(existing_pane);
+            self.status_message = Some("That board storage is already open".to_string());
+            self.mode = Mode::Normal;
+            return;
+        }
+        let board_result = if storage.path().exists() {
+            BoardPane::load(storage.clone())
+        } else {
+            BoardPane::create(storage.clone())
+        };
+        if let Err(error) = board_result {
+            self.status_message = Some(format!("Could not create board: {error}"));
+            self.mode = Mode::CreateBoard(state.clone());
+            return;
+        }
         let name = if state.name.buf.trim().is_empty() {
             "Board".to_string()
         } else {
@@ -1709,6 +2274,37 @@ impl App {
             storage,
         });
         self.mode = Mode::Normal;
+    }
+
+    /// Resolves user-entered relative board storage against the canonical
+    /// project directory and normalizes lexical `.`/`..` components. Existing
+    /// paths additionally use the filesystem's canonical identity.
+    fn resolve_board_path(&self, path: PathBuf) -> PathBuf {
+        let absolute_path = if path.is_absolute() {
+            path
+        } else {
+            self.session_cwd.join(path)
+        };
+        absolute_path
+            .canonicalize()
+            .unwrap_or_else(|_| normalize_path_lexically(&absolute_path))
+    }
+
+    /// Finds the one board pane already owning `path`, if any. Board storage
+    /// is single-owner inside a session because each pane otherwise carries an
+    /// independent client-local document copy capable of stale overwrites.
+    fn board_pane_for_path(&self, path: &Path) -> Option<NodeId> {
+        let candidate = self.resolve_board_path(path.to_path_buf());
+        self.tree.panes().find_map(|node| {
+            let NodeKind::Pane {
+                board_storage: Some(storage),
+                ..
+            } = &node.kind
+            else {
+                return None;
+            };
+            (self.resolve_board_path(storage.path().to_path_buf()) == candidate).then_some(node.id)
+        })
     }
 
     pub fn open_board_path_picker(&mut self, state: CreateBoardState) {
@@ -1757,11 +2353,11 @@ impl App {
         let Some(PaneRuntime::Board(board)) = self.panes.get(&pane_id) else {
             return;
         };
-        let (target, title) = match board
-            .columns
-            .get(board.selected_column)
-            .and_then(|column| column.cards.get(board.selected_card))
-        {
+        let (target, title) = match board.columns.get(board.selected_column).and_then(|column| {
+            board
+                .selected_card
+                .and_then(|selected_card| column.cards.get(selected_card))
+        }) {
             Some(card) => (BoardRenameTarget::Card, card.title.clone()),
             None => match board.columns.get(board.selected_column) {
                 Some(column) => (BoardRenameTarget::Column, column.title.clone()),
@@ -1793,11 +2389,7 @@ impl App {
         let Some(PaneRuntime::Board(board)) = self.panes.get(&pane_id) else {
             return;
         };
-        let target = if board
-            .columns
-            .get(board.selected_column)
-            .is_some_and(|column| board.selected_card < column.cards.len())
-        {
+        let target = if board.selected_card.is_some() {
             BoardDeleteTarget::Card
         } else {
             BoardDeleteTarget::Column
@@ -1946,7 +2538,7 @@ impl App {
     fn split_choice_kind_label(&self, pane_id: NodeId) -> &'static str {
         match self.tree.get(pane_id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(_, _),
+                status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
                 ..
             }) => "agent",
             Some(NodeKind::Pane {
@@ -2057,7 +2649,7 @@ impl App {
         if actions.is_empty() {
             return;
         }
-        let width = 28.min(self.layout.screen_area.width.max(1));
+        let width = 36.min(self.layout.screen_area.width.max(1));
         let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
@@ -2067,6 +2659,40 @@ impl App {
             area,
             actions,
             selected_index: 0,
+            tree_order_submenu: None,
+        });
+    }
+
+    /// Opens the Order by submenu beside its parent row, flipping it to the
+    /// left only when the terminal has no room on the right.
+    pub fn open_context_tree_order_submenu(&self, menu: &mut ContextMenu) {
+        let submenu_width = 32.min(self.layout.screen_area.width.max(1));
+        let submenu_height =
+            (TreeOrder::ALL.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let order_row = menu
+            .actions
+            .iter()
+            .position(|action| *action == ContextMenuAction::OrderBy)
+            .unwrap_or(0) as u16;
+        let preferred_x = menu.area.right();
+        let x = if preferred_x.saturating_add(submenu_width) <= self.layout.screen_area.right() {
+            preferred_x
+        } else {
+            menu.area.x.saturating_sub(submenu_width)
+        };
+        let preferred_y = menu.area.y.saturating_add(1).saturating_add(order_row);
+        let max_y = self
+            .layout
+            .screen_area
+            .bottom()
+            .saturating_sub(submenu_height);
+        let selected_index = TreeOrder::ALL
+            .iter()
+            .position(|tree_order| *tree_order == self.ui_settings.tree_order)
+            .unwrap_or(0);
+        menu.tree_order_submenu = Some(TreeOrderSubmenu {
+            area: Rect::new(x, preferred_y.min(max_y), submenu_width, submenu_height),
+            selected_index,
         });
     }
 
@@ -2142,14 +2768,16 @@ impl App {
     /// per-node ones.
     fn context_actions_for(&self, target: NodeId) -> Vec<ContextMenuAction> {
         if target == ROOT_ID {
-            return vec![
+            let mut actions = vec![
                 ContextMenuAction::NewTerminal,
                 ContextMenuAction::NewEditor,
                 ContextMenuAction::NewGroup,
                 ContextMenuAction::NewSplitView,
                 ContextMenuAction::NewFolder,
-                ContextMenuAction::Settings,
             ];
+            actions.extend(ContextMenuAction::new_agent_actions());
+            actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
+            return actions;
         }
         let mut actions = vec![
             ContextMenuAction::NewTerminal,
@@ -2158,6 +2786,7 @@ impl App {
             ContextMenuAction::NewSplitView,
             ContextMenuAction::NewFolder,
         ];
+        actions.extend(ContextMenuAction::new_agent_actions());
         match self.tree.get(target) {
             Some(node) if node.is_split_view() => {
                 actions.retain(|action| {
@@ -2169,24 +2798,57 @@ impl App {
                 actions.insert(0, ContextMenuAction::ShowSplitView);
             }
             Some(node) if node.is_group() => actions.insert(0, ContextMenuAction::ToggleGroup),
+            Some(Node {
+                kind:
+                    NodeKind::Pane {
+                        content: PaneContentKind::Terminal,
+                        ..
+                    },
+                ..
+            }) => {
+                actions.insert(0, ContextMenuAction::FocusPane);
+                actions.insert(1, ContextMenuAction::SchedulePaneInput);
+            }
+            Some(Node {
+                kind:
+                    NodeKind::Pane {
+                        content: PaneContentKind::Editor,
+                        ..
+                    },
+                ..
+            }) => {
+                actions.insert(0, ContextMenuAction::FocusPane);
+                let is_markdown_editor = matches!(
+                    self.panes.get(&target),
+                    Some(PaneRuntime::Editor(editor)) if editor.is_markdown()
+                ) || self
+                    .restored_editor_paths
+                    .get(&target)
+                    .is_some_and(|path| crate::editor_pane::is_markdown_path(path));
+                if is_markdown_editor {
+                    actions.insert(1, ContextMenuAction::CreateBoardFromMarkdown);
+                }
+            }
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
             Some(Node {
                 kind: NodeKind::Folder { .. },
                 ..
             }) => actions.insert(0, ContextMenuAction::ToggleGroup),
-            Some(_) => return vec![ContextMenuAction::Settings],
+            Some(_) => {
+                return ContextMenuAction::GLOBAL_ACTIONS.to_vec();
+            }
             // A stale/unrecognized target (e.g. a race with a concurrent
             // structural change) still gets a menu -- just the one action
             // that never depends on the target actually existing.
-            None => return vec![ContextMenuAction::Settings],
+            None => return ContextMenuAction::GLOBAL_ACTIONS.to_vec(),
         }
         actions.extend([
             ContextMenuAction::Rename,
             ContextMenuAction::MoveUp,
             ContextMenuAction::MoveDown,
             ContextMenuAction::Close,
-            ContextMenuAction::Settings,
         ]);
+        actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
         actions
     }
 
@@ -2195,12 +2857,23 @@ impl App {
     pub fn execute_context_action(&mut self, action: ContextMenuAction, target: NodeId) {
         self.mode = Mode::Normal;
         match action {
+            ContextMenuAction::Search => self.action_open_search(),
             ContextMenuAction::FocusPane => self.focus_pane(target),
+            ContextMenuAction::CreateBoardFromMarkdown => {
+                self.request_board_from_markdown_editor(target)
+            }
+            ContextMenuAction::SchedulePaneInput => {
+                self.mode =
+                    Mode::SchedulePaneInput(Box::new(ScheduledInputDialogState::new(target)));
+            }
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
-                self.tree_state.toggle_selected();
+                self.toggle_selected_tree_node();
             }
             ContextMenuAction::NewTerminal => self.action_new_terminal(),
+            ContextMenuAction::NewAgent(provider) => {
+                self.action_new_command_pane(provider.command_line())
+            }
             ContextMenuAction::NewEditor => self.action_new_editor(),
             ContextMenuAction::NewGroup => {
                 let preselected = self.create_group_target_for_click(target);
@@ -2216,8 +2889,36 @@ impl App {
                 self.request_move(target, ilium_core::TreeMoveDirection::Down)
             }
             ContextMenuAction::Close => self.action_close(target),
+            // Input handlers open this entry without leaving the parent menu;
+            // direct execution is intentionally a harmless no-op.
+            ContextMenuAction::OrderBy => {}
+            ContextMenuAction::Restart => {
+                self.request_client_exit(ClientExitReason::RestartRequested)
+            }
             ContextMenuAction::Settings => self.action_open_settings(),
         }
+    }
+
+    /// Validates the complete form before queueing one atomic request. An
+    /// invalid field keeps the dialog open and surfaces its exact correction
+    /// in the status bar instead of silently normalizing user input.
+    pub fn commit_scheduled_pane_input(&mut self, state: Box<ScheduledInputDialogState>) {
+        let (delay_seconds, text, send_enter) = match state.validated_request() {
+            Ok(request) => request,
+            Err(message) => {
+                self.status_message = Some(message);
+                self.mode = Mode::SchedulePaneInput(state);
+                return;
+            }
+        };
+        self.queue_request(ClientRequest::SchedulePaneInput {
+            pane_id: state.pane_id,
+            delay_seconds,
+            text,
+            send_enter,
+        });
+        self.status_message = Some("Scheduled pane input".to_string());
+        self.mode = Mode::Normal;
     }
 
     /// Creates a plain shell pane under the currently targeted group and
@@ -2227,7 +2928,7 @@ impl App {
         self.request_new_terminal(parent);
     }
 
-    /// Creates a specific command-line pane (e.g. `claude`, `codex`) under
+    /// Creates a specific command-line pane (e.g. `claude`, `codex`, `agy`) under
     /// the currently targeted group.
     pub fn action_new_command_pane(&mut self, command_line: impl Into<String>) {
         let parent = self.group_for_new_node();
@@ -2464,9 +3165,22 @@ impl App {
     /// `TreeItem` list is served from `tree_hit_test_cache` rather than
     /// rebuilt (see that field's doc comment).
     pub fn tree_node_at(&mut self, position: Position) -> Option<TreeNodeHit> {
-        let items = self
-            .tree_hit_test_cache
-            .get_or_build(&self.tree, self.tree_version);
+        if self
+            .tree_transitions
+            .presentation_tree(self.started_at.elapsed().as_millis())
+            .is_some()
+        {
+            // The old snapshot's rows intentionally differ from the logical
+            // new tree during a removal. Withhold pointer hits for this brief
+            // window instead of applying a click to a shifted, invisible row.
+            return None;
+        }
+        let items = self.tree_hit_test_cache.get_or_build(
+            &self.tree,
+            self.tree_version,
+            self.ui_settings.tree_order,
+            self.tree_state.opened(),
+        );
         tree_ui::node_at_position(items, &self.tree_state, self.layout.tree_area, position)
     }
 
@@ -2492,14 +3206,29 @@ impl App {
                 self.tree_state.key_down();
             }
             KeyCode::Left | KeyCode::Char('h') => {
-                self.tree_state.key_left();
+                if self.tree_state.key_left() {
+                    self.bump_tree_version();
+                }
             }
             KeyCode::Right | KeyCode::Char('l') => {
-                self.tree_state.key_right();
+                if self.tree_state.key_right() {
+                    self.bump_tree_version();
+                }
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                self.tree_state.toggle_selected();
                 if let Some(id) = self.selected_node_id() {
+                    if let Some(entry) = crate::tree_ui::folder_entry(&self.tree, id) {
+                        if entry.is_directory {
+                            self.toggle_selected_tree_node();
+                        } else {
+                            self.request_new_editor(
+                                self.tree.parent_of(entry.root_id).unwrap_or(ROOT_ID),
+                                entry.path,
+                            );
+                        }
+                        return;
+                    }
+                    self.toggle_selected_tree_node();
                     match self.tree.get(id) {
                         Some(node) if node.is_split_view() => self.show_split_view(id),
                         Some(node) if node.is_pane() => self.focus_pane(id),
@@ -2531,6 +3260,10 @@ impl App {
         let Some(id) = self.active_pane_id() else {
             return;
         };
+        let pane_content_area = self
+            .pane_viewport(id)
+            .map(|viewport| viewport.content_area)
+            .unwrap_or(self.layout.pane_content_area);
         let editor_content_area = self.editor_content_area(id);
         let mut pending_key_input = None;
         let mut is_enter_press = false;
@@ -2595,7 +3328,46 @@ impl App {
                 if !is_press(&key) {
                     return;
                 }
+                if board.is_detail_panel_open {
+                    let result = match key.code {
+                        KeyCode::Esc => {
+                            board.close_card_details();
+                            Ok(false)
+                        }
+                        KeyCode::Tab => {
+                            board.cycle_detail_editor_focus(false);
+                            Ok(false)
+                        }
+                        KeyCode::BackTab => {
+                            board.cycle_detail_editor_focus(true);
+                            Ok(false)
+                        }
+                        KeyCode::Enter
+                            if board.detail_editor.as_ref().is_some_and(|editor| {
+                                editor.focus == crate::board::CardEditorField::Title
+                            }) =>
+                        {
+                            board.cycle_detail_editor_focus(false);
+                            Ok(false)
+                        }
+                        _ => board.input_detail_editor(ratatui_textarea::Input::from(
+                            crossterm::event::Event::Key(key),
+                        )),
+                    };
+                    if let Err(error) = result {
+                        self.status_message = Some(error);
+                    } else if result == Ok(true) {
+                        self.status_message = Some("Card saved".to_string());
+                    }
+                    return;
+                }
                 let result = match key.code {
+                    KeyCode::Enter => {
+                        if let Some(card_index) = board.selected_card {
+                            board.open_card_details(board.selected_column, card_index);
+                        }
+                        Ok(())
+                    }
                     KeyCode::Left | KeyCode::Char('h')
                         if key.modifiers.contains(KeyModifiers::SHIFT) =>
                     {
@@ -2605,6 +3377,16 @@ impl App {
                         if key.modifiers.contains(KeyModifiers::SHIFT) =>
                     {
                         board.move_selected_card(1)
+                    }
+                    KeyCode::Up | KeyCode::Char('k')
+                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                    {
+                        board.move_selected_card_vertically(-1)
+                    }
+                    KeyCode::Down | KeyCode::Char('j')
+                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                    {
+                        board.move_selected_card_vertically(1)
                     }
                     KeyCode::Left | KeyCode::Char('h') => {
                         board.select_previous_column();
@@ -2624,11 +3406,11 @@ impl App {
                     }
                     KeyCode::Char('n') => {
                         self.action_add_board_card(id);
-                        Ok(())
+                        return;
                     }
                     KeyCode::Char('c') => {
                         self.action_add_board_column(id);
-                        Ok(())
+                        return;
                     }
                     KeyCode::Char('r') => match BoardPane::load(board.storage.clone()) {
                         Ok(reloaded) => {
@@ -2639,14 +3421,28 @@ impl App {
                     },
                     KeyCode::Char('e') => {
                         self.action_rename_board_selection(id);
-                        Ok(())
+                        return;
                     }
                     KeyCode::Char('d') => {
                         self.action_delete_board_selection(id);
-                        Ok(())
+                        return;
                     }
                     _ => Ok(()),
                 };
+                if result.is_ok() {
+                    let layout = crate::board_ui::compute_layout(
+                        pane_content_area,
+                        board.is_detail_panel_open,
+                        board.columns.len(),
+                        self.kanban_board_settings.minimum_column_width,
+                    );
+                    let visible_column_count = crate::board_ui::visible_column_count(
+                        layout.columns_area,
+                        board.columns.len(),
+                        self.kanban_board_settings.minimum_column_width,
+                    );
+                    board.ensure_selected_column_visible(visible_column_count);
+                }
                 if let Err(error) = result {
                     self.status_message = Some(error);
                 }
@@ -2721,7 +3517,7 @@ impl App {
         }
         match self.tree.get(id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(class, _),
+                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
                 ..
             }) => {
                 let Some(session_id) = self.agent_session_ids.get(&id).cloned() else {
@@ -2854,53 +3650,183 @@ impl App {
         position: Position,
     ) {
         use crossterm::event::{MouseButton, MouseEventKind};
+        let preview_lines = self.kanban_board_settings.card_preview_lines;
+        let minimum_column_width = self.kanban_board_settings.minimum_column_width;
         let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&id) else {
             return;
         };
         if board.columns.is_empty() {
             return;
         }
-        let relative_x = position.x.saturating_sub(area.x) as usize;
-        let column_width = (usize::from(area.width).max(1) / board.columns.len()).max(1);
-        let column_index = (relative_x / column_width).min(board.columns.len() - 1);
-        // `ui::draw_board` starts the first three-row card just inside the
-        // column border and reserves one spacer row after each card.
-        let relative_y = position.y.saturating_sub(area.y);
-        let card_index = relative_y.saturating_sub(1) as usize / 4;
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                board.selected_column = column_index;
-                if card_index < board.columns[column_index].cards.len() {
-                    board.selected_card = card_index;
-                    board.drag_source = Some((column_index, card_index));
+                match crate::board_ui::hit_test(
+                    board,
+                    area,
+                    preview_lines,
+                    minimum_column_width,
+                    position,
+                ) {
+                    Some(crate::board_ui::BoardHit::Column { column_index }) => {
+                        board.select_column(column_index);
+                        board.drag_source = None;
+                        board.drag_target = None;
+                    }
+                    Some(crate::board_ui::BoardHit::Card {
+                        column_index,
+                        card_index,
+                    }) => {
+                        board.select_card(column_index, card_index);
+                        board.drag_source = Some((column_index, card_index));
+                        board.drag_target = None;
+                    }
+                    Some(crate::board_ui::BoardHit::CardCheckbox {
+                        column_index,
+                        card_index,
+                        checkbox_index,
+                    }) => {
+                        board.select_card(column_index, card_index);
+                        board.drag_source = None;
+                        board.drag_target = None;
+                        match board.toggle_card_checkbox(column_index, card_index, checkbox_index) {
+                            Ok(()) => self.status_message = Some("Card saved".to_string()),
+                            Err(error) => self.status_message = Some(error),
+                        }
+                    }
+                    Some(crate::board_ui::BoardHit::HorizontalScrollbar { column_scroll }) => {
+                        let layout = crate::board_ui::compute_layout(
+                            area,
+                            board.is_detail_panel_open,
+                            board.columns.len(),
+                            minimum_column_width,
+                        );
+                        let visible_column_count = crate::board_ui::visible_column_count(
+                            layout.columns_area,
+                            board.columns.len(),
+                            minimum_column_width,
+                        );
+                        board.set_column_scroll(column_scroll, visible_column_count);
+                        board.drag_source = None;
+                        board.drag_target = None;
+                    }
+                    Some(crate::board_ui::BoardHit::DetailClose) => {
+                        board.drag_source = None;
+                        board.drag_target = None;
+                        board.close_card_details();
+                    }
+                    Some(crate::board_ui::BoardHit::DetailTitle) => {
+                        board.drag_source = None;
+                        board.drag_target = None;
+                        board.set_detail_editor_focus(crate::board::CardEditorField::Title);
+                    }
+                    Some(crate::board_ui::BoardHit::DetailBody) => {
+                        board.drag_source = None;
+                        board.drag_target = None;
+                        board.set_detail_editor_focus(crate::board::CardEditorField::Body);
+                    }
+                    None => {
+                        board.drag_source = None;
+                        board.drag_target = None;
+                    }
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                board.drag_target = crate::board_ui::card_drop_target(
+                    board,
+                    area,
+                    preview_lines,
+                    minimum_column_width,
+                    position,
+                );
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some((source_column, source_card)) = board.drag_source.take() {
-                    // `source_column`/`source_card` were captured on the matching
-                    // mouse-down and may no longer be valid indices by the time the
-                    // button is released (a keypress in between -- e.g. deleting a
-                    // column, or `r` reloading the board from a since-changed file --
-                    // can shrink `board.columns` underneath a held drag), so this must
-                    // re-validate against the current state rather than indexing
-                    // directly, or a stale index would panic instead of just
-                    // cancelling the drop.
-                    let source_card_count = board
-                        .columns
-                        .get(source_column)
-                        .map(|column| column.cards.len());
-                    if source_column != column_index
-                        && source_card_count.is_some_and(|count| source_card < count)
-                    {
-                        let card = board.columns[source_column].cards.remove(source_card);
-                        board.columns[column_index].cards.push(card);
-                        board.selected_column = column_index;
-                        board.selected_card = board.columns[column_index].cards.len() - 1;
-                        if let Err(error) = board.save() {
+                    if let Some((destination_column, insertion_index)) = board.drag_target.take() {
+                        let result = board.move_dragged_card(
+                            source_column,
+                            source_card,
+                            destination_column,
+                            insertion_index,
+                        );
+                        if let Err(error) = result {
                             self.status_message = Some(error);
                         }
+                    } else if matches!(
+                        crate::board_ui::hit_test(
+                            board,
+                            area,
+                            preview_lines,
+                            minimum_column_width,
+                            position,
+                        ),
+                        Some(crate::board_ui::BoardHit::Card {
+                            column_index,
+                            card_index,
+                        }) if (column_index, card_index) == (source_column, source_card)
+                    ) {
+                        board.open_card_details(source_column, source_card);
+                        let layout = crate::board_ui::compute_layout(
+                            area,
+                            true,
+                            board.columns.len(),
+                            minimum_column_width,
+                        );
+                        let visible_column_count = crate::board_ui::visible_column_count(
+                            layout.columns_area,
+                            board.columns.len(),
+                            minimum_column_width,
+                        );
+                        board.ensure_selected_column_visible(visible_column_count);
                     }
                 }
+                board.drag_target = None;
+            }
+            MouseEventKind::ScrollUp
+                if matches!(
+                    crate::board_ui::hit_test(
+                        board,
+                        area,
+                        preview_lines,
+                        minimum_column_width,
+                        position,
+                    ),
+                    Some(crate::board_ui::BoardHit::DetailBody)
+                ) =>
+            {
+                board.scroll_detail_body(-3);
+            }
+            MouseEventKind::ScrollDown
+                if matches!(
+                    crate::board_ui::hit_test(
+                        board,
+                        area,
+                        preview_lines,
+                        minimum_column_width,
+                        position,
+                    ),
+                    Some(crate::board_ui::BoardHit::DetailBody)
+                ) =>
+            {
+                board.scroll_detail_body(3);
+            }
+            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                let layout = crate::board_ui::compute_layout(
+                    area,
+                    board.is_detail_panel_open,
+                    board.columns.len(),
+                    minimum_column_width,
+                );
+                let visible_column_count = crate::board_ui::visible_column_count(
+                    layout.columns_area,
+                    board.columns.len(),
+                    minimum_column_width,
+                );
+                let next_scroll = match mouse.kind {
+                    MouseEventKind::ScrollLeft => board.column_scroll.saturating_sub(1),
+                    MouseEventKind::ScrollRight => board.column_scroll.saturating_add(1),
+                    _ => unreachable!("matched horizontal wheel events"),
+                };
+                board.set_column_scroll(next_scroll, visible_column_count);
             }
             _ => {}
         }
@@ -3204,6 +4130,7 @@ mod tests {
     #[test]
     fn waiting_background_keeps_wall_clock_animation_redraws_active() {
         let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -3213,6 +4140,264 @@ mod tests {
             .set_pane_status(
                 pane_id,
                 PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground),
+            )
+            .unwrap();
+
+        assert!(app.has_active_animation());
+    }
+
+    #[test]
+    fn scheduled_input_action_is_available_only_for_terminal_panes() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = app
+            .tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+
+        assert!(app
+            .context_actions_for(terminal)
+            .contains(&ContextMenuAction::SchedulePaneInput));
+        assert!(!app
+            .context_actions_for(editor)
+            .contains(&ContextMenuAction::SchedulePaneInput));
+        assert!(!app
+            .context_actions_for(group)
+            .contains(&ContextMenuAction::SchedulePaneInput));
+    }
+
+    #[test]
+    fn every_builtin_agent_is_available_from_tree_context_menus() {
+        let mut app = app();
+        let actions = app.context_actions_for(ROOT_ID);
+
+        for provider in BuiltinAgentProvider::ALL {
+            assert!(actions.contains(&ContextMenuAction::NewAgent(provider)));
+        }
+
+        app.execute_context_action(
+            ContextMenuAction::NewAgent(BuiltinAgentProvider::Antigravity),
+            ROOT_ID,
+        );
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::NewPane {
+                parent_group: ROOT_ID,
+                kind: ilium_ipc::NewPaneKind::Command(command_line),
+            }] if command_line == "agy"
+        ));
+    }
+
+    #[test]
+    fn markdown_editor_tree_action_creates_a_sibling_board_from_the_same_file() {
+        let path = std::env::temp_dir().join(format!(
+            "ilium-board-context-{}-{}.markdown",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        std::fs::write(&path, "# Work\n\n* [ ] Keep this task\n").unwrap();
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "work.markdown", PaneContentKind::Editor)
+            .unwrap();
+        let editor = EditorPane::load(path.clone()).unwrap();
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+
+        assert!(app
+            .context_actions_for(editor_id)
+            .contains(&ContextMenuAction::CreateBoardFromMarkdown));
+
+        app.execute_context_action(ContextMenuAction::CreateBoardFromMarkdown, editor_id);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::NewBoard {
+                parent_group: group,
+                name: path.file_stem().unwrap().to_string_lossy().into_owned(),
+                storage: ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
+            }]
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn create_board_tree_action_is_hidden_for_non_markdown_editors() {
+        let path = std::env::temp_dir().join(format!(
+            "ilium-board-context-{}-{}.txt",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        std::fs::write(&path, "not markdown").unwrap();
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "notes.txt", PaneContentKind::Editor)
+            .unwrap();
+        let editor = EditorPane::load(path.clone()).unwrap();
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+
+        assert!(!app
+            .context_actions_for(editor_id)
+            .contains(&ContextMenuAction::CreateBoardFromMarkdown));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn every_tree_context_exposes_order_by_and_submenu_selects_the_live_mode() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.settings_set_tree_order(TreeOrder::AgeDescending);
+
+        for target in [ROOT_ID, group, pane] {
+            assert!(app
+                .context_actions_for(target)
+                .contains(&ContextMenuAction::OrderBy));
+        }
+
+        app.open_context_menu(pane, 10, 4);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("right-click should open the tree context menu");
+        };
+        app.open_context_tree_order_submenu(&mut menu);
+        let submenu = menu
+            .tree_order_submenu
+            .expect("Order by should open an adjacent submenu");
+
+        assert_eq!(
+            TreeOrder::ALL[submenu.selected_index],
+            TreeOrder::AgeDescending
+        );
+        assert!(submenu.area.x >= menu.area.right() || submenu.area.right() <= menu.area.x);
+    }
+
+    #[test]
+    fn restart_is_global_and_requests_only_a_client_detach() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        for target in [ROOT_ID, group, pane, NodeId(u64::MAX)] {
+            assert!(app
+                .context_actions_for(target)
+                .contains(&ContextMenuAction::Restart));
+        }
+
+        app.execute_context_action(ContextMenuAction::Restart, pane);
+
+        assert_eq!(app.exit_reason, Some(ClientExitReason::RestartRequested));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::Detach]
+        ));
+    }
+
+    #[test]
+    fn manual_move_and_reparent_restore_and_persist_manual_tree_order() {
+        let config_dir = std::env::temp_dir()
+            .join("ilium-app-tree-order-tests")
+            .join(format!("{:?}", std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut app = app();
+        app.config_dir = Some(config_dir.clone());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.settings_set_tree_order(TreeOrder::NameAscending);
+        app.request_move(pane, ilium_core::TreeMoveDirection::Up);
+
+        assert_eq!(app.ui_settings.tree_order, TreeOrder::Manual);
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::MoveNode { node_id, .. }] if *node_id == pane
+        ));
+        assert_eq!(
+            crate::config::load(&config_dir).unwrap().ui.tree_order,
+            TreeOrder::Manual
+        );
+
+        app.settings_set_tree_order(TreeOrder::Type);
+        app.request_reparent(pane, group, Some(0));
+        assert_eq!(app.ui_settings.tree_order, TreeOrder::Manual);
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::ReparentNode { node_id, .. }] if *node_id == pane
+        ));
+
+        let _ = std::fs::remove_dir_all(config_dir);
+    }
+
+    #[test]
+    fn scheduled_input_dialog_commit_queues_the_complete_request() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.execute_context_action(ContextMenuAction::SchedulePaneInput, terminal);
+        let Mode::SchedulePaneInput(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("scheduled input action should open its dialog");
+        };
+        state.hours = TextPromptState::new("1");
+        state.minutes = TextPromptState::new("2");
+        state.seconds = TextPromptState::new("3");
+        state.text = TextPromptState::new("cargo test");
+        state.send_enter = true;
+
+        app.commit_scheduled_pane_input(state);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SchedulePaneInput {
+                pane_id: terminal,
+                delay_seconds: 3723,
+                text: "cargo test".to_string(),
+                send_enter: true,
+            }]
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn pending_scheduled_input_keeps_countdown_redraws_active() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .schedule_pane_input(
+                terminal,
+                ilium_core::ScheduledPaneInput {
+                    execute_at_unix_millis: u64::MAX,
+                    text: String::new(),
+                    send_enter: true,
+                },
             )
             .unwrap();
 
@@ -3238,7 +4423,103 @@ mod tests {
     }
 
     #[test]
-    fn track_newly_created_nodes_ignores_the_very_first_snapshot() {
+    fn new_board_dialog_skips_existing_and_already_open_default_paths() {
+        let project_path = std::env::temp_dir().join(format!(
+            "ilium-board-defaults-{}-{}",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        let board_directory = project_path.join(".ilium").join("boards");
+        std::fs::create_dir_all(&board_directory).unwrap();
+        std::fs::write(board_directory.join("board.md"), "# Existing\n").unwrap();
+        let mut app = App::new("test".to_string(), project_path.clone());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree
+            .add_board(
+                group,
+                "Second".to_string(),
+                ilium_core::BoardStorage::MarkdownFile {
+                    path: board_directory.join("board-2.md"),
+                },
+            )
+            .unwrap();
+
+        app.open_create_board_dialog();
+
+        let Mode::CreateBoard(state) = &app.mode else {
+            panic!("new board should open its creation dialog");
+        };
+        assert_eq!(
+            PathBuf::from(&state.path.buf),
+            board_directory.join("board-3.md")
+        );
+        let _ = std::fs::remove_dir_all(project_path);
+    }
+
+    #[test]
+    fn board_creation_resolves_relative_path_and_preflights_storage_before_request() {
+        let project_path = std::env::temp_dir().join(format!(
+            "ilium-board-relative-{}-{}",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        std::fs::create_dir_all(&project_path).unwrap();
+        let mut app = App::new("test".to_string(), project_path.clone());
+        let state = CreateBoardState {
+            name: TextPromptState::new("Sprint"),
+            path: TextPromptState::new("plans/sprint.md"),
+            storage_kind: BoardStorageKind::MarkdownFile,
+            editing_path: true,
+        };
+
+        app.commit_create_board(&state);
+
+        let board_path = project_path.join("plans").join("sprint.md");
+        assert!(board_path.is_file());
+        assert!(std::fs::read_to_string(&board_path)
+            .unwrap()
+            .contains("## To do"));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::NewBoard {
+                name,
+                storage: ilium_core::BoardStorage::MarkdownFile { path },
+                ..
+            }] if name == "Sprint" && path == &board_path
+        ));
+        let _ = std::fs::remove_dir_all(project_path);
+    }
+
+    #[test]
+    fn board_creation_rejects_an_unreadable_storage_shape_without_queuing_a_dead_pane() {
+        let project_path = std::env::temp_dir().join(format!(
+            "ilium-board-invalid-{}-{}",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        let directory_path = project_path.join("not-a-markdown-file");
+        std::fs::create_dir_all(&directory_path).unwrap();
+        let mut app = App::new("test".to_string(), project_path.clone());
+        let state = CreateBoardState {
+            name: TextPromptState::new("Broken"),
+            path: TextPromptState::new(directory_path.display().to_string()),
+            storage_kind: BoardStorageKind::MarkdownFile,
+            editing_path: true,
+        };
+
+        app.commit_create_board(&state);
+
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(matches!(app.mode, Mode::CreateBoard(_)));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("Could not create board")));
+        let _ = std::fs::remove_dir_all(project_path);
+    }
+
+    #[test]
+    fn tree_snapshot_transitions_ignore_the_very_first_snapshot() {
         let mut app = app();
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
@@ -3248,7 +4529,7 @@ mod tests {
 
         // The first snapshot after attaching (e.g. a boot-time restore of a
         // whole persisted session) must not flash every node in it.
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 0);
 
         assert!(app.recently_created.is_empty());
         assert!(!app.recently_created.contains_key(&group));
@@ -3256,31 +4537,31 @@ mod tests {
     }
 
     #[test]
-    fn track_newly_created_nodes_flags_only_ids_absent_from_the_previous_tree() {
+    fn tree_snapshot_transitions_flag_only_ids_absent_from_the_previous_tree() {
         let mut app = app();
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let existing_pane = tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 0);
         app.tree = tree.clone();
 
         let new_pane = tree
             .add_pane(group, "claude", PaneContentKind::Terminal)
             .unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 100);
 
         assert!(!app.recently_created.contains_key(&existing_pane));
-        assert!(app.recently_created.contains_key(&new_pane));
+        assert_eq!(app.recently_created.get(&new_pane), Some(&320));
     }
 
     #[test]
-    fn track_newly_created_nodes_flags_every_node_from_a_multi_create_burst_independently() {
+    fn tree_snapshot_transitions_flag_every_node_from_a_multi_create_burst_independently() {
         let mut app = app();
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 0);
         app.tree = tree.clone();
 
         // Several panes created in one action (e.g. rapid clicks on the
@@ -3293,7 +4574,7 @@ mod tests {
             .add_pane(group, "shell-2", PaneContentKind::Terminal)
             .unwrap();
         let third_group = tree.add_group(ROOT_ID, "another group").unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 50);
 
         assert!(app.recently_created.contains_key(&first));
         assert!(app.recently_created.contains_key(&second));
@@ -3301,17 +4582,41 @@ mod tests {
     }
 
     #[test]
+    fn removal_transition_withholds_pointer_hits_until_visual_rows_match_the_new_tree() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let mut previous_tree = Tree::new();
+        let group_id = previous_tree.add_group(ROOT_ID, "work").unwrap();
+        let first_pane = previous_tree
+            .add_pane(group_id, "first", PaneContentKind::Terminal)
+            .unwrap();
+        previous_tree
+            .add_pane(group_id, "second", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree = previous_tree.clone();
+        app.tree_state.open(vec![group_id]);
+        let mut new_tree = previous_tree.clone();
+        new_tree.remove_node(first_pane).unwrap();
+        app.tree_transitions
+            .observe_snapshot_change(&previous_tree, &new_tree, 0);
+        app.tree = new_tree;
+        let list = tree_ui::list_area(app.layout.tree_area);
+
+        assert_eq!(app.tree_node_at(Position::new(list.x, list.y + 1)), None);
+    }
+
+    #[test]
     fn prune_recently_created_drops_ids_no_longer_in_the_tree() {
         let mut app = app();
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 0);
         app.tree = tree.clone();
 
         let pane_id = tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 10);
         app.tree = tree.clone();
         assert!(app.recently_created.contains_key(&pane_id));
 
@@ -3327,13 +4632,13 @@ mod tests {
         let mut app = app();
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 0);
         app.tree = tree.clone();
 
         let pane_id = tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.track_newly_created_nodes(&tree);
+        app.track_tree_snapshot_change_at(&tree, 10);
         app.tree = tree;
 
         // Simulate the flash window having fully elapsed without waiting
@@ -3963,12 +5268,116 @@ mod tests {
     }
 
     #[test]
-    fn settings_tabs_cycle_through_sound_before_about() {
+    fn settings_tabs_cycle_through_kanban_board_sound_and_about() {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Keyboard);
-        assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Sound);
+        assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::KanbanBoard);
+        assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
+    }
+
+    #[test]
+    fn kanban_layout_settings_persist_with_bounded_adjustments() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        for _ in 0..20 {
+            app.settings_adjust_card_preview_lines(1);
+        }
+        app.settings_adjust_board_column_width(100);
+
+        assert_eq!(app.kanban_board_settings.card_preview_lines, 10);
+        assert_eq!(app.kanban_board_settings.minimum_column_width, 80);
+        let persisted = crate::config::load(config_dir.path()).unwrap().kanban_board;
+        assert_eq!(persisted.card_preview_lines, 10);
+        assert_eq!(persisted.minimum_column_width, 80);
+    }
+
+    #[test]
+    fn clicking_a_board_card_opens_scrolls_and_closes_its_detail_panel() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let directory = tempfile::tempdir().unwrap();
+        let storage = ilium_core::BoardStorage::MarkdownFile {
+            path: directory.path().join("board.md"),
+        };
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let board_id = app
+            .tree
+            .add_board(group, "Board".to_string(), storage.clone())
+            .unwrap();
+        let mut board = BoardPane::create(storage).unwrap();
+        board.add_card("Detailed card".to_string()).unwrap();
+        board.columns[0].cards[0].body = (0..80)
+            .map(|line| format!("detail line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.panes
+            .insert(board_id, PaneRuntime::Board(Box::new(board)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: board_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let board_area = app.pane_viewport(board_id).unwrap().content_area;
+        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
+            unreachable!();
+        };
+        let columns_layout = crate::board_ui::compute_layout(board_area, false, 3, 20);
+        let column_area =
+            crate::board_ui::column_viewport(board, columns_layout.columns_area, 20).areas[0].1;
+        let column_inner = ratatui::widgets::Block::bordered().inner(column_area);
+        let card_area = crate::board_ui::card_area(column_inner, 0, 3).unwrap();
+        let card_position = Position::new(card_area.x + 2, card_area.y + 2);
+        let mouse = |kind, position: Position| MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_pane_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), card_position),
+            card_position,
+        );
+        app.handle_pane_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), card_position),
+            card_position,
+        );
+
+        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
+            panic!("board runtime should remain available");
+        };
+        assert!(board.is_detail_panel_open);
+        let detail_area = crate::board_ui::compute_layout(board_area, true, 3, 20)
+            .detail_area
+            .unwrap();
+        assert_eq!(detail_area.width, board_area.width / 3);
+
+        let detail_body = crate::board_ui::detail_editor_layout(detail_area).body_area;
+        let detail_position = Position::new(detail_body.x + 1, detail_body.y + 1);
+        app.handle_pane_mouse(
+            mouse(MouseEventKind::ScrollDown, detail_position),
+            detail_position,
+        );
+        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
+            unreachable!();
+        };
+        assert_eq!(
+            board.detail_editor.as_ref().unwrap().focus,
+            crate::board::CardEditorField::Body
+        );
+
+        let close_position = Position::new(detail_area.right() - 2, detail_area.y);
+        app.handle_pane_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), close_position),
+            close_position,
+        );
+        let PaneRuntime::Board(board) = app.panes.get(&board_id).unwrap() else {
+            unreachable!();
+        };
+        assert!(!board.is_detail_panel_open);
     }
 
     #[test]
@@ -4008,5 +5417,90 @@ mod tests {
         assert_eq!(persisted.sound, app.sound_settings);
 
         let _ = std::fs::remove_dir_all(config_dir);
+    }
+
+    #[test]
+    fn workspace_search_finds_terminal_history_and_activates_its_exact_location() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let mut terminal = TerminalView::new(4, 40);
+        terminal.feed(b"before\r\nWORKSPACE_SEARCH_NEEDLE\r\nafter\r\n");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
+
+        let mut state = SearchState::new();
+        state.query = TextPromptState::new("workspace_search_needle");
+        app.refresh_search_results(&mut state);
+
+        let result = state.selected_result().cloned().expect("terminal result");
+        assert_eq!(result.pane_id, pane_id);
+        assert!(matches!(result.location, SearchLocation::Terminal { .. }));
+
+        app.activate_search_result(result);
+
+        assert_eq!(app.active_pane_id(), Some(pane_id));
+        let PaneRuntime::Terminal(terminal) = app.panes.get(&pane_id).unwrap() else {
+            unreachable!();
+        };
+        assert!(terminal
+            .with_screen(|screen| screen.contents())
+            .contains("WORKSPACE_SEARCH_NEEDLE"));
+    }
+
+    #[test]
+    fn workspace_search_waits_then_applies_a_worker_result_for_the_current_query() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let mut terminal = TerminalView::new(4, 40);
+        terminal.feed(b"background WORKSPACE_DEBOUNCE_NEEDLE\r\n");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
+        app.action_open_search();
+        let started = Instant::now();
+        let Mode::Search(state) = &mut app.mode else {
+            panic!("workspace finder should be open");
+        };
+        state.query = TextPromptState::new("workspace_debounce_needle");
+        state.note_query_changed(started);
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = SearchWorkers::new(events_tx);
+        assert!(!app.tick_workspace_search(
+            started + search_ui::SEARCH_DEBOUNCE - std::time::Duration::from_millis(1),
+            &mut workers,
+        ));
+        assert!(workers.is_idle());
+
+        assert!(app.tick_workspace_search(started + search_ui::SEARCH_DEBOUNCE, &mut workers));
+        let event = events_rx.blocking_recv().expect("worker result");
+        workers.finish();
+        assert!(app.apply_workspace_search_result(event));
+
+        let Mode::Search(state) = &app.mode else {
+            panic!("workspace finder should remain open");
+        };
+        assert_eq!(state.results.len(), 1);
+        assert_eq!(state.results[0].pane_id, pane_id);
+    }
+
+    #[test]
+    fn every_tree_context_menu_exposes_workspace_search() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.open_context_menu(ROOT_ID, 2, 2);
+
+        let Mode::ContextMenu(menu) = &app.mode else {
+            panic!("tree context menu should open");
+        };
+        assert!(menu.actions.contains(&ContextMenuAction::Search));
     }
 }

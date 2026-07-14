@@ -6,12 +6,15 @@
 //! spawn one) so this decision stays unit-testable without a background
 //! thread or a real gateway call.
 //!
-//! Two triggers, both driven by [`AppliedEvent`] (what `render_cache::apply`
+//! Three triggers, all driven by [`AppliedEvent`] (what `render_cache::apply`
 //! just observed):
 //! - [`AppliedEvent::SessionIdResolved`] -- the first, most common trigger:
 //!   the server just told this client an agent pane's session ID, right
 //!   after which its transcript usually already has at least one prompt to
 //!   summarize.
+//! - [`AppliedEvent::PaneBecameAgent`] -- closes the event-ordering race where
+//!   the ID reaches the client just before the first `PlainShell -> Agent`
+//!   status event. Whichever event arrives second can start the worker.
 //! - [`AppliedEvent::PaneBecameDone`] -- a turn just finished on a pane
 //!   whose session ID is already known but a title hasn't been
 //!   successfully inferred yet. This is the retry path that replaces the
@@ -42,6 +45,7 @@ pub const MAX_ATTEMPTS: u32 = 5;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppliedEvent {
     SessionIdResolved { pane_id: NodeId },
+    PaneBecameAgent { pane_id: NodeId },
     PaneBecameDone { pane_id: NodeId },
     Other,
 }
@@ -53,9 +57,9 @@ pub fn pane_ready_for_inference(
     applied: &AppliedEvent,
 ) -> Option<(NodeId, AgentClass, String)> {
     let pane_id = match applied {
-        AppliedEvent::SessionIdResolved { pane_id } | AppliedEvent::PaneBecameDone { pane_id } => {
-            *pane_id
-        }
+        AppliedEvent::SessionIdResolved { pane_id }
+        | AppliedEvent::PaneBecameAgent { pane_id }
+        | AppliedEvent::PaneBecameDone { pane_id } => *pane_id,
         AppliedEvent::Other => return None,
     };
 
@@ -76,7 +80,7 @@ pub fn pane_ready_for_inference(
         return None;
     }
     let NodeKind::Pane {
-        status: PaneStatus::Agent(class, _),
+        status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
         title_source,
         ..
     } = &app.tree.get(pane_id)?.kind
@@ -86,9 +90,7 @@ pub fn pane_ready_for_inference(
     if title_source.is_user_specified() {
         return None;
     }
-    if !matches!(class, AgentClass::Claude | AgentClass::Codex) {
-        return None;
-    }
+    class.provider()?;
     Some((pane_id, class.clone(), session_id))
 }
 

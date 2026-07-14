@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use ilium_core::AgentClass;
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -50,6 +51,17 @@ impl TerminalOrigin {
             TerminalOrigin::Command(command_line) => command_line,
         }
     }
+
+    /// Name shown after a known session is invalidated. Standard persisted
+    /// resume commands drop their now-stale ID; arbitrary user commands keep
+    /// their exact launch text.
+    pub fn pane_name_without_stale_session(&self) -> &str {
+        match self {
+            TerminalOrigin::Command(command) if command.starts_with("claude --resume ") => "claude",
+            TerminalOrigin::Command(command) if command.starts_with("codex resume ") => "codex",
+            _ => self.default_pane_name(),
+        }
+    }
 }
 
 /// One live pty-backed terminal pane: the pty session itself, what it was
@@ -59,28 +71,36 @@ pub struct TerminalPaneRuntime {
     pub session: PtySession,
     pub origin: TerminalOrigin,
     pub shell_command_tracker: Option<ShellCommandTracker>,
-    /// Reconstructs the most recent line the user actually typed into this
-    /// pane's PTY, from raw input bytes, the same way `shell_command_tracker`
-    /// reconstructs a shell command line -- but unlike that tracker (title
-    /// display only, `PlainShell` origin only, reset the moment a
-    /// foreground program takes the terminal over), this one stays live
-    /// for every terminal pane regardless of origin or foreground process,
-    /// because an agent CLI's own prompt box is exactly the input it needs
-    /// to see through. Feeds `last_submitted_line` below; used only as a
-    /// best-effort fingerprint by `crate::session_id`'s content-match tier
-    /// to tell apart two concurrent agent panes in the same project
-    /// directory -- never shown to the user.
-    pub input_fingerprint_tracker: ShellCommandTracker,
-    /// The most recent line `input_fingerprint_tracker` committed (on
-    /// Enter), with when it was captured so a stale one (the user typed
-    /// something long ago, unrelated to what's in-flight now) can be
-    /// ignored by callers rather than risking a false content match.
-    pub last_submitted_line: Option<(String, Instant)>,
+    /// Observes submitted agent slash commands only so an in-process
+    /// `/resume`-style transition can invalidate launch-time identity before
+    /// discovery sees the replacement transcript. It is never used to infer
+    /// an ID from content.
+    pub session_command_tracker: ShellCommandTracker,
+    /// While true, launch arguments describe the pre-transition session and
+    /// are forbidden as identity evidence. Only a PID-held transcript can
+    /// resolve the new session and clear this flag.
+    pub is_session_identity_invalidated: bool,
+    /// Session ID cleared by an in-process transition. The same agent PID may
+    /// briefly retain its old transcript descriptor while `/resume` switches
+    /// sessions, so this ID stays inadmissible until a different verified ID
+    /// is found or a replacement process takes ownership.
+    pub invalidated_session_id: Option<String>,
+    /// UUID supplied by ilium to an exact fresh `claude` launch. It is not
+    /// published or persisted as an active session until detection confirms
+    /// that this pane actually owns a live Claude process.
+    pub pending_generated_session_id: Option<String>,
     pub detection_schedule: DetectionSchedule,
     /// This pane's agent session/thread ID, once `crate::session_id`
     /// discovers one. Rechecked while an agent is detected because `/resume`
     /// can replace the active session inside an existing terminal pane.
     pub session_id: Option<String>,
+    /// Agent class that owned `session_id`; prevents a later different CLI in
+    /// the same terminal from inheriting stale identity.
+    pub session_agent_class: Option<AgentClass>,
+    /// Exact detected process that owned `session_id`. A replacement process
+    /// may safely use its own startup arguments even when the previous agent
+    /// invalidated launch-time identity with an in-process session command.
+    pub session_process_id: Option<u32>,
     /// Forwards `session.subscribe_output_bytes()` chunks to the session's
     /// broadcast channel as `ServerEvent::ScreenUpdate` frames. Owned here
     /// so closing this pane has a single, unambiguous place to cancel it
@@ -93,6 +113,7 @@ impl TerminalPaneRuntime {
     pub fn new(
         session: PtySession,
         origin: TerminalOrigin,
+        pending_generated_session_id: Option<String>,
         initial_poll_interval: Duration,
         forward_task: JoinHandle<()>,
     ) -> Self {
@@ -100,8 +121,10 @@ impl TerminalPaneRuntime {
             session,
             shell_command_tracker: matches!(&origin, TerminalOrigin::PlainShell)
                 .then(ShellCommandTracker::default),
-            input_fingerprint_tracker: ShellCommandTracker::default(),
-            last_submitted_line: None,
+            session_command_tracker: ShellCommandTracker::default(),
+            is_session_identity_invalidated: false,
+            invalidated_session_id: None,
+            pending_generated_session_id,
             origin,
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
@@ -114,6 +137,8 @@ impl TerminalPaneRuntime {
                 last_forced: None,
             },
             session_id: None,
+            session_agent_class: None,
+            session_process_id: None,
             forward_task,
         }
     }
@@ -126,6 +151,17 @@ impl TerminalPaneRuntime {
     pub fn abort_background_tasks(&self) {
         self.forward_task.abort();
     }
+}
+
+/// Returns true only for interactive commands known to replace the active
+/// conversation within an already-running agent process. Invalidating on a
+/// false positive would suppress a correct ID, so ordinary prompt content and
+/// commands that keep the current conversation are deliberately excluded.
+pub fn invalidates_agent_session_identity(submitted_line: &str) -> bool {
+    matches!(
+        submitted_line.split_whitespace().next(),
+        Some("/resume" | "/branch" | "/new")
+    )
 }
 
 impl Drop for TerminalPaneRuntime {
@@ -206,17 +242,112 @@ impl PaneResource {
 /// at `cwd`. Synchronous and does not touch tokio -- the caller is
 /// responsible for spawning the async forwarder task around the returned
 /// session's `subscribe_output_bytes()` receiver.
-pub fn spawn_terminal_session(origin: &TerminalOrigin, cwd: &Path) -> Result<PtySession, PtyError> {
+pub struct SpawnedTerminalSession {
+    pub session: PtySession,
+    /// Known before launch only for a fresh exact `claude` command, where
+    /// ilium supplies Claude Code's supported `--session-id` UUID itself.
+    pub session_id: Option<String>,
+}
+
+struct TerminalLaunchPlan {
+    command_line: Option<String>,
+    session_id: Option<String>,
+}
+
+/// Builds the shell command and any identity ilium can know before spawn.
+/// Exact fresh Claude launches receive a UUID through Claude's supported
+/// `--session-id` flag; all other commands remain byte-for-byte user-owned.
+fn terminal_launch_plan(origin: &TerminalOrigin) -> TerminalLaunchPlan {
+    match origin {
+        TerminalOrigin::PlainShell => TerminalLaunchPlan {
+            command_line: None,
+            session_id: None,
+        },
+        TerminalOrigin::Command(command_line) if command_line == "claude" => {
+            let session_id = uuid::Uuid::new_v4().to_string();
+            TerminalLaunchPlan {
+                command_line: Some(format!("claude --session-id '{session_id}'")),
+                session_id: Some(session_id),
+            }
+        }
+        TerminalOrigin::Command(command_line) => TerminalLaunchPlan {
+            command_line: Some(command_line.clone()),
+            session_id: None,
+        },
+    }
+}
+
+pub fn spawn_terminal_session(
+    origin: &TerminalOrigin,
+    cwd: &Path,
+) -> Result<SpawnedTerminalSession, PtyError> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let command = match origin {
-        TerminalOrigin::PlainShell => {
-            PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
-        }
-        TerminalOrigin::Command(command_line) => {
-            PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
-                .arg("-c")
-                .arg(command_line)
-        }
+    let launch_plan = terminal_launch_plan(origin);
+    let command = match launch_plan.command_line {
+        None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
+        Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
+            .arg("-c")
+            .arg(command_line),
     };
-    PtySession::spawn(command)
+    Ok(SpawnedTerminalSession {
+        session: PtySession::spawn(command)?,
+        session_id: launch_plan.session_id,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_fresh_claude_launch_gets_a_matching_uuid_argument() {
+        let plan = terminal_launch_plan(&TerminalOrigin::Command("claude".to_string()));
+        let session_id = plan.session_id.expect("generated session id");
+
+        assert!(uuid::Uuid::parse_str(&session_id).is_ok());
+        assert_eq!(
+            plan.command_line,
+            Some(format!("claude --session-id '{session_id}'"))
+        );
+    }
+
+    #[test]
+    fn non_exact_commands_are_not_rewritten() {
+        for command_line in ["codex", "claude --dangerously-skip-permissions"] {
+            let plan = terminal_launch_plan(&TerminalOrigin::Command(command_line.to_string()));
+            assert_eq!(plan.command_line.as_deref(), Some(command_line));
+            assert_eq!(plan.session_id, None);
+        }
+    }
+
+    #[test]
+    fn only_session_replacing_slash_commands_invalidate_identity() {
+        for command in ["/resume", "/resume abc", "/branch release", "/new"] {
+            assert!(invalidates_agent_session_identity(command));
+        }
+        for input in [
+            "please run /resume",
+            "/clear",
+            "/fork investigate",
+            "resume",
+        ] {
+            assert!(!invalidates_agent_session_identity(input));
+        }
+    }
+
+    #[test]
+    fn cleared_standard_resume_titles_drop_the_stale_id() {
+        assert_eq!(
+            TerminalOrigin::Command(
+                "claude --resume '11111111-1111-4111-8111-111111111111'".to_string()
+            )
+            .pane_name_without_stale_session(),
+            "claude"
+        );
+        assert_eq!(
+            TerminalOrigin::Command("custom resume value".to_string())
+                .pane_name_without_stale_session(),
+            "custom resume value"
+        );
+    }
 }

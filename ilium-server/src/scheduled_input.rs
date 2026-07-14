@@ -92,6 +92,10 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
     };
     let mut tree_changed = false;
     for (pane_id, scheduled_input) in due_inputs {
+        // Keep schedule replacement outside the final check/write/clear
+        // window. Normal live keyboard input still serializes at the PTY
+        // writer, so the delayed payload itself remains one atomic write.
+        let _transaction = state.scheduled_input_transaction.lock().await;
         if !is_current_schedule(state, pane_id, &scheduled_input).await {
             continue;
         }
@@ -127,20 +131,28 @@ async fn is_current_schedule(
     is_current
 }
 
-/// Sends text and Enter as separate writes, exactly like direct typing. This
-/// preserves shell-title tracking and the Enter-triggered detection refresh.
+/// Sends the complete payload in one PTY write so live input cannot interleave
+/// between delayed text and its Enter. The shared write path still observes
+/// the embedded carriage return for title tracking and detection refresh.
 async fn write_scheduled_input(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     scheduled_input: &ScheduledPaneInput,
 ) -> Result<(), String> {
-    if !scheduled_input.text.is_empty() {
-        write_key_input(state, pane_id, scheduled_input.text.as_bytes()).await?;
-    }
+    let bytes = scheduled_input_bytes(scheduled_input);
+    write_key_input(state, pane_id, &bytes).await
+}
+
+/// Produces each supported payload form without special cases in the PTY
+/// layer: text only, text followed by Enter, or Enter only.
+fn scheduled_input_bytes(scheduled_input: &ScheduledPaneInput) -> Vec<u8> {
+    let mut bytes =
+        Vec::with_capacity(scheduled_input.text.len() + usize::from(scheduled_input.send_enter));
+    bytes.extend_from_slice(scheduled_input.text.as_bytes());
     if scheduled_input.send_enter {
-        write_key_input(state, pane_id, b"\r").await?;
+        bytes.push(b'\r');
     }
-    Ok(())
+    bytes
 }
 
 fn current_unix_millis() -> Result<u64, String> {
@@ -210,5 +222,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(nearest_deadline(&tree), Some(5000));
+    }
+
+    #[test]
+    fn payload_bytes_cover_text_only_text_plus_enter_and_enter_only() {
+        let text_only = ScheduledPaneInput {
+            execute_at_unix_millis: 1,
+            text: "continue".to_string(),
+            send_enter: false,
+        };
+        let text_and_enter = ScheduledPaneInput {
+            send_enter: true,
+            ..text_only.clone()
+        };
+        let enter_only = ScheduledPaneInput {
+            execute_at_unix_millis: 1,
+            text: String::new(),
+            send_enter: true,
+        };
+
+        assert_eq!(scheduled_input_bytes(&text_only), b"continue");
+        assert_eq!(scheduled_input_bytes(&text_and_enter), b"continue\r");
+        assert_eq!(scheduled_input_bytes(&enter_only), b"\r");
     }
 }

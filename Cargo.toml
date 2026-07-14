@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "ilium-agent-session",
     "ilium-client",
     "ilium-core",
     "ilium-detect",
@@ -11,7 +12,17 @@ members = [
     "ilium-sound",
     "ilium",
 ]
+# The patched third-party crate remains a dependency, not an ilium workspace
+# package; this also lets its own upstream-style unit tests run independently.
+exclude = ["vendor/vt100"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+
+# vt100 0.16.2 can retain an orphaned wide cell after a shrinking resize,
+# then panic when a later erase sequence clears that row. Upstream issue #28
+# and PR #30 contain the unreleased fix; keep the shared client/server repair
+# local and reproducible until a fixed crate release exists.
+[patch.crates-io]
+vt100 = { path = "vendor/vt100" }

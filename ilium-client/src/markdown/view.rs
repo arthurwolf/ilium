@@ -74,8 +74,7 @@ fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64) -> i
     match block {
         RenderedBlock::Text(lines) => {
             let paragraph = text_paragraph(lines);
-            let height =
-                u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
+            let height = u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
             let visible = visible_rect(area, area_top, area_bottom, y, height);
             if let Some((visible_top, _, rect)) = visible {
                 let skip = (visible_top - y) as u16;

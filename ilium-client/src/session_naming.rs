@@ -9,16 +9,16 @@
 //! `session_naming` only turns "agent class + already-extracted prompts"
 //! into a title pair; it never touches a transcript file itself
 //! (`transcript_prompts` does that) and never resolves a session ID to a
-//! path itself (`session_transcript::transcript_path_for_session` does
-//! that) -- kept separate so each piece stays independently testable.
+//! path itself (`ilium_agent_session::TranscriptLocator` does that) -- kept
+//! separate so each piece stays independently testable.
 
 use std::path::Path;
 
+use ilium_agent_session::TranscriptLocator;
 use ilium_core::AgentClass;
 use serde::Serialize;
 
 use crate::naming::{self, BoundedField, DualTitle, PromptCompletionClient};
-use crate::session_transcript;
 use crate::transcript_prompts;
 
 const SESSION_TITLE_SHORT_MIN_WORDS: usize = 2;
@@ -54,10 +54,12 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
     agent_class: &AgentClass,
     session_id: &str,
 ) -> anyhow::Result<DualTitle> {
-    let transcript_path =
-        session_transcript::transcript_path_for_session(agent_class, home, cwd, session_id)
-            .ok_or_else(|| anyhow::anyhow!("no transcript file found for session {session_id}"))?;
-    let prompts = transcript_prompts::recent_user_prompts(agent_class, &transcript_path)?;
+    let transcript = TranscriptLocator::new(home, cwd)
+        .transcript_for_session(agent_class, session_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!("no project-verified transcript found for session {session_id}")
+        })?;
+    let prompts = transcript_prompts::recent_user_prompts(agent_class, &transcript.path)?;
     infer_session_title(generator, agent_label(agent_class), &prompts)
 }
 
@@ -66,8 +68,7 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
 fn agent_label(class: &AgentClass) -> &str {
     match class {
         AgentClass::Claude => "Claude Code",
-        AgentClass::Codex => "Codex",
-        AgentClass::Other(name) => name,
+        _ => class.label(),
     }
 }
 
@@ -228,7 +229,17 @@ mod tests {
         let session_id = "77777777-7777-4777-8777-777777777777";
         std::fs::write(
             project_dir.join(format!("{session_id}.jsonl")),
-            r#"{"type":"user","message":{"role":"user","content":"fix the login bug"}}"#,
+            serde_json::json!({
+                "type": "user",
+                "sessionId": session_id,
+                "cwd": cwd,
+                "isSidechain": false,
+                "message": {
+                    "role": "user",
+                    "content": "fix the login bug",
+                },
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -263,6 +274,33 @@ mod tests {
             &AgentClass::Claude,
             "88888888-8888-4888-8888-888888888888",
         );
+
+        assert!(result.is_err());
+        assert_eq!(generator.calls.get(), 0);
+    }
+
+    #[test]
+    fn infer_pane_title_rejects_a_codex_transcript_owned_by_another_project() {
+        let home = scratch_dir("infer-pane-title-cross-project");
+        let cwd = Path::new("/home/developer/dev/ai/money");
+        let other_cwd = Path::new("/home/developer/dev/ai/ilium");
+        let session_id = "99999999-9999-4999-8999-999999999999";
+        let directory = home.join(".codex/sessions/2026/07/14");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join(format!("rollout-2026-07-14T12-00-00-{session_id}.jsonl")),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": other_cwd},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let generator = FakeGenerator::new(
+            r#"{"session_title_short":"Wrong Project","session_title_long":"Wrong Project Session Title"}"#,
+        );
+
+        let result = infer_pane_title(&generator, &home, cwd, &AgentClass::Codex, session_id);
 
         assert!(result.is_err());
         assert_eq!(generator.calls.get(), 0);

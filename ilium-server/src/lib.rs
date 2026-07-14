@@ -40,7 +40,7 @@ use ilium_detect::AgentSignature;
 
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::error::ServerError;
-use crate::state::ServerState;
+use crate::state::{ServerState, ServerStateOptions};
 
 pub use crate::sounds::{NoopSoundPlayer, SoundPlayer, SystemSoundPlayer};
 
@@ -53,8 +53,10 @@ pub struct ServerOptions {
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
     /// Project directory the CLI used to create this session. It is needed
-    /// only for importing a pre-client/server `.ilium/sessions.yml` once.
+    /// as the hard boundary for pane cwd and agent transcript ownership.
     pub session_cwd: PathBuf,
+    /// User home containing the local built-in provider transcript stores.
+    pub home_dir: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
     pub sound_settings: ilium_sound::SoundSettings,
@@ -90,17 +92,25 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         })?;
 
     let (sound_requests, sound_playback_task) = sounds::spawn(Arc::clone(&options.sound_player));
-    let state = Arc::new(ServerState::new(
-        options.session_name,
-        options.snapshot_path,
-        options.detection_config,
-        options.notifications_config,
-        options.sound_settings,
+    let state = Arc::new(ServerState::new(ServerStateOptions {
+        session_name: options.session_name,
+        session_cwd: options.session_cwd,
+        home_dir: options.home_dir,
+        snapshot_path: options.snapshot_path,
+        detection_config: options.detection_config,
+        notifications_config: options.notifications_config,
+        sound_settings: options.sound_settings,
         sound_requests,
-        options.custom_signatures,
-    ));
+        custom_signatures: options.custom_signatures,
+    }));
 
-    match persistence::load_snapshot_or_migrate(&state.snapshot_path, &options.session_cwd).await {
+    match persistence::load_snapshot_or_migrate(
+        &state.snapshot_path,
+        &state.session_cwd,
+        &state.home_dir,
+    )
+    .await
+    {
         Ok(Some(snapshot)) => restore_snapshot(&state, snapshot).await,
         Ok(None) => {}
         Err(error) => tracing::warn!("failed to load crash-recovery snapshot: {error}"),
@@ -365,6 +375,7 @@ mod restore_tests {
             socket_path: socket_path.clone(),
             snapshot_path,
             session_cwd: dir.path().to_path_buf(),
+            home_dir: dir.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
@@ -446,6 +457,7 @@ mod restore_tests {
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
             session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),

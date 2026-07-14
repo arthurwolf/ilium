@@ -103,20 +103,20 @@ fn spawn_config_watcher_with_interval(
     poll_interval: Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut observed_fingerprint = file_fingerprint(&config_path);
+        let mut observed_fingerprint = poll_config_blocking(&config_path).await;
         let mut interval = tokio::time::interval(poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             interval.tick().await;
-            let fingerprint = file_fingerprint(&config_path);
+            let fingerprint = poll_config_blocking(&config_path).await;
             if fingerprint == observed_fingerprint {
                 continue;
             }
-            let Some(config_dir) = config_path.parent() else {
+            let Some(config_dir) = config_path.parent().map(Path::to_path_buf) else {
                 continue;
             };
-            match crate::config::load(config_dir) {
+            match load_config_blocking(config_dir).await {
                 Ok(config) => {
                     *state.sound_settings.write().await = config.sound;
                     observed_fingerprint = fingerprint;
@@ -128,6 +128,33 @@ fn spawn_config_watcher_with_interval(
             }
         }
     })
+}
+
+/// Hashes the config file's bytes on a blocking thread. This tick fires
+/// every `poll_interval` for the lifetime of the server, so -- exactly like
+/// `detection.rs`'s `sysinfo` refresh and `notifications.rs`'s `notify-rust`
+/// call -- the filesystem read must not run inline on a tokio worker thread.
+/// A panicked hashing task is treated as "no observable change this tick"
+/// rather than propagated, since a transient failure here must never bring
+/// down the watcher loop.
+async fn poll_config_blocking(config_path: &Path) -> Option<u64> {
+    let config_path = config_path.to_path_buf();
+    tokio::task::spawn_blocking(move || file_fingerprint(&config_path))
+        .await
+        .unwrap_or(None)
+}
+
+/// Parses the config file on a blocking thread for the same reason as
+/// `poll_config_blocking`. A panicked parse task is surfaced as a config
+/// load failure (stringified rather than a new `ServerError` variant, since
+/// the only consumer logs it) so the caller reports it and keeps the last
+/// known-good settings, rather than silently proceeding as if nothing
+/// changed.
+async fn load_config_blocking(config_dir: PathBuf) -> Result<crate::config::ServerConfig, String> {
+    match tokio::task::spawn_blocking(move || crate::config::load(&config_dir)).await {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(join_error) => Err(format!("config reload task panicked: {join_error}")),
+    }
 }
 
 fn file_fingerprint(path: &Path) -> Option<u64> {
@@ -195,15 +222,17 @@ mod tests {
         let config_path = directory.path().join("config.toml");
         std::fs::write(&config_path, "[sound]\nsource = \"system_beep\"\n").unwrap();
         let (sound_requests, playback_task) = spawn(Arc::new(NoopSoundPlayer));
-        let state = Arc::new(ServerState::new(
-            "watcher-test".to_string(),
-            directory.path().join("snapshot.json"),
-            crate::config::DetectionConfig::default(),
-            crate::config::NotificationsConfig::default(),
-            SoundSettings::default(),
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "watcher-test".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: SoundSettings::default(),
             sound_requests,
-            Vec::new(),
-        ));
+            custom_signatures: Vec::new(),
+        }));
         let watcher = spawn_config_watcher_with_interval(
             Arc::clone(&state),
             config_path.clone(),

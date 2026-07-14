@@ -14,7 +14,7 @@
 
 use std::time::{Duration, Instant};
 
-use directories::BaseDirs;
+use ilium_agent_session::TranscriptLocator;
 use ilium_core::{NodeId, PaneStatus};
 use ilium_ipc::ServerEvent;
 use sysinfo::{Pid, System};
@@ -39,13 +39,6 @@ const BASE_TICK_INTERVAL: Duration = Duration::from_secs(1);
 /// classification to run every single base tick regardless of its
 /// configured poll tier.
 const FORCE_CHECK_DEBOUNCE: Duration = Duration::from_secs(5);
-
-/// How long a pane's `input_fingerprint_tracker` snapshot stays trustworthy
-/// as a `crate::session_id::discover` content-match candidate. Older than
-/// this and it likely describes a different, already-finished turn rather
-/// than whatever the pane's transcript is being written for right now, so
-/// the caller treats it as if nothing had been typed.
-const RECENT_INPUT_MAX_AGE: Duration = Duration::from_secs(180);
 
 /// Spawns the detection loop as a single tracked task and returns its
 /// handle. The loop runs until aborted (session shutdown) -- it has no
@@ -189,6 +182,29 @@ async fn any_pane_due(state: &ServerState, now: Instant) -> bool {
     })
 }
 
+/// Separates uniquely owned IDs from legacy/corrupt duplicate claims. A
+/// duplicate has no defensible owner, so every claimant must be invalidated
+/// instead of preserving whichever pane happened to appear first in a hash
+/// map's iteration order.
+fn partition_session_claims(
+    claims: impl IntoIterator<Item = (String, NodeId)>,
+) -> (
+    std::collections::HashMap<String, NodeId>,
+    std::collections::HashSet<String>,
+) {
+    let mut unique_claims = std::collections::HashMap::new();
+    let mut ambiguous_session_ids = std::collections::HashSet::new();
+    for (session_id, pane_id) in claims {
+        if unique_claims.insert(session_id.clone(), pane_id).is_some() {
+            ambiguous_session_ids.insert(session_id);
+        }
+    }
+    for session_id in &ambiguous_session_ids {
+        unique_claims.remove(session_id);
+    }
+    (unique_claims, ambiguous_session_ids)
+}
+
 /// Checks and (if due) reschedules every terminal pane, updating the tree
 /// and broadcasting a `PaneStatusChanged` event for any pane whose status
 /// changed. A single pane's classification failure never stops the others
@@ -237,38 +253,36 @@ async fn run_due_panes(
         pane_id: NodeId,
         shell_pid: Option<u32>,
         screen_text: String,
-        /// This pane's `input_fingerprint_tracker` snapshot, already
-        /// age-filtered -- see `RECENT_INPUT_MAX_AGE` and
-        /// `crate::session_id::discover`'s `recent_input` parameter.
-        recent_input: Option<String>,
-        /// This pane's already-known session ID, if any -- threaded through
-        /// to `crate::session_id::discover`'s `already_resolved` parameter
-        /// so a guess-tier fallback can never override it. See that
-        /// parameter's doc comment.
-        existing_session_id: Option<String>,
+        is_session_identity_invalidated: bool,
+        invalidated_session_id: Option<String>,
+        session_process_id: Option<u32>,
+        pending_generated_session_id: Option<String>,
     }
 
     // Phase 1: snapshot inputs under a read lock only. Also collects every
     // terminal pane's *already-known* session ID (not just due panes' --
     // an idle pane not due this tick still needs to keep excluding its
-    // claimed transcript from a due pane's tier 4/5 candidates), the
+    // claimed transcript from another due pane's admissible candidates), the
     // starting point for `claimed_session_ids` phase 2 mutates as it
     // resolves each due pane in turn.
-    let (due_panes, mut claimed_session_ids): (
+    let (due_panes, mut claimed_session_ids, ambiguous_session_ids): (
         Vec<DuePane>,
         std::collections::HashMap<String, NodeId>,
+        std::collections::HashSet<String>,
     ) = {
         let panes = state.panes.read().await;
-        let claimed_session_ids = panes
-            .iter()
-            .filter_map(|(pane_id, resource)| match resource {
-                PaneResource::Terminal(runtime) => runtime
-                    .session_id
-                    .as_ref()
-                    .map(|session_id| (session_id.clone(), *pane_id)),
-                PaneResource::Editor { .. } => None,
-            })
-            .collect();
+        let (claimed_session_ids, ambiguous_session_ids) =
+            partition_session_claims(panes.iter().filter_map(|(pane_id, resource)| {
+                match resource {
+                    PaneResource::Terminal(runtime) if !runtime.is_session_identity_invalidated => {
+                        runtime
+                            .session_id
+                            .as_ref()
+                            .map(|session_id| (session_id.clone(), *pane_id))
+                    }
+                    PaneResource::Terminal(_) | PaneResource::Editor { .. } => None,
+                }
+            }));
         let due_panes = panes
             .iter()
             .filter_map(|(pane_id, resource)| {
@@ -278,23 +292,18 @@ async fn run_due_panes(
                 if runtime.detection_schedule.next_due > now {
                     return None;
                 }
-                let recent_input = runtime
-                    .last_submitted_line
-                    .as_ref()
-                    .filter(|(_, captured_at)| {
-                        now.saturating_duration_since(*captured_at) <= RECENT_INPUT_MAX_AGE
-                    })
-                    .map(|(line, _)| line.clone());
                 Some(DuePane {
                     pane_id: *pane_id,
                     shell_pid: runtime.session.process_id(),
                     screen_text: runtime.session.screen_text(),
-                    recent_input,
-                    existing_session_id: runtime.session_id.clone(),
+                    is_session_identity_invalidated: runtime.is_session_identity_invalidated,
+                    invalidated_session_id: runtime.invalidated_session_id.clone(),
+                    session_process_id: runtime.session_process_id,
+                    pending_generated_session_id: runtime.pending_generated_session_id.clone(),
                 })
             })
             .collect();
-        (due_panes, claimed_session_ids)
+        (due_panes, claimed_session_ids, ambiguous_session_ids)
     };
 
     if due_panes.is_empty() {
@@ -312,9 +321,10 @@ async fn run_due_panes(
         pane_id: NodeId,
         status: PaneStatus,
         identity: Option<ilium_detect::AgentIdentity>,
-        screen_text: String,
-        recent_input: Option<String>,
-        existing_session_id: Option<String>,
+        is_session_identity_invalidated: bool,
+        invalidated_session_id: Option<String>,
+        session_process_id: Option<u32>,
+        pending_generated_session_id: Option<String>,
     }
 
     let classifications: Vec<ClassifiedPane> = due_panes
@@ -331,22 +341,18 @@ async fn run_due_panes(
                 pane_id: due_pane.pane_id,
                 status,
                 identity,
-                screen_text: due_pane.screen_text,
-                recent_input: due_pane.recent_input,
-                existing_session_id: due_pane.existing_session_id,
+                is_session_identity_invalidated: due_pane.is_session_identity_invalidated,
+                invalidated_session_id: due_pane.invalidated_session_id,
+                session_process_id: due_pane.session_process_id,
+                pending_generated_session_id: due_pane.pending_generated_session_id,
             }
         })
         .collect();
 
-    // Every identified pane reaches `crate::session_id::discover` below
-    // regardless of `AgentClass` -- tiers 1-2 (`from_arguments`/
-    // `from_environment`) are class-agnostic and can match a custom-signature
-    // CLI's resume flag or session env var just as well as Claude/Codex's.
-    // This must therefore cover every identified pid, not just Claude/Codex:
-    // narrowing it to those two classes (as an earlier version did) left
-    // `cmd`/`environ`/`cwd` permanently unrefreshed for any `AgentClass::Other`
-    // pane, silently blinding tiers 1-2 for it even when a matching flag or
-    // env var was actually present.
+    // Refresh command/cwd fields only for identified process IDs. Discovery
+    // itself accepts only built-in provider classes; custom signatures do
+    // not have a transcript format with a project-verifiable ownership
+    // contract, so they intentionally receive no session ID.
     let discovery_pids: Vec<Pid> = classifications
         .iter()
         .filter_map(|pane| {
@@ -356,8 +362,6 @@ async fn run_due_panes(
         })
         .collect();
     crate::session_id::refresh_for_discovery(system, &discovery_pids);
-    let home = BaseDirs::new().map(|base_dirs| base_dirs.home_dir().to_path_buf());
-
     // Sequential (not a one-shot `filter_map`/`collect`) so `claimed_session_ids`
     // accumulates *within* this same tick: once pane A resolves to session
     // S, pane B -- classified later in this same due-batch -- must never
@@ -366,38 +370,68 @@ async fn run_due_panes(
     // misattribution, independent of which tier finds the answer.
     let mut discovered_session_ids: std::collections::HashMap<NodeId, String> =
         std::collections::HashMap::new();
+    let transcript_locator = TranscriptLocator::new(&state.home_dir, &state.session_cwd);
     for pane in &classifications {
         let Some(identity) = pane.identity.as_ref() else {
             continue;
         };
-        let Some(home) = home.as_deref() else {
-            continue;
-        };
-        let excluded_session_ids: std::collections::HashSet<String> = claimed_session_ids
+        let mut excluded_session_ids: std::collections::HashSet<String> = claimed_session_ids
             .iter()
             .filter(|(_, owner)| **owner != pane.pane_id)
             .map(|(session_id, _)| session_id.clone())
             .collect();
-        let Some(session_id) = crate::session_id::discover(
-            system,
-            Pid::from_u32(identity.pid),
-            &identity.class,
-            home,
-            pane.recent_input.as_deref(),
-            &excluded_session_ids,
-            pane.existing_session_id.as_deref(),
-        )
-        .or_else(|| {
-            // `from_screen` is a guess (screen-scraped, not scoped to this
-            // pid) exactly like `discover`'s tiers 4-5 -- same guard, same
-            // reason: never let a guess override an already-resolved ID.
-            if pane.existing_session_id.is_some() {
-                return None;
-            }
-            crate::session_id::from_screen(&pane.screen_text)
-        }) else {
+        excluded_session_ids.extend(ambiguous_session_ids.iter().cloned());
+        // `/resume` can leave the old transcript descriptor open until the
+        // CLI finishes switching. For the same process, that old ID is known
+        // stale even though the open-file evidence would otherwise be exact.
+        if pane.is_session_identity_invalidated
+            && pane
+                .session_process_id
+                .is_some_and(|owner_pid| owner_pid == identity.pid)
+        {
+            excluded_session_ids.extend(pane.invalidated_session_id.iter().cloned());
+        }
+        let generated_session = pane
+            .pending_generated_session_id
+            .as_ref()
+            .filter(|session_id| {
+                identity.class == ilium_core::AgentClass::Claude
+                    && !excluded_session_ids.contains(*session_id)
+                    // Supplying `--session-id` proves what ilium requested;
+                    // transcript metadata proves the launched CLI accepted it
+                    // for this canonical project. Until then, no ID is safer.
+                    && transcript_locator
+                        .transcript_for_session(&identity.class, session_id)
+                        .is_some()
+            })
+            .map(|session_id| crate::session_id::DiscoveredSession {
+                session_id: session_id.clone(),
+                source: crate::session_id::DiscoverySource::GeneratedAtLaunch,
+            });
+        let discovered_session = generated_session.or_else(|| {
+            crate::session_id::discover(
+                system,
+                Pid::from_u32(identity.pid),
+                &identity.class,
+                &transcript_locator,
+                &state.session_cwd,
+                pane.is_session_identity_invalidated
+                    && pane
+                        .session_process_id
+                        .is_none_or(|owner_pid| owner_pid == identity.pid),
+                &excluded_session_ids,
+            )
+        });
+        let Some(discovered_session) = discovered_session else {
             continue;
         };
+        let session_id = discovered_session.session_id;
+        tracing::debug!(
+            pane_id = ?pane.pane_id,
+            session_id,
+            source = ?discovered_session.source,
+            "resolved project-verified agent session"
+        );
         claimed_session_ids.insert(session_id.clone(), pane.pane_id);
         discovered_session_ids.insert(pane.pane_id, session_id);
     }
@@ -406,6 +440,7 @@ async fn run_due_panes(
     let sound_settings = state.sound_settings.read().await.clone();
     let mut pending_notifications = Vec::new();
     let mut pending_sounds = Vec::new();
+    let mut tree_snapshot_changed = false;
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
         let mut tree = state.tree.write().await;
@@ -439,6 +474,14 @@ async fn run_due_panes(
                         runtime.detection_schedule.client_focused,
                     ),
                 ),
+                PaneStatus::AgentWithGoal(class, raw_activity) => PaneStatus::AgentWithGoal(
+                    class,
+                    promote_to_done(
+                        previous_status.as_ref(),
+                        raw_activity,
+                        runtime.detection_schedule.client_focused,
+                    ),
+                ),
                 other => other,
             };
 
@@ -449,14 +492,94 @@ async fn run_due_panes(
             );
             runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
 
+            let detected_agent_class = classified_pane
+                .identity
+                .as_ref()
+                .map(|identity| identity.class.clone());
+            if classified_pane.pending_generated_session_id.is_some()
+                && detected_agent_class
+                    .as_ref()
+                    .is_some_and(|class| *class != ilium_core::AgentClass::Claude)
+            {
+                runtime.pending_generated_session_id = None;
+            }
+            let session_belongs_to_different_class = runtime.session_id.is_some()
+                && runtime.session_agent_class.is_some()
+                && detected_agent_class.is_some()
+                && runtime.session_agent_class != detected_agent_class;
+            let owning_process_disappeared = runtime.session_id.is_some()
+                && runtime.session_process_id.is_some()
+                && classified_pane.identity.is_none()
+                && matches!(
+                    previous_status.as_ref(),
+                    Some(PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..))
+                )
+                && matches!(&new_status, PaneStatus::PlainShell);
+            let owning_process_changed_without_reverification = runtime.session_id.is_some()
+                && runtime.session_process_id.is_some()
+                && classified_pane
+                    .identity
+                    .as_ref()
+                    .is_some_and(|identity| Some(identity.pid) != runtime.session_process_id)
+                && discovered_session_ids.get(&pane_id) != runtime.session_id.as_ref();
+            let session_is_ambiguously_claimed = runtime
+                .session_id
+                .as_ref()
+                .is_some_and(|session_id| ambiguous_session_ids.contains(session_id));
+            let should_clear_session_id = session_identity_is_stale(
+                runtime.is_session_identity_invalidated,
+                session_belongs_to_different_class,
+                owning_process_disappeared,
+                owning_process_changed_without_reverification,
+                session_is_ambiguously_claimed,
+            );
+            if should_clear_session_id && runtime.session_id.is_some() {
+                if session_is_ambiguously_claimed {
+                    runtime.invalidated_session_id = runtime.session_id.clone();
+                    runtime.is_session_identity_invalidated = true;
+                }
+                runtime.session_id = None;
+                runtime.session_agent_class = None;
+                if !runtime.is_session_identity_invalidated {
+                    runtime.session_process_id = None;
+                }
+                state.request_snapshot_save();
+                state.broadcast(ServerEvent::PaneSessionIdCleared { pane_id });
+                match tree.set_automatic_pane_title(
+                    pane_id,
+                    runtime.origin.pane_name_without_stale_session(),
+                    None,
+                ) {
+                    Ok(changed) => tree_snapshot_changed |= changed,
+                    Err(error) => tracing::warn!(
+                        "detection loop: failed to reset automatic title for pane \
+                         {pane_id:?} after clearing its session ID: {error}"
+                    ),
+                }
+            }
+
             if let Some(session_id) = discovered_session_ids.get(&pane_id) {
                 if runtime.session_id.as_ref() != Some(session_id) {
                     runtime.session_id = Some(session_id.clone());
+                    runtime.session_agent_class = detected_agent_class.clone();
+                    runtime.session_process_id = classified_pane
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.pid);
+                    runtime.is_session_identity_invalidated = false;
+                    runtime.invalidated_session_id = None;
+                    runtime.pending_generated_session_id = None;
                     state.request_snapshot_save();
                     state.broadcast(ServerEvent::PaneSessionIdResolved {
                         pane_id,
                         session_id: session_id.clone(),
                     });
+                } else {
+                    runtime.session_agent_class = detected_agent_class;
+                    runtime.session_process_id = classified_pane
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.pid);
                 }
             }
 
@@ -465,8 +588,13 @@ async fn run_due_panes(
             }
             if matches!(
                 (previous_status.as_ref(), &new_status),
-                (Some(PaneStatus::PlainShell), PaneStatus::Agent(..))
-                    | (Some(PaneStatus::Agent(..)), PaneStatus::PlainShell)
+                (
+                    Some(PaneStatus::PlainShell),
+                    PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
+                ) | (
+                    Some(PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)),
+                    PaneStatus::PlainShell
+                )
             ) {
                 if let Some(tracker) = &mut runtime.shell_command_tracker {
                     tracker.reset_pending_line();
@@ -521,6 +649,11 @@ async fn run_due_panes(
         }
     }
 
+    if tree_snapshot_changed {
+        let snapshot = state.tree.read().await.clone();
+        state.broadcast(ServerEvent::TreeSnapshot(snapshot));
+    }
+
     for pending in pending_notifications {
         notifications::send(pending).await;
     }
@@ -529,6 +662,20 @@ async fn run_due_panes(
     }
 
     Ok(())
+}
+
+fn session_identity_is_stale(
+    is_session_identity_invalidated: bool,
+    session_belongs_to_different_class: bool,
+    owning_process_disappeared: bool,
+    owning_process_changed_without_reverification: bool,
+    session_is_ambiguously_claimed: bool,
+) -> bool {
+    is_session_identity_invalidated
+        || session_belongs_to_different_class
+        || owning_process_disappeared
+        || owning_process_changed_without_reverification
+        || session_is_ambiguously_claimed
 }
 
 /// Pulls `schedule.next_due` forward to `now` so the next detection tick
@@ -584,10 +731,12 @@ fn classify_pane(
     ) {
         Some(identity) => {
             let activity = ilium_detect::classify_activity(screen_text);
-            (
-                PaneStatus::Agent(identity.class.clone(), activity),
-                Some(identity),
-            )
+            let status = if ilium_detect::has_visible_goal(screen_text) {
+                PaneStatus::AgentWithGoal(identity.class.clone(), activity)
+            } else {
+                PaneStatus::Agent(identity.class.clone(), activity)
+            };
+            (status, Some(identity))
         }
         None => (PaneStatus::PlainShell, None),
     }
@@ -619,12 +768,16 @@ fn promote_to_done(
         return raw_activity;
     }
     match previous {
-        Some(PaneStatus::Agent(_, ilium_core::AgentActivity::Working))
-        | Some(PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingApproval))
-        | Some(PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingBackground))
-        | Some(PaneStatus::Agent(_, ilium_core::AgentActivity::Done)) => {
-            ilium_core::AgentActivity::Done
-        }
+        Some(
+            PaneStatus::Agent(_, ilium_core::AgentActivity::Working)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working)
+            | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingApproval)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingApproval)
+            | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingBackground)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingBackground)
+            | PaneStatus::Agent(_, ilium_core::AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Done),
+        ) => ilium_core::AgentActivity::Done,
         _ => ilium_core::AgentActivity::Idle,
     }
 }
@@ -668,6 +821,12 @@ fn interval_for(
     }
     match status {
         PaneStatus::Agent(
+            _,
+            ilium_core::AgentActivity::Working
+            | ilium_core::AgentActivity::WaitingBackground
+            | ilium_core::AgentActivity::WaitingApproval,
+        )
+        | PaneStatus::AgentWithGoal(
             _,
             ilium_core::AgentActivity::Working
             | ilium_core::AgentActivity::WaitingBackground
@@ -889,5 +1048,35 @@ mod tests {
             ),
             AgentActivity::Done
         );
+    }
+
+    #[test]
+    fn duplicate_session_claims_have_no_arbitrary_winner() {
+        let shared_session_id = "11111111-1111-4111-8111-111111111111";
+        let unique_session_id = "22222222-2222-4222-8222-222222222222";
+        let (unique_claims, ambiguous_session_ids) = partition_session_claims([
+            (shared_session_id.to_string(), NodeId(10)),
+            (unique_session_id.to_string(), NodeId(20)),
+            (shared_session_id.to_string(), NodeId(30)),
+        ]);
+
+        assert_eq!(unique_claims.get(unique_session_id), Some(&NodeId(20)));
+        assert!(!unique_claims.contains_key(shared_session_id));
+        assert_eq!(
+            ambiguous_session_ids,
+            std::collections::HashSet::from([shared_session_id.to_string()])
+        );
+    }
+
+    #[test]
+    fn every_ownership_break_clears_a_stale_session_identity() {
+        assert!(session_identity_is_stale(true, false, false, false, false));
+        assert!(session_identity_is_stale(false, true, false, false, false));
+        assert!(session_identity_is_stale(false, false, true, false, false));
+        assert!(session_identity_is_stale(false, false, false, true, false));
+        assert!(session_identity_is_stale(false, false, false, false, true));
+        assert!(!session_identity_is_stale(
+            false, false, false, false, false
+        ));
     }
 }

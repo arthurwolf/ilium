@@ -3,16 +3,21 @@
 //! but translating every structural mutation into a queued `ClientRequest`
 //! (see `app.rs`'s module docs) instead of a direct tree edit.
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use std::time::Instant;
+
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ilium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
+#[cfg(test)]
 use ilium_ipc::ClientRequest;
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
-    App, AppearanceRow, BoardRenameTarget, BoardStorageKind, CreateBoardState, FocusTarget, Mode,
-    SettingsState, SettingsTab, SoundRow,
+    App, AppearanceRow, BoardRenameTarget, BoardStorageKind, ClientExitReason, CreateBoardState,
+    FocusTarget, KanbanBoardRow, Mode, SettingsState, SettingsTab, SoundRow,
 };
 use crate::keymap::{self, Action, ShortcutBase};
+use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
+use crate::search_ui::SearchState;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
 
 fn is_press(key: &KeyEvent) -> bool {
@@ -37,6 +42,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::CommandPrompt(state) => handle_command_prompt_event(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
+        Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
         }
@@ -64,6 +70,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
         Mode::Settings(state) => handle_settings_event(app, state, &event),
+        Mode::Search(state) => handle_search_event(app, state, &event),
         Mode::Move => {
             app.mode = Mode::Move;
             if let Event::Key(key) = &event {
@@ -119,7 +126,7 @@ fn handle_create_board_event(app: &mut App, mut state: CreateBoardState, event: 
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
         KeyCode::Tab => state.editing_path = !state.editing_path,
-        KeyCode::Char('p') => {
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.open_board_path_picker(state);
             return;
         }
@@ -250,6 +257,11 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         return;
     }
 
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('f') {
+        app.action_open_search();
+        return;
+    }
+
     if matches!(app.mode, Mode::LeaderPending) {
         if let KeyCode::Char(c) = key.code {
             if let Some(action) = keymap::action_for(c) {
@@ -273,6 +285,68 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
     match app.focus {
         FocusTarget::Tree => app.handle_tree_key(key),
         FocusTarget::Pane => app.handle_pane_key(key),
+    }
+}
+
+/// Full-screen search treats typing as an immediate query edit rather than a
+/// submitted form. Navigation keys never mutate the query, and Enter uses the
+/// selected hit's durable location to open the right pane/buffer position.
+fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::Search(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::Search(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Enter => {
+            if let Some(result) = state.selected_result().cloned() {
+                app.activate_search_result(result);
+            } else {
+                app.mode = Mode::Search(state);
+            }
+        }
+        KeyCode::Up => {
+            state.move_selection(
+                -1,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(state);
+        }
+        KeyCode::Down => {
+            state.move_selection(
+                1,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(state);
+        }
+        KeyCode::PageUp => {
+            let rows = crate::search_ui::visible_result_rows(app.layout.screen_area) as i32;
+            state.move_selection(
+                -rows,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(state);
+        }
+        KeyCode::PageDown => {
+            let rows = crate::search_ui::visible_result_rows(app.layout.screen_area) as i32;
+            state.move_selection(
+                rows,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(state);
+        }
+        _ => {
+            let query_before = state.query.buf.clone();
+            let _ = text_prompt::handle_key(&mut state.query, key.code);
+            if state.query.buf != query_before {
+                state.note_query_changed(Instant::now());
+            }
+            app.mode = Mode::Search(state);
+        }
     }
 }
 
@@ -307,10 +381,7 @@ fn execute_action(app: &mut App, action: Action) {
         // `handle_help_event`, which intercepts everything while it is),
         // so this always means "open it".
         Action::Help => app.mode = Mode::Help,
-        Action::Quit => {
-            app.queue_request(ClientRequest::Detach);
-            app.should_quit = true;
-        }
+        Action::Quit => app.request_client_exit(ClientExitReason::Quit),
         Action::ToggleEditorViewMode => app.action_toggle_editor_view_mode(),
         Action::ToggleLineNumbers => app.action_toggle_editor_line_numbers(),
         Action::ToggleMinimap => app.action_toggle_editor_minimap(),
@@ -712,6 +783,36 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
         app.mode = Mode::ContextMenu(menu);
         return;
     }
+
+    if let Some(submenu) = menu.tree_order_submenu.as_mut() {
+        match key.code {
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
+                menu.tree_order_submenu = None;
+                app.mode = Mode::ContextMenu(menu);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                submenu.selected_index = submenu.selected_index.saturating_sub(1);
+                app.mode = Mode::ContextMenu(menu);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                submenu.selected_index = (submenu.selected_index + 1)
+                    .min(crate::config::TreeOrder::ALL.len().saturating_sub(1));
+                app.mode = Mode::ContextMenu(menu);
+            }
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                if let Some(tree_order) = crate::config::TreeOrder::ALL
+                    .get(submenu.selected_index)
+                    .copied()
+                {
+                    app.settings_set_tree_order(tree_order);
+                }
+                app.mode = Mode::Normal;
+            }
+            _ => app.mode = Mode::ContextMenu(menu),
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
         KeyCode::Up | KeyCode::Char('k') => {
@@ -723,7 +824,18 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
                 (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
             app.mode = Mode::ContextMenu(menu);
         }
+        KeyCode::Right | KeyCode::Char('l')
+            if menu.actions[menu.selected_index] == crate::app::ContextMenuAction::OrderBy =>
+        {
+            app.open_context_tree_order_submenu(&mut menu);
+            app.mode = Mode::ContextMenu(menu);
+        }
         KeyCode::Enter => {
+            if menu.actions[menu.selected_index] == crate::app::ContextMenuAction::OrderBy {
+                app.open_context_tree_order_submenu(&mut menu);
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            }
             app.select_node(menu.target);
             app.execute_context_action(menu.actions[menu.selected_index], menu.target);
         }
@@ -808,6 +920,9 @@ fn handle_create_agent_from_line_event(
         KeyCode::Char('x') if state.focus == CreateAgentFocus::AgentType => {
             state.agent_type = crate::agent_from_line::AgentLaunchType::Codex
         }
+        KeyCode::Char('a') if state.focus == CreateAgentFocus::AgentType => {
+            state.agent_type = crate::agent_from_line::AgentLaunchType::Antigravity
+        }
         KeyCode::Enter if state.focus == CreateAgentFocus::AgentType => {
             state.focus = CreateAgentFocus::Prompt
         }
@@ -821,6 +936,68 @@ fn handle_create_agent_from_line_event(
         _ => {}
     }
     app.mode = Mode::CreateAgentFromLine(state);
+}
+
+/// Edits the six controls in the scheduled-input form. Tab order mirrors the
+/// visual order, Ctrl+Enter is a form-wide submit shortcut, and plain Enter
+/// advances until the explicit button is focused.
+fn handle_scheduled_input_event(
+    app: &mut App,
+    mut state: Box<ScheduledInputDialogState>,
+    event: &Event,
+) {
+    use crossterm::event::KeyModifiers;
+
+    if let Event::Paste(pasted) = event {
+        state.paste(pasted);
+        app.mode = Mode::SchedulePaneInput(state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::SchedulePaneInput(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::SchedulePaneInput(state);
+        return;
+    }
+    if key.code == KeyCode::Esc {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.commit_scheduled_pane_input(state);
+        return;
+    }
+
+    match key.code {
+        KeyCode::Tab => state.focus = state.focus.next(),
+        KeyCode::BackTab => state.focus = state.focus.previous(),
+        KeyCode::Enter if state.focus == ScheduledInputFocus::SendEnter => {
+            state.send_enter = !state.send_enter;
+            state.focus = state.focus.next();
+        }
+        KeyCode::Char(' ') if state.focus == ScheduledInputFocus::SendEnter => {
+            state.send_enter = !state.send_enter;
+        }
+        KeyCode::Enter if state.focus == ScheduledInputFocus::ScheduleButton => {
+            app.commit_scheduled_pane_input(state);
+            return;
+        }
+        KeyCode::Enter => state.focus = state.focus.next(),
+        code if matches!(
+            state.focus,
+            ScheduledInputFocus::Hours
+                | ScheduledInputFocus::Minutes
+                | ScheduledInputFocus::Seconds
+        ) =>
+        {
+            state.handle_numeric_key(code);
+        }
+        code if state.focus == ScheduledInputFocus::Text => state.handle_text_key(code),
+        _ => {}
+    }
+    app.mode = Mode::SchedulePaneInput(state);
 }
 
 /// How many lines `PageUp`/`PageDown` scroll the settings screen's content
@@ -900,6 +1077,25 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_set_shortcut_base(shortcut_base);
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::KanbanBoard => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::KanbanBoard => {
+            state.selected_row =
+                (state.selected_row + 1).min(KanbanBoardRow::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::KanbanBoard => {
+            if let Some(row) = KanbanBoardRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_kanban_board_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::KanbanBoard =>
+        {
+            if let Some(row) = KanbanBoardRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_kanban_board_row(row, 1);
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Sound => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -925,15 +1121,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
 
     let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
-    let max_scroll = crate::settings_ui::max_scroll(
-        state.tab,
-        &app.ui_settings,
-        &app.keyboard_settings,
-        &app.sound_settings,
-        &app.sound_discovery,
-        state.selected_row,
-        content_area,
-    );
+    let max_scroll =
+        crate::settings_ui::max_scroll(state.tab, app, state.selected_row, content_area);
     state.scroll = state.scroll.min(max_scroll);
     app.mode = Mode::Settings(state);
 }
@@ -943,6 +1132,24 @@ mod indent_outdent_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
     use std::path::PathBuf;
+
+    #[test]
+    fn search_typing_updates_the_visible_prompt_without_running_a_scan() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.action_open_search();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+        );
+
+        let Mode::Search(state) = &app.mode else {
+            panic!("typing should remain in workspace search");
+        };
+        assert_eq!(state.query.buf, "n");
+        assert!(state.results.is_empty());
+        assert!(state.is_waiting_for_debounce());
+    }
 
     /// `top` (group) containing `sibling_group` (group, empty) and `pane`
     /// (pane), in that order, plus a second top-level group `other`.
@@ -972,6 +1179,117 @@ mod indent_outdent_tests {
         assert!(matches!(app.mode, Mode::Normal));
         handle_event(&mut app, ctrl_b);
         assert!(matches!(app.mode, Mode::LeaderPending));
+    }
+
+    #[test]
+    fn board_dialog_types_plain_p_and_reserves_control_p_for_browse() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.mode = Mode::CreateBoard(CreateBoardState {
+            name: crate::text_prompt::TextPromptState::new(""),
+            path: crate::text_prompt::TextPromptState::new("/tmp/board.md"),
+            storage_kind: BoardStorageKind::MarkdownFile,
+            editing_path: false,
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
+        );
+        let Mode::CreateBoard(state) = &app.mode else {
+            panic!("plain p should keep editing the board form");
+        };
+        assert_eq!(state.name.buf, "p");
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
+        );
+        assert!(matches!(app.mode, Mode::BoardPathPicker(_, _)));
+    }
+
+    #[test]
+    fn context_menu_keyboard_opens_order_submenu_and_applies_selection() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.open_context_menu(pane, 2, 2);
+        let Mode::ContextMenu(menu) = &mut app.mode else {
+            panic!("context menu should be open");
+        };
+        menu.selected_index = menu
+            .actions
+            .iter()
+            .position(|action| *action == crate::app::ContextMenuAction::OrderBy)
+            .unwrap();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(
+            app.mode,
+            Mode::ContextMenu(crate::app::ContextMenu {
+                tree_order_submenu: Some(_),
+                ..
+            })
+        ));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        assert_eq!(app.ui_settings.tree_order, crate::config::TreeOrder::Type);
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let mut state = ScheduledInputDialogState::new(pane_id);
+        state.focus = ScheduledInputFocus::Text;
+        app.mode = Mode::SchedulePaneInput(Box::new(state));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+        );
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SchedulePaneInput {
+                pane_id,
+                delay_seconds: 30,
+                text: "x".to_string(),
+                send_enter: false,
+            }]
+        );
+        assert!(matches!(app.mode, Mode::Normal));
     }
 
     #[test]

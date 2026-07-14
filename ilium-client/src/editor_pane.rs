@@ -196,11 +196,7 @@ impl EditorPane {
     pub fn is_markdown(&self) -> bool {
         self.path
             .as_ref()
-            .and_then(|path| path.extension())
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| {
-                ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
-            })
+            .is_some_and(|path| is_markdown_path(path))
     }
 
     /// Flips `Source` <-> `Rendered`. A no-op for non-markdown files --
@@ -489,6 +485,17 @@ impl EditorPane {
         self.source_scroll_should_follow_cursor.set(true);
         self.mark_dirty();
     }
+}
+
+/// Whether `path` names a Markdown document supported by the editor and
+/// board adapters. Keeping this check at the editor/file boundary prevents
+/// tree menus and explorer menus from drifting on `.md` versus `.markdown`.
+pub fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        })
 }
 
 #[cfg(test)]

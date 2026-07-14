@@ -162,6 +162,20 @@ mod tests {
                 text: "cargo test".to_string(),
                 send_enter: true,
             },
+            ClientRequest::SetSessionPaneTitle {
+                pane_id: NodeId(2),
+                expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                title: "Fix Auth Bug In Login Flow".to_string(),
+                short_title: Some("Fix Auth".to_string()),
+                title_source: ilium_core::PaneTitleSource::Automatic,
+            },
+            ClientRequest::SetSessionPaneTitle {
+                pane_id: NodeId(2),
+                expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                title: "My Agent Name".to_string(),
+                short_title: None,
+                title_source: ilium_core::PaneTitleSource::UserSpecified,
+            },
         ]
     }
 
@@ -202,6 +216,10 @@ mod tests {
                     AgentActivity::Idle,
                 ),
             },
+            ServerEvent::PaneStatusChanged {
+                pane_id: NodeId(2),
+                status: PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+            },
             ServerEvent::Error {
                 message: "pane 2 failed to spawn: No such file or directory".to_string(),
             },
@@ -209,6 +227,7 @@ mod tests {
                 pane_id: NodeId(2),
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
             },
+            ServerEvent::PaneSessionIdCleared { pane_id: NodeId(2) },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
                 path: Some(PathBuf::from("/tmp/notes.md")),

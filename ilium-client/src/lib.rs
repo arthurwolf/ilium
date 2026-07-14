@@ -25,13 +25,14 @@
 //! `settings_ui`, `text_prompt`, `explorer_overlay`, `editor_pane` and its
 //! chrome/highlight/toolbar/syntax/minimap helpers, `markdown`, `keymap`,
 //! `session_naming`, `project_naming`, `transcript_prompts`,
-//! `project_config`, `workspace_file`, `naming`, `session_transcript`) is
+//! `project_config`, `workspace_file`, `naming`) is
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
 
 pub mod agent_from_line;
 pub mod app;
 pub mod board;
+pub mod board_ui;
 pub mod config;
 pub mod connection;
 pub mod editor_chrome;
@@ -55,8 +56,9 @@ pub mod project_config;
 pub mod project_naming;
 pub mod render_cache;
 pub mod scheduled_input;
+pub mod search_ui;
+pub mod search_workers;
 pub mod session_naming;
-pub mod session_transcript;
 pub mod settings_ui;
 pub mod split_layout;
 pub mod syntax;
@@ -69,6 +71,8 @@ pub mod theme;
 pub mod tick;
 pub mod title_inference;
 pub mod transcript_prompts;
+pub mod tree_ordering;
+pub mod tree_transitions;
 pub mod tree_ui;
 pub mod ui;
 pub mod workspace_file;
@@ -82,11 +86,14 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
+pub use crate::app::ClientExitReason;
+
 use crate::app::App;
 use crate::connection::Connection;
 use crate::error::ClientError;
 use crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL;
 use crate::naming_workers::NamingWorkers;
+use crate::search_workers::SearchWorkers;
 use crate::terminal_guard::TerminalGuard;
 
 /// Everything [`run`] needs to attach to one already-running
@@ -119,11 +126,10 @@ const INPUT_CHANNEL_CAPACITY: usize = 256;
 /// crate, not because it could plausibly fill up.
 const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 
-/// Runs ilium-client until the user quits (`Action::Quit`) or the
-/// connection to the server ends. Owns the whole terminal lifecycle
-/// (raw mode, alternate screen -- see `TerminalGuard`) and the tokio
-/// event loop described in the crate docs.
-pub async fn run(options: RunOptions) -> Result<(), ClientError> {
+/// Runs ilium-client until the user quits, requests a client-only restart, or
+/// loses the server connection. The typed result lets the CLI wrapper re-exec
+/// only for the explicit restart path after this function restores the terminal.
+pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     if !options.session_cwd.is_dir() {
         return Err(ClientError::InvalidSessionCwd(options.session_cwd));
     }
@@ -186,13 +192,14 @@ async fn run_inner(
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
     sound_discovery: ilium_sound::SoundDiscovery,
-) -> Result<(), ClientError> {
+) -> Result<ClientExitReason, ClientError> {
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
 
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.apply_ui_settings(config.ui);
     app.keyboard_settings = config.keyboard;
+    app.kanban_board_settings = config.kanban_board;
     app.apply_sound_settings(config.sound);
     app.sound_discovery = sound_discovery;
     app.config_dir = config_dir;
@@ -203,6 +210,8 @@ async fn run_inner(
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx);
+    let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
+    let mut search_workers = SearchWorkers::new(search_events_tx);
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
     // equivalent), rather than per pane -- `None` on a platform/environment
     // where it can't be resolved simply disables session-title inference
@@ -232,8 +241,8 @@ async fn run_inner(
     // every iteration was wasted work under load.
     let mut needs_redraw = true;
 
-    while !app.should_quit {
-        let tick_delay = if app.is_layout_animating() {
+    while app.exit_reason.is_none() {
+        let tick_delay = if app.is_spatial_animation_active() {
             TREE_WIDTH_ANIMATION_FRAME_INTERVAL
         } else {
             POLL_INTERVAL
@@ -248,7 +257,7 @@ async fn run_inner(
                     }
                     // The input-reading thread ended (a crossterm read
                     // error -- see `spawn_input_forwarder`); keyboard and
-                    // mouse are the only way `should_quit` ever gets set
+                    // mouse are the only way `exit_reason` ever gets set
                     // (see `keys.rs`), so without this the client would
                     // otherwise keep running forever, fully unresponsive to
                     // the user, until something external kills the process.
@@ -276,8 +285,13 @@ async fn run_inner(
                 crate::tick::apply_naming_worker_event(&mut app, &mut naming_workers, naming_event);
                 needs_redraw = true;
             }
+            Some(search_event) = search_events_rx.recv() => {
+                search_workers.finish();
+                app.apply_workspace_search_result(search_event);
+                needs_redraw = true;
+            }
             () = tokio::time::sleep(tick_delay) => {
-                if crate::tick::on_tick(&mut app, Instant::now()) {
+                if crate::tick::on_tick(&mut app, Instant::now(), &mut search_workers) {
                     needs_redraw = true;
                 }
             }
@@ -308,7 +322,9 @@ async fn run_inner(
         }
     }
 
-    Ok(())
+    // A dropped input/server channel remains an ordinary exit. Only the
+    // explicit Restart menu action can request a process re-exec.
+    Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
 }
 
 /// Applies `first` (already received) and then drains + applies every

@@ -1,4 +1,4 @@
-//! Reads a Claude Code/Codex session transcript (JSONL) and extracts the
+//! Reads a supported-agent session record and extracts the
 //! handful of most recent prompts the user actually typed, compacted down
 //! to a bounded size -- the raw material `session_naming` sends to the free
 //! LLM to infer a short session title.
@@ -43,6 +43,9 @@ pub fn recent_user_prompts(
     if matches!(class, AgentClass::Other(_)) {
         return Ok(Vec::new());
     }
+    if matches!(class, AgentClass::Antigravity) {
+        return antigravity_recent_user_prompts(transcript_path);
+    }
     // Stream the transcript line-by-line instead of `read_to_string`-ing the
     // whole file: a long-running session's transcript can grow to many tens
     // or hundreds of megabytes (tool output, pasted file contents), and this
@@ -84,6 +87,7 @@ fn extract_user_prompts(class: &AgentClass, lines: impl Iterator<Item = String>)
     match class {
         AgentClass::Claude => claude_user_prompts(lines),
         AgentClass::Codex => codex_user_prompts(lines),
+        AgentClass::Antigravity => Vec::new(),
         AgentClass::Other(_) => Vec::new(),
     }
 }
@@ -167,6 +171,41 @@ fn codex_user_prompts(lines: impl Iterator<Item = String>) -> Vec<String> {
             }),
         RECENT_PROMPT_COUNT,
     )
+}
+
+/// Antigravity's primary conversation database is binary, while its durable
+/// `history.jsonl` records the user-entered display text alongside each
+/// conversation UUID. The session locator has already verified the UUID's
+/// project ownership before this reader is called; this function only derives
+/// its sibling history file and extracts that one conversation's prompts.
+fn antigravity_recent_user_prompts(transcript_path: &Path) -> anyhow::Result<Vec<String>> {
+    let Some(session_id) = transcript_path.file_stem().and_then(|value| value.to_str()) else {
+        return Ok(Vec::new());
+    };
+    let Some(antigravity_dir) = transcript_path.parent().and_then(Path::parent) else {
+        return Ok(Vec::new());
+    };
+    let history_path = antigravity_dir.join("history.jsonl");
+    let file = std::fs::File::open(history_path)?;
+    #[allow(clippy::lines_filter_map_ok)]
+    let lines = BufReader::new(file).lines().filter_map(Result::ok);
+    Ok(take_last(
+        lines
+            .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+            .filter(|entry| entry.get("conversationId").and_then(Value::as_str) == Some(session_id))
+            .filter_map(|entry| {
+                entry
+                    .get("display")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty()),
+        RECENT_PROMPT_COUNT,
+    )
+    .into_iter()
+    .map(|prompt| compact_prompt(&prompt, PROMPT_MAX_LINES))
+    .collect())
 }
 
 /// Compacts `text` to at most `max_lines` lines by keeping its first and
@@ -308,6 +347,35 @@ mod tests {
             recent_user_prompts(&AgentClass::Other("opencode".to_string()), missing_path).unwrap();
 
         assert!(prompts.is_empty());
+    }
+
+    #[test]
+    fn antigravity_prompts_are_read_from_the_verified_conversation_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("antigravity-cli");
+        let conversations = root.join("conversations");
+        std::fs::create_dir_all(&conversations).unwrap();
+        let session_id = "3a333333-3333-4333-8333-333333333333";
+        let conversation_path = conversations.join(format!("{session_id}.db"));
+        std::fs::write(&conversation_path, "fixture").unwrap();
+        std::fs::write(
+            root.join("history.jsonl"),
+            [
+                serde_json::json!({"conversationId": "other", "display": "ignore"}),
+                serde_json::json!({"conversationId": session_id, "display": "first task"}),
+                serde_json::json!({"conversationId": session_id, "display": "second task"}),
+            ]
+            .into_iter()
+            .map(|entry| entry.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            recent_user_prompts(&AgentClass::Antigravity, &conversation_path).unwrap(),
+            vec!["first task".to_string(), "second task".to_string()]
+        );
     }
 
     #[test]

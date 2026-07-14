@@ -1,85 +1,87 @@
-# General
+# Board
 
-* [ ] Option for a standalone app.
-* [ ] In standalone app, move rendering to libghostty (might be mac-only, maybe make this just a preference?)
-* [ ] In standalone app, move to GPU based rendering (optionally)
-* [ ] In standalone app, add browser tabs.
-* [-] Horizontal and vertical split panes, with nice display/catch in the tree view (see vs code terminal list)
-* [x] Detect when an agent is sleeping/waiting for things, and have a specific animation for it.
-* [ ] HTTP API, and IPC.
-* [ ] vi-mode shortcuts.
-* [ ] Options for both vertical and horizontal tabs. Options for top/bottom, left/right tabs.
-* [ ] Option for git branches to show up in tabs, with 3 options: yes/no/show branch only when it's not X (main, master)
-* [ ] Option for recency (<1m) to the right of each entry in the tree.
-* [x] Options for Ctrl+A or Ctrl+B or others (explore which works/can work, give all options but explain which are good ones)
-* [ ] Option to create an agent with a worktree (different menu options **and** agent creation dialog)
-* [ ] Option for a given folder to "be" a worktree/be associated with a worktree (option in folder creation dialog)
-* [ ] Docker sandboxing, isolating workers/agents in containers with shared auth (idea from aoe)
-* [ ] Git review panel/entry in the tree that lets us see the current git status, and review diffs, and automagically create commits using LLMs based on the data we have.
-* [ ] Do our docs need to include information about setting up OpenMoji since we rely on emojis quite a bit?
-* [-] Sound notifications, configurable.
-* [ ] Have a startup time wizard that shows icons and asks if we want nicer icons and offers to install them (on ubuntu at least)
-* [ ] Add support for more than claude and codex, have nice abstractions (object oriented) in the code, have support for the resume stuff, the detection stuff, etc.
-* [ ] Support for displaying useful status information like notifications about stuff that needs attention in user tmux bar.
-* [ ] Kubernetes control/orchestration with control from the agents (?)
-* [ ] Right click on a given agent to fork it into a new forked session using the stuff in claude code that lets us do that.
-* [ ] File navigation entry in the list.
-* [ ] File search entry in the list.
-* [x] Support for themes, and import some themes from vs code and some other terminal-based goodies like oh-my-zsh
-* [x] Desktop/OS notifications.
-* [ ] Full configuration screen with great user experience.
-* [-] Kanban board tab/panel type (with cards on the left and details on the right and auto-resize based on focus with mouse/keyboard, plus keyboard navigation, and up/down/left/right arrows to move them around), with creation dialog that lets you have it either be file based (one file for each column) or folder based (one folder for each column, each entry is a file)
-* [ ] Left-panel file explorer, and "drag file to agent" feature.
-* [ ] Optional git +32/-11 green/red dispaly next to the branch "second line" showing the additions/removals in git for this terminal/session/group/worktree/etc.
-* [ ] Worktree "groups"/folders have a special icon, and right click menu that lets us do things like commit/push with llm.
-* [ ] Explore if https://github.com/a-kenji/tui-term is a good option for our terminals.
-* [ ] When an agent exits, if it was created from a terminal that terminal "becomes" a terminal again, correctly.
-* [ ] Explore https://github.com/doy/vt100-rust
-* [ ] Add support for gemini, opencode, and other agent types.
-* [ ] Create pull requests from a worktree (either a group or a terminal or agent etc)
-* [x] Fix the project-wide ilium/ilium typo.
-* [ ] Docker sandboxes as an option for groups and for agents and for terminals, letting them "share"/enter an existing sandbox too, as part of the dialog/modal when creating a new agent/terminal/etc.
-* [ ] Spec/Plan creation and execution.
-* [ ] Machine control panel/tree entry, lets us use visual agents and screen caps to detect useful information from screen caps and click in interresting/useful places?
-* [ ] Voice dictation/input.
-* [ ] Fully voice navigation and user interface usage using the latest gpt models, including letting it re-organize everything.
-* [~] « Magic »: LLM-based re-organizing and re-labelling of everything including giving the LLM screen caps of each terminal and asking it to sort them into folders and rename each thing.
-* [ ] Make it a settings option if a worktree-associated group/folder can have terminals/things that use another worktree/none, or if that's forbidden.
-* [ ] Search through everything including terminal histories and agent histories, with a search result pane where if you click on a result it gets you to that pane/window at the right place etc.
-* [ ] Agent group chat, with each agent being given access to a chat group (in the form of a text file), and the user can monitor this.
-* [ ] Agent group chat -> agents know their session ID, can get their name from ilium with api calls, have a chat setup thing where we add instructiions to the project's CLAUDE.md/AGENTS.md to "set up" the group chat giving them the means to monitor it and opening a group chat monitoring "pane", with the main goal being that agents don't interfere with each other, or sending instructions to all agents. 
-* [ ] Agent group chat -> if possible add per-project (.claude/) hooks that tell the agent to check the group chat if it has changed etc, and to update it when it does something important, or with warnings for others, etc.
-* [ ] Todo file to kanban board tool (with llm and context)
-* [ ] Optionally, instead of using kilo-gateway for small llm tasks, use claude code with low instrumentation (no tools, no system prompt) and have us run the agent "in the background" giving it a simple task and asking it to answer with json to a /tmp/ file or something
-* [ ] Optional git conflict detection where we mark agents that share a branch/worktree with a warning icon and/or callout at the bottom, and an option/button to solve the problem or ignore it.
-* [ ] Agent "roles" where agents are started with a "role" prompt and monitor the group chat for @mentions and when received and if they are not doing something already they take care of it (and if they are doing something there's a qaueue or something)
-* [ ] Task "templates" where we can define templates for tasks with prompt templates and forms and we have a list of those templates and we can run/create one where we fill a form and that's used to generate the prompt and start a new agent with that prompt or put it in the copy/paste buffer.
-* [ ] Telegram/chat channel panels/windows.
-* [ ] Optionally add ressources to groups, like a GPU only one can use at a time, or only one is allowed to compile at a time, etc. A semaphore they share. Agents that don't have the allowance just sleep until they do/can. They should use the group chat to figure out who is next and negociate that based on priorities and potentially ask the user questions with a special question format.
-* [ ] Detect if an agent (claude) has a goal active, and add a goal "flag" to it if it does. Same thing for dynamic workfflows.
-* [ ] Have both icons for "create folder" and "create folder at root" in the menu at the bottom of the left par
-* [ ] Icons at the bottom of the left bar should show anytime the left bar is focused, but their "extensions" like "create with options" should show only when the mouse gets close
-* [ ] Add "create with options" menus for terminals, groups, agents, etc in the menu bar at the botto of the left panel
-* [ ] When we get titles for the agents from the llm, get two titles, a short one for the left panel being thin and a longer one baut not too long for the left panel being wider.
-* [ ] In agents detect the pattern « ✔ Goal achieved (1h · 1 turn · 210.7k tokens) » (this one is for claude, figure out the codex one) and add a "goal" or "success" type flag/icon to that agent
-* [x] Save and restore the buffer/history of terminals.
-* [x] New "type" in the left panel, folder (not group) to navigate/see files on disk and easily/quickly open them.
+## Application shell and terminal rendering
+- [ ] Offer ilium as a standalone desktop application.
+- [ ] Let the standalone application use libghostty for terminal rendering, if platform support allows it; otherwise expose it as an optional renderer.
+- [ ] Add optional GPU-accelerated rendering to the standalone application.
+- [ ] Add browser-style tabs to the standalone application.
+- [-] Support horizontal and vertical split panes with a clear representation in the tree, similar to the VS Code terminal list.
+- [ ] Support horizontal or vertical tab layouts, positioned at the top, bottom, left, or right.
+- [ ] Optionally show recent activity (for example, `<1m`) to the right of each tree entry.
+- [ ] Evaluate whether [tui-term](https://github.com/a-kenji/tui-term) is a better terminal-widget foundation.
+- [ ] Evaluate [vt100-rust](https://github.com/doy/vt100-rust) as an alternative terminal parser.
+- [x] Complete the project-wide rename from `illium` to `ilium`.
+- [ ] Show separate “create folder” and “create folder at root” actions in the bottom toolbar.
+- [ ] Keep bottom-toolbar icons visible whenever the left panel is focused, while showing extended actions such as “create with options” only when the pointer approaches.
+- [ ] Add “create with options” menus for terminals, groups, agents, and other supported node types to the bottom toolbar.
+- [ ] Add a settings section for configuring the bottom toolbar: location, visibility behavior, icons, and icon order.
+- [ ] During first-run setup, test whether the terminal renders the toolbar’s rounded-corner glyphs; if not, offer to install a compatible font and configure supported terminals such as VS Code and GNOME Terminal.
 
+## Settings, appearance, and input
+- [ ] Add vi-style keyboard shortcuts.
+- [x] Let users choose Ctrl+A, Ctrl+B, or another supported shortcut prefix, while explaining conflicts and recommended choices.
+- [ ] Document OpenMoji setup if ilium’s emoji-heavy interface requires it.
+- [ ] Add a first-run icon preview that offers to install improved icon support, at least on Ubuntu.
+- [x] Support themes, including selected themes inspired by VS Code and terminal tools such as Oh My Zsh.
+- [x] Build a complete configuration screen with a polished user experience.
+- [ ] Add voice dictation as an input method.
+- [ ] Add full voice navigation and interface control using current GPT models, including voice-directed workspace reorganization.
 
+## Agent lifecycle, providers, and intelligence
+- [x] Detect when an agent is sleeping or waiting for an external event and show a dedicated animation.
+- [ ] Define a clean provider abstraction for agent detection, resume behavior, session metadata, and other provider-specific capabilities beyond Claude and Codex.
+- [ ] Add provider implementations for Gemini, OpenCode, and other agent types.
+- [ ] Let users fork an agent into a new session from its context menu when the provider supports session forking, starting with Claude Code.
+- [ ] When an agent launched from a terminal exits, return the pane to its original terminal state.
+- [~] Add “Magic” LLM-assisted workspace organization: inspect terminal screenshots, group related panes, and relabel nodes.
+- [ ] Optionally run small LLM tasks through a low-instrumentation Claude Code process instead of Kilo Gateway, with no tools or custom system prompt and a structured JSON result written to a temporary file.
+- [ ] Detect whether an agent has an active goal or dynamic workflow and show an appropriate flag.
+- [ ] Generate two agent titles: a compact title for the narrow left panel and a slightly longer title for its expanded state.
+- [ ] Detect provider-specific goal-completion output—such as Claude’s `✔ Goal achieved (...)` message—and show a success flag; determine the equivalent Codex signal.
 
+## Files, search, and boards
+- [ ] Add a file-navigation entry to the left panel.
+- [ ] Add a file-search entry to the left panel.
+- [-] Add a Kanban panel with cards on the left, details on the right, focus-responsive sizing, keyboard navigation, and directional card movement. Its creation dialog should support either one file per column or one folder per column with one file per card.
+- [ ] Add a left-panel file explorer with drag-file-to-agent interaction.
+- [ ] Search across terminal and agent histories, then open the selected result in the correct pane at the matching position.
+- [ ] Add an LLM-assisted tool that converts a TODO file into a Kanban board using project context.
+- [x] Save and restore terminal buffers and scrollback history.
+- [x] Add a left-panel folder node, distinct from a group, for navigating files and opening them quickly.
 
+## Git and worktree workflows
+- [ ] Optionally show the current Git branch in tabs: always, never, or only when it differs from configured defaults such as `main` and `master`.
+- [ ] Let users create an agent in a new worktree from both context-menu actions and the agent-creation dialog.
+- [ ] Let a folder be associated with a worktree from the folder-creation dialog.
+- [ ] Add a Git review panel or tree entry for status, diff review, and LLM-assisted commit creation from the available changes.
+- [ ] Optionally show compact green/red diff statistics, such as `+32/-11`, beside the branch on a second line for terminals, sessions, groups, and worktrees.
+- [ ] Create pull requests from worktree-associated groups, terminals, or agents.
+- [ ] Detect agents that share a branch or worktree, show a conflict-risk warning, and offer actions to resolve or dismiss it.
+- [ ] Add a setting that controls whether a worktree-associated group or folder may contain nodes using a different worktree or no worktree.
 
+## Sandboxing, infrastructure, and shared resources
+- [ ] Add container-based sandboxing for workers and agents with shared authentication, inspired by aoe.
+- [ ] Explore Kubernetes orchestration and whether agents should have any control over it.
+- [ ] Expose Docker sandbox choices when creating groups, agents, and terminals, including joining an existing sandbox.
+- [ ] Add a machine-control panel or tree entry where visual agents can inspect screenshots and interact with useful on-screen controls.
+- [ ] Let groups define exclusive resources, such as a GPU or compiler slot, through shared semaphores. Waiting agents should sleep, coordinate priority through group chat, and escalate decisions to the user through a structured question format.
+- [ ] Give worktree-associated groups and folders a distinct icon and context-menu actions such as LLM-assisted commit and push.
 
+## Agent collaboration and reusable workflows
+- [ ] Add specification/plan creation and execution workflows.
+- [ ] Add a user-visible agent group chat backed by a shared text file.
+- [ ] Add group-chat setup that exposes agent session IDs and names through ilium’s APIs, updates project `CLAUDE.md`/`AGENTS.md` instructions, and opens a monitoring pane so agents can coordinate without interfering with one another.
+- [ ] Where supported, add project-scoped hooks under `.claude/` that prompt agents to read changed group-chat messages and post important updates or warnings.
+- [ ] Add agent roles: start agents with role-specific prompts, let idle agents respond to relevant group-chat mentions, and queue mentions while they are busy.
+- [ ] Add reusable task templates with prompt templates and forms; submitting a form should either launch an agent with the generated prompt or copy the prompt to the clipboard.
 
+## APIs, notifications, and external integrations
+- [ ] Expose documented HTTP and IPC APIs.
+- [-] Add configurable sound notifications.
+- [ ] Show attention-worthy ilium status and notifications in the user’s tmux status bar.
+- [x] Send desktop/OS notifications.
+- [ ] Add Telegram and other chat-channel panels.
 
-
-
-
-
-
-
-
-
-
-
+## Demos
+- [ ] Create a restart-recovery demo framed as a machine crash: show BIOS and boot animations, then have an agent diagnose overheating and jokingly connect it to the earlier question about mayonnaise as CPU thermal paste.
 

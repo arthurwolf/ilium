@@ -8,12 +8,13 @@
 //! tree edit does.
 
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
-use ilium_core::{NodeId, NodeKind, Tree, ROOT_ID};
+use ilium_core::{AgentProvider, NodeId, NodeKind, Tree, ROOT_ID};
 use ratatui::layout::{Position, Rect};
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{App, ContextMenu, CreateGroupState, Mode};
 use crate::explorer_overlay::ExplorerOverlay;
+use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
 
 /// Converts a crossterm mouse event's kind/modifiers into the wire shapes
@@ -71,6 +72,20 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::ContextMenu above");
         };
         handle_context_menu_mouse(app, menu, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::Search(_)) {
+        let Mode::Search(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::Search above");
+        };
+        handle_search_mouse(app, &mut state, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::SchedulePaneInput(_)) {
+        let Mode::SchedulePaneInput(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::SchedulePaneInput above");
+        };
+        handle_scheduled_input_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::EditorLineContextMenu(_)) {
@@ -199,6 +214,46 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
 }
 
+/// Mouse parity for the keyboard-first full-screen search screen: wheel
+/// scrolls results, while clicking a result opens it immediately at its
+/// recorded terminal/editor location.
+fn handle_search_mouse(
+    app: &mut App,
+    state: &mut crate::search_ui::SearchState,
+    mouse: MouseEvent,
+) {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            state.move_selection(
+                -3,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(Box::new(std::mem::take(state)));
+        }
+        MouseEventKind::ScrollDown => {
+            state.move_selection(
+                3,
+                crate::search_ui::visible_result_rows(app.layout.screen_area),
+            );
+            app.mode = Mode::Search(Box::new(std::mem::take(state)));
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            let position = Position::new(mouse.column, mouse.row);
+            if let Some(index) =
+                crate::search_ui::result_at(app.layout.screen_area, state, position)
+            {
+                state.selected_index = index;
+                if let Some(result) = state.selected_result().cloned() {
+                    app.activate_search_result(result);
+                    return;
+                }
+            }
+            app.mode = Mode::Search(Box::new(std::mem::take(state)));
+        }
+        _ => app.mode = Mode::Search(Box::new(std::mem::take(state))),
+    }
+}
+
 fn handle_create_split_orientation_mouse(
     app: &mut App,
     state: crate::app::CreateSplitOrientationState,
@@ -302,16 +357,14 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(hit) = app.tree_node_at(position) {
-                if let Some((folder_id, path, is_dir)) =
-                    tree_ui::folder_entry_path(&app.tree, hit.id)
-                {
-                    app.select_node(hit.id);
-                    if is_dir {
-                        app.tree_state.toggle_selected();
+                if let Some(entry) = tree_ui::folder_entry(&app.tree, hit.id) {
+                    app.select_tree_path(entry.identifier_path);
+                    if entry.is_directory {
+                        app.toggle_selected_tree_node();
                     } else {
                         app.request_new_editor(
-                            app.tree.parent_of(folder_id).unwrap_or(ROOT_ID),
-                            path,
+                            app.tree.parent_of(entry.root_id).unwrap_or(ROOT_ID),
+                            entry.path,
                         );
                     }
                     return;
@@ -323,13 +376,13 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                     .get(hit.id)
                     .is_some_and(ilium_core::Node::is_split_view)
                 {
-                    app.tree_state.toggle_selected();
+                    app.toggle_selected_tree_node();
                     app.show_split_view(hit.id);
                 } else if matches!(
                     app.tree.get(hit.id).map(|node| &node.kind),
                     Some(NodeKind::Container(_) | NodeKind::Folder { .. })
                 ) {
-                    app.tree_state.toggle_selected();
+                    app.toggle_selected_tree_node();
                 } else {
                     app.focus_pane(hit.id);
                 }
@@ -460,6 +513,10 @@ fn compute_drop_target(
 /// interactive shell -- see `ilium_server::pane::TerminalOrigin::Command`.
 fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
     match action {
+        TreeToolbarAction::Search => {
+            app.action_open_search();
+            return;
+        }
         TreeToolbarAction::Group => {
             let preselected = app.create_group_preselect_target();
             app.open_create_group_dialog(preselected);
@@ -490,8 +547,7 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             return;
         }
         TreeToolbarAction::Shell => app.action_new_terminal(),
-        TreeToolbarAction::Claude => app.action_new_command_pane("claude"),
-        TreeToolbarAction::Codex => app.action_new_command_pane("codex"),
+        TreeToolbarAction::Agent(provider) => app.action_new_command_pane(provider.command_line()),
     }
     app.status_message = Some(format!("Created {}", action.description()));
 }
@@ -503,6 +559,28 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
         return;
     }
     let position = Position::new(mouse.column, mouse.row);
+
+    if let Some(submenu) = &menu.tree_order_submenu {
+        if submenu.area.contains(position) {
+            let content_top = submenu.area.y.saturating_add(1);
+            if position.y < content_top {
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            }
+            let item_row = usize::from(position.y - content_top);
+            let Some(tree_order) = crate::config::TreeOrder::ALL.get(item_row).copied() else {
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            };
+            app.settings_set_tree_order(tree_order);
+            app.mode = Mode::Normal;
+            return;
+        }
+        if !menu.area.contains(position) {
+            app.mode = Mode::Normal;
+            return;
+        }
+    }
     if !menu.area.contains(position) {
         app.mode = Mode::Normal;
         return;
@@ -523,7 +601,13 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
     }
     menu.selected_index = item_row;
     app.select_node(menu.target);
-    app.execute_context_action(menu.actions[item_row], menu.target);
+    let action = menu.actions[item_row];
+    if action == crate::app::ContextMenuAction::OrderBy {
+        app.open_context_tree_order_submenu(&mut menu);
+        app.mode = Mode::ContextMenu(menu);
+        return;
+    }
+    app.execute_context_action(action, menu.target);
 }
 
 /// Handles the source-line popup independently from tree selection state.
@@ -600,6 +684,57 @@ fn handle_create_agent_from_line_mouse(
         return;
     }
     app.mode = Mode::CreateAgentFromLine(state);
+}
+
+/// Gives every visible form control a direct mouse target. Clicking outside
+/// follows ilium's other creation dialogs and cancels; clicking a field moves
+/// its cursor close to the selected cell before keyboard input resumes.
+fn handle_scheduled_input_mouse(
+    app: &mut App,
+    mut state: Box<ScheduledInputDialogState>,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::SchedulePaneInput(state);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let layout = crate::scheduled_input::dialog_layout(app.layout.screen_area);
+    if !layout.popup.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if layout.hours.contains(position) {
+        state.focus = ScheduledInputFocus::Hours;
+        place_prompt_cursor(&mut state.hours, layout.hours, position);
+    } else if layout.minutes.contains(position) {
+        state.focus = ScheduledInputFocus::Minutes;
+        place_prompt_cursor(&mut state.minutes, layout.minutes, position);
+    } else if layout.seconds.contains(position) {
+        state.focus = ScheduledInputFocus::Seconds;
+        place_prompt_cursor(&mut state.seconds, layout.seconds, position);
+    } else if layout.text.contains(position) {
+        state.focus = ScheduledInputFocus::Text;
+        place_prompt_cursor(&mut state.text, layout.text, position);
+    } else if layout.send_enter.contains(position) {
+        state.focus = ScheduledInputFocus::SendEnter;
+        state.send_enter = !state.send_enter;
+    } else if layout.schedule_button.contains(position) {
+        state.focus = ScheduledInputFocus::ScheduleButton;
+        app.commit_scheduled_pane_input(state);
+        return;
+    }
+    app.mode = Mode::SchedulePaneInput(state);
+}
+
+fn place_prompt_cursor(
+    prompt: &mut crate::text_prompt::TextPromptState,
+    field_area: Rect,
+    position: Position,
+) {
+    let inner_x = field_area.x.saturating_add(1);
+    let clicked_offset = usize::from(position.x.saturating_sub(inner_x));
+    prompt.cursor = clicked_offset.min(prompt.buf.chars().count());
 }
 
 /// Mouse handling for the create-group dialog: clicking a destination row
@@ -709,6 +844,20 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 ) {
                     app.settings_adjust_shortcut_base(direction);
                 }
+            } else if state.tab == crate::app::SettingsTab::KanbanBoard {
+                if let Some((row, direction)) = crate::settings_ui::kanban_board_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                ) {
+                    if let Some(index) = crate::app::KanbanBoardRow::ALL
+                        .iter()
+                        .position(|candidate| *candidate == row)
+                    {
+                        state.selected_row = index;
+                    }
+                    app.settings_adjust_kanban_board_row(row, direction);
+                }
             } else if state.tab == crate::app::SettingsTab::Sound {
                 match crate::settings_ui::sound_content_hit(
                     layout.content_area,
@@ -741,15 +890,8 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         _ => {}
     }
 
-    let max_scroll = crate::settings_ui::max_scroll(
-        state.tab,
-        &app.ui_settings,
-        &app.keyboard_settings,
-        &app.sound_settings,
-        &app.sound_discovery,
-        state.selected_row,
-        layout.content_area,
-    );
+    let max_scroll =
+        crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);
     state.scroll = state.scroll.min(max_scroll);
     app.mode = Mode::Settings(state);
 }
@@ -764,10 +906,7 @@ fn handle_explorer_mouse(
 ) {
     if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
         if let Some(path) = overlay.file_at_mouse(mouse, app.layout.screen_area) {
-            if path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-            {
+            if crate::editor_pane::is_markdown_path(&path) {
                 app.open_explorer_file_menu(
                     overlay,
                     target,
@@ -951,6 +1090,208 @@ mod agent_from_line_mouse_tests {
 }
 
 #[cfg(test)]
+mod scheduled_input_mouse_tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
+
+    fn click(app: &mut App, area: Rect) {
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x + area.width.saturating_sub(1) / 2,
+                row: area.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+    }
+
+    #[test]
+    fn scheduled_input_checkbox_and_button_have_real_mouse_targets() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.mode = Mode::SchedulePaneInput(Box::new(ScheduledInputDialogState::new(pane_id)));
+        let layout = crate::scheduled_input::dialog_layout(app.layout.screen_area);
+
+        click(&mut app, layout.send_enter);
+
+        let Mode::SchedulePaneInput(state) = &mut app.mode else {
+            panic!("checkbox click should keep the form open");
+        };
+        assert!(!state.send_enter);
+        assert_eq!(state.focus, ScheduledInputFocus::SendEnter);
+        state.text = crate::text_prompt::TextPromptState::new("status");
+
+        click(&mut app, layout.schedule_button);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SchedulePaneInput {
+                pane_id,
+                delay_seconds: 30,
+                text: "status".to_string(),
+                send_enter: false,
+            }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod tree_order_context_mouse_tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
+
+    fn click(app: &mut App, column: u16, row: u16) {
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+    }
+
+    #[test]
+    fn context_menu_mouse_opens_order_submenu_and_applies_clicked_mode() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.open_context_menu(pane, 2, 2);
+        let (order_column, order_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let index = menu
+                    .actions
+                    .iter()
+                    .position(|action| *action == crate::app::ContextMenuAction::OrderBy)
+                    .unwrap();
+                (menu.area.x + 1, menu.area.y + 1 + index as u16)
+            }
+            _ => panic!("context menu should be open"),
+        };
+
+        click(&mut app, order_column, order_row);
+        let (submenu_column, submenu_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let submenu = menu
+                    .tree_order_submenu
+                    .as_ref()
+                    .expect("Order by click should open its submenu");
+                let index = crate::config::TreeOrder::ALL
+                    .iter()
+                    .position(|tree_order| *tree_order == crate::config::TreeOrder::NameAscending)
+                    .unwrap();
+                (submenu.area.x + 1, submenu.area.y + 1 + index as u16)
+            }
+            _ => panic!("parent context menu should remain open"),
+        };
+
+        click(&mut app, submenu_column, submenu_row);
+
+        assert_eq!(
+            app.ui_settings.tree_order,
+            crate::config::TreeOrder::NameAscending
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+}
+
+#[cfg(test)]
+mod markdown_board_context_mouse_tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
+
+    #[test]
+    fn right_clicking_a_markdown_editor_row_exposes_and_runs_create_board() {
+        let path = std::env::temp_dir().join(format!(
+            "ilium-board-mouse-{}-{}.md",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        std::fs::write(&path, "# Work\n\n* [ ] Mouse task\n").unwrap();
+
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "work.md", ilium_core::PaneContentKind::Editor)
+            .unwrap();
+        let editor = crate::editor_pane::EditorPane::load(path.clone()).unwrap();
+        app.panes
+            .insert(editor_id, crate::app::PaneRuntime::Editor(Box::new(editor)));
+        app.tree_state.open(vec![group]);
+        let tree_area = app.layout.tree_area;
+        let editor_row = (tree_area.y..tree_area.bottom())
+            .find(|row| {
+                app.tree_node_at(Position::new(tree_area.x + 1, *row))
+                    .is_some_and(|hit| hit.id == editor_id)
+            })
+            .expect("editor row should be visible");
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: tree_area.x + 1,
+                row: editor_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        let (action_column, action_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                assert_eq!(menu.target, editor_id);
+                let action_index = menu
+                    .actions
+                    .iter()
+                    .position(|action| {
+                        *action == crate::app::ContextMenuAction::CreateBoardFromMarkdown
+                    })
+                    .expect("Markdown editor menu should contain create-board action");
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + u16::try_from(action_index).unwrap(),
+                )
+            }
+            _ => panic!("right click should open the tree context menu"),
+        };
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: action_column,
+                row: action_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::NewBoard {
+                parent_group,
+                storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
+                ..
+            }] if *parent_group == group && board_path == &path
+        ));
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
 mod row_action_click_tests {
     use super::*;
     use crate::app::App;
@@ -1053,5 +1394,30 @@ mod row_action_click_tests {
         let mut app = test_app();
         execute_tree_toolbar_action(&mut app, TreeToolbarAction::Settings);
         assert!(matches!(app.mode, Mode::Settings(_)));
+    }
+
+    #[test]
+    fn search_toolbar_action_opens_the_full_screen_workspace_finder() {
+        let mut app = test_app();
+        execute_tree_toolbar_action(&mut app, TreeToolbarAction::Search);
+        assert!(matches!(app.mode, Mode::Search(_)));
+    }
+
+    #[test]
+    fn antigravity_toolbar_action_launches_its_registered_command() {
+        let mut app = test_app();
+
+        execute_tree_toolbar_action(
+            &mut app,
+            TreeToolbarAction::Agent(ilium_core::BuiltinAgentProvider::Antigravity),
+        );
+
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::NewPane {
+                kind: ilium_ipc::NewPaneKind::Command(command_line),
+                ..
+            }] if command_line == "agy"
+        ));
     }
 }

@@ -34,8 +34,8 @@
 //! path sidesteps `PATH`/rc-file resolution entirely and is
 //! unconditionally deterministic.
 //!
-//! The fake script's only job is producing the one *observable signal*
-//! `ilium_detect::classify_activity` actually keys off
+//! The fake script produces the two observable screen-text signals the
+//! detector owns: the persistent `Goal:` row plus activity state from
 //! (`ilium-detect/src/lib.rs`'s `WORKING_MARKER`, the literal substring
 //! `"esc to interrupt"`) for a few seconds, then clearing the screen and
 //! printing something else -- simulating a turn finishing. Everything
@@ -50,7 +50,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ilium_core::{PaneStatus, ROOT_ID};
-use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
+use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 use ilium_server::config::DetectionConfig;
 use ilium_server::SoundPlayer;
 
@@ -101,11 +101,13 @@ fn write_fake_claude_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
         "#!/bin/sh\n\
          i=0\n\
          while [ \"$i\" -lt {WORKING_PHASE_SECONDS} ]; do\n\
+         \x20\x20printf 'Goal: prove goal detection end to end\\n'\n\
          \x20\x20printf 'Cogitating (esc to interrupt)\\n'\n\
          \x20\x20i=$((i + 1))\n\
          \x20\x20sleep 1\n\
          done\n\
          printf '\\033[2J\\033[H'\n\
+         printf 'Goal: prove goal detection end to end\\n'\n\
          printf 'Done. Ready for the next instruction.\\n'\n\
          sleep 60\n"
     );
@@ -120,7 +122,7 @@ fn write_fake_claude_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[tokio::test]
-async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pipeline() {
+async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_pipeline() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
     let fake_claude_path = write_fake_claude_binary(fake_bin_dir.path());
 
@@ -206,14 +208,18 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
     // `ilium_detect::AGENT_SIGNATURES`) and classify it `Working` (by
     // real `vt100` screen-text scrape, via `ilium_detect::classify_activity`
     // matching the literal `"esc to interrupt"` marker this fake script
-    // prints) -- broadcast as a real `PaneStatusChanged` event to this
+    // prints), and preserve its visible `Goal:` row as `AgentWithGoal` --
+    // broadcast as a real `PaneStatusChanged` event to this
     // real connected IPC client.
     let working_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
             ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
                 if *changed_id == pane_id
-                    && matches!(status, PaneStatus::Agent(_, ilium_core::AgentActivity::Working))
+                    && matches!(
+                        status,
+                        PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working)
+                    )
         )
     })
     .await;
@@ -221,7 +227,10 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
         unreachable!("predicate only matches PaneStatusChanged");
     };
     assert!(
-        matches!(status, PaneStatus::Agent(ilium_core::AgentClass::Claude, _)),
+        matches!(
+            status,
+            PaneStatus::AgentWithGoal(ilium_core::AgentClass::Claude, _)
+        ),
         "expected the real process tree walk to identify this pane as Claude, got {status:?}"
     );
     assert!(
@@ -246,7 +255,7 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
                 if *changed_id == pane_id
                     && matches!(
                         status,
-                        PaneStatus::Agent(
+                        PaneStatus::AgentWithGoal(
                             ilium_core::AgentClass::Claude,
                             ilium_core::AgentActivity::Idle | ilium_core::AgentActivity::Done
                         )
@@ -259,8 +268,11 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
     };
     assert_eq!(
         status,
-        PaneStatus::Agent(ilium_core::AgentClass::Claude, ilium_core::AgentActivity::Done),
-        "expected a real Working -> Done transition (this client never focused the pane), got {status:?}"
+        PaneStatus::AgentWithGoal(
+            ilium_core::AgentClass::Claude,
+            ilium_core::AgentActivity::Done
+        ),
+        "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
 
     let sound_dispatched = common::wait_until(
@@ -285,8 +297,8 @@ async fn a_real_process_named_claude_drives_working_to_idle_through_the_whole_pi
 
 /// Writes an executable POSIX shell script named exactly `name` (same
 /// absolute-path-spawn rationale as [`write_fake_claude_binary`]) that just
-/// idles -- the two session-ID-discovery tests below only care about
-/// `crate::session_id::discover`'s tier 1 (an explicit resume argument on
+/// idles -- the argument-based session-ID-discovery tests below only care about
+/// `crate::session_id::discover`'s first admissible source (an explicit resume argument on
 /// the command line), not activity classification, so unlike
 /// [`write_fake_claude_binary`] neither ever needs to print the "esc to
 /// interrupt" working marker.
@@ -301,21 +313,100 @@ fn write_idle_fake_agent_binary(bin_dir: &std::path::Path, name: &str) -> std::p
     script_path
 }
 
+/// Writes a resumed-agent fixture whose exact process both exposes a resume
+/// ID in argv and keeps that same transcript open. This recreates the real
+/// transition window where `/resume` has invalidated argv but the old file
+/// descriptor has not been replaced yet.
+fn write_resumed_transcript_holding_fake_agent_binary(
+    bin_dir: &std::path::Path,
+    name: &str,
+) -> std::path::PathBuf {
+    let script_path = bin_dir.join(name);
+    let script = "#!/bin/sh\nexec 3<\"$3\"\nsleep 60\n";
+    let mut file = std::fs::File::create(&script_path).expect("create fake resumed agent script");
+    file.write_all(script.as_bytes())
+        .expect("write fake resumed agent script");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("chmod fake resumed agent script executable");
+    script_path
+}
+
+/// Writes a fake agent that keeps one caller-supplied transcript open while
+/// it idles. The descriptor is inherited by `sleep`, while the script process
+/// itself also retains it as the exact PID found by agent detection.
+fn write_transcript_holding_fake_agent_binary(
+    bin_dir: &std::path::Path,
+    name: &str,
+) -> std::path::PathBuf {
+    let script_path = bin_dir.join(name);
+    let script = "#!/bin/sh\nexec 3<\"$1\"\nsleep 60\n";
+    let mut file = std::fs::File::create(&script_path).expect("create fake agent script");
+    file.write_all(script.as_bytes())
+        .expect("write fake agent script");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("chmod fake agent script executable");
+    script_path
+}
+
+fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> std::path::PathBuf {
+    let slug: String = server
+        .project_cwd
+        .to_string_lossy()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let directory = server.home_dir.join(".claude/projects").join(slug);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join(format!("{session_id}.jsonl"));
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "type": "user",
+            "sessionId": session_id,
+            "cwd": server.project_cwd,
+            "message": {"content": "integration test prompt"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    path
+}
+
+fn write_verified_codex_transcript(server: &TestServer, session_id: &str) -> std::path::PathBuf {
+    let directory = server.home_dir.join(".codex/sessions/2026/07/14");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join(format!("rollout-2026-07-14T12-00-00-{session_id}.jsonl"));
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "type": "session_meta",
+            "payload": {"id": session_id, "cwd": server.project_cwd}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    path
+}
+
 /// End-to-end test of `ilium-server::session_id`'s live wiring into the
 /// detection loop: a real spawned process (named `claude`, exactly like
 /// [`a_real_process_named_claude_drives_working_to_idle_through_the_whole_pipeline`])
-/// invoked with a `--resume <uuid>` argument must have that exact uuid
-/// picked up by `session_id::discover`'s tier 1 (`from_arguments`, a real
-/// `sysinfo::Process::cmd()` read of this real process, not a fixture) and
-/// broadcast as a real `ServerEvent::PaneSessionIdResolved` to a real
-/// connected IPC client -- proving the gap this whole feature was built to
-/// close (the pre-refactor bin crate's session-ID discovery never having
-/// been ported into the new client/server split, see `session_id`'s module
-/// docs) is actually closed, not just unit-tested in isolation.
+/// invoked with a `--resume <uuid>` argument and holding that transcript open
+/// must broadcast that exact uuid as a real `ServerEvent::PaneSessionIdResolved`
+/// to a real connected IPC client. It then proves the old descriptor is
+/// quarantined after `/resume`, covering both admissible process-bound sources
+/// and the in-process transition lifecycle end to end.
 #[tokio::test]
 async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
-    let fake_claude_path = write_idle_fake_agent_binary(fake_bin_dir.path(), "claude");
+    let fake_claude_path =
+        write_resumed_transcript_holding_fake_agent_binary(fake_bin_dir.path(), "claude");
     let resumed_session_id = "95fd0645-3331-408b-a7e5-36e6007bfb78";
 
     let detection_config = DetectionConfig {
@@ -325,6 +416,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let server =
         TestServer::start_with_detection_config("live-session-id-discovery-test", detection_config)
             .await;
+    let transcript_path = write_verified_claude_transcript(&server, resumed_session_id);
     let mut client = server.connect().await;
 
     write_frame(
@@ -341,20 +433,19 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await;
 
     // Same `$SHELL -c "<command_line>"` mechanism as the `Working`/`Idle`
-    // test above -- the real spawned process's real argv ends up being
-    // exactly `<fake_claude_path> --resume <resumed_session_id>`, so
-    // `session_id::discover`'s tier 1 (`from_arguments`, reading this
-    // exact process's `sysinfo::Process::cmd()`) has real data to find,
-    // not a fixture.
+    // test above. The real spawned process exposes the resume ID in argv and
+    // owns the verified transcript descriptor, rather than supplying either
+    // signal through a fixture inside the discovery implementation.
     let command_line = format!(
-        "{} --resume {resumed_session_id}",
-        fake_claude_path.display()
+        "{} --resume {resumed_session_id} {}",
+        fake_claude_path.display(),
+        transcript_path.display()
     );
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            kind: NewPaneKind::Command(command_line),
+            kind: NewPaneKind::Command(command_line.clone()),
         },
     )
     .await
@@ -390,6 +481,110 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         "expected the real process's --resume argument to be discovered verbatim"
     );
 
+    write_frame(
+        &mut client,
+        &ClientRequest::SetSessionPaneTitle {
+            pane_id,
+            expected_session_id: resumed_session_id.to_string(),
+            title: "Title From The Old Session".to_string(),
+            short_title: Some("Old Session".to_string()),
+            title_source: ilium_core::PaneTitleSource::Automatic,
+        },
+    )
+    .await
+    .expect("set an inferred title for the old session");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TreeSnapshot(tree)
+                if tree.get(pane_id).is_some_and(|node| node.name == "Title From The Old Session")
+        )
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"/resume\r".to_vec(),
+        },
+    )
+    .await
+    .expect("submit an in-process session transition");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::PaneSessionIdCleared { pane_id: changed_id } if *changed_id == pane_id)
+    })
+    .await;
+    let reset_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TreeSnapshot(tree)
+                if tree.get(pane_id).is_some_and(|node| node.name == command_line)
+        )
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(reset_tree) = reset_event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    assert_eq!(reset_tree.get(pane_id).unwrap().short_name, None);
+
+    // The old transcript is deliberately still open on the exact same PID.
+    // It must remain quarantined instead of immediately rebinding the ID and
+    // retriggering a title request on the next fixed one-second detection tick.
+    let rebound_old_session = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read event while checking invalidated-session quarantine");
+            if matches!(
+                event,
+                ServerEvent::PaneSessionIdResolved {
+                    pane_id: changed_id,
+                    session_id,
+                } if changed_id == pane_id && session_id == resumed_session_id
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        rebound_old_session.is_err(),
+        "the same PID's still-open old transcript must not restore an invalidated session ID"
+    );
+
+    // Recreate the IPC ordering race directly: a worker result tagged with
+    // the cleared ID arrives after invalidation. The server's compare-and-set
+    // must reject it even if the sending client had not processed the clear.
+    write_frame(
+        &mut client,
+        &ClientRequest::SetSessionPaneTitle {
+            pane_id,
+            expected_session_id: resumed_session_id.to_string(),
+            title: "Stale Result Must Not Return".to_string(),
+            short_title: Some("Stale Result".to_string()),
+            title_source: ilium_core::PaneTitleSource::Automatic,
+        },
+    )
+    .await
+    .expect("send a stale session-title result");
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "live-session-id-discovery-test".to_string(),
+        },
+    )
+    .await
+    .expect("request authoritative tree after stale title");
+    let authoritative_tree = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(authoritative_tree) = authoritative_tree else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    assert_eq!(authoritative_tree.get(pane_id).unwrap().name, command_line);
+
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
@@ -401,13 +596,10 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
 /// for a real process named `codex` invoked with `resume <uuid>` (Codex's
 /// positional resume form, distinct from Claude's `--resume <uuid>` flag --
 /// see `session_id::from_arguments`). This is the exact asymmetry this
-/// feature was reported broken on ("works for Claude, not Codex"): tiers
-/// 1-3 (`from_arguments`/`from_environment`/`from_open_files`) are fully
-/// symmetric between the two classes, so a resumed Codex process is
-/// discovered exactly like a resumed Claude one -- only tier 4 (the
-/// newest-project-transcript fallback, irrelevant here since tier 1 always
-/// wins first) is deliberately Claude-only (see `session_id`'s module
-/// docs).
+/// feature was reported broken on ("works for Claude, not Codex"): argument
+/// and exact-PID open-file evidence are symmetric between the two classes.
+/// No environment/directory/newest-transcript fallback
+/// exists: if neither process-bound source proves ownership, no ID is emitted.
 #[tokio::test]
 async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake codex binary");
@@ -423,6 +615,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         detection_config,
     )
     .await;
+    write_verified_codex_transcript(&server, resumed_session_id);
     let mut client = server.connect().await;
 
     write_frame(
@@ -478,6 +671,85 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         session_id, resumed_session_id,
         "expected the real Codex process's positional resume argument to be discovered verbatim"
     );
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+}
+
+/// Proves the second admissible source end-to-end: an agent with no session
+/// ID in argv is resolved only from a project-verified transcript held open by
+/// that exact detected process.
+#[tokio::test]
+async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake codex binary");
+    let fake_codex_path = write_transcript_holding_fake_agent_binary(fake_bin_dir.path(), "codex");
+    let session_id = "6f7a8891-6c0a-4e60-9448-1e63fc74cd82";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(200),
+        idle_poll_interval: Duration::from_millis(200),
+    };
+    let server = TestServer::start_with_detection_config(
+        "live-open-transcript-discovery-test",
+        detection_config,
+    )
+    .await;
+    let transcript_path = write_verified_codex_transcript(&server, session_id);
+    let mut client = server.connect().await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "live-open-transcript-discovery-test".to_string(),
+        },
+    )
+    .await
+    .expect("write Attach request");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(format!(
+                "{} {}",
+                fake_codex_path.display(),
+                transcript_path.display()
+            )),
+        },
+    )
+    .await
+    .expect("write NewPane request");
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    let default_group = tree.children_of(ROOT_ID).unwrap()[0];
+    let pane_id = tree.children_of(default_group).unwrap()[0];
+
+    let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionIdResolved { pane_id: changed_id, .. }
+                if *changed_id == pane_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneSessionIdResolved {
+        session_id: resolved_session_id,
+        ..
+    } = resolved_event
+    else {
+        unreachable!("predicate only matches PaneSessionIdResolved");
+    };
+    assert_eq!(resolved_session_id, session_id);
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

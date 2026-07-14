@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use crate::app::App;
 use crate::naming_workers::{NamingWorkerEvent, NamingWorkers, TitleTrigger};
+use crate::search_workers::SearchWorkers;
 
 /// Runs every poll tick, regardless of whether any input/`ServerEvent`
 /// fired this iteration. Returns whether anything it did actually changed
@@ -14,7 +15,7 @@ use crate::naming_workers::{NamingWorkerEvent, NamingWorkers, TitleTrigger};
 /// spinner, a "Done" pulse, a recently-created flash, and the tree-width
 /// hover animation are all wall-clock-driven and keep animating with no
 /// new event at all -- see `App::has_active_animation`).
-pub fn on_tick(app: &mut App, now: Instant) -> bool {
+pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) -> bool {
     // Read *before* advancing the animation so the tick that finishes an
     // in-progress transition still reports "was animating" and forces its
     // own final redraw -- `tick_layout_animation` and the animation
@@ -22,8 +23,10 @@ pub fn on_tick(app: &mut App, now: Instant) -> bool {
     // of this tick" contract.
     let was_animating = app.has_active_animation();
     app.tick_layout_animation(now);
+    let tree_transition_changed = app.tick_tree_transitions(now);
     let autosave_wrote = app.tick_autosave();
-    was_animating || autosave_wrote
+    let workspace_search_started = app.tick_workspace_search(now, search_workers);
+    was_animating || tree_transition_changed || autosave_wrote || workspace_search_started
 }
 
 /// Applies one finished background naming result to `app`, and tells
@@ -46,50 +49,36 @@ pub fn apply_naming_worker_event(
         }
         NamingWorkerEvent::SessionTitle(pane_id, session_id, result, trigger) => {
             workers.session_title_worker_finished(pane_id, &session_id);
-            match trigger {
-                TitleTrigger::Automatic => {
-                    if app.agent_session_ids.get(&pane_id) == Some(&session_id) {
-                        app.titles_loading.remove(&pane_id);
-                    }
-                    if app.agent_session_ids.get(&pane_id) != Some(&session_id) {
-                        // The pane changed sessions while the request was in
-                        // flight. Never apply an old transcript's title to
-                        // the new session.
-                        return;
-                    }
-                }
-                TitleTrigger::Manual => {
-                    // A manual retitle click isn't keyed to a particular
-                    // session snapshot the way the automatic retry path is
-                    // -- the user asked for a fresh title for whatever this
-                    // pane is now, so it always applies (or reports its
-                    // error) rather than getting dropped for a `/resume`
-                    // that happened mid-flight.
-                    app.titles_loading.remove(&pane_id);
-                }
+            if app.agent_session_ids.get(&pane_id) == Some(&session_id) {
+                app.titles_loading.remove(&pane_id);
+            } else {
+                // Both automatic and user-requested workers read one exact
+                // transcript. A `/resume` while either request is in flight
+                // makes its result stale; manual changes overwrite semantics,
+                // never the provenance requirement.
+                return;
             }
             match result {
                 Ok(title) => match trigger {
                     TitleTrigger::Automatic => {
-                        // Not `request_rename`: that would permanently mark
-                        // the pane user-specified (see `Tree::rename_node`),
-                        // which would (a) treat an automatic inference as if
-                        // the user had typed the name themselves, and (b)
-                        // block any *other* automatic title source (e.g.
-                        // the plain-shell typed-command titler) from ever
-                        // updating it again. `request_automatic_pane_title`
-                        // keeps this an automatic proposal the server only
-                        // accepts while the pane hasn't been genuinely
-                        // user-renamed.
-                        app.inferred_title_session_ids.insert(pane_id, session_id);
-                        app.request_automatic_pane_title(pane_id, title.long, Some(title.short));
+                        app.inferred_title_session_ids
+                            .insert(pane_id, session_id.clone());
+                        app.request_session_pane_title(
+                            pane_id,
+                            session_id,
+                            title.long,
+                            Some(title.short),
+                            ilium_core::PaneTitleSource::Automatic,
+                        );
                     }
                     TitleTrigger::Manual => {
-                        // Here `request_rename` is exactly right: the user
-                        // explicitly asked for this title just now, so it
-                        // should win unconditionally -- see
-                        // `TitleTrigger::Manual`'s doc comment.
-                        app.request_rename(pane_id, title.long, Some(title.short));
+                        app.request_session_pane_title(
+                            pane_id,
+                            session_id,
+                            title.long,
+                            Some(title.short),
+                            ilium_core::PaneTitleSource::UserSpecified,
+                        );
                     }
                 },
                 Err(err) => {
@@ -122,5 +111,44 @@ pub fn apply_naming_worker_event(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ilium_core::NodeId;
+
+    use super::*;
+    use crate::naming::DualTitle;
+
+    #[test]
+    fn stale_manual_session_title_is_discarded_after_session_change() {
+        let pane_id = NodeId(7);
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.agent_session_ids
+            .insert(pane_id, "new-session".to_string());
+        app.titles_loading.insert(pane_id);
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(events_tx);
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::SessionTitle(
+                pane_id,
+                "old-session".to_string(),
+                Ok(DualTitle {
+                    short: "Old Session".to_string(),
+                    long: "Title From The Previous Agent Session".to_string(),
+                }),
+                TitleTrigger::Manual,
+            ),
+        );
+
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(
+            app.titles_loading.contains(&pane_id),
+            "an old worker must not clear the new session's loading guard"
+        );
     }
 }

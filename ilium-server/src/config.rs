@@ -131,7 +131,9 @@ struct RawCustomSignature {
     /// Lowercase substring matched against a process name -- same
     /// semantics as `AgentSignature::name_substring`.
     process_name: String,
-    /// One of `"claude"`, `"codex"`, or `"other"`. `"other"` resolves to
+    /// One of `"claude"`, `"codex"`, `"antigravity"`, or `"other"`.
+    /// `"antimatter"` is accepted as an alias for `"antigravity"`.
+    /// `"other"` resolves to
     /// `AgentClass::Other(<the process name that actually matched>)`,
     /// mirroring how the built-in `opencode`/`aider` signatures behave --
     /// there is no separate "fixed label" field, since `class_of` is a
@@ -154,10 +156,11 @@ impl RawCustomSignature {
         {
             "claude" => |_matched_name: &str| AgentClass::Claude,
             "codex" => |_matched_name: &str| AgentClass::Codex,
+            "antigravity" | "antimatter" => |_matched_name: &str| AgentClass::Antigravity,
             "other" => |matched_name: &str| AgentClass::Other(matched_name.to_string()),
             other => {
                 return Err(ConfigLoadError::InvalidCustomSignature(format!(
-                    "unknown agent_class {other:?} (expected \"claude\", \"codex\", or \"other\")"
+                    "unknown agent_class {other:?} (expected \"claude\", \"codex\", \"antigravity\", or \"other\")"
                 )))
             }
         };

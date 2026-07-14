@@ -7,9 +7,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
-use ilium_core::{AgentActivity, AgentClass, Node, NodeId, NodeKind, PaneStatus, Tree, ROOT_ID};
+use ilium_core::{
+    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, Node, NodeId, NodeKind,
+    PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
+};
+use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -18,8 +23,10 @@ use ratatui::Frame;
 use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::{AgentIdentifierMode, AgentIdentifierSettings};
+use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, TreeOrder};
 use crate::theme;
+use crate::tree_ordering;
+use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
 
 /// Braille spinner frames for an actively-`Working` agent pane, cycled by
 /// elapsed wall-clock time so it animates smoothly across redraws
@@ -63,25 +70,6 @@ const TEXT_EDITOR_ICON: &str = "🗒️";
 /// Settings stays anchored at the bottom-right of the left panel.
 const SETTINGS_ICON: &str = "🎚️";
 
-/// Hard ceiling on how many filesystem entries `folder_children` will
-/// materialize into `TreeItem`s across one `Folder` node's entire subtree in
-/// a single call. `render` rebuilds the whole tree (including every open
-/// `Folder` node's descendants) on every frame -- see `build_tree_items` --
-/// and animation (the Working spinner, WaitingBackground clock, and Done
-/// pulse) forces frequent redraws even when nothing about the folder itself
-/// changed. Without a cap, opening a folder whose subtree contains something
-/// like `node_modules` or a build-output directory would re-walk and
-/// re-allocate a `TreeItem` (plus its owned label `String`) for every entry,
-/// every redraw, unboundedly.
-///
-/// This is a mitigation, not the complete fix: the complete fix is to only
-/// recurse into folders the user has actually expanded, driven by
-/// `TreeState`'s own expansion set instead of the raw filesystem shape. That
-/// needs `TreeState` threaded into `build_tree_items`'s public signature and
-/// `TreeItemCache`'s version bumped on expand/collapse, both of which live
-/// in `app.rs` (outside this file).
-const MAX_FOLDER_TREE_ENTRIES: usize = 2_000;
-
 /// Every row reserves the same display-cell width for its node-kind icon.
 /// Emoji glyphs such as the robot/folder/pen often occupy two terminal
 /// cells, while shell and activity glyphs occupy one; padding by display
@@ -93,6 +81,11 @@ const NODE_ICON_COLUMN_WIDTH: usize = 3;
 /// Keeping its column on every row means a shell/group/editor title starts
 /// at the same horizontal position as an agent's class label.
 const ACTIVITY_ICON_COLUMN_WIDTH: usize = 2;
+
+/// Goal state is independent of an agent's current activity. Its fixed
+/// column places a double-width checkered flag immediately after the status
+/// indicator whenever a goal is present.
+const GOAL_ICON_COLUMN_WIDTH: usize = 3;
 
 /// Panel width (the outer tree `Rect`'s column count, borders and icon
 /// columns included) at or above which a pane shows its long-form title
@@ -112,16 +105,12 @@ const WIDE_TITLE_MIN_COLUMNS: u16 = 40;
 /// pointer is actually over (blank otherwise, so it never nags).
 const TOOLBAR_HEIGHT: u16 = 2;
 const TOOLBAR_BUTTON_WIDTH: u16 = 4;
-/// Two display cells hold each emoji and the third is a guaranteed blank gap
-/// before the next action. Drawing clears the complete combined strip first,
-/// so this gap can never reveal title text rendered underneath.
+/// Two display cells hold the original emoji and the third is its spacer.
+/// Each complete slot is emitted as one forced-width terminal run -- see
+/// `TreeRowActionStrip::draw` -- so a later purple spacer write cannot clip
+/// an emoji's painted edge in terminals such as VS Code's xterm.js.
 pub(crate) const ROW_ACTION_WIDTH: u16 = 3;
 const ROW_ACTION_TOTAL_WIDTH: u16 = ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
-/// A visibly empty, single-cell spacer that the terminal backend must emit.
-/// Unlike an ASCII space, it cannot be optimized away while diff-rendering
-/// over an existing title character, which is the bleed-through this strip
-/// specifically prevents.
-const ROW_ACTION_BLANK: &str = "\u{00a0}";
 /// Edit, up, down, close, then retitle -- reserved as the trailing cells of
 /// a hovered row (see `row_action_at`/`draw_row_actions`).
 pub(crate) const ROW_ACTION_COUNT: u16 = 5;
@@ -129,9 +118,11 @@ pub(crate) const ROW_ACTION_COUNT: u16 = 5;
 /// Actions available from the tree toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeToolbarAction {
+    Search,
     Shell,
-    Claude,
-    Codex,
+    /// One visible launcher for each built-in provider. Carrying the provider
+    /// keeps this surface synchronized with the core agent registry.
+    Agent(BuiltinAgentProvider),
     Editor,
     Board,
     Group,
@@ -143,10 +134,12 @@ pub enum TreeToolbarAction {
 impl TreeToolbarAction {
     /// Ordered left-aligned creation actions. Settings is intentionally not
     /// part of this list because its geometry is anchored independently.
-    const LEFT_ALIGNED: [Self; 8] = [
+    const LEFT_ALIGNED: [Self; 10] = [
+        Self::Search,
         Self::Shell,
-        Self::Claude,
-        Self::Codex,
+        Self::Agent(BuiltinAgentProvider::Claude),
+        Self::Agent(BuiltinAgentProvider::Codex),
+        Self::Agent(BuiltinAgentProvider::Antigravity),
         Self::Editor,
         Self::Board,
         Self::Group,
@@ -157,11 +150,13 @@ impl TreeToolbarAction {
     /// Single glyph shown on the button, reusing the same symbol the tree
     /// already uses for that node kind elsewhere (group/editor) so the
     /// toolbar and the tree read as one visual language rather than two.
-    const fn glyph(self) -> &'static str {
+    fn glyph(self) -> &'static str {
         match self {
+            Self::Search => "⌕",
             Self::Shell => TERMINAL_ICON,
-            Self::Claude => "Ⓒ",
-            Self::Codex => "Ⓧ",
+            Self::Agent(BuiltinAgentProvider::Claude) => "Ⓒ",
+            Self::Agent(BuiltinAgentProvider::Codex) => "Ⓧ",
+            Self::Agent(BuiltinAgentProvider::Antigravity) => "Ⓐ",
             Self::Editor => TEXT_EDITOR_ICON,
             Self::Board => "▦",
             Self::Group => "\u{1F4C1}",
@@ -175,11 +170,13 @@ impl TreeToolbarAction {
     /// others (and from the status colors already used for pane state --
     /// yellow/working, cyan/waiting, green/idle) that the five buttons read
     /// as five different things at a glance instead of one repeated shape.
-    const fn accent(self) -> Color {
+    fn accent(self) -> Color {
         match self {
+            Self::Search => Color::Cyan,
             Self::Shell => Color::Gray,
-            Self::Claude => Color::Rgb(0xd9, 0x77, 0x57),
-            Self::Codex => Color::Rgb(0x2c, 0xb6, 0x7d),
+            Self::Agent(BuiltinAgentProvider::Claude) => Color::Rgb(0xd9, 0x77, 0x57),
+            Self::Agent(BuiltinAgentProvider::Codex) => Color::Rgb(0x2c, 0xb6, 0x7d),
+            Self::Agent(BuiltinAgentProvider::Antigravity) => Color::Rgb(0x9b, 0x7b, 0xff),
             Self::Editor => Color::Magenta,
             Self::Board => Color::Cyan,
             Self::Group => Color::Rgb(0x7a, 0xa2, 0xf7),
@@ -191,11 +188,11 @@ impl TreeToolbarAction {
 
     /// Human-readable text shown live in the toolbar's caption row while
     /// hovered, and reused in the status bar if the action later fails.
-    pub const fn description(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
+            Self::Search => "search workspace",
             Self::Shell => "new shell",
-            Self::Claude => "new Claude shell",
-            Self::Codex => "new Codex shell",
+            Self::Agent(provider) => provider.label(),
             Self::Editor => "new editor",
             Self::Board => "new board",
             Self::Group => "new group",
@@ -244,6 +241,93 @@ impl TreeRowAction {
     }
 }
 
+/// Geometry and ordering for the trailing action cells on one tree row.
+///
+/// Rendering and mouse input both go through this type, so adding, removing,
+/// or resizing an action cannot silently leave its click target somewhere
+/// else. The strip owns complete fixed-width slots from the list's right edge;
+/// actions that do not apply keep their slot blank rather than shifting later
+/// actions into a different position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TreeRowActionStrip {
+    area: Rect,
+}
+
+impl TreeRowActionStrip {
+    /// Resolves a complete action strip, or none when the tree is too narrow
+    /// to show every action and its click target without overlap.
+    fn from_tree_area(area: Rect) -> Option<Self> {
+        let list = list_area(area);
+        (list.width >= ROW_ACTION_TOTAL_WIDTH).then_some(Self {
+            area: Rect::new(
+                list.right().saturating_sub(ROW_ACTION_TOTAL_WIDTH),
+                list.y,
+                ROW_ACTION_TOTAL_WIDTH,
+                list.height,
+            ),
+        })
+    }
+
+    /// Returns the fixed slot for an action's stable index in `ALL`.
+    fn slot(self, index: u16, row: u16) -> Rect {
+        Rect::new(
+            self.area
+                .x
+                .saturating_add(index.saturating_mul(ROW_ACTION_WIDTH)),
+            row,
+            ROW_ACTION_WIDTH,
+            1,
+        )
+    }
+
+    /// Maps a coordinate back through the exact slot geometry used to draw.
+    fn action_at(self, position: Position) -> Option<TreeRowAction> {
+        if !self.area.contains(position) {
+            return None;
+        }
+        let index = usize::from((position.x - self.area.x) / ROW_ACTION_WIDTH);
+        TreeRowAction::ALL.get(index).copied()
+    }
+
+    /// Paints every slot as one atomic terminal run: emoji and trailing
+    /// spacer share one `Cell` and one `Print`, with the remaining covered
+    /// cells skipped by Ratatui's diff iterator. This is stronger than widget
+    /// call ordering, which disappears once Ratatui reduces a frame to cells.
+    fn draw(self, buffer: &mut Buffer, row: u16, actions: &[TreeRowAction], style: Style) {
+        let Some(forced_width) = NonZeroU16::new(ROW_ACTION_WIDTH) else {
+            return;
+        };
+
+        for (index, action) in TreeRowAction::ALL.iter().enumerate() {
+            let Ok(index) = u16::try_from(index) else {
+                continue;
+            };
+            let slot = self.slot(index, row);
+
+            // Reset and style every covered cell so the in-memory frame stays
+            // truthful even though only the slot's first cell reaches the
+            // terminal backend while the forced-width run is visible.
+            for column in slot.x..slot.right() {
+                buffer[(column, row)].reset();
+                buffer[(column, row)].set_symbol(" ").set_style(style);
+            }
+
+            let glyph = if actions.contains(action) {
+                action.glyph()
+            } else {
+                ""
+            };
+            let padding_width =
+                usize::from(ROW_ACTION_WIDTH).saturating_sub(UnicodeWidthStr::width(glyph));
+            let terminal_run = format!("{glyph}{}", " ".repeat(padding_width));
+            buffer[(slot.x, row)]
+                .set_symbol(&terminal_run)
+                .set_style(style)
+                .set_diff_option(CellDiffOption::ForcedWidth(forced_width));
+        }
+    }
+}
+
 /// Exact node and screen row identified by tree hit testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeNodeHit {
@@ -268,6 +352,8 @@ pub struct TreeHoverState {
 pub struct TreeRenderOptions<'a> {
     pub focused: bool,
     pub elapsed_ms: u128,
+    /// Current wall-clock time used only for durable absolute countdowns.
+    pub current_unix_millis: u64,
     pub project_name: Option<&'a str>,
     pub is_project_name_loading: bool,
     /// Terminal panes currently awaiting `session_naming::infer_pane_title`
@@ -275,11 +361,32 @@ pub struct TreeRenderOptions<'a> {
     /// braille spinner instead, same visual language as `is_project_name_loading`.
     pub titles_loading: &'a HashSet<NodeId>,
     /// Node id -> `elapsed_ms`-relative offset (ms) at which this client
-    /// first observed the node existing -- see `App::recently_created`.
+    /// finished sliding into place -- see `App::recently_created`.
     pub recently_created: &'a HashMap<NodeId, u128>,
+    /// Client-only structural transition state. It may temporarily supply the
+    /// previous snapshot for exit rendering while `tree` remains authoritative.
+    pub transitions: &'a TreeTransitions,
     /// Resolved user-global presentation settings for detected agent types.
     pub agent_identifiers: &'a AgentIdentifierSettings,
+    pub tree_order: TreeOrder,
     pub hover: TreeHoverState,
+}
+
+/// Shared immutable inputs for one recursive item-tree build. Keeping these
+/// together prevents each new presentation concern from widening every
+/// recursive helper's signature independently.
+struct TreeItemBuildContext<'a> {
+    elapsed_ms: u128,
+    current_unix_millis: u64,
+    titles_loading: &'a HashSet<NodeId>,
+    recently_created: &'a HashMap<NodeId, u128>,
+    agent_identifiers: &'a AgentIdentifierSettings,
+    tree_order: TreeOrder,
+    panel_width: u16,
+    /// Full widget identifier paths that users have expanded. Folder nodes
+    /// are materialized only along these paths, so a large unopened subtree
+    /// never becomes render work merely because another row animates.
+    opened_paths: &'a HashSet<Vec<NodeId>>,
 }
 
 /// Builds the full recursive `TreeItem` tree from the root group's
@@ -288,55 +395,60 @@ pub struct TreeRenderOptions<'a> {
 /// Working spinner, WaitingBackground clock, and Done pulse animations.
 /// `panel_width` is the tree panel's current outer `Rect` width, used to
 /// pick each pane's short- vs long-form title -- see `display_title`.
-pub fn build_tree_items(
+fn build_tree_items(
     tree: &Tree,
-    elapsed_ms: u128,
-    titles_loading: &HashSet<NodeId>,
-    recently_created: &HashMap<NodeId, u128>,
-    agent_identifiers: &AgentIdentifierSettings,
-    panel_width: u16,
+    context: TreeItemBuildContext<'_>,
 ) -> Vec<TreeItem<'static, NodeId>> {
-    build_children(
+    build_children(tree, ROOT_ID, &context, &[])
+}
+
+/// Returns the authoritative tree-node ids in the exact order currently
+/// visible in the sidebar. Virtual filesystem descendants are deliberately
+/// omitted: they cannot be closed through IPC and never survive the removal
+/// of their owning [`NodeKind::Folder`] as independent tree nodes.
+pub(crate) fn visible_tree_node_ids(
+    tree: &Tree,
+    state: &TreeState<NodeId>,
+    tree_order: TreeOrder,
+) -> Vec<NodeId> {
+    let opened_paths = HashSet::new();
+    let items = build_tree_items(
         tree,
-        ROOT_ID,
-        elapsed_ms,
-        titles_loading,
-        recently_created,
-        agent_identifiers,
-        panel_width,
-    )
+        TreeItemBuildContext {
+            elapsed_ms: 0,
+            current_unix_millis: 0,
+            titles_loading: &HashSet::new(),
+            recently_created: &HashMap::new(),
+            agent_identifiers: &AgentIdentifierSettings::default(),
+            tree_order,
+            panel_width: 0,
+            opened_paths: &opened_paths,
+        },
+    );
+
+    state
+        .flatten(&items)
+        .into_iter()
+        .filter_map(|flattened| flattened.identifier.last().copied())
+        .filter(|node_id| tree.get(*node_id).is_some())
+        .collect()
 }
 
 /// Recursively builds `TreeItem`s for every child of `parent`.
 fn build_children(
     tree: &Tree,
     parent: NodeId,
-    elapsed_ms: u128,
-    titles_loading: &HashSet<NodeId>,
-    recently_created: &HashMap<NodeId, u128>,
-    agent_identifiers: &AgentIdentifierSettings,
-    panel_width: u16,
+    context: &TreeItemBuildContext<'_>,
+    ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
-    let Ok(children) = tree.children_of(parent) else {
-        // `parent` was a Pane (not a Group) or didn't exist -- neither is
-        // reachable from a valid tree walk starting at ROOT_ID, but fail
-        // soft rather than panic if the tree ever gets into that shape.
-        return Vec::new();
-    };
+    let children = tree_ordering::ordered_children(tree, parent, context.tree_order);
     children
-        .iter()
-        .filter_map(|&child_id| {
-            tree.get(child_id).map(|node| {
-                build_item(
-                    tree,
-                    node,
-                    elapsed_ms,
-                    titles_loading,
-                    recently_created,
-                    agent_identifiers,
-                    panel_width,
-                )
-            })
+        .into_iter()
+        .filter_map(|child_id| {
+            let mut identifier_path = ancestor_path.to_vec();
+            identifier_path.push(child_id);
+            tree.get(child_id)
+                .map(|node| build_item(tree, node, context, &identifier_path))
         })
         .collect()
 }
@@ -345,24 +457,13 @@ fn build_children(
 fn build_item(
     tree: &Tree,
     node: &Node,
-    elapsed_ms: u128,
-    titles_loading: &HashSet<NodeId>,
-    recently_created: &HashMap<NodeId, u128>,
-    agent_identifiers: &AgentIdentifierSettings,
-    panel_width: u16,
+    context: &TreeItemBuildContext<'_>,
+    identifier_path: &[NodeId],
 ) -> TreeItem<'static, NodeId> {
-    let flash_on = should_flash(node.id, recently_created, elapsed_ms);
+    let flash_on = should_flash(node.id, context.recently_created, context.elapsed_ms);
     match &node.kind {
         NodeKind::Container(container) => {
-            let children = build_children(
-                tree,
-                node.id,
-                elapsed_ms,
-                titles_loading,
-                recently_created,
-                agent_identifiers,
-                panel_width,
-            );
+            let children = build_children(tree, node.id, context, identifier_path);
             let icon = match container.split_orientation() {
                 Some(ilium_core::SplitOrientation::Vertical) => "▥",
                 Some(ilium_core::SplitOrientation::Horizontal) => "▤",
@@ -375,27 +476,47 @@ fn build_item(
             // the `Result` this returns is unreachable in practice.
             TreeItem::new(node.id, label, children).expect("sibling NodeIds are always unique")
         }
-        NodeKind::Pane { status, .. } => {
-            let label = pane_label(
-                status,
-                display_title(node, panel_width),
-                elapsed_ms,
-                titles_loading.contains(&node.id),
-                agent_identifiers,
+        NodeKind::Pane {
+            status,
+            scheduled_input,
+            ..
+        } => {
+            let label = scheduled_input.as_ref().map_or_else(
+                || {
+                    pane_label(
+                        status,
+                        display_title(node, context.panel_width),
+                        context.elapsed_ms,
+                        context.titles_loading.contains(&node.id),
+                        context.agent_identifiers,
+                    )
+                },
+                |scheduled_input| {
+                    scheduled_pane_label(
+                        status,
+                        display_title(node, context.panel_width),
+                        context.elapsed_ms,
+                        context.current_unix_millis,
+                        scheduled_input,
+                        context.titles_loading.contains(&node.id),
+                        context.agent_identifiers,
+                    )
+                },
             );
             TreeItem::new_leaf(node.id, apply_recent_pulse(label, flash_on))
         }
         NodeKind::Folder { path } => {
             let label = node_label(Span::raw("\u{1F5C0}"), None, Span::raw(node.name.clone()));
-            // A fresh budget per folder node/render -- see
-            // `MAX_FOLDER_TREE_ENTRIES` for why this exists.
-            let mut budget = MAX_FOLDER_TREE_ENTRIES;
-            TreeItem::new(
-                node.id,
-                apply_recent_pulse(label, flash_on),
-                folder_children(node.id, path, &mut budget),
-            )
-            .expect("folder node ids are unique")
+            // The root itself is a normal tree row. Once opened, its direct
+            // children are listed; each child directory recurses only after
+            // *that* exact virtual path has been expanded.
+            let children = if context.opened_paths.contains(identifier_path) {
+                folder_children(node.id, path, context, identifier_path)
+            } else {
+                Vec::new()
+            };
+            TreeItem::new(node.id, apply_recent_pulse(label, flash_on), children)
+                .expect("folder node ids are unique")
         }
     }
 }
@@ -413,25 +534,15 @@ fn virtual_folder_node_id(root: NodeId, path: &Path) -> NodeId {
 fn folder_children(
     root: NodeId,
     path: &Path,
-    budget: &mut usize,
+    context: &TreeItemBuildContext<'_>,
+    ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
-    if *budget == 0 {
-        // Read no further once the whole subtree's budget is spent --
-        // avoids the `read_dir` syscall entirely for branches beyond the cap.
-        return Vec::new();
-    }
     let Ok(entries) = std::fs::read_dir(path) else {
         return Vec::new();
     };
-    // `.take(*budget)` bounds how many `DirEntry`s this level ever reads and
-    // sorts, not just how many `TreeItem`s get built from them -- without it
-    // a single pathologically large flat directory (millions of files) would
-    // still fully enumerate and sort every entry before the per-item budget
-    // check below ever ran.
     let mut entries: Vec<_> = entries
         .flatten()
         .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
-        .take(*budget)
         .collect();
     entries.sort_by(|left, right| {
         let left_is_dir = left.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
@@ -442,10 +553,6 @@ fn folder_children(
     });
     let mut children = Vec::with_capacity(entries.len());
     for entry in entries {
-        if *budget == 0 {
-            break;
-        }
-        *budget -= 1;
         let path = entry.path();
         let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
         let label = node_label(
@@ -454,9 +561,15 @@ fn folder_children(
             Span::raw(entry.file_name().to_string_lossy().into_owned()),
         );
         let id = virtual_folder_node_id(root, &path);
+        let mut identifier_path = ancestor_path.to_vec();
+        identifier_path.push(id);
         let item = if is_dir {
-            TreeItem::new(id, label, folder_children(root, &path, budget))
-                .expect("filesystem ids are unique")
+            let children = if context.opened_paths.contains(&identifier_path) {
+                folder_children(root, &path, context, &identifier_path)
+            } else {
+                Vec::new()
+            };
+            TreeItem::new(id, label, children).expect("filesystem ids are unique")
         } else {
             TreeItem::new_leaf(id, label)
         };
@@ -465,32 +578,73 @@ fn folder_children(
     children
 }
 
-/// Resolves a virtual file/folder row to its current path. Re-reading makes
-/// a click safe when the filesystem changed after the previous render.
-pub fn folder_entry_path(tree: &Tree, id: NodeId) -> Option<(NodeId, PathBuf, bool)> {
+/// A currently-resolvable virtual filesystem row. `identifier_path` is the
+/// exact tree-widget path, not merely the synthetic leaf ID; nested folder
+/// expansion and selection must use the complete path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderEntry {
+    pub root_id: NodeId,
+    pub path: PathBuf,
+    pub is_directory: bool,
+    pub identifier_path: Vec<NodeId>,
+}
+
+/// Resolves a virtual file/folder row to its current path and full widget
+/// identifier path. Re-reading makes a click safe when the filesystem
+/// changed after the previous render.
+pub fn folder_entry(tree: &Tree, id: NodeId) -> Option<FolderEntry> {
     for node in tree.all_ids().filter_map(|node_id| tree.get(node_id)) {
         let NodeKind::Folder { path } = &node.kind else {
             continue;
         };
-        if let Some(found) = find_folder_entry(node.id, path, id) {
+        if let Some(found) = find_folder_entry(node.id, path, &tree_path(tree, node.id), id) {
             return Some(found);
         }
     }
     None
 }
 
-fn find_folder_entry(root: NodeId, path: &Path, target: NodeId) -> Option<(NodeId, PathBuf, bool)> {
+/// Reconstructs one persisted node's widget identifier path without leaking
+/// client `App` concerns into the filesystem renderer.
+fn tree_path(tree: &Tree, id: NodeId) -> Vec<NodeId> {
+    let mut path = vec![id];
+    let mut current = id;
+    while let Some(parent) = tree.parent_of(current) {
+        if parent == ROOT_ID {
+            break;
+        }
+        path.push(parent);
+        current = parent;
+    }
+    path.reverse();
+    path
+}
+
+fn find_folder_entry(
+    root: NodeId,
+    path: &Path,
+    ancestor_path: &[NodeId],
+    target: NodeId,
+) -> Option<FolderEntry> {
     for entry in std::fs::read_dir(path).ok()?.flatten() {
         if entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
         let entry_path = entry.path();
         let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
-        if virtual_folder_node_id(root, &entry_path) == target {
-            return Some((root, entry_path, is_dir));
+        let id = virtual_folder_node_id(root, &entry_path);
+        let mut identifier_path = ancestor_path.to_vec();
+        identifier_path.push(id);
+        if id == target {
+            return Some(FolderEntry {
+                root_id: root,
+                path: entry_path,
+                is_directory: is_dir,
+                identifier_path,
+            });
         }
         if is_dir {
-            if let Some(found) = find_folder_entry(root, &entry_path, target) {
+            if let Some(found) = find_folder_entry(root, &entry_path, &identifier_path, target) {
                 return Some(found);
             }
         }
@@ -526,7 +680,8 @@ fn should_flash(
 ) -> bool {
     recently_created
         .get(&node_id)
-        .map(|&created_offset_ms| elapsed_ms.saturating_sub(created_offset_ms))
+        .filter(|&&created_offset_ms| elapsed_ms >= created_offset_ms)
+        .map(|&created_offset_ms| elapsed_ms - created_offset_ms)
         .is_some_and(is_recently_created_flash_on)
 }
 
@@ -588,67 +743,21 @@ fn pane_label(
             None,
             Span::raw(title()),
         ),
-        PaneStatus::Agent(class, AgentActivity::Working) => {
-            let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-            let glyph = SPINNER_FRAMES[frame_index];
-            node_label(
-                Span::raw(agent_node_icon(class, agent_identifiers)),
-                Some(Span::raw(glyph.to_string())),
-                Span::raw(agent_title(class, &title(), agent_identifiers.mode)),
-            )
-        }
-        PaneStatus::Agent(class, AgentActivity::WaitingBackground) => {
-            // Slow clock sweep, not bold -- distinct from `Working`'s fast
-            // braille churn (calmer, lower-urgency animation) and from
-            // `WaitingApproval`'s bold "needs you" styling, since this is
-            // "blocked on background work the agent itself dispatched," not
-            // blocked on the user.
-            let frame_index =
-                (elapsed_ms / BACKGROUND_FRAME_MS) as usize % BACKGROUND_CLOCK_FRAMES.len();
-            let glyph = BACKGROUND_CLOCK_FRAMES[frame_index];
-            node_label(
-                Span::raw(agent_node_icon(class, agent_identifiers)),
-                Some(Span::raw(glyph.to_string())),
-                Span::raw(agent_title(class, &title(), agent_identifiers.mode)),
-            )
-        }
-        PaneStatus::Agent(class, AgentActivity::Done) => {
-            // Pulses bold on/off rather than changing color -- every agent
-            // status shares the same base text color, so "come look, I'm
-            // done" reads through boldness alone.
-            let bright = (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2);
-            let style = if bright {
-                Style::new().add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            let title = title();
-            node_label(
-                Span::raw(agent_node_icon(class, agent_identifiers)),
-                Some(Span::styled("\u{1F514}", style)),
-                Span::styled(
-                    format!(
-                        "{} — done",
-                        agent_title(class, &title, agent_identifiers.mode)
-                    ),
-                    style,
-                ),
-            )
-        }
-        PaneStatus::Agent(class, AgentActivity::WaitingApproval) => {
-            // Bold, not colored -- every agent status shares the same base
-            // text color; boldness alone signals "needs you."
-            let style = Style::new().add_modifier(Modifier::BOLD);
-            node_label(
-                Span::raw(agent_node_icon(class, agent_identifiers)),
-                Some(Span::styled("?", style)),
-                Span::styled(agent_title(class, &title(), agent_identifiers.mode), style),
-            )
-        }
-        PaneStatus::Agent(class, AgentActivity::Idle) => node_label(
-            Span::raw(agent_node_icon(class, agent_identifiers)),
-            Some(Span::raw("\u{25cf}")),
-            Span::raw(agent_title(class, &title(), agent_identifiers.mode)),
+        PaneStatus::Agent(class, activity) => agent_pane_label(
+            class,
+            *activity,
+            false,
+            title(),
+            elapsed_ms,
+            agent_identifiers,
+        ),
+        PaneStatus::AgentWithGoal(class, activity) => agent_pane_label(
+            class,
+            *activity,
+            true,
+            title(),
+            elapsed_ms,
+            agent_identifiers,
         ),
         PaneStatus::Editor { dirty: true } => node_label(
             Span::styled(TEXT_EDITOR_ICON, Style::new().fg(Color::Magenta)),
@@ -668,6 +777,156 @@ fn pane_label(
     }
 }
 
+/// Builds the agent portion of a tree row from independent activity and goal
+/// signals. Every activity therefore preserves the same checkered-flag rule.
+fn agent_pane_label(
+    class: &AgentClass,
+    activity: AgentActivity,
+    has_goal: bool,
+    title: String,
+    elapsed_ms: u128,
+    agent_identifiers: &AgentIdentifierSettings,
+) -> Line<'static> {
+    let node_icon = Span::raw(agent_node_icon(class, agent_identifiers));
+    match activity {
+        AgentActivity::Working => {
+            let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            agent_node_label(
+                node_icon,
+                Some(Span::raw(SPINNER_FRAMES[frame_index].to_string())),
+                has_goal,
+                Span::raw(agent_title(class, &title, agent_identifiers.mode)),
+            )
+        }
+        AgentActivity::WaitingBackground => {
+            let frame_index =
+                (elapsed_ms / BACKGROUND_FRAME_MS) as usize % BACKGROUND_CLOCK_FRAMES.len();
+            agent_node_label(
+                node_icon,
+                Some(Span::raw(BACKGROUND_CLOCK_FRAMES[frame_index].to_string())),
+                has_goal,
+                Span::raw(agent_title(class, &title, agent_identifiers.mode)),
+            )
+        }
+        AgentActivity::Done => {
+            let style = if (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2) {
+                Style::new().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            agent_node_label(
+                node_icon,
+                Some(Span::styled("\u{1F514}", style)),
+                has_goal,
+                Span::styled(
+                    format!(
+                        "{} — done",
+                        agent_title(class, &title, agent_identifiers.mode)
+                    ),
+                    style,
+                ),
+            )
+        }
+        AgentActivity::WaitingApproval => {
+            let style = Style::new().add_modifier(Modifier::BOLD);
+            agent_node_label(
+                node_icon,
+                Some(Span::styled("?", style)),
+                has_goal,
+                Span::styled(agent_title(class, &title, agent_identifiers.mode), style),
+            )
+        }
+        AgentActivity::Idle => agent_node_label(
+            node_icon,
+            Some(Span::raw("\u{25cf}")),
+            has_goal,
+            Span::raw(agent_title(class, &title, agent_identifiers.mode)),
+        ),
+    }
+}
+
+/// Overrides the ordinary activity glyph while a durable input is pending.
+/// The clock frame is indexed by remaining time, so as the quotient decreases
+/// the familiar half-hour sequence visibly runs backwards.
+fn scheduled_pane_label(
+    status: &PaneStatus,
+    name: &str,
+    elapsed_ms: u128,
+    current_unix_millis: u64,
+    scheduled_input: &ScheduledPaneInput,
+    is_title_loading: bool,
+    agent_identifiers: &AgentIdentifierSettings,
+) -> Line<'static> {
+    let remaining_millis = scheduled_input
+        .execute_at_unix_millis
+        .saturating_sub(current_unix_millis);
+    let frame_index = usize::try_from(
+        u128::from(remaining_millis) / BACKGROUND_FRAME_MS % BACKGROUND_CLOCK_FRAMES.len() as u128,
+    )
+    .unwrap_or(0);
+    let clock = BACKGROUND_CLOCK_FRAMES[frame_index];
+    let title = if is_title_loading {
+        let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+        SPINNER_FRAMES[frame_index].to_string()
+    } else {
+        name.to_string()
+    };
+    let countdown = human_readable_countdown(remaining_millis);
+    match status {
+        PaneStatus::PlainShell => node_label(
+            Span::styled(TERMINAL_ICON, Style::new().fg(Color::Gray)),
+            Some(Span::raw(clock.to_string())),
+            Span::raw(format!("{countdown} {title}")),
+        ),
+        PaneStatus::Agent(class, _) => agent_node_label(
+            Span::raw(agent_node_icon(class, agent_identifiers)),
+            Some(Span::raw(clock.to_string())),
+            false,
+            Span::raw(format!(
+                "{countdown} {}",
+                agent_title(class, &title, agent_identifiers.mode)
+            )),
+        ),
+        PaneStatus::AgentWithGoal(class, _) => agent_node_label(
+            Span::raw(agent_node_icon(class, agent_identifiers)),
+            Some(Span::raw(clock.to_string())),
+            true,
+            Span::raw(format!(
+                "{countdown} {}",
+                agent_title(class, &title, agent_identifiers.mode)
+            )),
+        ),
+        // The domain rejects scheduled input for non-terminal panes. Falling
+        // back keeps a malformed old snapshot renderable instead of panicking.
+        PaneStatus::Editor { .. } | PaneStatus::Board => pane_label(
+            status,
+            name,
+            elapsed_ms,
+            is_title_loading,
+            agent_identifiers,
+        ),
+    }
+}
+
+/// Rounds partial seconds up so a newly accepted 30-second timer says `30s`
+/// immediately, then chooses the shortest unambiguous clock-style phrase.
+fn human_readable_countdown(remaining_millis: u64) -> String {
+    let total_seconds = remaining_millis.saturating_add(999) / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = total_seconds % 3600 / 60;
+    let seconds = total_seconds % 60;
+    if hours > 0 {
+        return format!("{hours}h {minutes:02}m {seconds:02}s");
+    }
+    if minutes > 0 {
+        return format!("{minutes}m {seconds:02}s");
+    }
+    if seconds > 0 {
+        return format!("{seconds}s");
+    }
+    "now".to_string()
+}
+
 /// Builds a row label with fixed node-kind and activity icon columns, then
 /// the descriptive text. The columns are based on terminal display cells,
 /// not Rust string length, so a double-width emoji cannot shift one row's
@@ -683,6 +942,27 @@ fn node_label(
             activity_icon.unwrap_or_default(),
             ACTIVITY_ICON_COLUMN_WIDTH,
         ),
+        text,
+    ])
+}
+
+/// Builds an agent row with the persistent-goal badge beside its activity.
+fn agent_node_label(
+    node_icon: Span<'static>,
+    activity_icon: Option<Span<'static>>,
+    has_goal: bool,
+    text: Span<'static>,
+) -> Line<'static> {
+    if !has_goal {
+        return node_label(node_icon, activity_icon, text);
+    }
+    Line::from(vec![
+        fixed_width_icon_span(node_icon, NODE_ICON_COLUMN_WIDTH),
+        fixed_width_icon_span(
+            activity_icon.unwrap_or_default(),
+            ACTIVITY_ICON_COLUMN_WIDTH,
+        ),
+        fixed_width_icon_span(Span::raw("🏁"), GOAL_ICON_COLUMN_WIDTH),
         text,
     ])
 }
@@ -707,11 +987,7 @@ fn fixed_width_icon_column(icon: &str, column_width: usize) -> String {
 /// Human-readable name for an `AgentClass`, shown as a prefix before the
 /// pane's own name.
 fn agent_class_label(class: &AgentClass) -> String {
-    match class {
-        AgentClass::Claude => "Claude:".to_string(),
-        AgentClass::Codex => "Codex:".to_string(),
-        AgentClass::Other(name) => format!("{name}:"),
-    }
+    format!("{}:", class.label())
 }
 
 /// Chooses the first fixed-width column's glyph. Name/letter/hidden modes
@@ -724,19 +1000,22 @@ fn agent_node_icon(class: &AgentClass, settings: &AgentIdentifierSettings) -> &'
     match class {
         AgentClass::Claude => settings.claude_icon.glyph(),
         AgentClass::Codex => settings.codex_icon.glyph(),
+        AgentClass::Antigravity => settings.antigravity_icon.glyph(),
         AgentClass::Other(_) => AGENT_ICON,
     }
 }
 
 /// Produces the optional type prefix that precedes a pane's inferred/user
-/// title. Codex uses `X:` so Claude and Codex remain distinguishable at one
-/// letter, matching the settings screen's preview language.
+/// title. The provider registry reserves `C:`, `X:`, and `A:` for Claude,
+/// Codex, and Antigravity respectively, keeping each built-in distinct at one
+/// letter while arbitrary custom signatures retain their initial.
 fn agent_text_prefix(class: &AgentClass, mode: AgentIdentifierMode) -> String {
     match mode {
         AgentIdentifierMode::FullName => agent_class_label(class),
         AgentIdentifierMode::Letter => match class {
             AgentClass::Claude => "C:".to_string(),
             AgentClass::Codex => "X:".to_string(),
+            AgentClass::Antigravity => "A:".to_string(),
             AgentClass::Other(name) => name
                 .chars()
                 .next()
@@ -767,24 +1046,6 @@ pub fn list_area(area: Rect) -> Rect {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
         .split(inner)[0]
-}
-
-/// Returns the trailing strip row actions overlay while a row is hovered.
-/// Keeping this geometry shared by drawing and hit testing preserves the
-/// click targets without permanently taking these columns away from labels.
-fn row_action_strip_area(area: Rect) -> Rect {
-    let list = list_area(area);
-    if list.width < ROW_ACTION_TOTAL_WIDTH {
-        // Below this width, neither drawing nor hit testing can fit every
-        // action. Return an empty strip so the label keeps the whole row.
-        return Rect::new(list.right(), list.y, 0, list.height);
-    }
-    Rect::new(
-        list.right().saturating_sub(ROW_ACTION_TOTAL_WIDTH),
-        list.y,
-        ROW_ACTION_TOTAL_WIDTH,
-        list.height,
-    )
 }
 
 /// Returns the bottom two rows that reveal creation icons on hover.
@@ -844,7 +1105,7 @@ fn row_supports_retitle(tree: &Tree, id: NodeId) -> bool {
     matches!(
         tree.get(id).map(|node| &node.kind),
         Some(NodeKind::Pane {
-            status: PaneStatus::Agent(..) | PaneStatus::PlainShell,
+            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..) | PaneStatus::PlainShell,
             ..
         })
     )
@@ -877,12 +1138,7 @@ pub fn row_action_at(
     if row < list.y || row >= list.bottom() || position.y != row {
         return None;
     }
-    let action_strip = row_action_strip_area(area);
-    if action_strip.width < ROW_ACTION_TOTAL_WIDTH || !action_strip.contains(position) {
-        return None;
-    }
-    let index = usize::from((position.x - action_strip.x) / ROW_ACTION_WIDTH);
-    let action = TreeRowAction::ALL.get(index).copied()?;
+    let action = TreeRowActionStrip::from_tree_area(area)?.action_at(position)?;
     applicable_row_actions(tree, id)
         .contains(&action)
         .then_some(action)
@@ -921,33 +1177,46 @@ pub fn node_at_position(
 /// Caches the structural `TreeItem` list built with fixed/empty
 /// animation inputs (`elapsed_ms: 0`, no loading/recently-created state) --
 /// exactly what hit-testing needs and nothing that varies frame-to-frame.
-/// Rebuilding only happens when `version` (the caller's tree-change
-/// counter) actually changes, so a mouse-move flood over an unchanged tree
-/// costs one `Vec` lookup instead of a full recursive rebuild with a fresh
-/// heap-allocated label per node. See `App::tree_hit_test_cache`.
+/// Rebuilding only happens when `version` (the caller's tree-change counter)
+/// or `TreeOrder` changes, so a mouse-move flood over an unchanged view costs
+/// one `Vec` lookup instead of a full recursive rebuild with fresh labels.
+/// See `App::tree_hit_test_cache`.
 #[derive(Default)]
 pub struct TreeItemCache {
     version: Option<u64>,
+    tree_order: Option<TreeOrder>,
     items: Vec<TreeItem<'static, NodeId>>,
 }
 
 impl TreeItemCache {
     /// Returns the cached items for `tree`, rebuilding first if `version`
     /// doesn't match the last build this cache served.
-    pub fn get_or_build(&mut self, tree: &Tree, version: u64) -> &[TreeItem<'static, NodeId>] {
-        if self.version != Some(version) {
+    pub fn get_or_build(
+        &mut self,
+        tree: &Tree,
+        version: u64,
+        tree_order: TreeOrder,
+        opened_paths: &HashSet<Vec<NodeId>>,
+    ) -> &[TreeItem<'static, NodeId>] {
+        if self.version != Some(version) || self.tree_order != Some(tree_order) {
             // `panel_width` only selects which title text a label carries;
             // hit-testing only needs row structure and node identifiers, so
             // any width is correct here.
             self.items = build_tree_items(
                 tree,
-                0,
-                &HashSet::new(),
-                &HashMap::new(),
-                &AgentIdentifierSettings::default(),
-                0,
+                TreeItemBuildContext {
+                    elapsed_ms: 0,
+                    current_unix_millis: 0,
+                    titles_loading: &HashSet::new(),
+                    recently_created: &HashMap::new(),
+                    agent_identifiers: &AgentIdentifierSettings::default(),
+                    tree_order,
+                    panel_width: 0,
+                    opened_paths,
+                },
             );
             self.version = Some(version);
+            self.tree_order = Some(tree_order);
         }
         &self.items
     }
@@ -964,7 +1233,8 @@ pub(crate) fn any_recently_created_within_window(
     elapsed_ms: u128,
 ) -> bool {
     recently_created.values().any(|&created_offset_ms| {
-        elapsed_ms.saturating_sub(created_offset_ms) < RECENTLY_CREATED_PULSE_MS
+        elapsed_ms >= created_offset_ms
+            && elapsed_ms - created_offset_ms < RECENTLY_CREATED_PULSE_MS
     })
 }
 
@@ -979,11 +1249,16 @@ pub fn render(
 ) {
     let items = build_tree_items(
         tree,
-        options.elapsed_ms,
-        options.titles_loading,
-        options.recently_created,
-        options.agent_identifiers,
-        area.width,
+        TreeItemBuildContext {
+            elapsed_ms: options.elapsed_ms,
+            current_unix_millis: options.current_unix_millis,
+            titles_loading: options.titles_loading,
+            recently_created: options.recently_created,
+            agent_identifiers: options.agent_identifiers,
+            tree_order: options.tree_order,
+            panel_width: area.width,
+            opened_paths: state.opened(),
+        },
     );
     let block = theme::block(options.focused).title(theme::chrome_title(&sidebar_title(
         options.project_name,
@@ -1001,13 +1276,136 @@ pub fn render(
         .highlight_style(theme::selected_style());
     frame.render_stateful_widget(widget, list, state);
 
+    if let Some(presentation_tree) = options.transitions.presentation_tree(options.elapsed_ms) {
+        let presentation_items = build_tree_items(
+            presentation_tree,
+            TreeItemBuildContext {
+                elapsed_ms: options.elapsed_ms,
+                current_unix_millis: options.current_unix_millis,
+                titles_loading: options.titles_loading,
+                recently_created: options.recently_created,
+                agent_identifiers: options.agent_identifiers,
+                tree_order: options.tree_order,
+                panel_width: area.width,
+                opened_paths: state.opened(),
+            },
+        );
+        let mut presentation_state = copy_tree_state_for_presentation(state);
+        frame.render_widget(Clear, list);
+        let presentation_widget = TreeWidget::new(&presentation_items)
+            .expect("top-level presentation items have unique identifiers")
+            .highlight_style(theme::selected_style());
+        frame.render_stateful_widget(presentation_widget, list, &mut presentation_state);
+        apply_row_motions(
+            frame,
+            list,
+            &presentation_items,
+            &presentation_state,
+            options.transitions,
+            options.elapsed_ms,
+        );
+    } else {
+        apply_row_motions(
+            frame,
+            list,
+            &items,
+            state,
+            options.transitions,
+            options.elapsed_ms,
+        );
+    }
+
     draw_scrollbar(frame, area, &items, state);
 
     if let Some(hit) = options.hover.node {
-        draw_row_actions(frame, area, hit.row, applicable_row_actions(tree, hit.id));
+        if options
+            .transitions
+            .row_motion(hit.id, options.elapsed_ms)
+            .is_none()
+        {
+            draw_row_actions(frame, area, hit.row, applicable_row_actions(tree, hit.id));
+        }
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
         draw_toolbar(frame, area, options.hover.toolbar_action);
+    }
+}
+
+/// Copies interaction state into a throwaway renderer for the previous tree.
+/// The authoritative `TreeState` is still rendered against the new tree first,
+/// so hit testing and keyboard navigation never target a departing ghost row.
+fn copy_tree_state_for_presentation(state: &TreeState<NodeId>) -> TreeState<NodeId> {
+    let mut presentation_state = TreeState::default();
+    for identifier in state.opened() {
+        presentation_state.open(identifier.clone());
+    }
+    presentation_state.select(state.selected().to_vec());
+    presentation_state.scroll_down(state.get_offset());
+    presentation_state
+}
+
+/// Moves complete rendered rows at the buffer-cell level. Transforming after
+/// `tui-tree-widget` draws keeps indentation, selection background, activity
+/// icons, titles, and wide glyph continuation cells together as one row.
+fn apply_row_motions(
+    frame: &mut Frame,
+    list: Rect,
+    items: &[TreeItem<'static, NodeId>],
+    state: &TreeState<NodeId>,
+    transitions: &TreeTransitions,
+    elapsed_ms: u128,
+) {
+    let visible_items = state.flatten(items);
+    for (visible_row, item) in visible_items
+        .iter()
+        .skip(state.get_offset())
+        .take(usize::from(list.height))
+        .enumerate()
+    {
+        let Some(node_id) = item.identifier.last().copied() else {
+            continue;
+        };
+        let Some(motion) = transitions.row_motion(node_id, elapsed_ms) else {
+            continue;
+        };
+        let Ok(row_offset) = u16::try_from(visible_row) else {
+            continue;
+        };
+        translate_row_left(frame, list, list.y.saturating_add(row_offset), motion);
+    }
+}
+
+/// Applies one already-sampled transform without re-rendering or flattening.
+fn translate_row_left(frame: &mut Frame, list: Rect, row: u16, motion: TreeRowMotion) {
+    if motion.left_offset == 0 && !motion.is_dimmed {
+        return;
+    }
+
+    let buffer = frame.buffer_mut();
+    let mut cells = (list.x..list.right())
+        .map(|column| buffer[(column, row)].clone())
+        .collect::<Vec<_>>();
+    if motion.is_dimmed {
+        for cell in &mut cells {
+            cell.set_style(Style::new().add_modifier(Modifier::DIM));
+        }
+    }
+    for column in list.x..list.right() {
+        buffer[(column, row)].reset();
+    }
+    for (source_index, cell) in cells.into_iter().enumerate() {
+        let Ok(source_column_offset) = u16::try_from(source_index) else {
+            break;
+        };
+        if source_column_offset < motion.left_offset {
+            continue;
+        }
+        let destination_column = list
+            .x
+            .saturating_add(source_column_offset - motion.left_offset);
+        if destination_column < list.right() {
+            buffer[(destination_column, row)] = cell;
+        }
     }
 }
 
@@ -1078,35 +1476,11 @@ fn draw_scrollbar(
 /// (see `applicable_row_actions`), so e.g. a group or editor row never
 /// shows the retitle glyph it has no title-inference worker to back.
 fn draw_row_actions(frame: &mut Frame, area: Rect, row: u16, actions: &[TreeRowAction]) {
-    let action_strip = row_action_strip_area(area);
-    if action_strip.width < ROW_ACTION_TOTAL_WIDTH {
+    let Some(action_strip) = TreeRowActionStrip::from_tree_area(area) else {
         return;
-    }
+    };
     let style = theme::selected_style().add_modifier(Modifier::BOLD);
-
-    // Build one complete fixed-width line rather than overlaying five small
-    // widgets. Clearing exactly this hovered row keeps title glyphs out of
-    // the icon gaps while leaving every non-hovered row's full label visible.
-    let controls_area = Rect::new(action_strip.x, row, ROW_ACTION_TOTAL_WIDTH, 1);
-    frame.render_widget(Clear, controls_area);
-
-    let action_spans = TreeRowAction::ALL
-        .iter()
-        .map(|action| {
-            let glyph = if actions.contains(action) {
-                action.glyph()
-            } else {
-                ""
-            };
-            let blank_width =
-                usize::from(ROW_ACTION_WIDTH).saturating_sub(UnicodeWidthStr::width(glyph));
-            Span::styled(
-                format!("{glyph}{}", ROW_ACTION_BLANK.repeat(blank_width)),
-                style,
-            )
-        })
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(Line::from(action_spans)), controls_area);
+    action_strip.draw(frame.buffer_mut(), row, actions, style);
 }
 
 /// Draws the five creation buttons plus a caption row naming whichever one
@@ -1149,6 +1523,7 @@ fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction
 #[cfg(test)]
 mod tests {
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
     use super::*;
@@ -1182,6 +1557,168 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    fn render_tree_buffer(
+        tree: &Tree,
+        state: &mut TreeState<NodeId>,
+        transitions: &TreeTransitions,
+        recently_created: &HashMap<NodeId, u128>,
+        elapsed_ms: u128,
+    ) -> Buffer {
+        let area = Rect::new(0, 0, 40, 8);
+        let titles_loading = HashSet::new();
+        let agent_identifiers = AgentIdentifierSettings::default();
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    area,
+                    tree,
+                    state,
+                    TreeRenderOptions {
+                        focused: false,
+                        elapsed_ms,
+                        current_unix_millis: 0,
+                        project_name: None,
+                        is_project_name_loading: false,
+                        titles_loading: &titles_loading,
+                        recently_created,
+                        transitions,
+                        agent_identifiers: &agent_identifiers,
+                        tree_order: TreeOrder::Manual,
+                        hover: TreeHoverState::default(),
+                    },
+                );
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buffer_row_text(buffer: &Buffer, row: u16) -> String {
+        (buffer.area.x..buffer.area.right())
+            .map(|column| buffer[(column, row)].symbol())
+            .collect()
+    }
+
+    #[test]
+    fn row_translation_moves_the_complete_buffer_run_left_and_dims_it() {
+        let area = Rect::new(0, 0, 12, 2);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new("ABCDEFGHIJ"), area);
+                translate_row_left(
+                    frame,
+                    Rect::new(0, 0, 10, 1),
+                    0,
+                    TreeRowMotion {
+                        left_offset: 3,
+                        is_dimmed: true,
+                    },
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(&buffer_row_text(buffer, 0)[..7], "DEFGHIJ");
+        assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
+        assert_eq!(buffer[(7, 0)].symbol(), " ");
+    }
+
+    #[test]
+    fn added_row_slides_into_place_before_the_creation_blink() {
+        let mut previous_tree = Tree::new();
+        let group_id = previous_tree.add_group(ROOT_ID, "work").unwrap();
+        let mut new_tree = previous_tree.clone();
+        let pane_id = new_tree
+            .add_pane(
+                group_id,
+                "newly-created-pane",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let mut transitions = TreeTransitions::default();
+        let pulse_starts = transitions.observe_snapshot_change(&previous_tree, &new_tree, 0);
+        let recently_created = pulse_starts.into_iter().collect::<HashMap<_, _>>();
+        let mut state = TreeState::default();
+        state.open(vec![group_id]);
+        let pane_row = list_area(Rect::new(0, 0, 40, 8)).y + 1;
+
+        let entering =
+            render_tree_buffer(&new_tree, &mut state, &transitions, &recently_created, 0);
+        assert!(!buffer_row_text(&entering, pane_row).contains("newly-created-pane"));
+        assert!((entering.area.x..entering.area.right()).any(|column| {
+            entering[(column, pane_row)]
+                .modifier
+                .contains(Modifier::DIM)
+        }));
+
+        let settled = render_tree_buffer(
+            &new_tree,
+            &mut state,
+            &transitions,
+            &recently_created,
+            crate::tree_transitions::TREE_ENTRY_TRANSITION_MS,
+        );
+        assert!(buffer_row_text(&settled, pane_row).contains("newly-created-pane"));
+        assert!((settled.area.x..settled.area.right()).any(|column| {
+            settled[(column, pane_row)]
+                .modifier
+                .contains(Modifier::REVERSED)
+        }));
+        assert!(should_flash(
+            pane_id,
+            &recently_created,
+            crate::tree_transitions::TREE_ENTRY_TRANSITION_MS
+        ));
+    }
+
+    #[test]
+    fn removed_row_slides_left_then_disappears_from_the_presentation_tree() {
+        let mut previous_tree = Tree::new();
+        let group_id = previous_tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = previous_tree
+            .add_pane(
+                group_id,
+                "departing-pane",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let mut new_tree = previous_tree.clone();
+        new_tree.remove_node(pane_id).unwrap();
+        let mut transitions = TreeTransitions::default();
+        transitions.observe_snapshot_change(&previous_tree, &new_tree, 0);
+        let mut state = TreeState::default();
+        state.open(vec![group_id]);
+        let pane_row = list_area(Rect::new(0, 0, 40, 8)).y + 1;
+
+        let first = render_tree_buffer(&new_tree, &mut state, &transitions, &HashMap::new(), 0);
+        assert!(buffer_row_text(&first, pane_row).contains("departing-pane"));
+
+        let almost_gone = render_tree_buffer(
+            &new_tree,
+            &mut state,
+            &transitions,
+            &HashMap::new(),
+            crate::tree_transitions::TREE_ENTRY_TRANSITION_MS - 1,
+        );
+        assert!(!buffer_row_text(&almost_gone, pane_row).contains("departing-pane"));
+        assert!((almost_gone.area.x..almost_gone.area.right())
+            .any(|column| almost_gone[(column, pane_row)]
+                .modifier
+                .contains(Modifier::DIM)));
+
+        let gone = render_tree_buffer(
+            &new_tree,
+            &mut state,
+            &transitions,
+            &HashMap::new(),
+            crate::tree_transitions::TREE_ENTRY_TRANSITION_MS,
+        );
+        assert!(!buffer_row_text(&gone, pane_row).contains("departing-pane"));
+        assert_eq!(transitions.presentation_tree(220), None);
     }
 
     #[test]
@@ -1264,21 +1801,52 @@ mod tests {
     }
 
     #[test]
-    fn left_panel_uses_requested_icons_without_changing_the_rename_action() {
+    fn agent_goal_flag_sits_directly_after_the_activity_indicator() {
+        let settings = AgentIdentifierSettings::default();
+        let goal_line = pane_label(
+            &PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+            "Goal work",
+            0,
+            false,
+            &settings,
+        );
+        let ordinary_line = pane_label(
+            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            "Ordinary work",
+            0,
+            false,
+            &settings,
+        );
+
+        assert_eq!(
+            goal_line.spans[1].content.trim(),
+            SPINNER_FRAMES[0].to_string()
+        );
+        assert_eq!(goal_line.spans[2].content.trim_end(), "🏁");
+        assert_eq!(
+            UnicodeWidthStr::width(goal_line.spans[2].content.as_ref()),
+            GOAL_ICON_COLUMN_WIDTH
+        );
+        assert_eq!(ordinary_line.spans.len(), 3);
+    }
+
+    #[test]
+    fn row_actions_preserve_the_original_emoji_and_fit_their_fixed_slots() {
         assert_eq!(theme::PEN_ICON, "✏️");
         assert_eq!(TreeToolbarAction::Shell.glyph(), TERMINAL_ICON);
         assert_eq!(TreeToolbarAction::Editor.glyph(), TEXT_EDITOR_ICON);
         assert_eq!(TreeToolbarAction::Settings.glyph(), SETTINGS_ICON);
-        assert_eq!(TreeRowAction::Rename.glyph(), theme::PEN_ICON);
+        assert_eq!(TreeRowAction::Rename.glyph(), "✏️");
         assert_eq!(TreeRowAction::MoveUp.glyph(), "🔼");
         assert_eq!(TreeRowAction::MoveDown.glyph(), "🔽");
         assert_eq!(TreeRowAction::Close.glyph(), "🚫");
         assert_eq!(TreeRowAction::Retitle.glyph(), "♻️");
         for action in TreeRowAction::ALL {
-            assert!(
-                UnicodeWidthStr::width(action.glyph()) < usize::from(ROW_ACTION_WIDTH),
-                "{:?} must leave one blank display cell in its slot",
-                action
+            let glyph = action.glyph();
+            assert_eq!(
+                UnicodeWidthStr::width(glyph),
+                2,
+                "{action:?} must occupy the two emoji cells in its slot"
             );
         }
         assert!(UnicodeWidthStr::width(TERMINAL_ICON) < usize::from(TOOLBAR_BUTTON_WIDTH));
@@ -1314,7 +1882,7 @@ mod tests {
     fn tree_labels_use_action_columns_until_that_specific_row_is_hovered() {
         let area = Rect::new(0, 0, 40, 8);
         let list = list_area(area);
-        let action_strip = row_action_strip_area(area);
+        let action_strip = TreeRowActionStrip::from_tree_area(area).unwrap().area;
         assert_eq!(action_strip.right(), list.right());
         assert_eq!(action_strip.width, ROW_ACTION_TOTAL_WIDTH);
 
@@ -1337,11 +1905,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms: 0,
+                        current_unix_millis: 0,
                         project_name: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
+                        transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        tree_order: TreeOrder::Manual,
                         hover: TreeHoverState::default(),
                     },
                 );
@@ -1367,11 +1938,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms: 0,
+                        current_unix_millis: 0,
                         project_name: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
+                        transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        tree_order: TreeOrder::Manual,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
                                 id: first_group,
@@ -1387,7 +1961,7 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(
             buffer[(action_strip.x, list.y)].symbol(),
-            TreeRowAction::Rename.glyph()
+            format!("{} ", TreeRowAction::Rename.glyph())
         );
         for x in action_strip.x..action_strip.right() {
             assert_eq!(
@@ -1396,43 +1970,91 @@ mod tests {
                 "hovering the first row hid the second row's title at cell {x}"
             );
         }
-    }
-
-    #[test]
-    fn row_action_strip_erases_underlying_text_and_leaves_real_blank_gaps() {
-        let area = Rect::new(0, 0, 33, 6);
-        let row = 2;
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
 
         terminal
             .draw(|frame| {
-                frame.render_widget(
-                    Paragraph::new("x".repeat(usize::from(area.width))),
-                    Rect::new(area.x, row, area.width, 1),
+                render(
+                    frame,
+                    area,
+                    &tree,
+                    &mut state,
+                    TreeRenderOptions {
+                        focused: false,
+                        elapsed_ms: 0,
+                        current_unix_millis: 0,
+                        project_name: None,
+                        is_project_name_loading: false,
+                        titles_loading: &titles_loading,
+                        recently_created: &recently_created,
+                        transitions: &TreeTransitions::default(),
+                        agent_identifiers: &agent_identifiers,
+                        tree_order: TreeOrder::Manual,
+                        hover: TreeHoverState::default(),
+                    },
                 );
-                draw_row_actions(frame, area, row, &TreeRowAction::ALL);
             })
             .unwrap();
 
         let buffer = terminal.backend().buffer();
+        for x in action_strip.x..action_strip.right() {
+            assert_eq!(
+                buffer[(x, list.y)].symbol(),
+                "x",
+                "title did not return after row actions disappeared at cell {x}"
+            );
+        }
+    }
+
+    #[test]
+    fn row_action_strip_emits_each_emoji_and_spacer_as_one_atomic_diff() {
+        let area = Rect::new(0, 0, 33, 6);
+        let row = 2;
+        let mut previous = Buffer::empty(area);
+        previous.set_string(
+            area.x,
+            row,
+            "x".repeat(usize::from(area.width)),
+            Style::default(),
+        );
+        let mut next = previous.clone();
+        let action_strip = TreeRowActionStrip::from_tree_area(area).unwrap();
+        action_strip.draw(
+            &mut next,
+            row,
+            &TreeRowAction::ALL,
+            theme::selected_style().add_modifier(Modifier::BOLD),
+        );
+
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
-        assert_eq!(buffer[(controls_start - 1, row)].symbol(), "x");
+        assert_eq!(next[(controls_start - 1, row)].symbol(), "x");
+
+        // `ForcedWidth` makes Ratatui skip each emoji's two covered cells.
+        // Crossterm therefore receives exactly one update per complete slot,
+        // never a later adjacent purple-space update that can clip the icon.
+        let updates = previous.diff(&next);
+        assert_eq!(updates.len(), TreeRowAction::ALL.len());
 
         for (action_index, action) in TreeRowAction::ALL.into_iter().enumerate() {
             let action_x = controls_start + action_index as u16 * ROW_ACTION_WIDTH;
+            let (update_x, update_y, update_cell) = updates[action_index];
+            assert_eq!((update_x, update_y), (action_x, row));
             assert_eq!(
-                buffer[(action_x, row)].symbol(),
-                action.glyph(),
-                "slot {action_index} did not render its action glyph"
+                update_cell.symbol(),
+                format!("{} ", action.glyph()),
+                "slot {action_index} was not emitted as one emoji-plus-space run"
             );
-            let gap_x = controls_start
-                + action_index as u16 * ROW_ACTION_WIDTH
-                + ROW_ACTION_WIDTH.saturating_sub(1);
             assert_eq!(
-                buffer[(gap_x, row)].symbol(),
-                ROW_ACTION_BLANK,
-                "slot {action_index} did not erase its inter-icon gap"
+                update_cell.diff_option,
+                CellDiffOption::ForcedWidth(NonZeroU16::new(ROW_ACTION_WIDTH).unwrap()),
             );
+            assert_eq!(UnicodeWidthStr::width(update_cell.symbol()), 3);
+            assert_eq!(update_cell.bg, theme::accent_bg());
+
+            for covered_offset in 1..ROW_ACTION_WIDTH {
+                let covered_cell = &next[(action_x + covered_offset, row)];
+                assert_eq!(covered_cell.symbol(), " ");
+                assert_eq!(covered_cell.bg, theme::accent_bg());
+            }
         }
     }
 
@@ -1450,12 +2072,99 @@ mod tests {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "workspace").unwrap();
         let folder = tree.add_folder(group, root_path.clone()).unwrap();
+        let nested_id = virtual_folder_node_id(folder, &root_path.join("nested"));
         let virtual_id = virtual_folder_node_id(folder, &file_path);
 
         assert_eq!(
-            folder_entry_path(&tree, virtual_id),
-            Some((folder, file_path, false))
+            folder_entry(&tree, virtual_id),
+            Some(FolderEntry {
+                root_id: folder,
+                path: file_path,
+                is_directory: false,
+                identifier_path: vec![group, folder, nested_id, virtual_id],
+            })
         );
+        let _ = std::fs::remove_dir_all(root_path);
+    }
+
+    #[test]
+    fn folder_rows_materialize_only_along_expanded_paths_and_reach_deep_files() {
+        let root_path = std::env::temp_dir().join(format!(
+            "ilium-lazy-folder-tree-ui-{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root_path);
+        let nested_path = root_path.join("first").join("second");
+        std::fs::create_dir_all(&nested_path).expect("create nested folder fixture");
+        let file_path = nested_path.join("deep.rs");
+        std::fs::write(&file_path, "fn deep() {}\n").expect("write nested fixture file");
+
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "workspace").unwrap();
+        let folder = tree.add_folder(group, root_path.clone()).unwrap();
+        let first_id = virtual_folder_node_id(folder, &root_path.join("first"));
+        let second_id = virtual_folder_node_id(folder, &nested_path);
+
+        let mut opened_paths = HashSet::new();
+        let root_items = build_tree_items(
+            &tree,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                tree_order: TreeOrder::Manual,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+            },
+        );
+        assert!(root_items[0].children()[0].children().is_empty());
+
+        opened_paths.insert(vec![group, folder]);
+        let first_level_items = build_tree_items(
+            &tree,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                tree_order: TreeOrder::Manual,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+            },
+        );
+        let first_item = &first_level_items[0].children()[0].children()[0];
+        assert_eq!(*first_item.identifier(), first_id);
+        assert!(first_item.children().is_empty());
+
+        opened_paths.insert(vec![group, folder, first_id]);
+        opened_paths.insert(vec![group, folder, first_id, second_id]);
+        let deep_items = build_tree_items(
+            &tree,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                tree_order: TreeOrder::Manual,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+            },
+        );
+        let deep_file = &deep_items[0].children()[0].children()[0].children()[0].children()[0];
+        assert_eq!(
+            folder_entry(&tree, *deep_file.identifier()),
+            Some(FolderEntry {
+                root_id: folder,
+                path: file_path,
+                is_directory: false,
+                identifier_path: vec![group, folder, first_id, second_id, *deep_file.identifier()],
+            })
+        );
+
         let _ = std::fs::remove_dir_all(root_path);
     }
 
@@ -1545,6 +2254,64 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_pane_label_places_human_countdown_before_the_title() {
+        let line = scheduled_pane_label(
+            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            "Fix auth",
+            0,
+            1_000_000,
+            &ScheduledPaneInput {
+                execute_at_unix_millis: 4_661_000,
+                text: "continue".to_string(),
+                send_enter: true,
+            },
+            false,
+            &AgentIdentifierSettings::default(),
+        );
+
+        assert_eq!(line.spans[2].content, "1h 01m 01s Claude: Fix auth");
+    }
+
+    #[test]
+    fn scheduled_clock_frames_move_backwards_as_remaining_time_decreases() {
+        let deadline = 10_000 + 10 * BACKGROUND_FRAME_MS as u64;
+        let scheduled_input = ScheduledPaneInput {
+            execute_at_unix_millis: deadline,
+            text: String::new(),
+            send_enter: true,
+        };
+        let first = scheduled_pane_label(
+            &PaneStatus::PlainShell,
+            "shell",
+            0,
+            10_000,
+            &scheduled_input,
+            false,
+            &AgentIdentifierSettings::default(),
+        );
+        let second = scheduled_pane_label(
+            &PaneStatus::PlainShell,
+            "shell",
+            0,
+            10_000 + BACKGROUND_FRAME_MS as u64,
+            &scheduled_input,
+            false,
+            &AgentIdentifierSettings::default(),
+        );
+
+        assert_eq!(
+            first.spans[1].content.trim_end(),
+            BACKGROUND_CLOCK_FRAMES[10].to_string()
+        );
+        assert_eq!(
+            second.spans[1].content.trim_end(),
+            BACKGROUND_CLOCK_FRAMES[9].to_string()
+        );
+        assert_eq!(human_readable_countdown(0), "now");
+        assert_eq!(human_readable_countdown(61_001), "1m 02s");
+    }
+
+    #[test]
     fn pane_label_shows_the_braille_spinner_instead_of_the_name_while_title_inference_is_in_flight()
     {
         let line = pane_label(
@@ -1627,14 +2394,20 @@ mod tests {
             .unwrap();
         let mut recently_created = HashMap::new();
         recently_created.insert(fresh_pane, 0u128);
+        let opened_paths = HashSet::new();
 
         let items = build_tree_items(
             &tree,
-            0,
-            &HashSet::new(),
-            &recently_created,
-            &AgentIdentifierSettings::default(),
-            0,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &recently_created,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                tree_order: TreeOrder::Manual,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+            },
         );
         assert_eq!(items[0].children().len(), 2);
 
@@ -1654,6 +2427,18 @@ mod tests {
     }
 
     #[test]
+    fn wide_toolbar_exposes_every_registered_agent_provider() {
+        let actions: Vec<TreeToolbarAction> = toolbar_button_rects(Rect::new(0, 0, 80, 12))
+            .into_iter()
+            .map(|(action, _)| action)
+            .collect();
+
+        for provider in BuiltinAgentProvider::ALL {
+            assert!(actions.contains(&TreeToolbarAction::Agent(provider)));
+        }
+    }
+
+    #[test]
     fn toolbar_keeps_settings_right_aligned_without_overlapping_left_actions() {
         // `layout::MIN_TREE_WIDTH` (16) with a 1-cell border each side
         // leaves a 14-column-wide toolbar -- room for three left actions and
@@ -1664,7 +2449,7 @@ mod tests {
 
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 8, toolbar.y)),
-            Some(TreeToolbarAction::Codex)
+            Some(TreeToolbarAction::Agent(BuiltinAgentProvider::Claude))
         );
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 12, toolbar.y)),
@@ -1709,20 +2494,43 @@ mod tests {
 
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
         for (index, expected_action) in TreeRowAction::ALL.into_iter().enumerate() {
-            assert_eq!(
-                row_action_at(
-                    &tree,
-                    shell,
-                    area,
-                    5,
-                    Position::new(controls_start + index as u16 * ROW_ACTION_WIDTH, 5)
-                ),
-                Some(expected_action)
-            );
+            for slot_offset in 0..ROW_ACTION_WIDTH {
+                assert_eq!(
+                    row_action_at(
+                        &tree,
+                        shell,
+                        area,
+                        5,
+                        Position::new(
+                            controls_start + index as u16 * ROW_ACTION_WIDTH + slot_offset,
+                            5,
+                        ),
+                    ),
+                    Some(expected_action),
+                    "slot cell {slot_offset} did not map to {expected_action:?}",
+                );
+            }
         }
         assert_eq!(
             row_action_at(&tree, shell, area, 4, Position::new(controls_start, 5)),
             None
+        );
+    }
+
+    #[test]
+    fn row_action_strip_requires_its_complete_minimum_width() {
+        let too_narrow = Rect::new(0, 0, ROW_ACTION_TOTAL_WIDTH + 1, 8);
+        let exact_width = Rect::new(0, 0, ROW_ACTION_TOTAL_WIDTH + 2, 8);
+
+        assert_eq!(list_area(too_narrow).width, ROW_ACTION_TOTAL_WIDTH - 1);
+        assert!(TreeRowActionStrip::from_tree_area(too_narrow).is_none());
+        assert_eq!(list_area(exact_width).width, ROW_ACTION_TOTAL_WIDTH);
+        assert_eq!(
+            TreeRowActionStrip::from_tree_area(exact_width)
+                .unwrap()
+                .area
+                .width,
+            ROW_ACTION_TOTAL_WIDTH,
         );
     }
 
@@ -1770,13 +2578,19 @@ mod tests {
         state.open(vec![group]);
         let area = Rect::new(0, 0, 32, 12);
         let list = list_area(area);
+        let opened_paths = HashSet::new();
         let items = build_tree_items(
             &tree,
-            0,
-            &HashSet::new(),
-            &HashMap::new(),
-            &AgentIdentifierSettings::default(),
-            0,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                tree_order: TreeOrder::Manual,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+            },
         );
 
         assert_eq!(
@@ -1807,7 +2621,10 @@ mod tests {
             .unwrap();
 
         let mut cache = TreeItemCache::default();
-        let first = cache.get_or_build(&tree, 1).len();
+        let opened_paths = HashSet::new();
+        let first = cache
+            .get_or_build(&tree, 1, TreeOrder::Manual, &opened_paths)
+            .len();
         assert_eq!(first, 1);
 
         // A second call at the same version returns the same cached
@@ -1816,7 +2633,9 @@ mod tests {
         // guarantee (no rebuild happened) is covered by
         // `App::tree_node_at` being safe to call every mouse-move; this
         // just pins the observable contract (stable length per version).
-        let second = cache.get_or_build(&tree, 1).len();
+        let second = cache
+            .get_or_build(&tree, 1, TreeOrder::Manual, &opened_paths)
+            .len();
         assert_eq!(second, 1);
 
         // A second top-level group (not a second pane nested under the same
@@ -1826,8 +2645,33 @@ mod tests {
         let mut new_tree = Tree::new();
         new_tree.add_group(ROOT_ID, "group").unwrap();
         new_tree.add_group(ROOT_ID, "group-2").unwrap();
-        let third = cache.get_or_build(&new_tree, 2).len();
+        let third = cache
+            .get_or_build(&new_tree, 2, TreeOrder::Manual, &opened_paths)
+            .len();
         assert_eq!(third, 2);
+    }
+
+    #[test]
+    fn tree_item_cache_rebuilds_when_order_changes_at_the_same_tree_version() {
+        let mut tree = Tree::new();
+        let zebra = tree.add_group(ROOT_ID, "Zebra").unwrap();
+        let alpha = tree.add_group(ROOT_ID, "alpha").unwrap();
+        let mut cache = TreeItemCache::default();
+        let opened_paths = HashSet::new();
+
+        let manual_ids: Vec<NodeId> = cache
+            .get_or_build(&tree, 1, TreeOrder::Manual, &opened_paths)
+            .iter()
+            .map(|item| *item.identifier())
+            .collect();
+        let alphabetical_ids: Vec<NodeId> = cache
+            .get_or_build(&tree, 1, TreeOrder::NameAscending, &opened_paths)
+            .iter()
+            .map(|item| *item.identifier())
+            .collect();
+
+        assert_eq!(manual_ids, [zebra, alpha]);
+        assert_eq!(alphabetical_ids, [alpha, zebra]);
     }
 
     #[test]

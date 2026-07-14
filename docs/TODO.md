@@ -1,10 +1,109 @@
+# Responsive workspace search
+
+- [x] Keep query edits and native-cursor rendering on the immediate TUI path.
+- [x] Debounce workspace scans for one second and execute retained-history matching in one tracked background worker.
+- [x] Reject stale worker results by query revision and preserve exact result navigation.
+- [x] Run focused tests, release build/install, and verify the delayed search and visible cursor in an installed PTY.
+
+# Workspace search
+
+- [x] Search every attached terminal's retained output history and every open editor buffer from one full-screen command center.
+- [x] Add the sidebar search affordance, tree context-menu entry, result metadata, highlighted context, and direct result navigation.
+- [x] Cover terminal history, open-file matching, keyboard/mouse navigation, and exact jump behavior; rebuild/install and verify the full-screen UI with the installed binary under a real PTY.
+- [ ] Re-run workspace gates after the unrelated board/tree-transition test and strict-Clippy failures in the current dirty workspace are repaired.
+
+# Interactive Kanban navigation and editing
+
+- [x] Add a persisted 20-column default minimum width and horizontal board viewport whose render, scrollbar, keyboard, and mouse geometry share one source of truth.
+- [x] Remove redundant card labels and render visible drag source/drop-target feedback throughout a card drag.
+- [x] Make the aerated detail panel edit card title/body with immediate file or folder-backend persistence, including clickable persisted task checkboxes.
+- [x] Cover the new settings, layout, editing, checkbox, and drag behavior with focused and real PTY tests.
+- [x] Run workspace gates, rebuild/install, and verify every interaction through tmux with the installed binaries.
+
+# Kanban card previews and detail panel
+
+- [x] Add a validated, live-persisted Kanban Board setting for 1-10 preview lines with a default of 3.
+- [x] Render contiguous multi-line cards and a click-open, one-third-width full-detail panel from shared board geometry.
+- [x] Cover settings persistence, layout, rendering, mouse opening/closing, and detail scrolling with focused tests.
+- [x] Run workspace gates, rebuild/install, and verify the settings and card-detail flow through the real PTY/TUI.
+
+# File-backed board runtime repair
+
+- [x] Reproduce board creation and operation through the installed binary in an isolated tmux-controlled project.
+- [x] Fix every file-backed board interaction defect found by the runtime audit without changing the folder backend.
+- [x] Add focused regression and end-to-end PTY coverage for the repaired workflow.
+- [x] Run workspace gates, rebuild/install, and verify create, edit, move, reload, and reattach through tmux against the Markdown file.
+
+# Sidebar close successor selection
+
+- [x] Reconcile a removed selection against the sidebar's visible, configured ordering.
+- [x] Activate the next surviving row below the closed item, with a previous-row fallback at the end of the list.
+- [x] Cover pane, subtree, and automatic-order cases with focused regressions.
+- [ ] Run workspace gates, verify the real TUI close flow, rebuild, and install.
+
+# Codex initial-attach scrollback
+
+- [x] Reproduce the missing wheel scrollback and scrollbar with a real resumed Codex session inside an isolated tmux-controlled ilium instance.
+- [x] Add a per-connection attach barrier so live terminal output cannot overtake and then be erased by terminal replay.
+- [x] Cover the attach ordering and retained-history behavior with focused regressions, then run workspace gates.
+- [x] Rebuild, install, and verify the original resumed-Codex flow in the real TUI.
+
+# Markdown-backed board creation fixes
+
+- [x] Expose create-board-from-Markdown on a Markdown editor pane's left-tree context menu.
+- [x] Load existing Markdown headings and list items into a newly created file-backed board without overwriting the source file.
+- [x] Add focused regressions for context-menu eligibility, request routing, Markdown import, and tree-snapshot hydration.
+- [x] Run workspace gates, verify both flows in the real TUI, rebuild, and install.
+
+# Client-only restart from the tree menu
+
+- [x] Add an explicit client exit intent and expose Restart in every tree right-click menu.
+- [x] Re-exec the captured client executable with only the current project/session arguments, never a server restart/reset flag.
+- [x] Cover the menu, exit contract, and reconstructed invocation with focused regressions.
+- [x] Run workspace gates, prove the executable is reloaded while the detached server PID survives, rebuild, and install.
+
+# Correctly rendered tree row emoji actions
+
+- [x] Preserve the original emoji row actions while emitting every fixed-width slot as one atomic terminal run.
+- [x] Cover glyph width, atomic buffer diffs, complete strip painting, action ordering, and click geometry.
+- [x] Run workspace gates, verify the real TUI interaction, rebuild, and install.
+
+# Strict agent session-ID provenance
+
+- [x] Centralize Claude/Codex transcript identity and project-ownership validation.
+- [x] Replace permissive session-ID ranks with class-specific, project-clamped evidence and remove guess-only fallbacks.
+- [x] Reject corrupted cross-project resume bindings during snapshot restore and make fresh Claude IDs explicit at launch.
+- [x] Cover every discovery rank, duplicate/class-change clearing, cross-project restore, and title lookup with regression tests.
+- [x] Run focused and workspace gates, verify the live money/ilium isolation path, rebuild, and install.
+
+# Sidebar tree entry transitions
+
+- [x] Add client-owned, eased insertion/removal transition state at the render-cache boundary.
+- [x] Render removals sliding left and additions sliding right into place before the existing creation blink.
+- [x] Cover sequencing, timing, buffer movement, and snapshot reconciliation with focused tests.
+- [x] Run workspace gates, verify the real TUI interaction, rebuild, and install.
+
+# Sidebar tree ordering
+
+- [x] Add a validated, persisted client-side tree-order setting and pure recursive ordering rules for Manual, Type, Age up/down, and Name A-Z/Z-A.
+- [x] Add the checked Order by context submenu and the live User Appearance settings control.
+- [x] Make every manual arrow, drag/drop, and keyboard move restore Manual ordering, with focused regression coverage.
+- [x] Run focused and workspace gates, verify the real TUI interaction, rebuild, and install.
+
+# vt100 wide-character resize crash
+
+- [x] Vendor the unreleased upstream wide-character resize fix at the shared Cargo dependency boundary.
+- [x] Cover the exact 216-to-215-column erase panic through both the PTY reader and client render cache.
+- [x] Run the vendored-crate, targeted, workspace test, Clippy, and formatting gates.
+- [x] Rebuild and install the release binaries, restart this project session, and verify the fix is live.
+
 # Scheduled pane input countdown
 
-- [ ] Add the durable scheduled-input domain/IPC contract and detached-server executor. (IN PROGRESS)
-- [ ] Add the pane-only right-click action and aerated hours/minutes/seconds, text, and Enter dialog.
-- [ ] Render a human-readable countdown plus reverse clock animation before the pane title.
-- [ ] Cover validation, replacement, restore, execution, rendering, keyboard, and mouse behavior.
-- [ ] Run workspace gates, verify the real PTY/TUI flow, rebuild, and install.
+- [x] Add the durable scheduled-input domain/IPC contract and detached-server executor.
+- [x] Add the pane-only right-click action and aerated hours/minutes/seconds, text, and Enter dialog.
+- [x] Render a human-readable countdown plus reverse clock animation before the pane title.
+- [x] Cover validation, replacement, restore, execution, rendering, keyboard, and mouse behavior.
+- [x] Run workspace gates, verify the real PTY/TUI flow, rebuild, and install.
 
 # Configurable agent identifiers in the tree
 
@@ -121,3 +220,16 @@
 - [x] Persist automatic versus user-specified pane-title ownership in the core tree.
 - [x] Use completed input only while the original shell owns the foreground PTY, excluding agents and foreground applications.
 - [x] Verify cross-client updates, manual-name opt-out, formatting, clippy, workspace tests, release build, and local installation.
+
+# Recursive folder browser repair
+
+- [x] Trace virtual-row selection and expansion through the tree widget's full identifier-path contract.
+- [x] Materialize folder descendants lazily along expanded paths and preserve valid virtual expansion state across snapshots.
+- [x] Add nested folder/editor-open regression coverage and prove the complete interaction in an isolated tmux session.
+- [x] Run focused and workspace verification, rebuild, and install the repaired binaries.
+
+# Folder-picker mouse selection repair
+
+- [x] Make a repeat click on a visible folder choose that folder rather than the picker's current directory.
+- [x] Cover folder-overlay double-click selection and retain real PTY recursive folder coverage.
+- [x] Run focused and lint gates, rebuild/install, and prove the installed binary through the real PTY folder workflow.

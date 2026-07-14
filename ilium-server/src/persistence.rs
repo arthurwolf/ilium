@@ -15,14 +15,9 @@
 //! on `NewPane`), so duplicating a second schema for the same concept would
 //! violate DRY for no benefit.
 //!
-//! Known gap, deliberately deferred: this module does not yet resume an
-//! agent CLI's own session (`claude --resume <id>` / `codex resume <id>`)
-//! the way `workspace_file.rs`'s `SavedAgent::session_id` did -- that
-//! requires the session-ID screen-scraping logic in the pre-refactor bin
-//! crate's `agent_detect.rs`, which is app-level orchestration tied to
-//! pane-creation flows that don't exist in this crate yet. A pane
-//! recovered from a snapshot respawns as a fresh (non-resumed) invocation
-//! of the same command.
+//! The provider registry owns every built-in resume form (`claude --resume`,
+//! `codex resume`, and `agy --conversation`), so snapshot recovery does not
+//! have to duplicate provider-specific command parsing or reconstruction.
 //!
 //! Loading a snapshot on startup is implemented and tested here.
 //! Respawning its panes is `crate::run`'s job: on finding a snapshot, it
@@ -43,7 +38,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ilium_core::{NodeId, PaneContentKind, Tree, ROOT_ID};
+use ilium_agent_session::TranscriptLocator;
+use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, Tree, ROOT_ID};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
@@ -130,9 +126,10 @@ pub struct PaneSnapshot {
 pub async fn load_snapshot_or_migrate(
     snapshot_path: &Path,
     session_cwd: &Path,
+    home: &Path,
 ) -> Result<Option<SessionSnapshot>, ServerError> {
     if let Some(mut snapshot) = load_snapshot(snapshot_path).await? {
-        if normalize_duplicate_agent_resumes(&mut snapshot) {
+        if normalize_agent_resumes(&mut snapshot, home, session_cwd) {
             write_snapshot_to(snapshot_path, &snapshot).await?;
         }
         return Ok(Some(snapshot));
@@ -165,43 +162,70 @@ pub async fn load_snapshot_or_migrate(
     // session id on several titled panes; collapse those duplicates before
     // ever writing/spawning from this migrated snapshot, the same way a
     // reloaded native snapshot already does above.
-    normalize_duplicate_agent_resumes(&mut snapshot);
+    normalize_agent_resumes(&mut snapshot, home, session_cwd);
 
     write_snapshot_to(snapshot_path, &snapshot).await?;
     tracing::info!("imported legacy workspace into {}", snapshot_path.display());
     Ok(Some(snapshot))
 }
 
-/// Ensures one saved agent session is resumed by at most one pane. Legacy
-/// saves could incorrectly assign the same session id to several titled
-/// panes; resuming each copy opens identical agent conversations. Keep the
-/// first verifiable resume binding and start the remaining panes as fresh,
-/// independent agents rather than inventing session ids from pane titles.
-fn normalize_duplicate_agent_resumes(snapshot: &mut SessionSnapshot) -> bool {
+/// Keeps a persisted resume binding only when its transcript independently
+/// proves the same agent class, session UUID, and canonical project cwd. This
+/// also repairs older snapshots corrupted by inherited cross-project IDs and
+/// prevents one valid session from being resumed by multiple panes.
+fn normalize_agent_resumes(
+    snapshot: &mut SessionSnapshot,
+    home: &Path,
+    session_cwd: &Path,
+) -> bool {
+    let locator = TranscriptLocator::new(home, session_cwd);
     let mut seen_resumes = HashSet::new();
+    let mut invalid_automatic_titles = Vec::new();
     let mut changed = false;
     for pane in &mut snapshot.panes {
         let PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) = &mut pane.kind else {
             continue;
         };
-        let Some(agent_command) = resumed_agent_command(command) else {
+        let Some(binding) = persisted_resume_binding(command) else {
             continue;
         };
-        if seen_resumes.insert(command.clone()) {
+        let is_project_verified = locator
+            .transcript_for_session(&binding.provider.class(), &binding.session_id)
+            .is_some();
+        let is_unique = seen_resumes.insert(binding.session_id);
+        if is_project_verified && is_unique {
             continue;
         }
-        *command = agent_command.to_string();
+        *command = binding.provider.command_line().to_string();
+        invalid_automatic_titles.push((pane.node_id, binding.provider.command_line()));
         changed = true;
+    }
+    // A generated title is downstream of the same session binding. Once the
+    // binding fails provenance validation, retaining that automatic title
+    // would continue showing content from the wrong project even though the
+    // unsafe resume command itself was removed. User-specified titles remain
+    // protected by `set_automatic_pane_title`.
+    for (pane_id, bare_command) in invalid_automatic_titles {
+        let _ = snapshot
+            .tree
+            .set_automatic_pane_title(pane_id, bare_command, None);
     }
     changed
 }
 
-/// Returns the bare command only for a recognized persisted resume form.
-fn resumed_agent_command(command: &str) -> Option<&'static str> {
-    command
-        .starts_with("claude --resume ")
-        .then_some("claude")
-        .or_else(|| command.starts_with("codex resume ").then_some("codex"))
+struct PersistedResumeBinding {
+    provider: BuiltinAgentProvider,
+    session_id: String,
+}
+
+/// Parses only the exact resume commands ilium itself persists. Arbitrary
+/// shell commands containing similar words remain user-owned commands.
+fn persisted_resume_binding(command: &str) -> Option<PersistedResumeBinding> {
+    let (provider, session_id) = BuiltinAgentProvider::resume_binding(command)?;
+    Some(PersistedResumeBinding {
+        provider,
+        session_id,
+    })
 }
 
 impl LegacyWorkspace {
@@ -284,12 +308,13 @@ fn legacy_agent_origin(agent: LegacyAgent) -> TerminalOrigin {
     let Some(session_id) = agent.session_id else {
         return TerminalOrigin::Command(agent.command);
     };
+    if uuid::Uuid::try_parse(&session_id).is_err() {
+        return TerminalOrigin::Command(agent.command);
+    }
     let quoted_session_id = shell_quote(&session_id);
-    let command_line = match agent.command.as_str() {
-        "claude" => format!("claude --resume {quoted_session_id}"),
-        "codex" => format!("codex resume {quoted_session_id}"),
-        _ => agent.command,
-    };
+    let command_line = BuiltinAgentProvider::from_command_line(&agent.command)
+        .map(|provider| provider.resume_command(&quoted_session_id))
+        .unwrap_or(agent.command);
     TerminalOrigin::Command(command_line)
 }
 
@@ -329,18 +354,37 @@ async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
 /// Turns a freshly-launched agent command into its resume form once the
 /// detection loop has authoritatively discovered that CLI's session id.
 fn snapshot_terminal_origin(runtime: &crate::pane::TerminalPaneRuntime) -> TerminalOrigin {
-    let Some(session_id) = runtime.session_id.as_deref() else {
-        return runtime.origin.clone();
+    snapshot_origin_from_identity(
+        &runtime.origin,
+        runtime.session_id.as_deref(),
+        runtime.is_session_identity_invalidated,
+    )
+}
+
+/// Rebuilds only commands ilium itself owns as agent launch/resume forms.
+/// Arbitrary user commands are immutable. During an in-process transition,
+/// the previous resume ID is known stale, so a crash can safely restore only
+/// a fresh bare agent until the replacement identity is proven.
+fn snapshot_origin_from_identity(
+    origin: &TerminalOrigin,
+    session_id: Option<&str>,
+    is_session_identity_invalidated: bool,
+) -> TerminalOrigin {
+    let TerminalOrigin::Command(command) = origin else {
+        return origin.clone();
     };
-    match &runtime.origin {
-        TerminalOrigin::Command(command) if command == "claude" => {
-            TerminalOrigin::Command(format!("claude --resume {}", shell_quote(session_id)))
-        }
-        TerminalOrigin::Command(command) if command == "codex" => {
-            TerminalOrigin::Command(format!("codex resume {}", shell_quote(session_id)))
-        }
-        _ => runtime.origin.clone(),
+    let provider = BuiltinAgentProvider::from_command_line(command)
+        .or_else(|| persisted_resume_binding(command).map(|binding| binding.provider));
+    let Some(provider) = provider else {
+        return origin.clone();
+    };
+    if is_session_identity_invalidated {
+        return TerminalOrigin::Command(provider.command_line().to_string());
     }
+    let Some(session_id) = session_id else {
+        return origin.clone();
+    };
+    TerminalOrigin::Command(provider.resume_command(&shell_quote(session_id)))
 }
 
 /// Builds and writes the current snapshot to `state.snapshot_path`.
@@ -418,11 +462,12 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         source: SnapshotError::Json(source),
     })?;
 
-    let to_snapshot_io_error = |operation: &'static str, source: std::io::Error| ServerError::Snapshot {
-        operation,
-        path: path.to_path_buf(),
-        source: SnapshotError::Io(source),
-    };
+    let to_snapshot_io_error =
+        |operation: &'static str, source: std::io::Error| ServerError::Snapshot {
+            operation,
+            path: path.to_path_buf(),
+            source: SnapshotError::Io(source),
+        };
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     tokio::fs::create_dir_all(parent)
@@ -557,6 +602,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_scheduled_input_round_trips_with_the_session_snapshot() {
+        let path = scratch_snapshot_path();
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[0].node_id;
+        snapshot
+            .tree
+            .schedule_pane_input(
+                pane_id,
+                ilium_core::ScheduledPaneInput {
+                    execute_at_unix_millis: 9_999_999,
+                    text: "continue".to_string(),
+                    send_enter: true,
+                },
+            )
+            .unwrap();
+
+        write_snapshot_to(&path, &snapshot).await.unwrap();
+        let loaded = load_snapshot(&path).await.unwrap().unwrap();
+
+        assert_eq!(loaded, snapshot);
+        assert_eq!(loaded.tree.scheduled_pane_inputs().count(), 1);
+    }
+
+    #[test]
+    fn snapshots_from_before_scheduled_input_default_to_no_pending_action() {
+        fn remove_scheduled_input_fields(value: &mut serde_json::Value) {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    fields.remove("scheduled_input");
+                    for child in fields.values_mut() {
+                        remove_scheduled_input_fields(child);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        remove_scheduled_input_fields(item);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        remove_scheduled_input_fields(&mut old_shape);
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert_eq!(loaded.tree.scheduled_pane_inputs().count(), 0);
+    }
+
+    #[tokio::test]
     async fn a_second_save_overwrites_the_first_atomically_and_leaves_no_temp_file() {
         let path = scratch_snapshot_path();
         let first = sample_snapshot();
@@ -592,7 +688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrates_a_legacy_workspace_once_and_preserves_agent_resume_commands() {
+    async fn migrates_a_legacy_workspace_and_drops_unverifiable_resume_commands() {
         let directory = tempfile::tempdir().expect("tempdir");
         let legacy_directory = directory.path().join(".ilium");
         let legacy_path = legacy_directory.join("sessions.yml");
@@ -627,7 +723,7 @@ root:
         )
         .expect("write legacy workspace");
 
-        let snapshot = load_snapshot_or_migrate(&snapshot_path, directory.path())
+        let snapshot = load_snapshot_or_migrate(&snapshot_path, directory.path(), directory.path())
             .await
             .expect("migrate legacy workspace")
             .expect("migrated snapshot");
@@ -637,12 +733,12 @@ root:
         assert!(snapshot.panes.iter().any(|pane| matches!(
             &pane.kind,
             PaneSnapshotKind::Terminal(TerminalOrigin::Command(command))
-                if command == "claude --resume 'claude-session'"
+                if command == "claude"
         )));
         assert!(snapshot.panes.iter().any(|pane| matches!(
             &pane.kind,
             PaneSnapshotKind::Terminal(TerminalOrigin::Command(command))
-                if command == "codex resume 'codex-session'"
+                if command == "codex"
         )));
         assert_eq!(
             load_snapshot(&snapshot_path)
@@ -651,7 +747,7 @@ root:
             Some(snapshot)
         );
         assert_eq!(
-            load_snapshot_or_migrate(&snapshot_path, directory.path())
+            load_snapshot_or_migrate(&snapshot_path, directory.path(), directory.path(),)
                 .await
                 .expect("load existing native snapshot"),
             load_snapshot(&snapshot_path)
@@ -661,28 +757,71 @@ root:
     }
 
     #[test]
-    fn duplicate_agent_resume_bindings_become_fresh_independent_agents() {
+    fn cross_project_and_duplicate_resume_bindings_become_fresh_agents() {
+        let directory = tempfile::tempdir().unwrap();
+        let project_cwd = directory.path().join("money");
+        let other_cwd = directory.path().join("ilium");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        std::fs::create_dir_all(&other_cwd).unwrap();
+        let session_id = "11111111-1111-4111-8111-111111111111";
+        let rollout_directory = directory.path().join(".codex/sessions/2026/07/14");
+        std::fs::create_dir_all(&rollout_directory).unwrap();
+        std::fs::write(
+            rollout_directory.join(format!("rollout-2026-07-14T12-00-00-{session_id}.jsonl")),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": other_cwd}
+            })
+            .to_string(),
+        )
+        .unwrap();
         let mut snapshot = sample_snapshot();
+        let restored_group = snapshot.tree.add_group(ROOT_ID, "restored").unwrap();
+        let cross_project_pane = snapshot
+            .tree
+            .add_pane(
+                restored_group,
+                "Cross Project Title Must Not Survive",
+                PaneContentKind::Terminal,
+            )
+            .unwrap();
+        snapshot
+            .tree
+            .set_automatic_pane_title(
+                cross_project_pane,
+                "Cross Project Title Must Not Survive",
+                Some("Wrong Project".to_string()),
+            )
+            .unwrap();
+        let user_named_pane = snapshot
+            .tree
+            .add_pane(restored_group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        snapshot
+            .tree
+            .rename_node(user_named_pane, "My Persistent Name", None)
+            .unwrap();
         snapshot.panes.push(PaneSnapshot {
-            node_id: NodeId(99),
-            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(
-                "claude --resume 'same-session'".to_string(),
-            )),
+            node_id: cross_project_pane,
+            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                "codex resume '{session_id}'"
+            ))),
         });
         snapshot.panes.push(PaneSnapshot {
-            node_id: NodeId(100),
-            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(
-                "claude --resume 'same-session'".to_string(),
-            )),
+            node_id: user_named_pane,
+            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                "codex resume '{session_id}'"
+            ))),
         });
 
-        assert!(normalize_duplicate_agent_resumes(&mut snapshot));
+        assert!(normalize_agent_resumes(
+            &mut snapshot,
+            directory.path(),
+            &project_cwd
+        ));
 
         // Assert on the two specific node ids rather than `any`/count over the
-        // whole pane list -- this is the only way to actually verify the
-        // documented contract ("keep the *first* verifiable binding"): if the
-        // function instead kept node 100 and converted node 99, a looser
-        // `any`/count-based assertion would still pass.
+        // whole pane list so one repaired binding cannot conceal another.
         let command_for = |node_id: NodeId| {
             snapshot
                 .panes
@@ -697,14 +836,141 @@ root:
                 .expect("pane with this node id exists and is a command")
         };
         assert_eq!(
-            command_for(NodeId(99)),
-            "claude --resume 'same-session'",
-            "the first duplicate keeps its resume binding"
+            command_for(cross_project_pane),
+            "codex",
+            "a transcript owned by ilium cannot be resumed in money"
         );
         assert_eq!(
-            command_for(NodeId(100)),
-            "claude",
-            "the later duplicate becomes a fresh Claude invocation"
+            command_for(user_named_pane),
+            "codex",
+            "a duplicate cross-project binding is also removed"
+        );
+        let repaired_node = snapshot.tree.get(cross_project_pane).unwrap();
+        assert_eq!(repaired_node.name, "codex");
+        assert_eq!(repaired_node.short_name, None);
+        assert_eq!(
+            snapshot.tree.get(user_named_pane).unwrap().name,
+            "My Persistent Name",
+            "normalization must never overwrite a user-specified title"
+        );
+    }
+
+    #[test]
+    fn keeps_one_project_verified_resume_and_removes_its_duplicate() {
+        let directory = tempfile::tempdir().unwrap();
+        let project_cwd = directory.path().join("ilium");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        let session_id = "22222222-2222-4222-8222-222222222222";
+        let rollout_directory = directory.path().join(".codex/sessions/2026/07/14");
+        std::fs::create_dir_all(&rollout_directory).unwrap();
+        std::fs::write(
+            rollout_directory.join(format!("rollout-2026-07-14T12-00-00-{session_id}.jsonl")),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": project_cwd}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut snapshot = sample_snapshot();
+        let restored_group = snapshot.tree.add_group(ROOT_ID, "restored").unwrap();
+        let verified_pane = snapshot
+            .tree
+            .add_pane(
+                restored_group,
+                "Verified Project Title",
+                PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let duplicate_pane = snapshot
+            .tree
+            .add_pane(
+                restored_group,
+                "Duplicate Project Title",
+                PaneContentKind::Terminal,
+            )
+            .unwrap();
+        snapshot.panes.push(PaneSnapshot {
+            node_id: verified_pane,
+            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                "codex resume {session_id}"
+            ))),
+        });
+        snapshot.panes.push(PaneSnapshot {
+            node_id: duplicate_pane,
+            kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                "codex resume '{session_id}'"
+            ))),
+        });
+
+        assert!(normalize_agent_resumes(
+            &mut snapshot,
+            directory.path(),
+            &project_cwd
+        ));
+
+        let command_for = |node_id: NodeId| {
+            snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.node_id == node_id)
+                .and_then(|pane| match &pane.kind {
+                    PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) => {
+                        Some(command.as_str())
+                    }
+                    _ => None,
+                })
+                .expect("pane command")
+        };
+        assert_eq!(
+            command_for(verified_pane),
+            format!("codex resume {session_id}")
+        );
+        assert_eq!(command_for(duplicate_pane), "codex");
+        assert_eq!(
+            snapshot.tree.get(verified_pane).unwrap().name,
+            "Verified Project Title"
+        );
+        assert_eq!(snapshot.tree.get(duplicate_pane).unwrap().name, "codex");
+    }
+
+    #[test]
+    fn snapshot_rewrites_standard_agent_origins_from_current_identity() {
+        let old_session_id = "33333333-3333-4333-8333-333333333333";
+        let new_session_id = "44444444-4444-4444-8444-444444444444";
+        let old_origin =
+            TerminalOrigin::Command(format!("codex resume {}", shell_quote(old_session_id)));
+
+        assert_eq!(
+            snapshot_origin_from_identity(&old_origin, Some(new_session_id), false),
+            TerminalOrigin::Command(format!("codex resume {}", shell_quote(new_session_id)))
+        );
+        assert_eq!(
+            snapshot_origin_from_identity(&old_origin, None, true),
+            TerminalOrigin::Command("codex".to_string())
+        );
+        let old_antigravity_origin = TerminalOrigin::Command(format!(
+            "agy --conversation {}",
+            shell_quote(old_session_id)
+        ));
+        assert_eq!(
+            snapshot_origin_from_identity(&old_antigravity_origin, Some(new_session_id), false),
+            TerminalOrigin::Command(format!(
+                "agy --conversation {}",
+                shell_quote(new_session_id)
+            ))
+        );
+        assert_eq!(
+            snapshot_origin_from_identity(&old_antigravity_origin, None, true),
+            TerminalOrigin::Command("agy".to_string())
+        );
+        assert_eq!(
+            snapshot_origin_from_identity(
+                &TerminalOrigin::Command("custom-agent --resume value".to_string()),
+                Some(new_session_id),
+                true,
+            ),
+            TerminalOrigin::Command("custom-agent --resume value".to_string())
         );
     }
 }

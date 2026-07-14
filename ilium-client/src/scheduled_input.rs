@@ -4,6 +4,8 @@
 //! deliberately limited to collecting a relative duration plus the payload and
 //! producing a validated `ClientRequest` through `App`.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crossterm::event::KeyCode;
 use ilium_core::NodeId;
 use ratatui::layout::{Constraint, Direction, Flex, Layout, Rect};
@@ -14,6 +16,17 @@ use crate::text_prompt::{self, TextPromptState};
 const DEFAULT_SECONDS: &str = "30";
 const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
+
+/// Wall-clock value matching the detached server's persisted deadline unit.
+/// A pre-epoch clock falls back to zero so the countdown stays visible while
+/// the server reports the actual scheduling error through IPC.
+pub fn unix_millis_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .unwrap_or(0)
+}
 
 /// The currently active dialog control, ordered exactly as Tab traverses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,8 +78,8 @@ impl ScheduledInputDialogState {
     pub fn new(pane_id: NodeId) -> Self {
         Self {
             pane_id,
-            hours: TextPromptState::new("0"),
-            minutes: TextPromptState::new("0"),
+            hours: TextPromptState::new(""),
+            minutes: TextPromptState::new(""),
             seconds: TextPromptState::new(DEFAULT_SECONDS),
             text: TextPromptState::new(""),
             send_enter: true,
@@ -123,6 +136,9 @@ impl ScheduledInputDialogState {
     }
 
     pub fn handle_text_key(&mut self, code: KeyCode) {
+        if matches!(code, KeyCode::Char(character) if character.is_control()) {
+            return;
+        }
         let _ = text_prompt::handle_key(&mut self.text, code);
     }
 
@@ -237,13 +253,22 @@ mod tests {
         let mut state = ScheduledInputDialogState::new(NodeId(7));
         state.text = TextPromptState::new("status");
         state.send_enter = false;
-        assert_eq!(state.validated_request().unwrap(), (30, "status".to_string(), false));
+        assert_eq!(
+            state.validated_request().unwrap(),
+            (30, "status".to_string(), false)
+        );
 
         state.send_enter = true;
-        assert_eq!(state.validated_request().unwrap(), (30, "status".to_string(), true));
+        assert_eq!(
+            state.validated_request().unwrap(),
+            (30, "status".to_string(), true)
+        );
 
         state.text = TextPromptState::new("");
-        assert_eq!(state.validated_request().unwrap(), (30, String::new(), true));
+        assert_eq!(
+            state.validated_request().unwrap(),
+            (30, String::new(), true)
+        );
     }
 
     #[test]
@@ -252,10 +277,16 @@ mod tests {
         state.hours = TextPromptState::new("0");
         state.minutes = TextPromptState::new("0");
         state.seconds = TextPromptState::new("0");
-        assert_eq!(state.delay_seconds().unwrap_err(), "Choose a delay of at least one second");
+        assert_eq!(
+            state.delay_seconds().unwrap_err(),
+            "Choose a delay of at least one second"
+        );
 
         state.minutes = TextPromptState::new("60");
-        assert_eq!(state.delay_seconds().unwrap_err(), "Minutes must be between 0 and 59");
+        assert_eq!(
+            state.delay_seconds().unwrap_err(),
+            "Minutes must be between 0 and 59"
+        );
 
         state.minutes = TextPromptState::new("0");
         state.seconds = TextPromptState::new("1");
@@ -281,7 +312,9 @@ mod tests {
     fn dialog_layout_is_aerated_and_clamped_to_small_screens() {
         let screen = Rect::new(0, 0, 100, 30);
         let layout = dialog_layout(screen);
-        assert!(layout.popup.contains(Position::new(layout.hours.x, layout.hours.y)));
+        assert!(layout
+            .popup
+            .contains(Position::new(layout.hours.x, layout.hours.y)));
         assert!(layout.hours.right() < layout.minutes.x);
         assert!(layout.minutes.right() < layout.seconds.x);
         assert!(layout.text.y > layout.duration_label.y);

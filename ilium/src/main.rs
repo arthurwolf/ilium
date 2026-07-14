@@ -23,8 +23,10 @@
 mod error;
 mod session;
 
+use std::ffi::OsString;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command as ProcessCommand, ExitCode};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -129,6 +131,10 @@ async fn attach_or_create(
     should_reset_session: bool,
 ) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
+    // Capture this before the TUI starts. A later `make install` can replace
+    // the directory entry backing the running executable, but the original
+    // path remains the correct location from which Restart must load it.
+    let client_executable = std::env::current_exe().map_err(CliError::ResolveClientExecutable)?;
     if should_reset_session {
         session::reset_session(&project_session).await?;
     } else if should_restart_server {
@@ -136,13 +142,51 @@ async fn attach_or_create(
     } else {
         session::ensure_server_running(&project_session).await?;
     }
-    ilium_client::run(ilium_client::RunOptions {
-        session_name: project_session.name,
-        session_cwd: project_session.project_root,
-        socket_path: project_session.socket_path,
+    let exit_reason = ilium_client::run(ilium_client::RunOptions {
+        session_name: project_session.name.clone(),
+        session_cwd: project_session.project_root.clone(),
+        socket_path: project_session.socket_path.clone(),
     })
     .await?;
-    Ok(())
+    match exit_reason {
+        ilium_client::ClientExitReason::Quit => Ok(()),
+        ilium_client::ClientExitReason::RestartRequested => {
+            restart_client_process(&client_executable, &project_session)
+        }
+    }
+}
+
+/// Replaces this client process with the executable captured before the TUI
+/// started. The reconstructed invocation carries only project/session identity,
+/// so `--restart-server` and `--reset-session` can never leak into this path.
+fn restart_client_process(
+    executable_path: &Path,
+    project_session: &session::ProjectSession,
+) -> Result<(), CliError> {
+    let source = ProcessCommand::new(executable_path)
+        .args(client_restart_args(project_session))
+        .current_dir(&project_session.project_root)
+        .exec();
+    Err(CliError::RestartClient {
+        path: executable_path.to_path_buf(),
+        source,
+    })
+}
+
+/// Reconstructs the smallest CLI invocation that reattaches the same project
+/// session. Keeping this pure makes the no-server-lifecycle guarantee testable.
+fn client_restart_args(project_session: &session::ProjectSession) -> Vec<OsString> {
+    let mut arguments = vec![
+        OsString::from("--cwd"),
+        project_session.project_root.as_os_str().to_os_string(),
+    ];
+    if project_session.name != session::DEFAULT_SESSION_NAME {
+        arguments.extend([
+            OsString::from("new-session"),
+            OsString::from(&project_session.name),
+        ]);
+    }
+    arguments
 }
 
 fn list_sessions(cwd: &Path) -> Result<(), CliError> {
@@ -324,8 +368,49 @@ fn shell_quote_if_needed(argument: &str) -> String {
 }
 
 #[cfg(test)]
-mod shell_join_tests {
-    use super::shell_join;
+mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use super::{client_restart_args, session, shell_join};
+
+    fn project_session(name: &str) -> session::ProjectSession {
+        session::ProjectSession {
+            name: name.to_string(),
+            project_root: PathBuf::from("/work/project"),
+            socket_path: PathBuf::from("/tmp/session.sock"),
+            snapshot_path: PathBuf::from("/work/project/.ilium/sessions/session.json"),
+            log_path: PathBuf::from("/work/project/.ilium/logs/session.log"),
+        }
+    }
+
+    #[test]
+    fn restart_args_reattach_default_without_replaying_lifecycle_flags() {
+        let arguments = client_restart_args(&project_session(session::DEFAULT_SESSION_NAME));
+
+        assert_eq!(
+            arguments,
+            vec![OsString::from("--cwd"), OsString::from("/work/project")]
+        );
+    }
+
+    #[test]
+    fn restart_args_preserve_a_named_session_without_server_flags() {
+        let arguments = client_restart_args(&project_session("review"));
+
+        assert_eq!(
+            arguments,
+            vec![
+                OsString::from("--cwd"),
+                OsString::from("/work/project"),
+                OsString::from("new-session"),
+                OsString::from("review"),
+            ]
+        );
+        assert!(!arguments
+            .iter()
+            .any(|argument| { argument == "--restart-server" || argument == "--reset-session" }));
+    }
 
     #[test]
     fn bare_single_token_commands_round_trip_unquoted() {

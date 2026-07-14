@@ -188,6 +188,11 @@ pub enum SoundError {
         program: String,
         source: std::io::Error,
     },
+    #[error("failed while waiting for {program} to finish: {source}")]
+    WaitFailed {
+        program: String,
+        source: std::io::Error,
+    },
     #[error("{program} exited unsuccessfully ({status})")]
     Unsuccessful { program: String, status: ExitStatus },
     #[error("{program} did not finish within {PLAYBACK_TIMEOUT:?}")]
@@ -204,9 +209,14 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
     if matches!(
         previous,
         PaneStatus::Agent(_, AgentActivity::Working | AgentActivity::WaitingBackground)
+            | PaneStatus::AgentWithGoal(
+                _,
+                AgentActivity::Working | AgentActivity::WaitingBackground
+            )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done)
     ) {
         return Some(SoundEvent::AgentFinished);
     }
@@ -214,8 +224,12 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
     if !matches!(
         previous,
         PaneStatus::Agent(_, AgentActivity::WaitingApproval)
-    ) && matches!(new, PaneStatus::Agent(_, AgentActivity::WaitingApproval))
-    {
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval)
+    ) && matches!(
+        new,
+        PaneStatus::Agent(_, AgentActivity::WaitingApproval)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval)
+    ) {
         return Some(SoundEvent::ApprovalRequired);
     }
 
@@ -224,17 +238,27 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
         PaneStatus::Agent(
             _,
             AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval
+        ) | PaneStatus::AgentWithGoal(
+            _,
+            AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval
         )
-    ) && matches!(new, PaneStatus::Agent(_, AgentActivity::Working))
-    {
+    ) && matches!(
+        new,
+        PaneStatus::Agent(_, AgentActivity::Working)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Working)
+    ) {
         return Some(SoundEvent::AgentStarted);
     }
 
     if !matches!(
         previous,
         PaneStatus::Agent(_, AgentActivity::WaitingBackground)
-    ) && matches!(new, PaneStatus::Agent(_, AgentActivity::WaitingBackground))
-    {
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingBackground)
+    ) && matches!(
+        new,
+        PaneStatus::Agent(_, AgentActivity::WaitingBackground)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingBackground)
+    ) {
         return Some(SoundEvent::WaitingBackground);
     }
 
@@ -658,7 +682,7 @@ where
                 // return here without reaping would leak a zombie process.
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(SoundError::Launch {
+                return Err(SoundError::WaitFailed {
                     program: program.to_string(),
                     source,
                 });

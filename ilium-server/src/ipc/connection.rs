@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::ipc::handlers;
 use crate::state::ServerState;
@@ -26,6 +26,16 @@ use crate::state::ServerState;
 /// rather than letting the queue grow without bound while `write_replies`
 /// is stuck on a blocked socket write.
 const DIRECT_CHANNEL_CAPACITY: usize = 64;
+
+/// Per-connection replay phase shared by the request reader and event writer.
+/// Connections may issue lifecycle commands before attaching, so only the
+/// interval in which an Attach replay is actively being assembled is gated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachPhase {
+    Open,
+    Replaying,
+    Ready,
+}
 
 /// Drives one accepted connection to completion: concurrently reads
 /// requests (dispatching each one) and writes replies/broadcasts, until
@@ -39,9 +49,18 @@ where
     let (read_half, write_half) = tokio::io::split(stream);
     let (direct_tx, direct_rx) = mpsc::channel::<ServerEvent>(DIRECT_CHANNEL_CAPACITY);
     let broadcast_rx = state.events.subscribe();
+    // A connection subscribes to broadcasts before its Attach request is
+    // handled so it cannot miss output produced during the handshake. The
+    // writer must nevertheless hold those broadcasts until the complete
+    // attach replay is queued: otherwise a busy pane can send sequence N+1,
+    // then the client's later replay through N resets its parser and erases
+    // N+1 permanently. A watch channel lets the writer keep draining the
+    // bounded direct queue while the attach handler fills it, without ever
+    // admitting a broadcast across that cutover boundary.
+    let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
 
-    let reader = read_requests(Arc::clone(&state), read_half, direct_tx);
-    let writer = write_replies(write_half, broadcast_rx, direct_rx);
+    let reader = read_requests(Arc::clone(&state), read_half, direct_tx, attach_phase_tx);
+    let writer = write_replies(write_half, broadcast_rx, direct_rx, attach_phase_rx);
     tokio::join!(reader, writer);
 }
 
@@ -55,6 +74,7 @@ async fn read_requests<R>(
     state: Arc<ServerState>,
     mut read_half: R,
     direct_tx: mpsc::Sender<ServerEvent>,
+    attach_phase_tx: watch::Sender<AttachPhase>,
 ) where
     R: AsyncRead + Unpin,
 {
@@ -74,7 +94,21 @@ async fn read_requests<R>(
             }
         };
 
-        if handlers::handle_request(&state, request, &direct_tx).await {
+        let completes_attach = matches!(&request, ClientRequest::Attach { .. });
+        if completes_attach {
+            // Switch phases before the handler awaits or snapshots replay so
+            // output produced after the cutover cannot pass the direct batch.
+            attach_phase_tx.send_replace(AttachPhase::Replaying);
+        }
+        let should_close = handlers::handle_request(&state, request, &direct_tx).await;
+        // `handle_attach` only returns after every tree/replay/metadata event
+        // has entered `direct_tx`. Publishing the phase transition here gives
+        // the writer a precise barrier rather than relying on a momentarily
+        // empty direct queue or scheduler timing.
+        if completes_attach {
+            attach_phase_tx.send_replace(AttachPhase::Ready);
+        }
+        if should_close {
             break;
         }
     }
@@ -90,16 +124,44 @@ async fn write_replies<W>(
     mut write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<ServerEvent>,
     mut direct_rx: mpsc::Receiver<ServerEvent>,
+    mut attach_phase_rx: watch::Receiver<AttachPhase>,
 ) where
     W: AsyncWrite + Unpin,
 {
     loop {
+        // While an Attach handler is building its replay batch, drain direct
+        // events but leave broadcasts queued. A later Attach returns to this
+        // phase because reattachment has the same ordering contract.
+        if *attach_phase_rx.borrow() == AttachPhase::Replaying {
+            tokio::select! {
+                biased;
+                attach_changed = attach_phase_rx.changed() => {
+                    if attach_changed.is_err() {
+                        return;
+                    }
+                    continue;
+                },
+                direct_event = direct_rx.recv() => match direct_event {
+                    Some(event) => {
+                        if let Err(error) = write_frame(&mut write_half, &event).await {
+                            tracing::warn!("connection write failed during attach, closing: {error}");
+                            return;
+                        }
+                        continue;
+                    }
+                    None => return,
+                },
+            }
+        }
+
         let event = tokio::select! {
-            // Direct attach replies establish the tree and terminal replay
-            // before any queued live output is allowed onto this connection.
-            // `biased` makes that ordering deterministic when both channels
-            // are ready in the same poll.
             biased;
+            attach_changed = attach_phase_rx.changed() => {
+                if attach_changed.is_err() {
+                    return;
+                }
+                continue;
+            },
             direct_event = direct_rx.recv() => match direct_event {
                 Some(event) => event,
                 // The reader loop ended (Detach/KillSession/EOF/decode
@@ -171,5 +233,120 @@ async fn drain_pending_broadcasts<W>(
             tracing::warn!("connection write failed while draining final broadcasts: {error}");
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ilium_core::{NodeId, Tree};
+    use tokio::io::duplex;
+    use tokio::sync::{broadcast, mpsc, watch};
+    use tokio::time::{timeout, Duration};
+
+    use super::*;
+
+    /// A live chunk produced during Attach must remain behind the replay
+    /// cutover even when it reaches the broadcast receiver first. If it
+    /// overtakes replay, `TerminalView::apply_replay` resets the parser and
+    /// permanently erases that already-applied newer chunk.
+    #[tokio::test]
+    async fn live_broadcast_waits_for_complete_attach_replay() {
+        let (server_stream, mut client_stream) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
+        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Replaying);
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            attach_phase_rx,
+        ));
+
+        let live_event = ServerEvent::ScreenUpdate {
+            pane_id: NodeId(2),
+            sequence: 2,
+            bytes: b"live-after-replay".to_vec(),
+        };
+        broadcast_tx.send(live_event.clone()).unwrap();
+        // Give the writer an opportunity to observe the broadcast before any
+        // direct event exists. The attach barrier, not select timing, must be
+        // what holds it back.
+        tokio::task::yield_now().await;
+
+        let tree_event = ServerEvent::TreeSnapshot(Tree::new());
+        let replay_event = ServerEvent::TerminalReplay {
+            pane_id: NodeId(2),
+            through_sequence: 1,
+            bytes: b"retained-history".to_vec(),
+            is_complete: true,
+        };
+        direct_tx.send(tree_event.clone()).await.unwrap();
+        direct_tx.send(replay_event.clone()).await.unwrap();
+        attach_phase_tx.send_replace(AttachPhase::Ready);
+
+        let first = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let second = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let third = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(first, tree_event);
+        assert_eq!(second, replay_event);
+        assert_eq!(third, live_event);
+
+        drop(direct_tx);
+        drop(attach_phase_tx);
+        drop(broadcast_tx);
+        timeout(Duration::from_secs(1), writer)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Lifecycle-only clients issue commands before Attach and still need
+    /// their resulting broadcasts. The replay barrier must not turn the
+    /// connection's initial open phase into an implicit Attach requirement.
+    #[tokio::test]
+    async fn broadcast_before_attach_is_forwarded() {
+        let (server_stream, mut client_stream) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
+        let (_direct_tx, direct_rx) = mpsc::channel(8);
+        let (_attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            attach_phase_rx,
+        ));
+
+        let tree_event = ServerEvent::TreeSnapshot(Tree::new());
+        broadcast_tx.send(tree_event.clone()).unwrap();
+
+        let received = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(received, tree_event);
+
+        writer.abort();
     }
 }

@@ -47,6 +47,14 @@ pub enum CliError {
     SessionNotRunning(String),
     #[error("the server reported an error: {0}")]
     ServerReportedError(String),
+    #[error("could not resolve the running ilium client executable: {0}")]
+    ResolveClientExecutable(#[source] std::io::Error),
+    #[error("failed to restart ilium client from {path:?}: {source}")]
+    RestartClient {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Connection(#[from] ilium_client::connection::ConnectionError),
     #[error(transparent)]

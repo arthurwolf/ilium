@@ -67,6 +67,9 @@ async fn async_main(launch: ServerLaunch) -> ExitCode {
         socket_path: launch.socket_path,
         snapshot_path: launch.snapshot_path,
         session_cwd: launch.session_cwd,
+        home_dir: directories::BaseDirs::new()
+            .map(|directories| directories.home_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("/")),
         detection_config: server_config.detection,
         notifications_config: server_config.notifications,
         sound_settings: server_config.sound,

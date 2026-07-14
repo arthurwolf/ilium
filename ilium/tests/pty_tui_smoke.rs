@@ -242,6 +242,36 @@ async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::
     output
 }
 
+/// Finds the one socket owned by this test's isolated runtime directory and
+/// returns both its stable path and the detached server peer PID.
+async fn isolated_server_identity(xdg: &IsolatedXdgDirs) -> (PathBuf, u32) {
+    let socket_directory = xdg.runtime_dir.join("ilium");
+    let socket_paths = std::fs::read_dir(&socket_directory)
+        .unwrap_or_else(|error| {
+            panic!("read isolated socket directory {socket_directory:?}: {error}")
+        })
+        .map(|entry| entry.expect("read isolated socket entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        socket_paths.len(),
+        1,
+        "expected exactly one isolated session socket, got {socket_paths:?}"
+    );
+    let socket_path = socket_paths[0].clone();
+    let stream = tokio::net::UnixStream::connect(&socket_path)
+        .await
+        .unwrap_or_else(|error| {
+            panic!("connect to isolated server socket {socket_path:?}: {error}")
+        });
+    let process_id = stream
+        .peer_cred()
+        .expect("read isolated server peer credentials")
+        .pid()
+        .expect("isolated server socket should report a peer PID");
+    let process_id = u32::try_from(process_id).expect("server PID should fit u32");
+    (socket_path, process_id)
+}
+
 /// Writes `.ilium/config.yaml` with a pre-set project name into `cwd`,
 /// matching `ilium_client::project_config`'s on-disk format (a plain
 /// YAML mapping under the `project name` key) closely enough for
@@ -393,6 +423,95 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
+    // Move the real terminal pointer over the terminal row. This verifies
+    // the final PTY-rendered action strip, not only its in-memory TestBackend
+    // buffer: every action must remain visible, ordered, and separated after
+    // crossterm writes it to a vt100 terminal surface.
+    let terminal_rows = tui.with_screen(|screen| rows_containing(screen, "📟   cat"));
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "expected one terminal row before hovering its actions, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_move(8, terminal_rows[0]))
+        .expect("moving the pointer over the terminal row");
+    let row_actions_shown = wait_until(
+        || {
+            tui.with_screen(|screen| {
+                !rows_containing_in_order(screen, &["✏️", "🔼", "🔽", "🚫", "♻️"]).is_empty()
+            })
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        row_actions_shown,
+        "expected the complete original row actions after hover, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Open the real tree context menu with a right click, then activate its
+    // adjacent Order by submenu through the rendered menu row. The checked
+    // Manual label proves the submenu reflects the live setting before a
+    // different choice is selected.
+    let default_rows = tui.with_screen(|screen| rows_containing(screen, "default"));
+    assert_eq!(
+        default_rows.len(),
+        1,
+        "expected one default-group row before opening its context menu, got: {:?}",
+        tui.screen_text()
+    );
+    let context_column = 8;
+    tui.write(&sgr_mouse_down(2, context_column, default_rows[0]))
+        .expect("right-clicking the default group");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        "expected Order by in the tree context menu, got: {:?}",
+        tui.screen_text()
+    );
+    let order_rows = tui.with_screen(|screen| rows_containing(screen, "Order by"));
+    assert_eq!(
+        order_rows.len(),
+        1,
+        "expected one Order by action row, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_down(0, context_column + 1, order_rows[0]))
+        .expect("opening the Order by submenu");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("✓ Manual")
+                    && screen.contains("Type")
+                    && screen.contains("Age up (newest first)")
+                    && screen.contains("Age down (oldest first)")
+                    && screen.contains("Name A-Z")
+                    && screen.contains("Name Z-A")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the complete checked Order by submenu, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\x1b[B\x1b[B\r")
+        .expect("selecting Age down from the Order by submenu");
+    let age_order_persisted = wait_until(
+        || {
+            std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .unwrap_or_default()
+                .contains("tree_order = \"age_descending\"")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        age_order_persisted,
+        "expected context-menu ordering to persist, config={:?}",
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+    );
     // Structural assertion #2: input routing. `Ctrl+B` (0x02, selected in
     // this test's isolated config -- `ilium_client::keymap::is_leader_key`)
     // followed by `?` (`ilium_client::keymap::Action::Help`'s bound
@@ -423,13 +542,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // assertions cover actual rendered controls and persisted config rather
     // than only config/keymap units.
     tui.write(b"\x1b").expect("closing Help with Esc");
-    let help_closed = wait_until(
-        || !tui.screen_text().contains("keyboard reference"),
-        WAIT_TIMEOUT,
-    )
-    .await;
     assert!(
-        help_closed,
+        wait_until(|| !tui.screen_text().contains("keyboard reference"), WAIT_TIMEOUT).await,
         "expected Help to close before opening Settings"
     );
     tui.write(b"\x02S")
@@ -447,7 +561,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let agent_controls_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("Agent identifier")
+            screen.contains("Tree order")
+                && screen.contains("Age down (oldest first)")
+                && screen.contains("Agent identifier")
                 && screen.contains("Full name")
                 && screen.contains("Claude icon")
                 && screen.contains("🧠 Brain")
@@ -463,7 +579,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected all agent identifier controls in User Appearance, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\x1b[B\x1b[C\x1b[C\x1b[B\x1b[C\x1b[B\x1b[C")
+    tui.write(b"\x1b[B\x1b[B\x1b[B\x1b[C\x1b[C\x1b[B\x1b[C\x1b[B\x1b[C")
         .expect("selecting icon mode, Claude magic wand, and Codex tools");
     let agent_controls_persisted = wait_until(
         || {
@@ -546,10 +662,52 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the restored Ctrl+B preset to persist, got: {persisted_config:?}"
     );
 
-    // One more Tab enters the new Sound settings surface. Exercise a real
-    // event checkbox without activating Preview, so this remains a silent
-    // automated test while proving rendering, keyboard interaction, atomic
-    // config persistence, and live request dispatch all occur in the real TUI.
+    // The Kanban Board tab owns card compactness and column sizing
+    // independently from general appearance. Prove both defaults, live
+    // adjustment, and isolated persistence before continuing to Sound.
+    tui.write(b"\t")
+        .expect("switching to the Kanban Board settings tab");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Card preview lines")
+                    && screen.contains("‹ 3 ›")
+                    && screen.contains("Minimum column width")
+                    && screen.contains("‹ 20 ›")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the Kanban Board three-line default, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[C")
+        .expect("increase board card previews to four lines");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("card_preview_lines = 4")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected Kanban Board setting to persist"
+    );
+    tui.write(b"\x1b[B\x1b[C")
+        .expect("select and increase the minimum board column width");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("minimum_column_width = 21")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected minimum board column width to persist"
+    );
+
+    // Sound follows Kanban Board. Exercise a real event checkbox without
+    // activating Preview, so this remains a silent automated test while
+    // proving live request dispatch still occurs in the real TUI.
     tui.write(b"\t")
         .expect("switching to the Sound settings tab");
     let sound_tab_shown = wait_until(
@@ -616,6 +774,192 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "the pty-attached `ilium` process should exit on its own once `kill-session` \
          closes the connection, not need a force kill"
     );
+}
+
+/// Replaces the executable path underneath a live client with a marker shim,
+/// activates Restart through the real right-click menu, and proves the same
+/// process loads the replacement before reattaching to the untouched server.
+#[tokio::test]
+async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_keyboard_config(&xdg);
+    let project_dir = temp_root.path().join("client-restart-project");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&project_dir);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    // Start the detached server with a durable terminal fixture before the
+    // copied client attaches. The copied binary therefore never needs a
+    // sibling `ilium-server` executable in its temporary directory.
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating the client-restart fixture failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+    let (server_socket_before, server_process_id_before) = isolated_server_identity(&xdg).await;
+
+    // Run through a private hard link so the test can atomically replace
+    // exactly the path captured by `attach_or_create` without allocating a
+    // second binary-sized file or touching Cargo's shared test artifact.
+    let original_binary = std::fs::canonicalize(ilium_binary()).expect("canonicalize ilium binary");
+    let binary_directory = original_binary
+        .parent()
+        .expect("ilium binary should have a parent directory");
+    let restartable_path_guard = tempfile::Builder::new()
+        .prefix("ilium-client-restart-")
+        .tempfile_in(binary_directory)
+        .expect("reserve restartable binary path")
+        .into_temp_path();
+    std::fs::remove_file(&restartable_path_guard).expect("clear restartable binary path");
+    std::fs::hard_link(&original_binary, &restartable_path_guard)
+        .expect("hard-link restartable ilium binary");
+    let restartable_binary = restartable_path_guard.to_path_buf();
+    let restart_marker = temp_root.path().join("client-restarted.marker");
+
+    let attach_command = PtyCommand::new(
+        restartable_binary.to_string_lossy().to_string(),
+        &project_dir,
+        40,
+        120,
+    )
+    .arg("--cwd")
+    .arg(project_dir.to_string_lossy().to_string())
+    .env(
+        "ILIUM_RESTART_MARKER",
+        restart_marker.to_string_lossy().to_string(),
+    )
+    .env(
+        "ILIUM_RESTART_TARGET",
+        original_binary.to_string_lossy().to_string(),
+    );
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn restartable client under PTY");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains(PROJECT_NAME) && screen.contains("default")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected initial client UI before restart, got: {:?}",
+        tui.screen_text()
+    );
+    let client_process_id = tui.process_id().expect("client PTY should report a PID");
+    assert_eq!(
+        std::fs::read_link(format!("/proc/{client_process_id}/exe"))
+            .expect("read initial client executable"),
+        restartable_binary
+    );
+
+    // GNU install-style replacement unlinks the running image and installs a
+    // new directory entry. This shim records that the newly installed path was
+    // executed, then hands control back to the real test binary with the exact
+    // reconstructed project/session arguments.
+    let replacement_path_guard = tempfile::Builder::new()
+        .prefix("ilium-client-replacement-")
+        .tempfile_in(binary_directory)
+        .expect("reserve replacement client path")
+        .into_temp_path();
+    let replacement_binary = replacement_path_guard.to_path_buf();
+    std::fs::write(
+        &replacement_binary,
+        "#!/bin/sh\nprintf 'reloaded\\n' > \"$ILIUM_RESTART_MARKER\"\nexec \"$ILIUM_RESTART_TARGET\" \"$@\"\n",
+    )
+    .expect("write replacement client shim");
+    std::fs::set_permissions(&replacement_binary, std::fs::Permissions::from_mode(0o755))
+        .expect("make replacement client shim executable");
+    std::fs::rename(&replacement_binary, &restartable_binary)
+        .expect("atomically replace running client path");
+
+    let default_rows = tui.with_screen(|screen| rows_containing(screen, "default"));
+    assert_eq!(default_rows.len(), 1, "expected one default-group row");
+    let menu_column = 8;
+    tui.write(&sgr_mouse_down(2, menu_column, default_rows[0]))
+        .expect("right-click default group");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Restart"), WAIT_TIMEOUT).await,
+        "expected Restart in the real context menu, got: {:?}",
+        tui.screen_text()
+    );
+    let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
+    assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
+    tui.write(&sgr_mouse_down(0, menu_column + 1, restart_rows[0]))
+        .expect("click Restart context action");
+
+    assert!(
+        wait_until(|| restart_marker.is_file(), WAIT_TIMEOUT).await,
+        "replacement executable path was not loaded after Restart"
+    );
+    assert!(
+        wait_until(
+            || {
+                std::fs::read_link(format!("/proc/{client_process_id}/exe"))
+                    .is_ok_and(|path| path == original_binary)
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "client PID should have exec'd the replacement target"
+    );
+    assert_eq!(
+        tui.process_id(),
+        Some(client_process_id),
+        "exec should preserve the client PID while replacing its executable image"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains(PROJECT_NAME)
+                    && screen.contains("default")
+                    && !screen.contains("Restart")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "restarted client did not redraw the attached session, got: {:?}",
+        tui.screen_text()
+    );
+
+    let (server_socket_after, server_process_id_after) = isolated_server_identity(&xdg).await;
+    assert_eq!(server_socket_after, server_socket_before);
+    assert_eq!(server_process_id_after, server_process_id_before);
+
+    // Expansion state is intentionally client-local and resets on restart;
+    // expanding again must reveal the same server-owned terminal pane.
+    tui.write(b"\x02t\x1b[B\x1b[C")
+        .expect("focus tree and expand restored group");
+    assert!(
+        wait_until(|| tui.screen_text().contains("cat"), WAIT_TIMEOUT).await,
+        "expected the server-owned cat pane after client restart, got: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill restarted client");
+    }
+    assert!(exited, "restarted client should exit after session cleanup");
 }
 
 /// Drives split creation, multi-pane rendering, and focus-specific input
@@ -800,6 +1144,29 @@ fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
         .collect()
 }
 
+/// Returns terminal rows containing every needle from left to right. Exact
+/// spaces are intentionally ignored because vt100 and real terminal emulators
+/// can assign different presentation widths to VS16 emoji while preserving
+/// the fixed cell coordinates ilium sent.
+fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16> {
+    let cols = screen.size().1;
+    screen
+        .rows(0, cols)
+        .enumerate()
+        .filter(|(_, text)| {
+            let mut remainder = text.as_str();
+            for needle in needles {
+                let Some(offset) = remainder.find(needle) else {
+                    return false;
+                };
+                remainder = &remainder[offset + needle.len()..];
+            }
+            true
+        })
+        .map(|(index, _)| index as u16)
+        .collect()
+}
+
 /// True if any cell in `row` is currently rendered in inverse video --
 /// exactly what `ilium_client::tree_ui`'s creation-pulse flash
 /// (`Modifier::REVERSED`, applied by `apply_recent_pulse`) produces on a
@@ -820,12 +1187,46 @@ fn sgr_mouse_down(button: u8, column: u16, row: u16) -> Vec<u8> {
     .into_bytes()
 }
 
-/// Covers the feature this file's other test doesn't: a freshly created
-/// pane must visibly flash (so a click on the tree panel's creation
-/// toolbar is obviously followed by something appearing -- see
-/// `ilium_client::tree_ui`'s `RECENTLY_CREATED_PULSE_MS`/
-/// `apply_recent_pulse`), the flash must fade once its window elapses, and
-/// this must hold even when several panes are created in one burst.
+/// Encodes an xterm SGR left-button release. Tree selection starts drag
+/// tracking on press, so click-only tests must release explicitly to clear
+/// that state without accidentally carrying it into a later row action.
+fn sgr_mouse_up(column: u16, row: u16) -> Vec<u8> {
+    format!(
+        "\x1b[<0;{};{}m",
+        column.saturating_add(1),
+        row.saturating_add(1)
+    )
+    .into_bytes()
+}
+
+/// Encodes xterm SGR pointer motion while the left button remains held.
+/// Crossterm exposes this as `MouseEventKind::Drag(MouseButton::Left)`.
+fn sgr_mouse_drag(column: u16, row: u16) -> Vec<u8> {
+    format!(
+        "\x1b[<32;{};{}M",
+        column.saturating_add(1),
+        row.saturating_add(1)
+    )
+    .into_bytes()
+}
+
+/// Encodes pointer motion with no button held. Hover-only row actions are
+/// driven by this exact xterm SGR event in the real TUI.
+fn sgr_mouse_move(column: u16, row: u16) -> Vec<u8> {
+    format!(
+        "\x1b[<35;{};{}M",
+        column.saturating_add(1),
+        row.saturating_add(1)
+    )
+    .into_bytes()
+}
+
+/// Covers the feature this file's other test doesn't: a freshly created pane
+/// must first settle from its insertion slide, then visibly flash (so a click
+/// on the tree panel's creation toolbar is obviously followed by something
+/// appearing -- see `ilium_client::tree_transitions` and
+/// `ilium_client::tree_ui`'s `apply_recent_pulse`). The flash must fade once
+/// its window elapses, including when several panes are created in one burst.
 ///
 /// `Ctrl+A c` (`ilium_client::keymap::Action::NewTerminal`) drives exactly
 /// the same `App::action_new_terminal` the tree panel's "new shell"
@@ -899,8 +1300,12 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     tui.write(b"\x1b[B").expect("writing Down arrow");
     tui.write(b"\x1b[C").expect("writing Right arrow");
 
+    // Wait for the spatial insertion transition itself to settle, not merely
+    // for two partial labels to become visible while their rows are still
+    // moving right. The creation pulse starts only after this condition can
+    // become true, which pins the requested slide-then-blink sequence.
     let both_panes_listed = wait_until(
-        || tui.screen_text().matches("shell").count() >= 2,
+        || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 2),
         WAIT_TIMEOUT,
     )
     .await;
@@ -970,6 +1375,55 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     assert!(
         !second_still_flashing,
         "expected the second pane's flash to have faded by now, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Select the first pane and close it through the real leader action. While
+    // the authoritative tree already contains only one pane, the old snapshot
+    // should remain on screen briefly with one of the two labels translated
+    // left. Two names plus only one settled fixed-width label distinguishes
+    // that exit frame from both the pre-close and post-transition states.
+    tui.write(b"\x1b[B").expect("selecting the first pane row");
+    tui.write(b"\x01x")
+        .expect("writing Ctrl+A then x (ClosePane)");
+    let removal_motion_observed = wait_until(
+        || {
+            tui.screen_text().matches("shell").count() == 2
+                && tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 1)
+        },
+        Duration::from_millis(500),
+    )
+    .await;
+    assert!(
+        removal_motion_observed,
+        "expected one departing pane label to slide left before disappearing, got: {:?}",
+        tui.screen_text()
+    );
+    let transition_duration_ms =
+        u64::try_from(ilium_client::tree_transitions::TREE_ENTRY_TRANSITION_MS)
+            .expect("tree-entry transition duration should fit u64");
+    tokio::time::sleep(Duration::from_millis(transition_duration_ms + 100)).await;
+    let remaining_pane_rows = tui.with_screen(|screen| rows_containing(screen, "📟   shell").len());
+    assert_eq!(
+        remaining_pane_rows,
+        1,
+        "expected the departing pane row to disappear after its exit transition, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Closing the selected first pane must also activate the surviving row
+    // below it. Input now goes straight to that pane without another tree
+    // click or Enter, proving selection and right-panel routing together.
+    tui.write(b"printf 'close-successor-active\\n'\r")
+        .expect("writing into the automatically activated successor pane");
+    let successor_received_input = wait_until(
+        || tui.screen_text().contains("close-successor-active"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        successor_received_input,
+        "expected input to reach the successor selected after close, got: {:?}",
         tui.screen_text()
     );
 
@@ -1182,4 +1636,928 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         exited,
         "create-agent TUI did not exit after session cleanup"
     );
+}
+
+/// Proves both user-facing existing-Markdown entry points through the real
+/// mouse/keyboard TUI and detached server: a Markdown editor row's context
+/// action and the generic New board dialog's file picker. The source files
+/// use ordinary todo syntax (`#` plus `* [ ]`) rather than only ilium's
+/// canonical writer syntax, and creation must leave both files untouched.
+#[tokio::test]
+async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("board-project");
+    std::fs::create_dir_all(&project_dir).expect("create board project dir");
+    seed_project_config(&project_dir);
+    let context_source = "# Context column\n\n* [ ] Context task\n\n## Queue one\n\n## Queue two\n\n## Queue three\n\n## Queue four\n\n## Queue five\n";
+    let context_path = project_dir.join("context.md");
+    std::fs::write(&context_path, context_source).expect("write context Markdown");
+    let detail_lines = (0..60)
+        .map(|index| match index {
+            0 => "DETAIL TOP".to_string(),
+            59 => "DETAIL BOTTOM".to_string(),
+            _ => format!("Detail line {index:02}"),
+        })
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dialog_source = format!("# Dialog column\n\n* [ ] Dialog task\n{detail_lines}\n");
+    let dialog_path = project_dir.join("dialog.md");
+    std::fs::write(&dialog_path, &dialog_source).expect("write dialog Markdown");
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn board TUI under a PTY");
+    assert!(
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await,
+        "expected initial board TUI frame, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Open context.md as an editor, then use the general board dialog to bind
+    // a board to the same existing Markdown document.
+    tui.write(b"\x01e").expect("open editor file picker");
+    assert!(
+        wait_until(|| tui.screen_text().contains("context.md"), WAIT_TIMEOUT).await,
+        "expected Markdown files in editor picker, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\r")
+        .expect("select context.md below the parent entry");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Context task"), WAIT_TIMEOUT).await,
+        "expected context.md in editor, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x01B")
+        .expect("open context board creation dialog");
+    assert!(
+        wait_until(|| tui.screen_text().contains("New board"), WAIT_TIMEOUT).await,
+        "expected board creation dialog, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x7f\x7f\x7f\x7f\x7fContext\x10")
+        .expect("name context board and open its path picker");
+    assert!(
+        wait_until(|| tui.screen_text().contains("context.md"), WAIT_TIMEOUT).await,
+        "expected context.md in board path picker, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\r\r")
+        .expect("select context.md and create its board");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Context column")
+                    && screen.contains("[ ] Context task")
+                    && screen.contains("drop a card here")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected populated context-backed board, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Six columns cannot fit at the default 20-cell minimum. The board must
+    // expose a horizontal scrollbar and follow keyboard selection to columns
+    // outside the first page without narrowing the visible columns.
+    assert!(
+        tui.screen_text().contains('▶'),
+        "expected horizontal board scrollbar, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C")
+        .expect("navigate to the last context-board column");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Queue five"), WAIT_TIMEOUT).await,
+        "selected off-page column should scroll into view, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[D\x1b[D\x1b[D\x1b[D\x1b[D")
+        .expect("navigate back to the first context-board column");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Context column"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "first column should scroll back into view, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Cards use border state for selection and do not repeat generic `card`
+    // or `selected` titles along their top edge.
+    let context_card_row = tui.with_screen(|screen| rows_containing(screen, "[ ] Context task")[0]);
+    let context_card_border = tui.with_screen(|screen| {
+        let border_row = context_card_row.saturating_sub(1);
+        let columns = screen.size().1;
+        let border_start = (25..columns)
+            .find(|column| {
+                screen
+                    .cell(border_row, *column)
+                    .is_some_and(|cell| cell.contents() == "┌")
+            })
+            .expect("find Context task card border");
+        (border_start..border_start.saturating_add(20).min(columns))
+            .filter_map(|column| screen.cell(border_row, column))
+            .map(|cell| cell.contents())
+            .collect::<String>()
+            .to_lowercase()
+    });
+    assert!(!context_card_border.contains(" card "));
+    assert!(!context_card_border.contains(" selected "));
+
+    // A direct click on the rendered task marker toggles it and commits the
+    // Markdown document before any later input event.
+    let context_checkbox_column = tui.with_screen(|screen| {
+        let columns = screen.size().1;
+        (25..columns)
+            .find(|column| {
+                screen
+                    .cell(context_card_row, *column)
+                    .is_some_and(|cell| cell.contents() == "[")
+            })
+            .expect("find Context task checkbox")
+    });
+    tui.write(&sgr_mouse_down(
+        0,
+        context_checkbox_column + 1,
+        context_card_row,
+    ))
+    .expect("click Context task checkbox");
+    tui.write(&sgr_mouse_up(context_checkbox_column + 1, context_card_row))
+        .expect("release Context task checkbox");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&context_path)
+                .is_ok_and(|source| source.contains("- [x] Context task")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "checkbox click should save immediately"
+    );
+
+    // A complete click on the remaining card surface opens the editable
+    // title/body panel in the rightmost third.
+    let (context_card_column, context_card_row) = tui.with_screen(|screen| {
+        let row = rows_containing(screen, "[x] Context task")[0];
+        let columns = screen.size().1;
+        let column = (25..columns)
+            .find(|column| {
+                screen
+                    .cell(row, *column)
+                    .is_some_and(|cell| cell.contents() == "C")
+            })
+            .expect("find Context task card column");
+        (column, row)
+    });
+    tui.write(&sgr_mouse_down(0, context_card_column, context_card_row))
+        .expect("press Context task card");
+    tui.write(&sgr_mouse_up(context_card_column, context_card_row))
+        .expect("release Context task card");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Card details")
+                    && screen.contains("Title")
+                    && screen.contains("Notes")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected click-open card detail panel, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"!").expect("append to card title");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&context_path)
+                .is_ok_and(|source| source.contains("- [x] Context task!")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "title keystroke should save immediately"
+    );
+    tui.write(b"\tLive note")
+        .expect("switch to Notes and type a body");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&context_path)
+                .is_ok_and(|source| source.contains("  Live note")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "body keystrokes should save immediately"
+    );
+    tui.write(b"\x1b").expect("close card details with Escape");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("Card details"), WAIT_TIMEOUT).await,
+        "expected card detail panel to close, got: {:?}",
+        tui.screen_text()
+    );
+
+    // The generic New board path must make the same adapter decision. Its
+    // picker starts on `..`; context.md is first and dialog.md second, so two
+    // Down events select dialog.md before Enter returns to the create form.
+    tui.write(b"\x01B").expect("open New board dialog");
+    assert!(
+        wait_until(|| tui.screen_text().contains("New board"), WAIT_TIMEOUT).await,
+        "expected New board dialog, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"p")
+        .expect("type a literal p into the board name");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Boardp"), WAIT_TIMEOUT).await,
+        "plain p should edit the board name instead of opening Browse, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x7f\x10")
+        .expect("restore the name and open board path picker with Ctrl+P");
+    assert!(
+        wait_until(|| tui.screen_text().contains("dialog.md"), WAIT_TIMEOUT).await,
+        "expected dialog.md in board path picker, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\x1b[B\r")
+        .expect("select dialog.md below parent and context.md");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("New board") && screen.contains("dialog.md")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected selected dialog.md in create form, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("create dialog-backed board");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Dialog column") && screen.contains("[ ] Dialog task")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected populated dialog-backed board, got: {:?}",
+        tui.screen_text()
+    );
+    let edited_context_source = std::fs::read_to_string(&context_path).unwrap();
+    assert!(edited_context_source.contains("- [x] Context task!"));
+    assert!(edited_context_source.contains("  Live note"));
+    assert_eq!(
+        std::fs::read_to_string(&dialog_path).unwrap(),
+        dialog_source,
+        "dialog creation must not rewrite existing Markdown"
+    );
+
+    // Keyboard selection and Enter open the shared one-third detail editor.
+    // Long notes begin at their top and Esc restores the full board width.
+    tui.write(b"\x1b[B\r")
+        .expect("select Dialog task and open its details");
+    assert!(
+        wait_until(|| tui.screen_text().contains("DETAIL TOP"), WAIT_TIMEOUT).await,
+        "expected top of card details, got: {:?}",
+        tui.screen_text()
+    );
+    assert!(
+        !tui.screen_text().contains("DETAIL BOTTOM"),
+        "detail bottom should begin below the visible panel"
+    );
+    tui.write(b"\x1b").expect("close card details with Esc");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                !screen.contains("DETAIL TOP") && !screen.contains("DETAIL BOTTOM")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "detail body should disappear after Esc, got: {:?}",
+        tui.screen_text()
+    );
+    // Exercise the complete file-backed mutation path. The imported board
+    // starts with its column header selected, `n` adds a second card, and a
+    // real mouse drag must expose feedback before persisting its reorder.
+    tui.write(b"n").expect("open New card prompt");
+    assert!(
+        wait_until(|| tui.screen_text().contains("New card"), WAIT_TIMEOUT).await,
+        "expected New card prompt, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"Second task\r").expect("add second board card");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&dialog_path)
+                .is_ok_and(|source| source.contains("- Second task")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "second card should persist to Markdown"
+    );
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Second task") && screen.contains("[ ] Dialog task")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "persisted cards should render before their rows are used for mouse input, got: {:?}",
+        tui.screen_text()
+    );
+    let (second_task_column, second_task_row, dialog_task_row) = tui.with_screen(|screen| {
+        let second_task_row = rows_containing(screen, "Second task")[0];
+        let dialog_task_row = rows_containing(screen, "[ ] Dialog task")[0];
+        let columns = screen.size().1;
+        let second_task_column = (25..columns)
+            .find(|column| {
+                screen
+                    .cell(second_task_row, *column)
+                    .is_some_and(|cell| cell.contents() == "S")
+            })
+            .expect("find Second task text");
+        (second_task_column, second_task_row, dialog_task_row)
+    });
+    tui.write(&sgr_mouse_down(0, second_task_column, second_task_row))
+        .expect("press Second task for drag");
+    tui.write(&sgr_mouse_drag(second_task_column, dialog_task_row))
+        .expect("drag Second task above Dialog task");
+    assert!(
+        wait_until(|| tui.screen_text().contains('━'), WAIT_TIMEOUT).await,
+        "active card drag should show a visible insertion line, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_up(second_task_column, dialog_task_row))
+        .expect("drop Second task above Dialog task");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&dialog_path).is_ok_and(|source| {
+                source.contains("## Dialog column\n- Second task\n- [ ] Dialog task")
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "mouse drop should reorder cards in the Markdown file"
+    );
+
+    // Add a destination column, move the selected card across, then navigate
+    // from its first card back to the explicit column-header selection and
+    // rename that populated column. This was impossible when selection used
+    // an implicit always-present card index.
+    tui.write(b"cDone\r").expect("add Done column");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Done 0"), WAIT_TIMEOUT).await,
+        "expected empty Done column, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[D\x1b[B\x1b[1;2C")
+        .expect("select first card and move it to Done");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&dialog_path).is_ok_and(|source| {
+                source.contains("## Dialog column\n- [ ] Dialog task")
+                    && source.contains("## Done\n- Second task")
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "Shift+Right should move the card across columns"
+    );
+    tui.write(b"\x1b[Ae\x7f\x7f\x7f\x7fCompleted\r")
+        .expect("select and rename the populated Done column");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&dialog_path)
+                .is_ok_and(|source| source.contains("## Completed\n- Second task")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "populated column rename should persist"
+    );
+
+    // An out-of-band edit must be preserved. The stale local mutation is
+    // rejected and rolled back; `r` then adopts the external revision so a
+    // later edit can commit normally.
+    let external_source = std::fs::read_to_string(&dialog_path)
+        .unwrap()
+        .replace("- Second task\n", "- Second task\n- External task\n");
+    std::fs::write(&dialog_path, &external_source).expect("write external board revision");
+    tui.write(b"nStale task\r")
+        .expect("attempt mutation from stale board state");
+    assert!(
+        wait_until(
+            || tui
+                .screen_text()
+                .contains("press r to reload before editing"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected stale-write guidance, got: {:?}",
+        tui.screen_text()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&dialog_path).unwrap(),
+        external_source,
+        "stale board mutation must not overwrite the external edit"
+    );
+    tui.write(b"r\x1b[CnReloaded task\r")
+        .expect("reload external revision and commit a new card");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&dialog_path)
+                .is_ok_and(|source| source.contains("- Reloaded task")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "reloaded board should accept a new persisted mutation"
+    );
+
+    // Detach this client and attach a fresh one to the same detached server.
+    // The new client must hydrate the board from the final Markdown state.
+    tui.write(b"\x01q").expect("detach first board client");
+    assert!(
+        wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await,
+        "first board client should exit after detach"
+    );
+    let reattach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let reattach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(reattach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(reattach_command).expect("reattach board TUI under a PTY");
+    assert!(
+        wait_until(|| tui.screen_text().contains("▦    Board"), WAIT_TIMEOUT).await,
+        "fresh client should list the dialog-backed board, got: {:?}",
+        tui.screen_text()
+    );
+    let dialog_board_rows = tui.with_screen(|screen| rows_containing(screen, "▦    Board"));
+    assert_eq!(dialog_board_rows.len(), 1);
+    tui.write(&sgr_mouse_down(0, 8, dialog_board_rows[0]))
+        .expect("focus dialog-backed board after reattach");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Completed")
+                    && screen.contains("External task")
+                    && screen.contains("Reloaded task")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "fresh client should hydrate final board state, got: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill board TUI");
+    }
+    assert!(exited, "board TUI did not exit after session cleanup");
+}
+
+/// Drives the terminal-row context action, complete scheduling dialog,
+/// countdown rendering, and delayed PTY delivery through the real TUI and
+/// detached server. The live child is `cat`, so the submitted marker can be
+/// observed only after the server writes the scheduled text plus Enter.
+#[tokio::test]
+async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("scheduled-input-project");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&project_dir);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    // Create a deterministic terminal whose stdin is echoed back to its
+    // viewport, then attach the real TUI to the same isolated session.
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating scheduled-input fixture pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--restart-server")
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn scheduled-input TUI under PTY");
+
+    assert!(
+        wait_until(|| tui.screen_text().contains("default"), WAIT_TIMEOUT).await,
+        "expected default group in scheduled-input TUI, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Expand the group, select the `cat` pane, and display its viewport so
+    // delayed input is observable independently of the sidebar countdown.
+    tui.write(b"\x01t").expect("focus tree");
+    tui.write(b"\x1b[B").expect("select default group");
+    tui.write(b"\x1b[C").expect("expand default group");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("\u{1f4df}   cat"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected terminal row after expanding default group, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[B\r")
+        .expect("select and display the cat pane");
+
+    // Locate the actual rendered row and right-click it. The popup's second
+    // content row is the terminal-only scheduled-input action.
+    let terminal_rows = tui.with_screen(|screen| rows_containing(screen, "\u{1f4df}   cat"));
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "expected one terminal tree row, got: {:?}",
+        tui.screen_text()
+    );
+    let terminal_row = terminal_rows[0];
+    let menu_column = 8;
+    tui.write(&sgr_mouse_down(2, menu_column, terminal_row))
+        .expect("right-click terminal row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Hit key(s) X time from now"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected scheduled-input context action, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_down(0, menu_column + 1, terminal_row + 2))
+        .expect("click scheduled-input context action");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Schedule input for cat")
+                    && screen.contains("Hours")
+                    && screen.contains("Minutes")
+                    && screen.contains("Seconds")
+                    && screen.contains("Send Enter after the text")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected complete scheduled-input dialog, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Hours is initially focused. Move to Seconds, replace the default 30
+    // with four seconds, enter a distinctive payload, retain the checked
+    // Enter policy, and submit from the explicit button.
+    tui.write(b"\t\t\x7f\x7f4\tscheduled-live-marker\t\t\r")
+        .expect("fill and submit scheduled-input dialog");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("4s") && screen.contains("cat")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected live human countdown before pane title, got: {:?}",
+        tui.screen_text()
+    );
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("scheduled-live-marker"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected scheduled text plus Enter to reach cat after countdown, got: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill scheduled-input TUI");
+    }
+    assert!(
+        exited,
+        "scheduled-input TUI did not exit after session cleanup"
+    );
+}
+
+/// Proves the exact nested-boundary gesture through the real mouse/TUI,
+/// client request, detached server, and shared tree domain. The row starts
+/// below its nested group; clicking the rendered Up action must outdent it
+/// into the enclosing group immediately before that former parent.
+#[tokio::test]
+async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("p");
+    std::fs::create_dir_all(&project_dir).expect("create project dir");
+    seed_project_config(&project_dir);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fixture_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    assert!(
+        fixture_output.status.success(),
+        "creating boundary-move fixture failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&fixture_output.stdout),
+        String::from_utf8_lossy(&fixture_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--restart-server")
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn boundary-move TUI");
+
+    assert!(
+        wait_until(|| tui.screen_text().contains("default"), WAIT_TIMEOUT).await,
+        "expected default group in boundary-move TUI, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x01t\x1b[B\x1b[C")
+        .expect("focus tree, select default group, and expand it");
+
+    // The selected default group is the create dialog's preselected parent.
+    // Typing a name and pressing Enter therefore creates a genuinely nested
+    // group through the same UI path a user follows.
+    tui.write(b"\x01gnested\r")
+        .expect("create nested group through the real dialog");
+    assert!(
+        wait_until(|| tui.screen_text().contains("nested"), WAIT_TIMEOUT).await,
+        "expected nested group after dialog commit, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Select the nested group with a complete click, expand it, then create
+    // one plain shell using the normal leader action. This makes that shell
+    // both the first and last child, covering either boundary direction.
+    let nested_row = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
+    tui.write(&sgr_mouse_down(0, 8, nested_row))
+        .expect("press nested group row");
+    tui.write(&sgr_mouse_up(8, nested_row))
+        .expect("release nested group row");
+    tui.write(b"\x1b[C\x01c")
+        .expect("expand nested group and create its pane");
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 1),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected one shell inside nested group, got: {:?}",
+        tui.screen_text()
+    );
+
+    let nested_row_before = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
+    let shell_row_before = tui.with_screen(|screen| rows_containing(screen, "📟   shell"))[0];
+    assert!(
+        nested_row_before < shell_row_before,
+        "fixture pane must begin below its nested parent: {:?}",
+        tui.screen_text()
+    );
+
+    // Hover reveals the action overlay and expands the tree horizontally.
+    // Read the Up glyph's actual terminal cell rather than duplicating the
+    // renderer's animated width or fixed-slot geometry in this PTY test.
+    tui.write(&sgr_mouse_move(8, shell_row_before))
+        .expect("hover boundary pane row");
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    let columns = screen.size().1;
+                    (0..columns).any(|column| {
+                        screen
+                            .cell(shell_row_before, column)
+                            .is_some_and(|cell| cell.contents().contains("🔼"))
+                    })
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the hovered pane's Up control, got: {:?}",
+        tui.screen_text()
+    );
+    let move_up_column = tui.with_screen(|screen| {
+        let columns = screen.size().1;
+        (0..columns)
+            .find(|column| {
+                screen
+                    .cell(shell_row_before, *column)
+                    .is_some_and(|cell| cell.contents().contains("🔼"))
+            })
+            .expect("find rendered Up action column")
+    });
+    tui.write(&sgr_mouse_down(0, move_up_column, shell_row_before))
+        .expect("click boundary pane Up action");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    let nested_rows = rows_containing(screen, "nested");
+                    let shell_rows = rows_containing(screen, "📟   shell");
+                    nested_rows.len() == 1
+                        && shell_rows.len() == 1
+                        && shell_rows[0] < nested_rows[0]
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "clicked pane should exit immediately before its former group: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill boundary-move TUI");
+    }
+    assert!(exited, "boundary-move TUI did not exit after cleanup");
+}
+
+/// Drives the persisted folder browser through a real client/server TUI:
+/// create a root from the folder-only picker, expand four nested directory
+/// rows by mouse, then open the deep file. This protects the complete widget
+/// identifier path virtual rows need; selecting only a synthetic final ID
+/// makes the first level appear but breaks at the next directory.
+#[tokio::test]
+async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("folder-project");
+    let nested_directory = project_dir.join("alpha").join("beta").join("gamma");
+    std::fs::create_dir_all(&nested_directory).expect("create nested project folders");
+    let deep_file = nested_directory.join("deep.rs");
+    std::fs::write(
+        &deep_file,
+        "const DEEP_FOLDER_EDITOR_PROOF: &str = \"opened\";\n",
+    )
+    .expect("write deep editor fixture");
+    seed_project_config(&project_dir);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn folder-browser TUI");
+    assert!(
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await,
+        "expected initial TUI frame, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Folder-picker Enter intentionally selects its current directory, so
+    // this creates the project root without ever displaying ordinary files.
+    tui.write(b"\x01f").expect("open folder picker");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Open Folder"), WAIT_TIMEOUT).await,
+        "expected folder picker, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("select current project folder");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("folder-project") && !screen.contains("Open Folder")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected persisted folder root after picker closed, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Locate rows after each render so indentation never becomes a guessed
+    // coordinate; each click follows the same hit-test and expansion path a
+    // real user uses.
+    let root_rows = tui.with_screen(|screen| rows_containing(screen, "folder-project"));
+    assert_eq!(root_rows.len(), 1, "expected one folder-root row");
+    tui.write(&sgr_mouse_down(0, 8, root_rows[0]))
+        .expect("expand folder root");
+    tui.write(&sgr_mouse_up(8, root_rows[0]))
+        .expect("release folder-root click");
+    assert!(
+        wait_until(|| tui.screen_text().contains("alpha"), WAIT_TIMEOUT).await,
+        "expected first nested directory, got: {:?}",
+        tui.screen_text()
+    );
+    for (directory, next_entry) in [("alpha", "beta"), ("beta", "gamma"), ("gamma", "deep.rs")] {
+        let rows = tui.with_screen(|screen| rows_containing(screen, directory));
+        assert_eq!(rows.len(), 1, "expected one {directory:?} row");
+        tui.write(&sgr_mouse_down(0, 8, rows[0]))
+            .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
+        tui.write(&sgr_mouse_up(8, rows[0]))
+            .unwrap_or_else(|error| panic!("release {directory} click: {error}"));
+        assert!(
+            wait_until(|| tui.screen_text().contains(next_entry), WAIT_TIMEOUT).await,
+            "expected {next_entry:?} after expanding {directory:?}, got: {:?}",
+            tui.screen_text()
+        );
+    }
+    assert!(
+        wait_until(|| tui.screen_text().contains("deep.rs"), WAIT_TIMEOUT).await,
+        "expected deep file after recursive expansion, got: {:?}",
+        tui.screen_text()
+    );
+
+    let file_rows = tui.with_screen(|screen| rows_containing(screen, "deep.rs"));
+    assert_eq!(file_rows.len(), 1, "expected one deep file row");
+    tui.write(&sgr_mouse_down(0, 8, file_rows[0]))
+        .expect("open deep file in editor");
+    tui.write(&sgr_mouse_up(8, file_rows[0]))
+        .expect("release deep-file click");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("DEEP_FOLDER_EDITOR_PROOF"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected deep file editor content, got: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill folder-browser TUI");
+    }
+    assert!(exited, "folder-browser TUI did not exit after cleanup");
 }

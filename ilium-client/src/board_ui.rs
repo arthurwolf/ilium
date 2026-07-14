@@ -1,0 +1,737 @@
+//! Shared Kanban board rendering and pointer geometry.
+//!
+//! Card height, contiguous placement, detail-panel allocation, and mouse
+//! hit-testing all originate here so changing the preview-line setting cannot
+//! make clicks drift away from what the terminal actually shows.
+
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Position, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{
+    Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget, Wrap,
+};
+use ratatui::Frame;
+
+use crate::board::{checkbox_occurrences, BoardCard, BoardPane, CardDetailEditor, CardEditorField};
+use crate::theme;
+
+const DETAIL_PANEL_WIDTH_DIVISOR: u16 = 3;
+const CARD_BORDER_ROWS: u16 = 2;
+const HINT_HEIGHT: u16 = 1;
+const HORIZONTAL_SCROLLBAR_HEIGHT: u16 = 1;
+const DETAIL_CLOSE_LABEL: &str = "×";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoardLayout {
+    pub columns_area: Rect,
+    pub horizontal_scrollbar_area: Option<Rect>,
+    pub detail_area: Option<Rect>,
+    pub hint_area: Rect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnViewport {
+    pub first_column: usize,
+    pub visible_column_count: usize,
+    pub maximum_scroll: usize,
+    pub areas: Vec<(usize, Rect)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetailEditorLayout {
+    pub title_area: Rect,
+    pub body_area: Rect,
+    pub footer_area: Rect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardHit {
+    Column {
+        column_index: usize,
+    },
+    Card {
+        column_index: usize,
+        card_index: usize,
+    },
+    CardCheckbox {
+        column_index: usize,
+        card_index: usize,
+        checkbox_index: usize,
+    },
+    HorizontalScrollbar {
+        column_scroll: usize,
+    },
+    DetailClose,
+    DetailTitle,
+    DetailBody,
+}
+
+/// Allocates the board rows and, while details are open, the rightmost third.
+pub fn compute_layout(
+    area: Rect,
+    is_detail_panel_open: bool,
+    column_count: usize,
+    minimum_column_width: u16,
+) -> BoardLayout {
+    let content_height = area.height.saturating_sub(HINT_HEIGHT);
+    let content_area = Rect::new(area.x, area.y, area.width, content_height);
+    let hint_area = Rect::new(
+        area.x,
+        area.y.saturating_add(content_height),
+        area.width,
+        area.height.min(HINT_HEIGHT),
+    );
+    let (columns_content_area, detail_area) = if is_detail_panel_open && content_area.width >= 3 {
+        let detail_width = content_area.width / DETAIL_PANEL_WIDTH_DIVISOR;
+        let columns_width = content_area.width - detail_width;
+        (
+            Rect::new(
+                content_area.x,
+                content_area.y,
+                columns_width,
+                content_area.height,
+            ),
+            Some(Rect::new(
+                content_area.x.saturating_add(columns_width),
+                content_area.y,
+                detail_width,
+                content_area.height,
+            )),
+        )
+    } else {
+        (content_area, None)
+    };
+    let has_horizontal_overflow = column_count > 0
+        && usize::from(columns_content_area.width)
+            < column_count.saturating_mul(usize::from(minimum_column_width.max(1)));
+    let scrollbar_height = if has_horizontal_overflow {
+        HORIZONTAL_SCROLLBAR_HEIGHT.min(columns_content_area.height)
+    } else {
+        0
+    };
+    let columns_height = columns_content_area.height.saturating_sub(scrollbar_height);
+    let columns_area = Rect::new(
+        columns_content_area.x,
+        columns_content_area.y,
+        columns_content_area.width,
+        columns_height,
+    );
+    let horizontal_scrollbar_area = has_horizontal_overflow.then(|| {
+        Rect::new(
+            columns_content_area.x,
+            columns_content_area.y.saturating_add(columns_height),
+            columns_content_area.width,
+            scrollbar_height,
+        )
+    });
+    BoardLayout {
+        columns_area,
+        horizontal_scrollbar_area,
+        detail_area,
+        hint_area,
+    }
+}
+
+/// Number of complete minimum-width columns that fit in one page. A terminal
+/// narrower than the configured minimum still shows one clipped column.
+pub fn visible_column_count(area: Rect, column_count: usize, minimum_column_width: u16) -> usize {
+    if column_count == 0 {
+        return 0;
+    }
+    (usize::from(area.width) / usize::from(minimum_column_width.max(1)))
+        .max(1)
+        .min(column_count)
+}
+
+/// Returns the scrolled subset plus exact equal-width rectangles used by
+/// rendering, hit-testing, drop targeting, and scrollbar interaction.
+pub fn column_viewport(board: &BoardPane, area: Rect, minimum_column_width: u16) -> ColumnViewport {
+    let visible_column_count =
+        visible_column_count(area, board.columns.len(), minimum_column_width);
+    if visible_column_count == 0 {
+        return ColumnViewport {
+            first_column: 0,
+            visible_column_count: 0,
+            maximum_scroll: 0,
+            areas: Vec::new(),
+        };
+    }
+    let maximum_scroll = board.columns.len().saturating_sub(visible_column_count);
+    let first_column = board.column_scroll.min(maximum_scroll);
+    let rectangles = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![
+            Constraint::Ratio(1, visible_column_count as u32);
+            visible_column_count
+        ])
+        .split(area)
+        .to_vec();
+    let areas = rectangles
+        .into_iter()
+        .enumerate()
+        .map(|(visible_index, area)| (first_column + visible_index, area))
+        .collect();
+    ColumnViewport {
+        first_column,
+        visible_column_count,
+        maximum_scroll,
+        areas,
+    }
+}
+
+/// Returns one visible card rectangle. Cards are contiguous: there is no
+/// spacer row between one card's bottom border and the next card's top border.
+pub fn card_area(column_inner: Rect, card_index: usize, preview_lines: u16) -> Option<Rect> {
+    let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS);
+    let offset = u16::try_from(card_index).ok()?.saturating_mul(card_height);
+    if offset >= column_inner.height {
+        return None;
+    }
+    Some(Rect::new(
+        column_inner.x,
+        column_inner.y.saturating_add(offset),
+        column_inner.width,
+        card_height.min(column_inner.height - offset),
+    ))
+}
+
+/// Aerated title/body/footer rectangles inside the detail panel's outer
+/// border. Rendering and pointer focus use this exact allocation.
+pub fn detail_editor_layout(detail_area: Rect) -> DetailEditorLayout {
+    let inner = Block::bordered()
+        .inner(detail_area)
+        .inner(Margin::new(2, 1));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    DetailEditorLayout {
+        title_area: rows[0],
+        body_area: rows[2],
+        footer_area: rows[3],
+    }
+}
+
+/// Maps one pointer position back to the exact board element rendered there.
+pub fn hit_test(
+    board: &BoardPane,
+    area: Rect,
+    preview_lines: u16,
+    minimum_column_width: u16,
+    position: Position,
+) -> Option<BoardHit> {
+    let layout = compute_layout(
+        area,
+        board.is_detail_panel_open,
+        board.columns.len(),
+        minimum_column_width,
+    );
+    if let Some(detail_area) = layout.detail_area {
+        if detail_close_area(detail_area).contains(position) {
+            return Some(BoardHit::DetailClose);
+        }
+        let editor_layout = detail_editor_layout(detail_area);
+        if editor_layout.title_area.contains(position) {
+            return Some(BoardHit::DetailTitle);
+        }
+        if editor_layout.body_area.contains(position) {
+            return Some(BoardHit::DetailBody);
+        }
+    }
+    if let Some(scrollbar_area) = layout.horizontal_scrollbar_area {
+        if scrollbar_area.contains(position) {
+            return horizontal_scroll_target(board, scrollbar_area, minimum_column_width, position)
+                .map(|column_scroll| BoardHit::HorizontalScrollbar { column_scroll });
+        }
+    }
+    for (column_index, column_area) in
+        column_viewport(board, layout.columns_area, minimum_column_width).areas
+    {
+        if !column_area.contains(position) {
+            continue;
+        }
+        let inner = Block::bordered().inner(column_area);
+        for card_index in 0..board.columns[column_index].cards.len() {
+            let Some(card_area) = card_area(inner, card_index, preview_lines) else {
+                break;
+            };
+            if !card_area.contains(position) {
+                continue;
+            }
+            if let Some(checkbox_index) =
+                card_checkbox_areas(&board.columns[column_index].cards[card_index], card_area)
+                    .iter()
+                    .position(|area| area.contains(position))
+            {
+                return Some(BoardHit::CardCheckbox {
+                    column_index,
+                    card_index,
+                    checkbox_index,
+                });
+            } else {
+                return Some(BoardHit::Card {
+                    column_index,
+                    card_index,
+                });
+            }
+        }
+        return Some(BoardHit::Column { column_index });
+    }
+    None
+}
+
+/// Resolves a drag release into an insertion index using the same card grid.
+pub fn card_drop_target(
+    board: &BoardPane,
+    area: Rect,
+    preview_lines: u16,
+    minimum_column_width: u16,
+    position: Position,
+) -> Option<(usize, usize)> {
+    let layout = compute_layout(
+        area,
+        board.is_detail_panel_open,
+        board.columns.len(),
+        minimum_column_width,
+    );
+    for (column_index, column_area) in
+        column_viewport(board, layout.columns_area, minimum_column_width).areas
+    {
+        if !column_area.contains(position) {
+            continue;
+        }
+        let inner = Block::bordered().inner(column_area);
+        if position.y <= inner.y {
+            return Some((column_index, 0));
+        }
+        let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS).max(1);
+        let card_index = usize::from(position.y.saturating_sub(inner.y) / card_height)
+            .min(board.columns[column_index].cards.len());
+        return Some((column_index, card_index));
+    }
+    None
+}
+
+/// Maps a click on the scrollbar track to a valid first-column index.
+fn horizontal_scroll_target(
+    board: &BoardPane,
+    scrollbar_area: Rect,
+    minimum_column_width: u16,
+    position: Position,
+) -> Option<usize> {
+    let visible_column_count =
+        visible_column_count(scrollbar_area, board.columns.len(), minimum_column_width);
+    let maximum_scroll = board.columns.len().saturating_sub(visible_column_count);
+    if maximum_scroll == 0 || scrollbar_area.width <= 1 {
+        return Some(0);
+    }
+    let position_in_track = usize::from(position.x.saturating_sub(scrollbar_area.x));
+    Some(
+        position_in_track.saturating_mul(maximum_scroll)
+            / usize::from(scrollbar_area.width.saturating_sub(1)),
+    )
+}
+
+/// Draws columns, contiguous card previews, the optional editor panel, and
+/// the horizontal viewport affordance.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    board: &BoardPane,
+    preview_lines: u16,
+    minimum_column_width: u16,
+) {
+    let layout = compute_layout(
+        area,
+        board.is_detail_panel_open,
+        board.columns.len(),
+        minimum_column_width,
+    );
+    let viewport = column_viewport(board, layout.columns_area, minimum_column_width);
+    render_columns(frame, layout.columns_area, board, preview_lines, &viewport);
+    if let (Some(detail_area), Some(editor)) = (layout.detail_area, board.detail_editor.as_ref()) {
+        render_detail_panel(frame, detail_area, editor);
+    }
+    if let Some(scrollbar_area) = layout.horizontal_scrollbar_area {
+        let mut state = ScrollbarState::new(board.columns.len())
+            .position(viewport.first_column)
+            .viewport_content_length(viewport.visible_column_count);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+            .begin_symbol(Some("◀"))
+            .end_symbol(Some("▶"))
+            .track_symbol(Some("─"))
+            .style(theme::border_style(false));
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
+    }
+    let hint = if board.is_detail_panel_open {
+        "Tab field · type to edit · every change saves immediately · Esc close"
+    } else {
+        "←/→ column · ↑/↓ header/card · Enter details · n card · c column · e rename · d delete · Shift+arrows move · drag cards"
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(hint, Style::new().add_modifier(Modifier::DIM))),
+        layout.hint_area,
+    );
+}
+
+fn render_columns(
+    frame: &mut Frame,
+    area: Rect,
+    board: &BoardPane,
+    preview_lines: u16,
+    viewport: &ColumnViewport,
+) {
+    if board.columns.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No columns yet. Press c to create one."),
+            area,
+        );
+        return;
+    }
+    for (column_index, column_area) in viewport.areas.iter().copied() {
+        let column = &board.columns[column_index];
+        let is_selected_column = column_index == board.selected_column;
+        let title_style = if is_selected_column {
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().add_modifier(Modifier::BOLD)
+        };
+        let block = Block::bordered()
+            .border_style(theme::border_style(is_selected_column))
+            .title(Line::from(vec![
+                Span::styled(format!(" {} ", column.title), title_style),
+                Span::styled(
+                    column.cards.len().to_string(),
+                    Style::new().add_modifier(Modifier::DIM),
+                ),
+            ]));
+        let inner = block.inner(column_area);
+        frame.render_widget(block, column_area);
+        if column.cards.is_empty() {
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    "drop a card here",
+                    Style::new().add_modifier(Modifier::DIM | Modifier::ITALIC),
+                )),
+                inner,
+            );
+        } else {
+            for (card_index, card) in column.cards.iter().enumerate() {
+                let Some(area) = card_area(inner, card_index, preview_lines) else {
+                    break;
+                };
+                let is_selected = is_selected_column && board.selected_card == Some(card_index);
+                let is_drag_source = board.drag_source == Some((column_index, card_index));
+                let border_style = if is_drag_source {
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    theme::border_style(is_selected)
+                };
+                let text_style = if is_drag_source {
+                    Style::new().add_modifier(Modifier::DIM)
+                } else if is_selected {
+                    Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new()
+                };
+                frame.render_widget(
+                    Paragraph::new(Span::styled(card.title.as_str(), text_style))
+                        .block(Block::bordered().border_style(border_style))
+                        .wrap(Wrap { trim: true }),
+                    area,
+                );
+            }
+        }
+        render_drop_indicator(frame, board, column_index, inner, preview_lines);
+    }
+}
+
+fn render_drop_indicator(
+    frame: &mut Frame,
+    board: &BoardPane,
+    column_index: usize,
+    column_inner: Rect,
+    preview_lines: u16,
+) {
+    let Some((target_column, insertion_index)) = board.drag_target else {
+        return;
+    };
+    if target_column != column_index || column_inner.height == 0 {
+        return;
+    }
+    let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS).max(1);
+    let requested_y = column_inner.y.saturating_add(
+        u16::try_from(insertion_index)
+            .unwrap_or(u16::MAX)
+            .saturating_mul(card_height),
+    );
+    let y = requested_y.min(column_inner.bottom().saturating_sub(1));
+    frame.render_widget(
+        Paragraph::new("━".repeat(usize::from(column_inner.width)))
+            .style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Rect::new(column_inner.x, y, column_inner.width, 1),
+    );
+}
+
+fn render_detail_panel(frame: &mut Frame, area: Rect, editor: &CardDetailEditor) {
+    let block = Block::bordered()
+        .border_style(theme::border_style(true))
+        .title(Span::styled(
+            " Card details ",
+            Style::new().add_modifier(Modifier::BOLD),
+        ));
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(DETAIL_CLOSE_LABEL).style(theme::selected_style()),
+        detail_close_area(area),
+    );
+    let layout = detail_editor_layout(area);
+    let mut title = editor.title.clone();
+    title.set_block(
+        Block::bordered()
+            .title(" Title ")
+            .border_style(theme::border_style(editor.focus == CardEditorField::Title)),
+    );
+    title.set_cursor_style(if editor.focus == CardEditorField::Title {
+        theme::selected_style()
+    } else {
+        Style::default()
+    });
+    frame.render_widget(&title, layout.title_area);
+
+    let mut body = editor.body.clone();
+    body.set_block(
+        Block::bordered()
+            .title(" Notes ")
+            .border_style(theme::border_style(editor.focus == CardEditorField::Body)),
+    );
+    body.set_cursor_style(if editor.focus == CardEditorField::Body {
+        theme::selected_style()
+    } else {
+        Style::default()
+    });
+    frame.render_widget(&body, layout.body_area);
+    frame.render_widget(
+        Paragraph::new("Tab switches field · changes save immediately")
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        layout.footer_area,
+    );
+}
+
+fn detail_close_area(detail_area: Rect) -> Rect {
+    Rect::new(
+        detail_area.right().saturating_sub(2),
+        detail_area.y,
+        detail_area.width.min(1),
+        detail_area.height.min(1),
+    )
+}
+
+/// Uses Ratatui itself to wrap the card title into an off-screen buffer, then
+/// reports the exact visible three-cell checkbox rectangles. Pointer targets
+/// therefore cannot drift from word wrapping or wide-character behavior.
+fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
+    let expected_count = checkbox_occurrences(&card.title).len();
+    if expected_count == 0 {
+        return Vec::new();
+    }
+    let inner = Block::bordered().inner(area);
+    if inner.width < 3 || inner.height == 0 {
+        return Vec::new();
+    }
+    let mut buffer = Buffer::empty(inner);
+    Paragraph::new(card.title.as_str())
+        .wrap(Wrap { trim: true })
+        .render(inner, &mut buffer);
+    let mut areas = Vec::new();
+    for y in inner.y..inner.bottom() {
+        for x in inner.x..inner.right().saturating_sub(2) {
+            let left = buffer[(x, y)].symbol();
+            let middle = buffer[(x + 1, y)].symbol();
+            let right = buffer[(x + 2, y)].symbol();
+            if left == "[" && matches!(middle, " " | "x" | "X") && right == "]" {
+                areas.push(Rect::new(x, y, 3, 1));
+                if areas.len() == expected_count {
+                    return areas;
+                }
+            }
+        }
+    }
+    areas
+}
+
+#[cfg(test)]
+mod tests {
+    use ilium_core::BoardStorage;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    use super::*;
+    use crate::board::{BoardColumn, BoardPane};
+
+    fn board() -> BoardPane {
+        let directory = tempfile::tempdir().unwrap();
+        let mut board = BoardPane::create(BoardStorage::MarkdownFile {
+            path: directory.path().join("board.md"),
+        })
+        .unwrap();
+        board.columns = vec![BoardColumn {
+            title: "To do".to_string(),
+            cards: vec![
+                BoardCard {
+                    title: "one two three four five six seven".to_string(),
+                    body: "complete body".to_string(),
+                },
+                BoardCard {
+                    title: "second item".to_string(),
+                    body: String::new(),
+                },
+            ],
+        }];
+        board.selected_column = 0;
+        board.selected_card = Some(0);
+        board
+    }
+
+    #[test]
+    fn detail_panel_owns_exactly_the_rightmost_third() {
+        let layout = compute_layout(Rect::new(0, 0, 120, 30), true, 6, 20);
+
+        assert_eq!(layout.columns_area.width, 80);
+        assert_eq!(layout.detail_area.unwrap().width, 40);
+        assert!(layout.horizontal_scrollbar_area.is_some());
+    }
+
+    #[test]
+    fn minimum_width_pages_columns_and_exposes_horizontal_scrollbar() {
+        let mut board = board();
+        board.columns = (0..5)
+            .map(|index| BoardColumn {
+                title: format!("Column {index}"),
+                cards: Vec::new(),
+            })
+            .collect();
+        board.column_scroll = 1;
+        let layout = compute_layout(Rect::new(0, 0, 60, 20), false, 5, 20);
+        let viewport = column_viewport(&board, layout.columns_area, 20);
+
+        assert_eq!(viewport.visible_column_count, 3);
+        assert_eq!(viewport.first_column, 1);
+        assert_eq!(viewport.maximum_scroll, 2);
+        assert!(viewport.areas.iter().all(|(_, area)| area.width >= 20));
+        assert!(layout.horizontal_scrollbar_area.is_some());
+
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &board, 3, 20))
+            .unwrap();
+        assert!(terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "▶"));
+    }
+
+    #[test]
+    fn cards_are_contiguous_and_follow_the_preview_line_setting() {
+        let inner = Rect::new(1, 1, 30, 20);
+
+        let first = card_area(inner, 0, 3).unwrap();
+        let second = card_area(inner, 1, 3).unwrap();
+
+        assert_eq!(first.height, 5);
+        assert_eq!(second.y, first.bottom());
+    }
+
+    #[test]
+    fn hit_testing_uses_the_same_three_line_card_geometry() {
+        let board = board();
+        let area = Rect::new(0, 0, 60, 20);
+
+        assert_eq!(
+            hit_test(&board, area, 3, 20, Position::new(3, 6)),
+            Some(BoardHit::Card {
+                column_index: 0,
+                card_index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn render_shows_three_wrapped_lines_without_a_blank_card_row() {
+        let board = board();
+        let backend = TestBackend::new(18, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &board, 3, 20))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rows = (0..20)
+            .map(|row| {
+                (0..18)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert!(rows[2].contains("one two three"));
+        assert!(rows[3].contains("four five six"));
+        assert!(rows[4].contains("seven"));
+        assert!(rows[7].contains("second item"));
+        assert!(!rows[1].contains(" card "));
+    }
+
+    #[test]
+    fn checkbox_hit_uses_the_wrapped_card_rendering() {
+        let mut board = board();
+        board.columns[0].cards[0].title = "prefix [ ] complete this".to_string();
+        let area = Rect::new(0, 0, 30, 20);
+        let layout = compute_layout(area, false, 1, 20);
+        let card_area = card_area(Block::bordered().inner(layout.columns_area), 0, 3).unwrap();
+        let checkbox = card_checkbox_areas(&board.columns[0].cards[0], card_area)[0];
+
+        assert_eq!(
+            hit_test(
+                &board,
+                area,
+                3,
+                20,
+                Position::new(checkbox.x + 1, checkbox.y)
+            ),
+            Some(BoardHit::CardCheckbox {
+                column_index: 0,
+                card_index: 0,
+                checkbox_index: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn active_drag_renders_a_visible_insertion_line() {
+        let mut board = board();
+        board.drag_source = Some((0, 0));
+        board.drag_target = Some((0, 1));
+        let backend = TestBackend::new(30, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &board, 3, 20))
+            .unwrap();
+
+        assert!(terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "━"));
+    }
+}

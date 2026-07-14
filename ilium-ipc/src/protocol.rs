@@ -8,7 +8,9 @@
 
 use std::path::PathBuf;
 
-use ilium_core::{BoardStorage, NodeId, PaneStatus, SplitOrientation, Tree, TreeMoveDirection};
+use ilium_core::{
+    BoardStorage, NodeId, PaneStatus, PaneTitleSource, SplitOrientation, Tree, TreeMoveDirection,
+};
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
 
@@ -148,10 +150,11 @@ pub enum ClientRequest {
         new_parent: NodeId,
         index: Option<usize>,
     },
-    /// Proposes an automatically-inferred title for `pane_id` (e.g.
-    /// `ilium-client`'s background LLM session-title inference). Mirrors
-    /// `Tree::set_automatic_pane_title`: the server applies it only while
-    /// the pane hasn't been genuinely user-renamed, unlike `RenameNode`
+    /// Proposes an automatic title that has no agent-session dependency
+    /// (e.g. the plain-shell typed-command titler). Agent transcript titles
+    /// use `SetSessionPaneTitle` so the server can verify their expected ID.
+    /// Mirrors `Tree::set_automatic_pane_title`: the server applies it only
+    /// while the pane hasn't been genuinely user-renamed, unlike `RenameNode`
     /// (which always wins and permanently marks the pane user-specified).
     /// `short_title` mirrors `RenameNode`'s field -- `None` from a source
     /// with no distinct short form (e.g. the plain-shell typed-command
@@ -216,6 +219,18 @@ pub enum ClientRequest {
         text: String,
         send_enter: bool,
     },
+    /// Applies an LLM title only if `pane_id` still owns the exact session
+    /// the client summarized. The server-side compare-and-set closes the
+    /// race where `/resume` invalidates a session while a worker result is
+    /// crossing IPC. `title_source` controls whether the still-current result
+    /// remains automatic or records an explicit user-requested retitle.
+    SetSessionPaneTitle {
+        pane_id: NodeId,
+        expected_session_id: String,
+        title: String,
+        short_title: Option<String>,
+        title_source: PaneTitleSource,
+    },
 }
 
 /// Events pushed from `ilium-server` to `ilium-client`, asynchronously
@@ -262,6 +277,10 @@ pub enum ServerEvent {
     /// session ID -- which changes much less often -- needs to travel.
     /// Appended last so existing bincode variant indexes remain stable.
     PaneSessionIdResolved { pane_id: NodeId, session_id: String },
+    /// The previously resolved ID no longer belongs to the detected agent
+    /// process (the agent exited or its class changed). Clients must discard
+    /// every title-inference cache keyed by that stale identity.
+    PaneSessionIdCleared { pane_id: NodeId },
     /// Replays the server-owned path for an editor pane when a client
     /// attaches to an already-restored session. Editor buffers stay local to
     /// each client, but the path is required to create that local buffer.

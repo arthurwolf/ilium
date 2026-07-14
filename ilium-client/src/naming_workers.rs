@@ -11,8 +11,8 @@
 //! Session-title inference (`spawn_session_title_worker`) is triggered by
 //! `crate::title_inference::pane_ready_for_inference`, called from
 //! `crate::run`'s event loop right after `render_cache::apply` -- see that
-//! module's docs for the two triggers (a pane's session ID just resolving,
-//! or a later `Done` transition retrying a still-untitled pane) and for
+//! module's docs for the triggers (a pane's session ID/status becoming
+//! usable, or a later `Done` transition retrying a still-untitled pane) and for
 //! why the decision itself lives in a separate, pure, unit-testable
 //! function rather than inline here.
 
@@ -30,12 +30,11 @@ use crate::project_naming::ProjectNameBootstrap;
 /// (a session ID just resolving, a turn finishing, every second Enter
 /// press) or from the user explicitly clicking the tree row's "retitle"
 /// icon (`App::action_request_retitle`). `crate::tick::apply_naming_worker_event`
-/// applies the two differently: `Automatic` proposes a title the server
-/// only accepts while the pane hasn't been genuinely user-renamed
-/// (`request_automatic_pane_title`); `Manual` is itself a genuine user
-/// action -- the user asked for a fresh title right now -- so it applies
-/// unconditionally via `request_rename`, the same as if the user had typed
-/// it themselves.
+/// applies the two differently: `Automatic` remains an automatic title the
+/// server will not place over a user rename; `Manual` marks a still-current
+/// result user-specified, the same as a typed rename. Both use the server's
+/// expected-session-ID compare-and-set and are discarded if that session
+/// changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleTrigger {
     Automatic,

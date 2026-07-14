@@ -44,6 +44,8 @@ pub struct ClientConfig {
     /// User-global sound source and event checkboxes. The client persists
     /// changes; the detached server owns actual playback.
     pub sound: SoundSettings,
+    /// Board presentation settings shown in the Kanban Board tab.
+    pub kanban_board: KanbanBoardSettings,
 }
 
 impl Default for ClientConfig {
@@ -54,6 +56,7 @@ impl Default for ClientConfig {
             theme: Theme::default(),
             ui: UiSettings::default(),
             sound: SoundSettings::default(),
+            kanban_board: KanbanBoardSettings::default(),
         }
     }
 }
@@ -62,6 +65,29 @@ impl Default for ClientConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KeyboardSettings {
     pub shortcut_base: ShortcutBase,
+}
+
+pub const MIN_CARD_PREVIEW_LINES: u16 = 1;
+pub const MAX_CARD_PREVIEW_LINES: u16 = 10;
+pub const DEFAULT_CARD_PREVIEW_LINES: u16 = 3;
+pub const MIN_BOARD_COLUMN_WIDTH: u16 = 10;
+pub const MAX_BOARD_COLUMN_WIDTH: u16 = 80;
+pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 20;
+
+/// `[kanban_board]` settings, validated before they reach board layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KanbanBoardSettings {
+    pub card_preview_lines: u16,
+    pub minimum_column_width: u16,
+}
+
+impl Default for KanbanBoardSettings {
+    fn default() -> Self {
+        Self {
+            card_preview_lines: DEFAULT_CARD_PREVIEW_LINES,
+            minimum_column_width: DEFAULT_BOARD_COLUMN_WIDTH,
+        }
+    }
 }
 
 /// How a detected agent's type is identified in the left tree panel.
@@ -153,6 +179,44 @@ pub enum CodexAgentIcon {
     CrossMark,
 }
 
+/// Antigravity-specific icon choices. Kept separate from the other provider
+/// palettes so every saved setting remains a valid, intentionally curated
+/// glyph for the provider it represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AntigravityAgentIcon {
+    #[default]
+    Spark,
+    Satellite,
+    Orbit,
+    Atom,
+}
+
+impl AntigravityAgentIcon {
+    pub const ALL: [Self; 4] = [Self::Spark, Self::Satellite, Self::Orbit, Self::Atom];
+
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::Spark => "✦",
+            Self::Satellite => "🛰️",
+            Self::Orbit => "🪐",
+            Self::Atom => "⚛️",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Spark => "✦ Spark",
+            Self::Satellite => "🛰️ Satellite",
+            Self::Orbit => "🪐 Orbit",
+            Self::Atom => "⚛️ Atom",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
 impl CodexAgentIcon {
     pub const ALL: [Self; 5] = [
         Self::Gear,
@@ -194,6 +258,50 @@ pub struct AgentIdentifierSettings {
     pub mode: AgentIdentifierMode,
     pub claude_icon: ClaudeAgentIcon,
     pub codex_icon: CodexAgentIcon,
+    pub antigravity_icon: AntigravityAgentIcon,
+}
+
+/// How the left tree presents the durable child order owned by the server.
+/// Automatic modes are a client-side view only, so returning to `Manual`
+/// reveals and edits the exact order persisted in the project snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TreeOrder {
+    #[default]
+    Manual,
+    Type,
+    AgeAscending,
+    AgeDescending,
+    NameAscending,
+    NameDescending,
+}
+
+impl TreeOrder {
+    /// Shared registry for the context submenu and settings selector.
+    pub const ALL: [Self; 6] = [
+        Self::Manual,
+        Self::Type,
+        Self::AgeAscending,
+        Self::AgeDescending,
+        Self::NameAscending,
+        Self::NameDescending,
+    ];
+
+    /// User-facing label. Age means elapsed age, so ascending puts the
+    /// youngest nodes first and descending puts the oldest nodes first.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual",
+            Self::Type => "Type",
+            Self::AgeAscending => "Age up (newest first)",
+            Self::AgeDescending => "Age down (oldest first)",
+            Self::NameAscending => "Name A-Z",
+            Self::NameDescending => "Name Z-A",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
 }
 
 /// Cycles one value in a small ordered settings registry, wrapping in either
@@ -227,6 +335,10 @@ pub struct UiSettings {
     /// Agent-type representation in the left tree. Activity remains a
     /// separate, always-visible status column regardless of this choice.
     pub agent_identifiers: AgentIdentifierSettings,
+    /// Presentation order applied independently inside every normal group.
+    /// Split-view child order remains structural because it controls pane
+    /// placement in the right panel.
+    pub tree_order: TreeOrder,
 }
 
 impl Default for UiSettings {
@@ -236,6 +348,7 @@ impl Default for UiSettings {
             tree_width: DEFAULT_TREE_WIDTH,
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
+            tree_order: TreeOrder::Manual,
         }
     }
 }
@@ -261,12 +374,21 @@ struct RawClientConfig {
     ui: RawUiConfig,
     #[serde(default)]
     sound: SoundSettings,
+    #[serde(default)]
+    kanban_board: RawKanbanBoardConfig,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
 #[derive(Debug, Default, Deserialize)]
 struct RawKeyboardConfig {
     shortcut_base: Option<String>,
+}
+
+/// `[kanban_board]`'s optional on-disk shape.
+#[derive(Debug, Default, Deserialize)]
+struct RawKanbanBoardConfig {
+    card_preview_lines: Option<u16>,
+    minimum_column_width: Option<u16>,
 }
 
 /// `[ui]`'s raw, possibly-partial on-disk shape -- see [`UiSettings`] for
@@ -281,6 +403,8 @@ struct RawUiConfig {
     agent_identifier_mode: Option<String>,
     claude_agent_icon: Option<String>,
     codex_agent_icon: Option<String>,
+    antigravity_agent_icon: Option<String>,
+    tree_order: Option<String>,
 }
 
 /// `[theme]`'s color overrides, each an optional `"#rrggbb"` (or `rrggbb`)
@@ -340,6 +464,24 @@ pub enum ConfigLoadError {
     /// `ui.codex_agent_icon` is not one of the curated Codex choices.
     #[error("ui.codex_agent_icon = {0:?} is not a supported Codex icon")]
     InvalidCodexAgentIcon(String),
+    /// `ui.antigravity_agent_icon` is not one of the curated choices.
+    #[error("ui.antigravity_agent_icon = {0:?} is not a supported Antigravity icon")]
+    InvalidAntigravityAgentIcon(String),
+    /// `ui.tree_order` is outside the closed ordering-mode set.
+    #[error(
+        "ui.tree_order = {0:?} must be \"manual\", \"type\", \"age_ascending\", \"age_descending\", \"name_ascending\", or \"name_descending\""
+    )]
+    InvalidTreeOrder(String),
+    /// `kanban_board.card_preview_lines` is outside the supported range.
+    #[error(
+        "kanban_board.card_preview_lines = {0} must be between {MIN_CARD_PREVIEW_LINES} and {MAX_CARD_PREVIEW_LINES}"
+    )]
+    InvalidCardPreviewLines(u16),
+    /// `kanban_board.minimum_column_width` is outside the supported range.
+    #[error(
+        "kanban_board.minimum_column_width = {0} must be between {MIN_BOARD_COLUMN_WIDTH} and {MAX_BOARD_COLUMN_WIDTH}"
+    )]
+    InvalidBoardColumnWidth(u16),
 }
 
 /// Why persisting a settings-screen change to `config.toml` failed -- see
@@ -391,6 +533,11 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
+    let kanban_board =
+        merge_kanban_board(raw.kanban_board).map_err(|source| ClientError::ConfigLoad {
+            path: path.clone(),
+            source,
+        })?;
     let theme =
         merge_theme(raw.theme, ui.color_scheme).map_err(|source| ClientError::ConfigLoad {
             path: path.clone(),
@@ -403,6 +550,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         theme,
         ui,
         sound: raw.sound,
+        kanban_board,
     })
 }
 
@@ -415,6 +563,24 @@ fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoad
         None => ShortcutBase::default(),
     };
     Ok(KeyboardSettings { shortcut_base })
+}
+
+/// Applies the optional board preview height over the three-line default.
+fn merge_kanban_board(raw: RawKanbanBoardConfig) -> Result<KanbanBoardSettings, ConfigLoadError> {
+    let card_preview_lines = match raw.card_preview_lines {
+        Some(lines) if (MIN_CARD_PREVIEW_LINES..=MAX_CARD_PREVIEW_LINES).contains(&lines) => lines,
+        Some(lines) => return Err(ConfigLoadError::InvalidCardPreviewLines(lines)),
+        None => DEFAULT_CARD_PREVIEW_LINES,
+    };
+    let minimum_column_width = match raw.minimum_column_width {
+        Some(width) if (MIN_BOARD_COLUMN_WIDTH..=MAX_BOARD_COLUMN_WIDTH).contains(&width) => width,
+        Some(width) => return Err(ConfigLoadError::InvalidBoardColumnWidth(width)),
+        None => DEFAULT_BOARD_COLUMN_WIDTH,
+    };
+    Ok(KanbanBoardSettings {
+        card_preview_lines,
+        minimum_column_width,
+    })
 }
 
 /// Applies `[ui]` overrides onto [`UiSettings::default`]. Pure, same
@@ -443,6 +609,14 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         Some(value) => parse_codex_agent_icon(&value)?,
         None => defaults.agent_identifiers.codex_icon,
     };
+    let antigravity_icon = match raw.antigravity_agent_icon {
+        Some(value) => parse_antigravity_agent_icon(&value)?,
+        None => defaults.agent_identifiers.antigravity_icon,
+    };
+    let tree_order = match raw.tree_order {
+        Some(value) => parse_tree_order(&value)?,
+        None => defaults.tree_order,
+    };
     Ok(UiSettings {
         auto_resize_tree_on_focus: raw
             .auto_resize_tree_on_focus
@@ -453,7 +627,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             mode,
             claude_icon,
             codex_icon,
+            antigravity_icon,
         },
+        tree_order,
     })
 }
 
@@ -494,6 +670,33 @@ fn parse_codex_agent_icon(value: &str) -> Result<CodexAgentIcon, ConfigLoadError
         "book" => Ok(CodexAgentIcon::Book),
         "cross_mark" => Ok(CodexAgentIcon::CrossMark),
         _ => Err(ConfigLoadError::InvalidCodexAgentIcon(value.to_string())),
+    }
+}
+
+/// Parses a curated Antigravity icon by semantic name; see
+/// [`parse_claude_agent_icon`] for the storage rationale.
+fn parse_antigravity_agent_icon(value: &str) -> Result<AntigravityAgentIcon, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "spark" => Ok(AntigravityAgentIcon::Spark),
+        "satellite" => Ok(AntigravityAgentIcon::Satellite),
+        "orbit" => Ok(AntigravityAgentIcon::Orbit),
+        "atom" => Ok(AntigravityAgentIcon::Atom),
+        _ => Err(ConfigLoadError::InvalidAntigravityAgentIcon(
+            value.to_string(),
+        )),
+    }
+}
+
+/// Parses the stable config spelling shared with [`tree_order_name`].
+fn parse_tree_order(value: &str) -> Result<TreeOrder, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "manual" => Ok(TreeOrder::Manual),
+        "type" => Ok(TreeOrder::Type),
+        "age_ascending" => Ok(TreeOrder::AgeAscending),
+        "age_descending" => Ok(TreeOrder::AgeDescending),
+        "name_ascending" => Ok(TreeOrder::NameAscending),
+        "name_descending" => Ok(TreeOrder::NameDescending),
+        _ => Err(ConfigLoadError::InvalidTreeOrder(value.to_string())),
     }
 }
 
@@ -543,6 +746,27 @@ fn codex_agent_icon_name(icon: CodexAgentIcon) -> &'static str {
         CodexAgentIcon::Dna => "dna",
         CodexAgentIcon::Book => "book",
         CodexAgentIcon::CrossMark => "cross_mark",
+    }
+}
+
+fn antigravity_agent_icon_name(icon: AntigravityAgentIcon) -> &'static str {
+    match icon {
+        AntigravityAgentIcon::Spark => "spark",
+        AntigravityAgentIcon::Satellite => "satellite",
+        AntigravityAgentIcon::Orbit => "orbit",
+        AntigravityAgentIcon::Atom => "atom",
+    }
+}
+
+/// Stable on-disk spelling for one tree-order mode.
+fn tree_order_name(tree_order: TreeOrder) -> &'static str {
+    match tree_order {
+        TreeOrder::Manual => "manual",
+        TreeOrder::Type => "type",
+        TreeOrder::AgeAscending => "age_ascending",
+        TreeOrder::AgeDescending => "age_descending",
+        TreeOrder::NameAscending => "name_ascending",
+        TreeOrder::NameDescending => "name_descending",
     }
 }
 
@@ -702,6 +926,23 @@ pub fn save_keyboard_settings(
     write_toml_document(&path, &document)
 }
 
+/// Persists `[kanban_board]` while preserving every unrelated config table.
+pub fn save_kanban_board_settings(
+    config_dir: &Path,
+    kanban_board: &KanbanBoardSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    table.insert(
+        "kanban_board".to_string(),
+        kanban_board_settings_to_toml(kanban_board),
+    );
+    write_toml_document(&path, &document)
+}
+
 /// Persists the complete `[sound]` table without replacing settings owned by
 /// either the client or server. The server receives the same typed value over
 /// IPC for immediate application; this file is the restart/global-session
@@ -793,6 +1034,30 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "codex_agent_icon".to_string(),
         toml::Value::String(codex_agent_icon_name(ui.agent_identifiers.codex_icon).to_string()),
+    );
+    table.insert(
+        "antigravity_agent_icon".to_string(),
+        toml::Value::String(
+            antigravity_agent_icon_name(ui.agent_identifiers.antigravity_icon).to_string(),
+        ),
+    );
+    table.insert(
+        "tree_order".to_string(),
+        toml::Value::String(tree_order_name(ui.tree_order).to_string()),
+    );
+    toml::Value::Table(table)
+}
+
+/// Builds the complete `[kanban_board]` table written by the settings UI.
+fn kanban_board_settings_to_toml(settings: &KanbanBoardSettings) -> toml::Value {
+    let mut table = toml::value::Table::new();
+    table.insert(
+        "card_preview_lines".to_string(),
+        toml::Value::Integer(i64::from(settings.card_preview_lines)),
+    );
+    table.insert(
+        "minimum_column_width".to_string(),
+        toml::Value::Integer(i64::from(settings.minimum_column_width)),
     );
     toml::Value::Table(table)
 }
@@ -1019,6 +1284,12 @@ mod tests {
                 icon
             );
         }
+        for icon in AntigravityAgentIcon::ALL {
+            assert_eq!(
+                parse_antigravity_agent_icon(antigravity_agent_icon_name(icon)).unwrap(),
+                icon
+            );
+        }
     }
 
     #[test]
@@ -1062,6 +1333,19 @@ mod tests {
                 ..
             })
         ));
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nantigravity_agent_icon = \"robot\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidAntigravityAgentIcon(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1076,6 +1360,36 @@ mod tests {
         );
         assert_eq!(ClaudeAgentIcon::Brain.stepped(-1), ClaudeAgentIcon::Lobster);
         assert_eq!(CodexAgentIcon::CrossMark.stepped(1), CodexAgentIcon::Gear);
+        assert_eq!(
+            AntigravityAgentIcon::Spark.stepped(-1),
+            AntigravityAgentIcon::Atom
+        );
+    }
+
+    #[test]
+    fn tree_order_settings_parse_every_mode_and_wrap_in_both_directions() {
+        for tree_order in TreeOrder::ALL {
+            assert_eq!(
+                parse_tree_order(tree_order_name(tree_order)).unwrap(),
+                tree_order
+            );
+        }
+        assert_eq!(TreeOrder::Manual.stepped(-1), TreeOrder::NameDescending);
+        assert_eq!(TreeOrder::NameDescending.stepped(1), TreeOrder::Manual);
+    }
+
+    #[test]
+    fn invalid_tree_order_is_a_clear_config_error() {
+        let dir = scratch_dir();
+        std::fs::write(dir.join("config.toml"), "[ui]\ntree_order = \"random\"\n").unwrap();
+
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidTreeOrder(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1149,7 +1463,9 @@ mod tests {
                 mode: AgentIdentifierMode::Icon,
                 claude_icon: ClaudeAgentIcon::Lobster,
                 codex_icon: CodexAgentIcon::Dna,
+                antigravity_icon: AntigravityAgentIcon::Orbit,
             },
+            tree_order: TreeOrder::NameDescending,
         };
         save_ui_settings(&dir, &ui).expect("save should succeed");
 
@@ -1170,6 +1486,56 @@ mod tests {
             Some(keymap::Action::Quit)
         );
         assert_eq!(config.ui, UiSettings::default());
+    }
+
+    #[test]
+    fn kanban_board_uses_three_preview_lines_and_twenty_column_width_by_default() {
+        let dir = scratch_dir();
+
+        let config = load(&dir).expect("missing config should use defaults");
+
+        assert_eq!(config.kanban_board.card_preview_lines, 3);
+        assert_eq!(config.kanban_board.minimum_column_width, 20);
+    }
+
+    #[test]
+    fn kanban_board_preview_lines_validate_and_round_trip() {
+        let dir = scratch_dir();
+        let settings = KanbanBoardSettings {
+            card_preview_lines: 10,
+            minimum_column_width: 37,
+        };
+
+        save_kanban_board_settings(&dir, &settings).expect("board settings should save");
+        let config = load(&dir).expect("saved board settings should load");
+
+        assert_eq!(config.kanban_board, settings);
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[kanban_board]\ncard_preview_lines = 11\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidCardPreviewLines(11),
+                ..
+            })
+        ));
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[kanban_board]\nminimum_column_width = 9\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidBoardColumnWidth(9),
+                ..
+            })
+        ));
     }
 
     #[test]

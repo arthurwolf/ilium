@@ -7,7 +7,6 @@
 //! (`ServerState::events` broadcast vs. this connection's own `direct_tx`)
 //! are wired together on the write side.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ilium_core::{
@@ -111,6 +110,24 @@ pub async fn handle_request(
             handle_automatic_pane_title(state, pane_id, title, short_title).await;
             false
         }
+        ClientRequest::SetSessionPaneTitle {
+            pane_id,
+            expected_session_id,
+            title,
+            short_title,
+            title_source,
+        } => {
+            handle_session_pane_title(
+                state,
+                pane_id,
+                &expected_session_id,
+                title,
+                short_title,
+                title_source,
+            )
+            .await;
+            false
+        }
         ClientRequest::ResizePane {
             pane_id,
             rows,
@@ -187,15 +204,8 @@ pub async fn handle_request(
             text,
             send_enter,
         } => {
-            handle_schedule_pane_input(
-                state,
-                pane_id,
-                delay_seconds,
-                text,
-                send_enter,
-                direct_tx,
-            )
-            .await;
+            handle_schedule_pane_input(state, pane_id, delay_seconds, text, send_enter, direct_tx)
+                .await;
             false
         }
     }
@@ -265,6 +275,9 @@ async fn handle_schedule_pane_input(
             return;
         }
     };
+    // Replacement and the executor's final check/write are one transaction,
+    // so accepting this schedule guarantees an older action cannot fire later.
+    let transaction = state.scheduled_input_transaction.lock().await;
     let result = {
         let mut tree = state.tree.write().await;
         tree.schedule_pane_input(
@@ -276,6 +289,9 @@ async fn handle_schedule_pane_input(
             },
         )
     };
+    // The authoritative replacement is now visible; snapshots and client
+    // broadcasts do not need to delay the executor's next freshness check.
+    drop(transaction);
     if let Err(error) = result {
         send_direct_error(direct_tx, format!("failed to schedule pane input: {error}")).await;
         return;
@@ -397,6 +413,52 @@ async fn handle_automatic_pane_title(
     }
 }
 
+/// Applies an LLM title as a compare-and-set against the server's live
+/// session identity. A stale client or in-flight worker can never title the
+/// replacement session, regardless of IPC event/request ordering.
+async fn handle_session_pane_title(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    expected_session_id: &str,
+    title: String,
+    short_title: Option<String>,
+    title_source: PaneTitleSource,
+) {
+    // Lock ordering is tree before panes throughout the server. Both remain
+    // held through the identity check and title write so `/resume` cannot
+    // invalidate the session between those two operations.
+    let mut tree = state.tree.write().await;
+    let panes = state.panes.read().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+        return;
+    };
+    if runtime.is_session_identity_invalidated
+        || runtime.session_id.as_deref() != Some(expected_session_id)
+    {
+        return;
+    }
+    let changed = match title_source {
+        PaneTitleSource::Automatic => tree
+            .set_automatic_pane_title(pane_id, title, short_title)
+            .unwrap_or_else(|error| {
+                tracing::warn!("session title update rejected for pane {pane_id:?}: {error}");
+                false
+            }),
+        PaneTitleSource::UserSpecified => match tree.rename_node(pane_id, title, short_title) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("session retitle rejected for pane {pane_id:?}: {error}");
+                false
+            }
+        },
+    };
+    drop(panes);
+    drop(tree);
+    if changed {
+        broadcast_and_persist(state).await;
+    }
+}
+
 /// Records whether the attached client currently has `pane_id` as its
 /// active view, and forces an immediate (debounced) recheck on every
 /// focus transition -- see `crate::detection::interval_for` (the
@@ -431,14 +493,21 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
 
     let cleared_status = focused
         .then(|| match tree.get(pane_id).map(|node| &node.kind) {
-            Some(NodeKind::Pane {
-                status: PaneStatus::Agent(class, AgentActivity::Done),
-                ..
-            }) => {
-                let new_status = PaneStatus::Agent(class.clone(), AgentActivity::Idle);
-                tree.set_pane_status(pane_id, new_status.clone())
-                    .ok()
-                    .map(|()| new_status)
+            Some(NodeKind::Pane { status, .. }) => {
+                let new_status = match status {
+                    PaneStatus::Agent(class, AgentActivity::Done) => {
+                        Some(PaneStatus::Agent(class.clone(), AgentActivity::Idle))
+                    }
+                    PaneStatus::AgentWithGoal(class, AgentActivity::Done) => Some(
+                        PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle),
+                    ),
+                    _ => None,
+                };
+                new_status.and_then(|new_status| {
+                    tree.set_pane_status(pane_id, new_status.clone())
+                        .ok()
+                        .map(|()| new_status)
+                })
             }
             _ => None,
         })
@@ -475,17 +544,6 @@ fn editor_pane_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "untitled".to_string())
-}
-
-/// The cwd new terminal panes are spawned in. `ilium_ipc::ClientRequest::NewPane`
-/// carries no per-pane cwd (only `Editor`'s file path implies a location),
-/// so this crate uses the server process's own working directory -- the
-/// directory the `ilium` CLI wrapper launched `ilium-server` from,
-/// matching how the pre-refactor bin crate's panes always shared one
-/// session-wide cwd. Extending the protocol with a per-`NewPane` cwd is a
-/// reasonable future addition but not one this stage's scope covers.
-fn default_pane_cwd() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
 /// Fully-resolved server work for one pane-creation request. Initial input is
@@ -586,17 +644,19 @@ async fn handle_new_pane(
     // eventual broadcast snapshot's O(n) clone -- see `broadcast_and_persist`.
     drop(tree);
 
-    if let Err(error) = spawn_and_register_pane(state, pane_id, plan.spawn_kind).await {
-        // The tree node exists (created just above) but has no resource
-        // behind it -- nothing was broadcast yet, so no attached client has
-        // seen it; remove it rather than leaving a phantom node no client
-        // could ever interact with (mirrors how `handle_close_pane` tears a
-        // pane out of the tree).
-        let mut tree = state.tree.write().await;
-        let _ = tree.remove_node(pane_id);
-        drop(tree);
-        send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
-        return;
+    match spawn_and_register_pane(state, pane_id, plan.spawn_kind).await {
+        Ok(()) => {}
+        Err(error) => {
+            // The tree node exists (created just above) but has no resource
+            // behind it -- nothing was broadcast yet, so no attached client has
+            // seen it; remove it rather than leaving a phantom node no client
+            // could ever interact with.
+            let mut tree = state.tree.write().await;
+            let _ = tree.remove_node(pane_id);
+            drop(tree);
+            send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
+            return;
+        }
     }
 
     if let Some(initial_input) = plan.initial_input {
@@ -629,7 +689,9 @@ pub(crate) async fn spawn_and_register_pane(
     let resource = match kind {
         PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
         PaneSnapshotKind::Terminal(origin) => {
-            let session = pane::spawn_terminal_session(&origin, &default_pane_cwd())?;
+            let spawned = pane::spawn_terminal_session(&origin, &state.session_cwd)?;
+            let pending_generated_session_id = spawned.session_id;
+            let session = spawned.session;
             let forward_task = tokio::spawn(forward_output_bytes(
                 Arc::clone(state),
                 pane_id,
@@ -638,6 +700,7 @@ pub(crate) async fn spawn_and_register_pane(
             let runtime = crate::pane::TerminalPaneRuntime::new(
                 session,
                 origin,
+                pending_generated_session_id,
                 state.detection_config.idle_poll_interval,
                 forward_task,
             );
@@ -831,6 +894,7 @@ pub(crate) async fn write_key_input(
     // while it remains held.
     let mut panes = state.panes.write().await;
     let mut observed_title = None;
+    let mut cleared_session_origin_name = None;
     let error_message = match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
@@ -853,13 +917,21 @@ pub(crate) async fn write_key_input(
                         tracker.reset_pending_line();
                     }
                 }
-                // Unlike `shell_command_tracker` above, this one is never
-                // gated on foreground/origin -- see its doc comment on
-                // `TerminalPaneRuntime`.
-                if let Some(line) = runtime.input_fingerprint_tracker.observe(bytes) {
-                    runtime.last_submitted_line = Some((line, std::time::Instant::now()));
+                let session_identity_invalidated = runtime
+                    .session_command_tracker
+                    .observe(bytes)
+                    .is_some_and(|line| crate::pane::invalidates_agent_session_identity(&line));
+                if session_identity_invalidated {
+                    runtime.is_session_identity_invalidated = true;
+                    runtime.pending_generated_session_id = None;
+                    if let Some(invalidated_session_id) = runtime.session_id.take() {
+                        runtime.invalidated_session_id = Some(invalidated_session_id);
+                        runtime.session_agent_class = None;
+                        cleared_session_origin_name =
+                            Some(runtime.origin.pane_name_without_stale_session().to_string());
+                    }
                 }
-                if bytes == b"\r" {
+                if bytes.contains(&b'\r') {
                     crate::detection::force_check(
                         &mut runtime.detection_schedule,
                         std::time::Instant::now(),
@@ -879,13 +951,17 @@ pub(crate) async fn write_key_input(
         return Err(message);
     }
 
-    // Escalate to the tree write lock only for the rare keystroke that
-    // actually completed a shell command line worth naming the pane
-    // after -- every other keystroke never touches `state.tree` at all,
-    // and this handler never holds the tree and pane locks at once (unlike
-    // the pre-existing "tree before panes" nested pattern other handlers
-    // use when they genuinely need both together).
-    let Some(title) = observed_title else {
+    if cleared_session_origin_name.is_some() {
+        state.request_snapshot_save();
+        state.broadcast(ServerEvent::PaneSessionIdCleared { pane_id });
+    }
+
+    // A session-transition reset takes precedence over a shell title from
+    // the same byte batch. In practice they are mutually exclusive, but the
+    // ordering makes the stale LLM title impossible to retain if input and
+    // foreground detection race.
+    let automatic_title = cleared_session_origin_name.or(observed_title);
+    let Some(title) = automatic_title else {
         return Ok(());
     };
     let title_changed = {
@@ -896,7 +972,7 @@ pub(crate) async fn write_key_input(
         match tree.set_automatic_pane_title(pane_id, title, None) {
             Ok(changed) => changed,
             Err(error) => {
-                tracing::error!("shell title update rejected for pane {pane_id:?}: {error}");
+                tracing::error!("automatic title update rejected for pane {pane_id:?}: {error}");
                 false
             }
         }

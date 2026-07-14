@@ -94,11 +94,15 @@ pub const fn shortcut_base_advice(base: ShortcutBase) -> ShortcutBaseAdvice {
         'f' => warning("commonly moves forward one character or opens search"),
         'g' => warning("commonly cancels the current operation or rings the terminal bell"),
         'h' => warning("is normally Backspace in terminal control encoding"),
-        'i' => warning("is indistinguishable from Tab in ordinary terminals, so every Tab becomes the shortcut base"),
+        'i' => warning(
+            "is indistinguishable from Tab in ordinary terminals, so every Tab becomes the shortcut base",
+        ),
         'j' => warning("is normally line-feed/newline in terminal control encoding"),
         'k' => warning("commonly cuts from the cursor to the end of the line"),
         'l' => warning("commonly clears or redraws the terminal"),
-        'm' => warning("is indistinguishable from Enter in ordinary terminals, so every Enter becomes the shortcut base"),
+        'm' => warning(
+            "is indistinguishable from Enter in ordinary terminals, so every Enter becomes the shortcut base",
+        ),
         'n' => warning("commonly selects the next history entry or search result"),
         'o' => warning("commonly accepts the current line and fetches the next history entry"),
         'p' => warning("commonly selects the previous history entry"),
@@ -233,8 +237,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
     KeyBinding {
         letter: 'v',
         action: Action::ToggleEditorViewMode,
-        description:
-            "Toggle the focused editor pane between Source and Rendered (markdown files only)",
+        description: "Toggle the focused editor pane between Source and Rendered (markdown files only)",
     },
     KeyBinding {
         letter: 'n',

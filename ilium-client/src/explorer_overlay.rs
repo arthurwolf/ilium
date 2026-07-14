@@ -154,6 +154,23 @@ impl ExplorerOverlay {
         }
     }
 
+    /// Activates the row under a repeated mouse click. Keyboard folder mode
+    /// deliberately selects `current_dir` on Enter, but a pointer gesture
+    /// names a visible child directory and must therefore return that child.
+    fn activate_clicked_entry(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        let Some(entry) = self.entries.get(self.selected) else {
+            return Ok(None);
+        };
+        if self.selection != ExplorerSelection::Folder {
+            return self.activate();
+        }
+        if entry.name == ".." {
+            self.navigate_up()?;
+            return Ok(None);
+        }
+        Ok(Some(entry.path.clone()))
+    }
+
     /// Descends into the selected directory without selecting it. Folder
     /// mode reserves Enter for "select this current folder", so Right/`l`
     /// retains a way to browse down into a child directory.
@@ -188,12 +205,10 @@ impl ExplorerOverlay {
         Ok(())
     }
 
-    /// Feeds a crossterm event to the picker. Returns `Some(path)` when
-    /// the event picked a file (Enter/Right/`l`, or clicking an
-    /// already-selected file row) -- the caller then closes the overlay
-    /// and opens that path in an editor pane. Returns `None` for every
-    /// other event, including one that just moved the selection or
-    /// navigated between directories.
+    /// Feeds a crossterm event to the picker. Returns `Some(path)` when the
+    /// event chooses a file or folder -- callers close the overlay and route
+    /// that path to the appropriate pane/tree action. Returns `None` for
+    /// every other event, including selection and navigation.
     pub fn handle(&mut self, event: &Event, screen_area: Rect) -> anyhow::Result<Option<PathBuf>> {
         match event {
             Event::Key(key) => self.handle_key(key, screen_area),
@@ -262,13 +277,12 @@ impl ExplorerOverlay {
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
                 if let Some(index) = row_at(&layout, self.offset, self.entries.len(), position) {
-                    // A click on the already-selected row activates it
-                    // (opens the file / descends the directory); the first
-                    // click on a different row just moves the selection --
-                    // this needs no click-timing state to tell a
-                    // "double-click" from two separate single clicks.
+                    // A click on the already-selected row activates it; in
+                    // folder mode that selects the visible directory itself
+                    // rather than silently choosing the parent currently in
+                    // the picker title.
                     if index == self.selected {
-                        return self.activate();
+                        return self.activate_clicked_entry();
                     }
                     self.selected = index;
                 }
@@ -694,6 +708,43 @@ mod tests {
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("enter should select folder");
         assert_eq!(selected, Some(dir.join("sub")));
+    }
+
+    #[test]
+    fn folder_mode_double_click_selects_the_clicked_directory() {
+        let dir = scratch_dir("folder-mouse-select");
+        let selected_directory = dir.join("docs");
+        std::fs::create_dir(&selected_directory).expect("mkdir");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let index = overlay
+            .entries
+            .iter()
+            .position(|entry| entry.name == "docs")
+            .expect("docs directory listed");
+        let layout = layout_for(SCREEN);
+        let row = layout.rows_area.y + index as u16;
+
+        let first_click = mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.rows_area.x,
+            row,
+        );
+        assert_eq!(
+            overlay.handle(&first_click, SCREEN).expect("select docs"),
+            None
+        );
+
+        let second_click = mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.rows_area.x,
+            row,
+        );
+        assert_eq!(
+            overlay
+                .handle(&second_click, SCREEN)
+                .expect("select docs folder"),
+            Some(selected_directory)
+        );
     }
 
     #[test]
