@@ -1,0 +1,11 @@
+[package]
+name = "ilium-inference"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ilium-kilo-gateway = { version = "0.1.0", path = "../ilium-kilo-gateway" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+ureq = { version = "3.2.0", features = ["json"] }

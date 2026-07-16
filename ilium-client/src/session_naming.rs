@@ -1,7 +1,7 @@
 //! Infers a short-form (2-3 word) and long-form (5-7 word) pair of titles
-//! for one agent pane's session, the same Kilo-Gateway-backed pattern
+//! for one agent pane's session, the same provider-neutral pattern
 //! `project_naming` uses for the whole project: collect bounded context,
-//! render an XML-shaped Handlebars prompt, call the free model, and
+//! render an XML-shaped Handlebars prompt, call the selected provider, and
 //! parse+validate its JSON reply. `ilium-client`'s tree panel shows the
 //! short title when the panel is narrow and the long title when it's wide
 //! (see `crate::tree_ui`).
@@ -43,7 +43,7 @@ Infer two titles describing the task or work in progress in this coding-agent se
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
 /// Locates `session_id`'s transcript under `home`, extracts its most recent
-/// user prompts, and asks the free model for a short/long title pair. This
+/// user prompts, and asks the selected provider for a short/long title pair. This
 /// is the entry point `main.rs` spawns a worker thread around;
 /// `infer_session_title` below is the pure remainder, tested directly with
 /// fabricated prompts.
@@ -120,7 +120,7 @@ fn parse_session_title_response(response: &str) -> anyhow::Result<DualTitle> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ilium_kilo_gateway::GatewayError;
+    use ilium_inference::InferenceError;
     use std::cell::{Cell, RefCell};
 
     struct FakeGenerator {
@@ -140,7 +140,7 @@ mod tests {
     }
 
     impl PromptCompletionClient for FakeGenerator {
-        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = Some(prompt);
             Ok(self.response.clone())

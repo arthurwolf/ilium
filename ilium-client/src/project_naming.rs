@@ -1,7 +1,7 @@
 //! Builds a bounded project-context prompt and persists one LLM-suggested name.
 //!
 //! `bootstrap_project_name` is called once during session boot. It reads the
-//! project config first and therefore never contacts Kilo Gateway when a name
+//! project config first and therefore never contacts an inference provider when a name
 //! already exists; only the missing-name path collects context and calls the
 //! injected generator.
 
@@ -60,7 +60,7 @@ pub fn load_stored_project_name(cwd: &Path) -> anyhow::Result<Option<String>> {
         }))
 }
 
-/// Loads a stored name, or calls the gateway exactly once to infer and save it.
+/// Loads a stored name, or calls the selected provider exactly once to infer and save it.
 pub fn bootstrap_project_name<G: PromptCompletionClient>(
     cwd: &Path,
     generator: &G,
@@ -174,7 +174,7 @@ fn parse_project_name_response(response: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ilium_kilo_gateway::GatewayError;
+    use ilium_inference::InferenceError;
     use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
 
@@ -195,7 +195,7 @@ mod tests {
     }
 
     impl PromptCompletionClient for FakeGenerator {
-        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = Some(prompt);
             Ok(self.response.clone())

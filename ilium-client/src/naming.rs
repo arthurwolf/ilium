@@ -1,29 +1,32 @@
-//! Shared "render an XML-ish Handlebars prompt, call the free-model gateway
+//! Shared "render an XML-ish Handlebars prompt, call the selected inference provider
 //! once, then parse+validate a bounded-word-count JSON reply" pipeline used
 //! by both `project_naming` and `session_naming`. Each caller supplies only
 //! what's genuinely distinct to it: the template text, the JSON field name
 //! the model is asked to return, and its word-count bounds. Neither caller
-//! retries a failed gateway call -- a naming inference is best-effort, and
+//! retries a failed provider call -- a naming inference is best-effort, and
 //! the caller decides how to react to (or surface) a failure.
 
 use handlebars::Handlebars;
-use ilium_kilo_gateway::{ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient};
+use ilium_inference::{
+    provider_from_settings, InferenceError, InferenceRequest, InferenceSettings,
+};
 use serde::Serialize;
 
-/// Sends one already-rendered prompt to the free model and returns its raw
+/// Sends one already-rendered prompt to the selected provider and returns its raw
 /// text reply. Both `project_naming` and `session_naming` implement this
 /// purely so tests can inject a fake generator without real HTTP; production
-/// code always uses the blanket `KiloGatewayClient` impl below.
+/// production code uses the settings-backed provider adapter below.
 pub trait PromptCompletionClient {
-    fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError>;
+    fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError>;
 }
 
-impl PromptCompletionClient for KiloGatewayClient {
-    fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
-        self.complete_text(&CompletionRequest::with_default_free_model(vec![
-            ChatMessage::system("You return concise, valid JSON only."),
-            ChatMessage::user(prompt),
-        ]))
+/// Settings-backed adapter. The concrete provider is constructed only when a
+/// worker runs, keeping persisted configuration independent from transport.
+impl PromptCompletionClient for InferenceSettings {
+    fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
+        provider_from_settings(self)
+            .complete(&InferenceRequest::json_only(prompt))
+            .map(|response| response.text)
     }
 }
 
@@ -178,7 +181,7 @@ mod tests {
     }
 
     impl PromptCompletionClient for FakeClient {
-        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = prompt;
             Ok(self.response.clone())

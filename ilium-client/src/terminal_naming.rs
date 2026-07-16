@@ -1,6 +1,6 @@
 //! Infers a short-form (2-3 word) and long-form (5-7 word) pair of titles
 //! for a plain terminal pane from its current on-screen text, reusing the
-//! same `crate::naming` (Handlebars prompt + Kilo-Gateway free model +
+//! same `crate::naming` (Handlebars prompt + selected provider +
 //! bounded-word-JSON-reply) pipeline `session_naming` uses for agent panes.
 //! `ilium-client`'s tree panel shows the short title when the panel is
 //! narrow and the long title when it's wide (see `crate::tree_ui`).
@@ -20,7 +20,7 @@ const TERMINAL_TITLE_LONG_MIN_WORDS: usize = 5;
 const TERMINAL_TITLE_LONG_MAX_WORDS: usize = 7;
 
 /// Upper bound (in characters) on how much screen text is sent to the
-/// model -- a full scrollback dump would blow the free model's context and
+/// model -- a full scrollback dump would blow the selected model's context and
 /// cost for no benefit, and the tail of the visible screen almost always
 /// carries the most recent, most relevant command and output anyway.
 const TERMINAL_SCREEN_CLIP_CHARS: usize = 4000;
@@ -38,7 +38,7 @@ Infer two titles describing what this terminal is currently being used for, base
 <output-example>{"terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
-/// Clips `screen_text` and asks the free model for a short/long title pair.
+/// Clips `screen_text` and asks the selected provider for a short/long title pair.
 /// This is the entry point `naming_workers::spawn_terminal_title_worker`
 /// spawns a worker thread around.
 pub fn infer_terminal_title<G: PromptCompletionClient>(
@@ -101,7 +101,7 @@ fn parse_terminal_title_response(response: &str) -> anyhow::Result<DualTitle> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ilium_kilo_gateway::GatewayError;
+    use ilium_inference::InferenceError;
     use std::cell::{Cell, RefCell};
 
     struct FakeGenerator {
@@ -121,7 +121,7 @@ mod tests {
     }
 
     impl PromptCompletionClient for FakeGenerator {
-        fn complete_prompt(&self, prompt: String) -> Result<String, GatewayError> {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = Some(prompt);
             Ok(self.response.clone())
