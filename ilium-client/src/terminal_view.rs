@@ -29,10 +29,28 @@ use std::sync::Arc;
 pub const DEFAULT_ROWS: u16 = 24;
 pub const DEFAULT_COLS: u16 = 80;
 
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Returns the offset before, and width of, a BEL or ST OSC terminator.
+fn osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
+    bytes.iter().enumerate().find_map(|(index, byte)| {
+        if *byte == 0x07 {
+            Some((index, 1))
+        } else if *byte == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+            Some((index, 2))
+        } else {
+            None
+        }
+    })
+}
+
 /// How many rows of scrolled-off history `vt100` retains per pane. Applies
 /// per terminal pane, client-side only -- see the module docs for why the
 /// server's own parser keeps none at all.
-const SCROLLBACK_LINES: usize = 10_000;
 /// The detached server retains this same upper bound per pane. Keeping the
 /// raw stream locally lets search cover retained history that is older than
 /// the render parser's 10,000-line viewport without giving the client a PTY.
@@ -61,6 +79,13 @@ pub struct TerminalView {
     /// that evidence out from under the user; `scroll_to_bottom` restores the
     /// live parser from `history_bytes`.
     is_history_anchor: bool,
+    scrollback_lines: usize,
+    /// Recent OSC-8 label/target pairs observed in the byte stream. vt100
+    /// renders the label but deliberately discards the metadata, so the
+    /// client retains this narrow side-channel for click activation.
+    osc8_links: Vec<(String, String)>,
+    /// Unconsumed raw output while an OSC-8 sequence spans IPC chunks.
+    osc8_stream: Vec<u8>,
 }
 
 impl TerminalView {
@@ -69,13 +94,31 @@ impl TerminalView {
     /// the server-side PTY matches, and this view's own `resize` keeps the
     /// local parser matching whatever the client's own layout computed.
     pub fn new(rows: u16, cols: u16) -> Self {
+        Self::with_scrollback_budget_mib(rows, cols, 32)
+    }
+
+    pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
+        let scrollback_lines = usize::from(budget_mib).saturating_mul(1024 * 1024) / 160;
         Self {
-            parser: vt100::Parser::new(rows, cols, SCROLLBACK_LINES),
+            parser: vt100::Parser::new(rows, cols, scrollback_lines.max(1_000)),
             scrollback_total: 0,
             last_output_sequence: 0,
             history_bytes: Arc::new(Vec::new()),
             is_history_anchor: false,
+            scrollback_lines: scrollback_lines.max(1_000),
+            osc8_links: Vec::new(),
+            osc8_stream: Vec::new(),
         }
+    }
+
+    /// Rebuilds the render cache from retained raw output under a new budget.
+    pub fn set_scrollback_budget_mib(&mut self, budget_mib: u16) {
+        let (rows, cols) = self.parser.screen().size();
+        self.scrollback_lines =
+            (usize::from(budget_mib).saturating_mul(1024 * 1024) / 160).max(1_000);
+        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
+        self.parser.process(&self.history_bytes);
+        self.refresh_scrollback_total();
     }
 
     /// Feeds one chunk of raw PTY output bytes (from `ServerEvent::ScreenUpdate`)
@@ -84,6 +127,7 @@ impl TerminalView {
     /// scroll offset in step as rows are pushed into scrollback) -- this
     /// only needs to refresh the cached total, not the position.
     pub fn feed(&mut self, bytes: &[u8]) {
+        self.observe_osc8_links(bytes);
         self.append_history(bytes);
         self.parser.process(bytes);
         self.refresh_scrollback_total();
@@ -94,9 +138,12 @@ impl TerminalView {
     /// event queued before the replay is applied can be rejected later.
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
         let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
+        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
         self.scrollback_total = 0;
         Arc::make_mut(&mut self.history_bytes).clear();
+        self.osc8_links.clear();
+        self.osc8_stream.clear();
+        self.observe_osc8_links(bytes);
         self.append_history(bytes);
         self.parser.process(bytes);
         self.refresh_scrollback_total();
@@ -112,11 +159,81 @@ impl TerminalView {
             return;
         }
         self.append_history(bytes);
+        self.observe_osc8_links(bytes);
         if !self.is_history_anchor {
             self.parser.process(bytes);
             self.refresh_scrollback_total();
         }
         self.last_output_sequence = sequence;
+    }
+
+    pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
+        self.osc8_links.iter().rev().find_map(|(label, target)| {
+            let start = line.find(label)?;
+            (start..start + label.len())
+                .contains(&column)
+                .then(|| target.clone())
+        })
+    }
+
+    fn observe_osc8_links(&mut self, bytes: &[u8]) {
+        self.osc8_stream.extend_from_slice(bytes);
+        // A well-formed OSC-8 open/label/close sequence never needs anywhere
+        // near this much buffering. Without a cap, a pane emitting a
+        // never-terminated (malformed, or adversarial-content) `\x1b]8;`
+        // opener would make every subsequent `feed` grow `osc8_stream`
+        // forever, since every early return below (no terminator found yet)
+        // leaves the buffer untouched. Capping here keeps that pending-match
+        // buffer bounded regardless of how the loop below exits.
+        const OSC8_STREAM_CAP_BYTES: usize = 64 * 1024;
+        let excess = self.osc8_stream.len().saturating_sub(OSC8_STREAM_CAP_BYTES);
+        if excess > 0 {
+            self.osc8_stream.drain(..excess);
+        }
+        const OPEN: &[u8] = b"\x1b]8;";
+        const CLOSE: &[u8] = b"\x1b]8;;";
+        loop {
+            let Some(open_start) = find_bytes(&self.osc8_stream, OPEN) else {
+                self.osc8_stream.truncate(OPEN.len().saturating_sub(1));
+                return;
+            };
+            if open_start > 0 {
+                self.osc8_stream.drain(..open_start);
+            }
+            let Some((header_end, header_terminator_width)) =
+                osc_terminator(&self.osc8_stream[OPEN.len()..])
+            else {
+                return;
+            };
+            let header_end = OPEN.len() + header_end;
+            let target = String::from_utf8_lossy(&self.osc8_stream[OPEN.len()..header_end])
+                .rsplit(';')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let label_start = header_end + header_terminator_width;
+            let Some(close_start) = find_bytes(&self.osc8_stream[label_start..], CLOSE)
+                .map(|offset| label_start + offset)
+            else {
+                return;
+            };
+            let close_after = close_start + CLOSE.len();
+            let Some((close_end, close_terminator_width)) =
+                osc_terminator(&self.osc8_stream[close_after..])
+            else {
+                return;
+            };
+            let label = String::from_utf8_lossy(&self.osc8_stream[label_start..close_start])
+                .replace(['\r', '\n'], "");
+            self.osc8_stream
+                .drain(..close_after + close_end + close_terminator_width);
+            if !target.is_empty() && !label.is_empty() {
+                self.osc8_links.push((label, target));
+                if self.osc8_links.len() > 256 {
+                    self.osc8_links.remove(0);
+                }
+            }
+        }
     }
 
     /// Resizes the local screen to match a `ResizePane` request just sent
@@ -201,7 +318,7 @@ impl TerminalView {
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let end_byte = end_byte.min(self.history_bytes.len());
-        self.parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
+        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
         self.parser.process(&self.history_bytes[..end_byte]);
         self.refresh_scrollback_total();
         self.is_history_anchor = true;
@@ -246,7 +363,7 @@ impl TerminalView {
 
     fn rebuild_live_parser(&mut self) {
         let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
+        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
         self.parser.process(&self.history_bytes);
         self.refresh_scrollback_total();
     }
@@ -255,6 +372,17 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn osc8_links_survive_split_output_chunks() {
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"\x1b]8;;https://example.test\x1b\\doc");
+        view.feed(b"s\x1b]8;;\x1b\\");
+        assert_eq!(
+            view.osc8_link_at("docs", 1),
+            Some("https://example.test".to_string())
+        );
+    }
 
     #[test]
     fn feed_updates_the_rendered_screen_text() {
