@@ -254,8 +254,11 @@ mod tests {
     /// actually proves the image rendered.
     #[test]
     fn local_image_paints_its_color_into_the_buffer() {
-        let dir = tempfile_dir();
-        let image_path = dir.join("pic.png");
+        // `TempDir` removes the scratch directory (and the fixture PNG
+        // written into it) on drop, instead of the previous fixed path
+        // under the OS temp dir that was never cleaned up.
+        let directory = tempfile::tempdir().expect("create scratch dir");
+        let image_path = directory.path().join("pic.png");
         write_solid_png(&image_path, 100, 40, [65, 105, 225]); // royalblue
 
         let doc = Document {
@@ -277,13 +280,5 @@ mod tests {
             .unwrap();
         let cell = terminal.backend().buffer().cell((0, 0)).unwrap();
         assert_eq!(cell.bg, Color::Rgb(65, 105, 225));
-    }
-
-    fn tempfile_dir() -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join("ilium-markdown-render-tests")
-            .join(format!("{:?}", std::thread::current().id()));
-        std::fs::create_dir_all(&dir).expect("create scratch dir");
-        dir
     }
 }

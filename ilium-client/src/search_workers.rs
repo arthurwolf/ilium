@@ -54,6 +54,15 @@ impl SearchWorkers {
             self.active.is_none(),
             "only one workspace scan may run at once"
         );
+        // The assert above is compiled out in release builds, so guard the
+        // invariant for real here too: overwriting `self.active` while a
+        // worker is still tracked would drop its `JoinHandle` with no
+        // cancellation requested, leaking a detached thread that keeps
+        // running (and keeps its captured request/results alive) with
+        // nothing left able to join or stop it.
+        if let Some(stale) = self.active.take() {
+            Self::cancel_worker(stale);
+        }
         let cancellation_requested = Arc::new(AtomicBool::new(false));
         let worker_cancellation = Arc::clone(&cancellation_requested);
         let events_tx = self.events_tx.clone();
@@ -87,6 +96,20 @@ impl SearchWorkers {
             tracing::error!("workspace search worker panicked");
         }
     }
+
+    /// Requests cancellation and detaches a worker's thread without joining
+    /// it. Shared by `start` (replacing a stale worker) and `Drop` (final
+    /// teardown): in both cases the thread's own cooperative cancellation
+    /// check -- not a join -- is what stops it, so this never blocks on the
+    /// scan itself.
+    fn cancel_worker(active: ActiveSearchWorker) {
+        active.cancellation_requested.store(true, Ordering::Relaxed);
+        // Do not block terminal restoration (or the next scan) on a
+        // potentially large terminal-history scan. The worker observes the
+        // flag between sources and no longer owns any TUI state once it is
+        // no longer tracked here.
+        drop(active.handle);
+    }
 }
 
 impl Drop for SearchWorkers {
@@ -94,10 +117,6 @@ impl Drop for SearchWorkers {
         let Some(active) = self.active.take() else {
             return;
         };
-        active.cancellation_requested.store(true, Ordering::Relaxed);
-        // Do not block terminal restoration on a potentially large final
-        // terminal-history scan. The worker observes the flag between sources
-        // and no longer owns any TUI state after this manager is dropped.
-        drop(active.handle);
+        Self::cancel_worker(active);
     }
 }

@@ -304,10 +304,12 @@ mod tests {
 
     #[test]
     fn recent_user_prompts_keeps_only_the_most_recent_and_ignores_malformed_lines() {
-        let dir = std::env::temp_dir()
-            .join("ilium-transcript-prompts-tests")
-            .join(format!("{:?}", std::thread::current().id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // Use a `TempDir` guard (already the pattern used below by
+        // `antigravity_prompts_are_read_from_the_verified_conversation_history`)
+        // so the fixture file is removed on drop, instead of the previous
+        // fixed path under the OS temp dir that was never cleaned up.
+        let directory = tempfile::tempdir().unwrap();
+        let dir = directory.path();
         let path = dir.join("session.jsonl");
 
         let mut lines = vec!["not json at all".to_string()];
