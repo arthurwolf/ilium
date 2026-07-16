@@ -18,6 +18,8 @@
 - [ ] During first-run setup, test whether the terminal renders the toolbar’s rounded-corner glyphs; if not, offer to install a compatible font and configure supported terminals such as VS Code and GNOME Terminal.
 
 ## Settings, appearance, and input
+
+- [ ] Add accessible status palettes: color-blind-safe alternatives and a monochrome-with-glyph mode.
 - [ ] Add vi-style keyboard shortcuts.
 - [x] Let users choose Ctrl+A, Ctrl+B, or another supported shortcut prefix, while explaining conflicts and recommended choices.
 - [ ] Document OpenMoji setup if ilium’s emoji-heavy interface requires it.
@@ -84,4 +86,3 @@
 
 ## Demos
 - [ ] Create a restart-recovery demo framed as a machine crash: show BIOS and boot animations, then have an agent diagnose overheating and jokingly connect it to the earlier question about mayonnaise as CPU thermal paste.
-
