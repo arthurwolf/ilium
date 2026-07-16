@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ilium_core::{
     AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId,
@@ -28,11 +28,15 @@ use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
 use crate::board::BoardPane;
-use crate::config::{KanbanBoardSettings, KeyboardSettings, TreeOrder, UiSettings};
+use crate::config::{
+    EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
+    TreeOrder, UiSettings,
+};
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
+use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
 use crate::search_ui::{
     self, SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
@@ -46,6 +50,7 @@ use crate::text_prompt::TextPromptState;
 use crate::theme::{self, ColorScheme, Theme};
 use crate::tree_transitions::TreeTransitions;
 use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
+use ilium_inference::InferenceSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
@@ -126,6 +131,8 @@ pub enum Mode {
     Rename(TextPromptState),
     /// In-progress command-line prompt for `Action::RunCommand`.
     CommandPrompt(TextPromptState),
+    /// Edits one provider-specific inference setting from the settings tab.
+    InferenceSettingPrompt(InferenceSettingField, TextPromptState),
     /// In-progress "Save As" filename prompt for the editor pane `NodeId`.
     SaveAs(NodeId, TextPromptState),
     Help,
@@ -163,6 +170,10 @@ pub enum Mode {
     BoardDeleteConfirm(NodeId, BoardDeleteTarget),
     /// A Yes/No confirmation is pending before closing `NodeId`.
     ConfirmClose(NodeId),
+    /// The server found a persisted session and is awaiting a restore/discard choice.
+    ConfirmSessionRecovery {
+        pane_count: usize,
+    },
     /// The full-screen settings view is open, replacing the entire screen
     /// (see `crate::settings_ui`'s module doc comment for the UI/UX brief).
     /// Reached via `Action::Settings`, the tree footer's settings button, or
@@ -187,26 +198,135 @@ pub enum ClientExitReason {
 /// for the tab-list-left/content-right layout this drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
+    Inference,
     Appearance,
+    Terminal,
+    Editor,
+    Session,
     Keyboard,
     KanbanBoard,
     Sound,
     About,
 }
 
+/// Editable fields are kept distinct from visual rows so a provider cannot
+/// accidentally expose an impossible field (for example, Kilo has no key).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InferenceSettingField {
+    OllamaUrl,
+    OllamaModel,
+    OpenAiUrl,
+    OpenAiApiKey,
+    OpenAiModel,
+    AnthropicUrl,
+    AnthropicApiKey,
+    AnthropicModel,
+    OpenRouterApiKey,
+    OpenRouterModel,
+}
+
+impl InferenceSettingField {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OllamaUrl => "Ollama API URL",
+            Self::OllamaModel => "Ollama model",
+            Self::OpenAiUrl => "OpenAI-compatible API URL",
+            Self::OpenAiApiKey => "OpenAI API key",
+            Self::OpenAiModel => "OpenAI model",
+            Self::AnthropicUrl => "Anthropic API URL",
+            Self::AnthropicApiKey => "Anthropic API key",
+            Self::AnthropicModel => "Anthropic model",
+            Self::OpenRouterApiKey => "OpenRouter API key",
+            Self::OpenRouterModel => "OpenRouter model",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InferenceRow {
+    Provider,
+    Field(InferenceSettingField),
+    RefreshOllamaModels,
+    Test,
+}
+
+/// Presentation state for the explicitly user-requested Ollama model
+/// discovery operation. It belongs to `App`, not `NamingWorkers`, because the
+/// worker only owns execution while this state is rendered and animated by the
+/// Settings screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OllamaModelDiscoveryState {
+    Idle,
+    Loading {
+        endpoint: String,
+        started_at: Instant,
+    },
+    Loaded {
+        endpoint: String,
+        model_count: usize,
+        elapsed: Duration,
+    },
+    Failed {
+        endpoint: String,
+        error: String,
+        elapsed: Duration,
+    },
+}
+
+impl OllamaModelDiscoveryState {
+    pub const fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+}
+
+/// Visible lifecycle for the explicit provider-test request. This belongs to
+/// `App` because workers execute the request while the Settings screen owns
+/// its user-facing progress, log, and terminal outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InferenceTestState {
+    Idle,
+    Running {
+        provider: ilium_inference::InferenceProviderKind,
+        started_at: Instant,
+    },
+    Succeeded {
+        provider: ilium_inference::InferenceProviderKind,
+        elapsed: Duration,
+    },
+    Failed {
+        provider: ilium_inference::InferenceProviderKind,
+        error: String,
+        elapsed: Duration,
+    },
+}
+
+impl InferenceTestState {
+    pub const fn is_loading(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+}
+
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 5] = [
+    pub const ALL: [SettingsTab; 9] = [
         Self::Appearance,
         Self::Keyboard,
+        Self::Terminal,
+        Self::Editor,
+        Self::Session,
         Self::KanbanBoard,
         Self::Sound,
+        Self::Inference,
         Self::About,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Appearance => "User Appearance",
+            Self::Inference => "Inference",
+            Self::Appearance => "User Interface",
+            Self::Terminal => "Terminal",
+            Self::Editor => "Editor",
+            Self::Session => "Session",
             Self::Keyboard => "Keyboard",
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
@@ -247,10 +367,12 @@ pub enum AppearanceRow {
     CodexAgentIcon,
     AntigravityAgentIcon,
     ColorScheme,
+    MotionLevel,
+    SidebarDensity,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 8] = [
+    pub const ALL: [AppearanceRow; 10] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
@@ -259,7 +381,42 @@ impl AppearanceRow {
         Self::CodexAgentIcon,
         Self::AntigravityAgentIcon,
         Self::ColorScheme,
+        Self::MotionLevel,
+        Self::SidebarDensity,
     ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalRow {
+    ScrollbackBudget,
+    NewPaneDirectory,
+}
+impl TerminalRow {
+    pub const ALL: [Self; 2] = [Self::ScrollbackBudget, Self::NewPaneDirectory];
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRow {
+    LineNumbers,
+    Minimap,
+    Autosave,
+    AutosaveDelay,
+    MarkdownDefault,
+}
+impl EditorRow {
+    pub const ALL: [Self; 5] = [
+        Self::LineNumbers,
+        Self::Minimap,
+        Self::Autosave,
+        Self::AutosaveDelay,
+        Self::MarkdownDefault,
+    ];
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionRow {
+    RecoveryPolicy,
+}
+impl SessionRow {
+    pub const ALL: [Self; 1] = [Self::RecoveryPolicy];
 }
 
 /// One live-persisted layout control in the Kanban Board settings tab.
@@ -546,6 +703,7 @@ pub enum PendingRetitleRequest {
         pane_id: NodeId,
         agent_class: AgentClass,
         session_id: String,
+        title_generation: u64,
         trigger: TitleTrigger,
     },
     /// A plain-shell terminal pane, with its screen text already captured
@@ -557,6 +715,15 @@ pub enum PendingRetitleRequest {
         screen_text: String,
         trigger: TitleTrigger,
     },
+}
+
+/// A whole-tree restructure worker `App` has decided to start but can't
+/// spawn itself -- see `App::pending_restructure_request`'s doc comment.
+/// `contexts` is already fully gathered except for agent panes' transcript
+/// text (see `crate::restructure`'s module docs on why that step is left to
+/// the worker thread).
+pub struct PendingRestructureRequest {
+    pub contexts: Vec<LeafContext>,
 }
 
 pub struct App {
@@ -577,6 +744,8 @@ pub struct App {
     pub focus: FocusTarget,
     pub mode: Mode,
     pub status_message: Option<String>,
+    /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
+    pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
     /// Set by input dispatch when the client should leave its event loop.
     /// `None` keeps rendering; the concrete reason controls whether the CLI
     /// exits normally or re-execs a fresh client binary afterward.
@@ -607,6 +776,21 @@ pub struct App {
     /// before the terminal enters raw mode.
     pub sound_settings: ilium_sound::SoundSettings,
     pub sound_discovery: ilium_sound::SoundDiscovery,
+    /// Persisted inference provider settings used by title and organization workers.
+    pub inference_settings: InferenceSettings,
+    pub terminal_settings: TerminalSettings,
+    pub editor_settings: EditorSettings,
+    pub session_settings: SessionSettings,
+    pending_inference_test: bool,
+    pending_ollama_model_refresh: bool,
+    pub ollama_models: Vec<String>,
+    /// Visible lifecycle and outcome of the latest explicit model-discovery
+    /// request. Unlike `status_message`, this remains visible in Settings.
+    pub ollama_model_discovery: OllamaModelDiscoveryState,
+    /// Visible lifecycle of the latest explicit provider test. Unlike the
+    /// status bar, this remains readable while Settings owns the full screen.
+    pub inference_test_state: InferenceTestState,
+    pub inference_test_result: Option<crate::inference_test::InferenceTestResult>,
     /// Where to write `config.toml` when a setting changes -- `None` when
     /// `crate::paths::config_dir` couldn't be resolved at startup, in which
     /// case settings changes still apply live but can't be persisted (see
@@ -645,7 +829,7 @@ pub struct App {
     /// `take_matching_pending_editor_open` for it, so without a bound this
     /// would grow by one abandoned entry per failed open for the life of
     /// the client process.
-    pending_editor_opens: Vec<(String, PathBuf)>,
+    pending_editor_opens: Vec<PendingEditorOpen>,
     pub markdown_picker: ratatui_image::picker::Picker,
     pub markdown_rasterizer: crate::markdown::raster::HeaderRasterizer,
     /// Creation-pulse bookkeeping: node id -> `started_at`-relative offset
@@ -680,6 +864,9 @@ pub struct App {
     /// inferred. A `/resume` can replace an agent session inside one pane,
     /// so a completed title must not suppress inference for the new one.
     pub inferred_title_session_ids: HashMap<NodeId, String>,
+    /// Current server-owned title generation per agent pane. It is distinct
+    /// from the agent session ID because `/clear` can retain the same ID.
+    pub agent_title_generations: HashMap<NodeId, u64>,
     /// How many completed Enter presses have been observed in a plain
     /// terminal pane since its last LLM retitle -- drives
     /// `maybe_trigger_terminal_retitle`'s "every second command" cadence.
@@ -699,6 +886,18 @@ pub struct App {
     /// Retitle workers `App` has decided to start but can't spawn itself --
     /// see `PendingRetitleRequest`'s doc comment.
     pending_retitle_requests: Vec<PendingRetitleRequest>,
+    /// Set while a whole-tree restructure LLM call is in flight -- blocks a
+    /// second click from starting another one, and drives the footer
+    /// button's loading indicator (`tree_ui`). Cleared once the worker's
+    /// result is applied (success or failure) in `crate::tick`.
+    pub structure_loading: bool,
+    /// A whole-tree restructure `App` has decided to start but can't spawn
+    /// itself -- see `PendingRetitleRequest`'s doc comment for the same
+    /// "propose here, spawn there" split. Contexts are gathered
+    /// synchronously in `action_request_restructure` since only `App` has
+    /// `&Tree`/`&PaneRuntime`; the worker thread only resolves agent
+    /// transcripts (disk I/O) and calls the LLM.
+    pending_restructure_request: Option<PendingRestructureRequest>,
     /// Bumped every time `render_cache::apply_tree_snapshot` replaces
     /// `self.tree`. Exists purely so `tree_hit_test_cache` can tell whether
     /// its cached `TreeItem`s are still valid without comparing the whole
@@ -718,6 +917,13 @@ pub struct App {
     tree_hit_test_cache: tree_ui::TreeItemCache,
 }
 
+pub(crate) struct PendingEditorOpen {
+    pub(crate) basename: String,
+    pub(crate) path: PathBuf,
+    pub(crate) line: Option<u32>,
+    pub(crate) column: Option<u32>,
+}
+
 impl App {
     /// Starts a client session with an empty render-cache tree -- the real
     /// tree arrives moments later as the first `ServerEvent::TreeSnapshot`
@@ -734,6 +940,7 @@ impl App {
             focus: FocusTarget::Pane,
             mode: Mode::Normal,
             status_message: None,
+            pending_terminal_link: None,
             exit_reason: None,
             started_at,
             tree_transitions: TreeTransitions::default(),
@@ -748,6 +955,16 @@ impl App {
             kanban_board_settings: KanbanBoardSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
+            inference_settings: InferenceSettings::default(),
+            terminal_settings: TerminalSettings::default(),
+            editor_settings: EditorSettings::default(),
+            session_settings: SessionSettings::default(),
+            pending_inference_test: false,
+            pending_ollama_model_refresh: false,
+            ollama_models: Vec::new(),
+            ollama_model_discovery: OllamaModelDiscoveryState::Idle,
+            inference_test_state: InferenceTestState::Idle,
+            inference_test_result: None,
             config_dir: None,
             pointer_position: None,
             is_terminal_focused: true,
@@ -773,9 +990,12 @@ impl App {
             restored_editor_paths: HashMap::new(),
             title_inference_attempts: HashMap::new(),
             inferred_title_session_ids: HashMap::new(),
+            agent_title_generations: HashMap::new(),
             enter_press_counts: HashMap::new(),
             terminal_retitle_content_hashes: HashMap::new(),
             pending_retitle_requests: Vec::new(),
+            structure_loading: false,
+            pending_restructure_request: None,
             tree_version: 0,
             tree_hit_test_cache: tree_ui::TreeItemCache::default(),
         }
@@ -1001,6 +1221,13 @@ impl App {
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
         self.ui_settings = ui;
         let now = Instant::now();
+        self.tree_width_animation.set_motion_enabled(
+            matches!(ui.motion_level, crate::config::MotionLevel::Full),
+            now,
+        );
+        if !matches!(ui.motion_level, crate::config::MotionLevel::Full) {
+            self.tree_transitions = TreeTransitions::default();
+        }
         self.tree_width_animation.set_base_width(ui.tree_width, now);
         theme::set(Theme::for_scheme(ui.color_scheme));
         let layout = UiLayout::from_screen_area_with_tree_width(
@@ -1008,6 +1235,53 @@ impl App {
             self.tree_width_animation.current_width(),
         );
         self.set_layout(layout);
+    }
+
+    pub fn apply_terminal_settings(&mut self, settings: TerminalSettings) {
+        self.terminal_settings = settings;
+        for pane in self.panes.values_mut() {
+            if let PaneRuntime::Terminal(view) = pane {
+                view.set_scrollback_budget_mib(settings.scrollback_budget_mib);
+            }
+        }
+    }
+    pub fn apply_editor_settings(&mut self, settings: EditorSettings) {
+        self.editor_settings = settings;
+        for pane in self.panes.values_mut() {
+            if let PaneRuntime::Editor(editor) = pane {
+                editor.apply_defaults(&settings);
+            }
+        }
+    }
+    pub fn apply_session_settings(&mut self, settings: SessionSettings) {
+        self.session_settings = settings;
+    }
+    fn persist_terminal_settings(&mut self) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_terminal_settings(&config_dir, &self.terminal_settings)
+            {
+                self.status_message = Some(format!("Could not save terminal settings: {error}"));
+            }
+        }
+    }
+    fn persist_editor_settings(&mut self) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_editor_settings(&config_dir, &self.editor_settings)
+            {
+                self.status_message = Some(format!("Could not save editor settings: {error}"));
+            }
+        }
+    }
+    fn persist_session_settings(&mut self) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_session_settings(&config_dir, &self.session_settings)
+            {
+                self.status_message = Some(format!("Could not save session settings: {error}"));
+            }
+        }
     }
 
     /// [`apply_ui_settings`] plus a best-effort write-through to
@@ -1101,6 +1375,208 @@ impl App {
     /// server has loaded the same global config before the client connects.
     pub fn apply_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
         self.sound_settings = sound;
+    }
+
+    /// Installs startup inference settings. Active workers receive a cloned
+    /// snapshot, so a settings change never mutates a request mid-flight.
+    pub fn apply_inference_settings(&mut self, inference: InferenceSettings) {
+        self.inference_settings = inference;
+    }
+
+    pub fn apply_and_persist_inference_settings(&mut self, inference: InferenceSettings) {
+        self.inference_settings = inference;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_inference_settings(&config_dir, &self.inference_settings)
+            {
+                self.status_message = Some(format!("Could not save inference settings: {error}"));
+            }
+        }
+    }
+
+    pub fn settings_select_inference_provider(
+        &mut self,
+        provider: ilium_inference::InferenceProviderKind,
+    ) {
+        let mut settings = self.inference_settings.clone();
+        settings.selected_provider = provider;
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    pub fn settings_adjust_inference_provider(&mut self, direction: i32) {
+        let providers = ilium_inference::InferenceProviderKind::ALL;
+        let current = providers
+            .iter()
+            .position(|candidate| *candidate == self.inference_settings.selected_provider)
+            .unwrap_or(0);
+        let next =
+            (current as i32 + direction.signum()).rem_euclid(providers.len() as i32) as usize;
+        self.settings_select_inference_provider(providers[next]);
+    }
+
+    pub fn settings_open_inference_field(&mut self, field: InferenceSettingField) {
+        let value = match field {
+            InferenceSettingField::OllamaUrl => self.inference_settings.ollama.base_url.clone(),
+            InferenceSettingField::OllamaModel => self.inference_settings.ollama.model.clone(),
+            InferenceSettingField::OpenAiUrl => self.inference_settings.openai.base_url.clone(),
+            InferenceSettingField::OpenAiApiKey => self.inference_settings.openai.api_key.clone(),
+            InferenceSettingField::OpenAiModel => self.inference_settings.openai.model.clone(),
+            InferenceSettingField::AnthropicUrl => {
+                self.inference_settings.anthropic.base_url.clone()
+            }
+            InferenceSettingField::AnthropicApiKey => {
+                self.inference_settings.anthropic.api_key.clone()
+            }
+            InferenceSettingField::AnthropicModel => {
+                self.inference_settings.anthropic.model.clone()
+            }
+            InferenceSettingField::OpenRouterApiKey => {
+                self.inference_settings.openrouter.api_key.clone()
+            }
+            InferenceSettingField::OpenRouterModel => {
+                self.inference_settings.openrouter.model.clone()
+            }
+        };
+        self.mode = Mode::InferenceSettingPrompt(field, TextPromptState::new(value));
+    }
+
+    pub fn settings_commit_inference_field(&mut self, field: InferenceSettingField, value: String) {
+        let mut settings = self.inference_settings.clone();
+        let value = value.trim().to_string();
+        match field {
+            InferenceSettingField::OllamaUrl => settings.ollama.base_url = value,
+            InferenceSettingField::OllamaModel => settings.ollama.model = value,
+            InferenceSettingField::OpenAiUrl => settings.openai.base_url = value,
+            InferenceSettingField::OpenAiApiKey => settings.openai.api_key = value,
+            InferenceSettingField::OpenAiModel => settings.openai.model = value,
+            InferenceSettingField::AnthropicUrl => settings.anthropic.base_url = value,
+            InferenceSettingField::AnthropicApiKey => settings.anthropic.api_key = value,
+            InferenceSettingField::AnthropicModel => settings.anthropic.model = value,
+            InferenceSettingField::OpenRouterApiKey => settings.openrouter.api_key = value,
+            InferenceSettingField::OpenRouterModel => settings.openrouter.model = value,
+        }
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    pub fn request_inference_test(&mut self) {
+        if self.inference_test_state.is_loading() {
+            self.status_message =
+                Some("Inference provider test is already in progress".to_string());
+            return;
+        }
+        self.pending_inference_test = true;
+        self.inference_test_result = None;
+        self.inference_test_state = InferenceTestState::Running {
+            provider: self.inference_settings.selected_provider,
+            started_at: Instant::now(),
+        };
+        self.status_message = Some("Testing inference provider…".to_string());
+    }
+
+    /// Records the terminal outcome of an explicit provider test so Settings
+    /// can show a durable log instead of leaving background work silent.
+    pub fn finish_inference_test(
+        &mut self,
+        provider: ilium_inference::InferenceProviderKind,
+        elapsed: Duration,
+        result: anyhow::Result<crate::inference_test::InferenceTestResult>,
+    ) {
+        match result {
+            Ok(result) => {
+                self.inference_test_result = Some(result);
+                self.inference_test_state = InferenceTestState::Succeeded { provider, elapsed };
+                self.status_message = Some("Inference test completed".to_string());
+            }
+            Err(error) => {
+                let error = error.to_string();
+                self.inference_test_state = InferenceTestState::Failed {
+                    provider,
+                    error: error.clone(),
+                    elapsed,
+                };
+                self.status_message = Some(format!("Inference test failed: {error}"));
+            }
+        }
+    }
+
+    pub fn request_ollama_model_refresh(&mut self) {
+        if self.ollama_model_discovery.is_loading() {
+            self.status_message = Some("Ollama model discovery is already in progress".to_string());
+            return;
+        }
+        self.pending_ollama_model_refresh = true;
+        self.ollama_model_discovery = OllamaModelDiscoveryState::Loading {
+            endpoint: self.inference_settings.ollama.base_url.clone(),
+            started_at: Instant::now(),
+        };
+        self.status_message = Some("Starting Ollama model discovery…".to_string());
+    }
+
+    /// Records the terminal result of an Ollama `/api/tags` discovery call.
+    /// Selecting the first returned model when the current selection is empty
+    /// or stale makes a successful refresh immediately useful rather than
+    /// leaving the user on an apparently unchanged empty field.
+    pub fn finish_ollama_model_discovery(
+        &mut self,
+        endpoint: String,
+        elapsed: Duration,
+        result: Result<Vec<String>, String>,
+    ) {
+        match result {
+            Ok(models) => {
+                let should_select_first = self.inference_settings.ollama.model.is_empty()
+                    || !models.contains(&self.inference_settings.ollama.model);
+                self.ollama_models = models;
+                if should_select_first {
+                    if let Some(model) = self.ollama_models.first() {
+                        let mut settings = self.inference_settings.clone();
+                        settings.ollama.model = model.clone();
+                        self.apply_and_persist_inference_settings(settings);
+                    }
+                }
+                self.ollama_model_discovery = OllamaModelDiscoveryState::Loaded {
+                    endpoint,
+                    model_count: self.ollama_models.len(),
+                    elapsed,
+                };
+                self.status_message = Some(format!(
+                    "Loaded {} Ollama model(s)",
+                    self.ollama_models.len()
+                ));
+            }
+            Err(error) => {
+                self.ollama_model_discovery = OllamaModelDiscoveryState::Failed {
+                    endpoint,
+                    error: error.clone(),
+                    elapsed,
+                };
+                self.status_message = Some(format!("Could not load Ollama models: {error}"));
+            }
+        }
+    }
+
+    pub fn take_pending_ollama_model_refresh(&mut self) -> bool {
+        std::mem::take(&mut self.pending_ollama_model_refresh)
+    }
+    pub fn settings_adjust_ollama_model(&mut self, direction: i32) {
+        if self.ollama_models.is_empty() {
+            self.request_ollama_model_refresh();
+            return;
+        }
+        let index = self
+            .ollama_models
+            .iter()
+            .position(|model| model == &self.inference_settings.ollama.model)
+            .unwrap_or(0);
+        let next = (index as i32 + direction.signum()).rem_euclid(self.ollama_models.len() as i32)
+            as usize;
+        let mut settings = self.inference_settings.clone();
+        settings.ollama.model = self.ollama_models[next].clone();
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    pub fn take_pending_inference_test(&mut self) -> bool {
+        std::mem::take(&mut self.pending_inference_test)
     }
 
     /// Applies, persists, and sends one live update to the current detached
@@ -1235,11 +1711,14 @@ impl App {
         if !workers.is_idle() {
             return false;
         }
-        let Mode::Search(mut state) = std::mem::replace(&mut self.mode, Mode::Normal) else {
-            return false;
+
+        // Inspect search state in place so a background maintenance tick can
+        // never replace Settings or another active interaction with Normal.
+        let due_search = match &mut self.mode {
+            Mode::Search(state) => state.take_due_search(now),
+            _ => return false,
         };
-        let Some((revision, query)) = state.take_due_search(now) else {
-            self.mode = Mode::Search(state);
+        let Some((revision, query)) = due_search else {
             return false;
         };
         let request = WorkspaceSearchRequest {
@@ -1250,24 +1729,28 @@ impl App {
         let started = match workers.start(request) {
             Ok(()) => true,
             Err(error) => {
-                state.cancel_in_flight_search(revision);
+                // This function cannot change modes between taking the due
+                // query and starting its worker, so Search still owns the
+                // revision that needs to be released after a spawn failure.
+                if let Mode::Search(state) = &mut self.mode {
+                    state.cancel_in_flight_search(revision);
+                }
                 self.status_message = Some(format!("Could not start workspace search: {error}"));
                 false
             }
         };
-        self.mode = Mode::Search(state);
         started
     }
 
     /// Receives one owned worker result. A revision mismatch is expected when
     /// the user continued typing while a previous scan was still running.
     pub fn apply_workspace_search_result(&mut self, event: SearchWorkerEvent) -> bool {
-        let Mode::Search(mut state) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+        // A late result may arrive after the user left Search. Ignore it in
+        // place instead of disturbing whichever interaction now owns `mode`.
+        let Mode::Search(state) = &mut self.mode else {
             return false;
         };
-        let changed = state.complete_search(event.revision, event.results);
-        self.mode = Mode::Search(state);
-        changed
+        state.complete_search(event.revision, event.results)
     }
 
     /// Synchronous helper retained for focused unit tests. Interactive
@@ -1505,7 +1988,54 @@ impl App {
                 self.settings_adjust_antigravity_agent_icon(direction)
             }
             AppearanceRow::ColorScheme => self.settings_toggle_color_scheme(),
+            AppearanceRow::MotionLevel => {
+                let mut ui = self.ui_settings;
+                ui.motion_level = ui.motion_level.stepped(direction);
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::SidebarDensity => {
+                let mut ui = self.ui_settings;
+                ui.sidebar_density = ui.sidebar_density.stepped(direction);
+                self.apply_and_persist_ui_settings(ui);
+            }
         }
+    }
+
+    pub fn settings_adjust_terminal_row(&mut self, row: TerminalRow, direction: i32) {
+        let mut settings = self.terminal_settings;
+        match row {
+            TerminalRow::ScrollbackBudget => {
+                settings.scrollback_budget_mib = settings.stepped_scrollback_budget_mib(direction)
+            }
+            TerminalRow::NewPaneDirectory => {
+                settings.new_pane_directory = settings.new_pane_directory.stepped(direction)
+            }
+        };
+        self.apply_terminal_settings(settings);
+        self.persist_terminal_settings();
+    }
+    pub fn settings_adjust_editor_row(&mut self, row: EditorRow, direction: i32) {
+        let mut settings = self.editor_settings;
+        match row {
+            EditorRow::LineNumbers => settings.show_line_numbers = !settings.show_line_numbers,
+            EditorRow::Minimap => settings.show_minimap = !settings.show_minimap,
+            EditorRow::Autosave => settings.autosave_enabled = !settings.autosave_enabled,
+            EditorRow::AutosaveDelay => {
+                settings.autosave_delay_ms = settings.stepped_autosave_delay_ms(direction)
+            }
+            EditorRow::MarkdownDefault => {
+                settings.markdown_rendered_by_default = !settings.markdown_rendered_by_default
+            }
+        };
+        self.apply_editor_settings(settings);
+        self.persist_editor_settings();
+    }
+    pub fn settings_adjust_session_row(&mut self, _row: SessionRow, direction: i32) {
+        self.session_settings.recovery_policy =
+            self.session_settings.recovery_policy.stepped(direction);
+        self.persist_session_settings();
+        self.status_message =
+            Some("Recovery policy applies when the server next starts".to_string());
     }
 
     /// Records the pointer's last reported cell, driving the tree-panel
@@ -1599,7 +2129,12 @@ impl App {
         if self.is_layout_animating() {
             return true;
         }
-        if self.is_project_name_loading || !self.titles_loading.is_empty() {
+        if self.is_project_name_loading
+            || !self.titles_loading.is_empty()
+            || self.structure_loading
+            || self.ollama_model_discovery.is_loading()
+            || self.inference_test_state.is_loading()
+        {
             return true;
         }
         let elapsed_ms = self.started_at.elapsed().as_millis();
@@ -1976,6 +2511,7 @@ impl App {
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
+            working_directory: self.new_pane_working_directory(),
         });
     }
 
@@ -1985,6 +2521,7 @@ impl App {
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
+            working_directory: self.new_pane_working_directory(),
         });
     }
 
@@ -2003,6 +2540,7 @@ impl App {
                 command_line,
                 initial_input,
             },
+            working_directory: self.new_pane_working_directory(),
         });
     }
 
@@ -2010,6 +2548,16 @@ impl App {
     /// and remembers it in `pending_editor_opens` so this client can load
     /// its own content locally once the server confirms the new node.
     pub fn request_new_editor(&mut self, parent_group: NodeId, path: PathBuf) {
+        self.request_new_editor_at(parent_group, path, None, None);
+    }
+
+    pub fn request_new_editor_at(
+        &mut self,
+        parent_group: NodeId,
+        path: PathBuf,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) {
         let basename = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -2021,11 +2569,31 @@ impl App {
         if self.pending_editor_opens.len() >= MAX_PENDING_EDITOR_OPENS {
             self.pending_editor_opens.remove(0);
         }
-        self.pending_editor_opens.push((basename, path.clone()));
+        self.pending_editor_opens.push(PendingEditorOpen {
+            basename,
+            path: path.clone(),
+            line,
+            column,
+        });
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Editor(path),
+            working_directory: self.new_pane_working_directory(),
         });
+    }
+
+    fn new_pane_working_directory(&self) -> ilium_ipc::NewPaneWorkingDirectory {
+        match self.terminal_settings.new_pane_directory {
+            crate::config::NewPaneDirectory::ProjectRoot => {
+                ilium_ipc::NewPaneWorkingDirectory::ProjectRoot
+            }
+            crate::config::NewPaneDirectory::FocusedTerminal => {
+                ilium_ipc::NewPaneWorkingDirectory::FocusedTerminal
+            }
+            crate::config::NewPaneDirectory::LastUsed => {
+                ilium_ipc::NewPaneWorkingDirectory::LastUsed
+            }
+        }
     }
 
     /// Queues a `ClosePane` request. The tree/pane-runtime removal itself
@@ -2101,6 +2669,7 @@ impl App {
         &mut self,
         pane_id: NodeId,
         expected_session_id: String,
+        expected_title_generation: u64,
         title: String,
         short_title: Option<String>,
         title_source: ilium_core::PaneTitleSource,
@@ -2108,6 +2677,7 @@ impl App {
         self.queue_request(ClientRequest::SetSessionPaneTitle {
             pane_id,
             expected_session_id,
+            expected_title_generation,
             title,
             short_title,
             title_source,
@@ -3187,12 +3757,15 @@ impl App {
     /// Consumes the oldest still-pending editor-open request whose
     /// remembered basename matches `name`, if any -- see
     /// `pending_editor_opens`'s doc comment.
-    pub(crate) fn take_matching_pending_editor_open(&mut self, name: &str) -> Option<PathBuf> {
+    pub(crate) fn take_matching_pending_editor_open(
+        &mut self,
+        name: &str,
+    ) -> Option<PendingEditorOpen> {
         let index = self
             .pending_editor_opens
             .iter()
-            .position(|(basename, _)| basename == name)?;
-        Some(self.pending_editor_opens.remove(index).1)
+            .position(|pending| pending.basename == name)?;
+        Some(self.pending_editor_opens.remove(index))
     }
 
     /// Ordinary (non-leader) key handling while the tree panel has focus.
@@ -3524,12 +4097,14 @@ impl App {
                     self.status_message = Some("No session detected yet for this pane".to_string());
                     return;
                 };
+                let title_generation = self.agent_title_generations.get(&id).copied().unwrap_or(0);
                 self.titles_loading.insert(id);
                 self.pending_retitle_requests
                     .push(PendingRetitleRequest::Session {
                         pane_id: id,
                         agent_class: class.clone(),
                         session_id,
+                        title_generation,
                         trigger: TitleTrigger::Manual,
                     });
             }
@@ -3561,6 +4136,50 @@ impl App {
                     Some("This item doesn't support automatic titling".to_string());
             }
         }
+    }
+
+    /// Gathers every pane/folder's current context synchronously (the only
+    /// place with `&Tree`/`&PaneRuntime`) and queues it for
+    /// `crate::run::dispatch_input_event` to spawn the background
+    /// restructure worker for -- mirrors `action_request_retitle`'s
+    /// "propose here, spawn there" split. A no-op while a previous call is
+    /// still in flight, or when there is nothing to restructure yet.
+    pub fn action_request_restructure(&mut self) {
+        if self.structure_loading {
+            self.status_message = Some("Restructure already in progress".to_string());
+            return;
+        }
+        let contexts = crate::restructure::gather_leaf_contexts(
+            &self.tree,
+            &self.panes,
+            &self.agent_session_ids,
+        );
+        if contexts.is_empty() {
+            self.status_message = Some("Nothing to restructure yet".to_string());
+            return;
+        }
+        self.structure_loading = true;
+        self.pending_restructure_request = Some(PendingRestructureRequest { contexts });
+    }
+
+    /// Drains the pending restructure request, if any, for
+    /// `crate::run::dispatch_input_event` to spawn a worker for.
+    pub fn take_pending_restructure_request(&mut self) -> Option<PendingRestructureRequest> {
+        self.pending_restructure_request.take()
+    }
+
+    /// Queues the applied plan for the server's atomic
+    /// `Tree::apply_restructure`. The server keeps a one-slot undo buffer
+    /// from immediately before this, restorable via
+    /// `request_revert_last_restructure`.
+    pub fn request_apply_restructure_plan(&mut self, plan: ilium_core::RestructurePlan) {
+        self.queue_request(ClientRequest::ApplyRestructurePlan(plan));
+    }
+
+    /// Queues a request to restore the tree exactly as it was immediately
+    /// before the most recently applied restructure plan.
+    pub fn request_revert_last_restructure(&mut self) {
+        self.queue_request(ClientRequest::RevertLastRestructure);
     }
 
     /// Exact content rectangle for editor `id`, after its toolbar and
@@ -3607,6 +4226,40 @@ impl App {
             return;
         }
 
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        ) && mouse
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL)
+        {
+            let row = usize::from(position.y.saturating_sub(viewport.content_area.y));
+            let column = usize::from(position.x.saturating_sub(viewport.content_area.x));
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) {
+                let line = view.with_screen(|screen| {
+                    screen
+                        .contents()
+                        .lines()
+                        .nth(row)
+                        .unwrap_or_default()
+                        .to_string()
+                });
+                let link = crate::terminal_links::link_at(&line, column, &self.session_cwd)
+                    .or_else(|| {
+                        view.osc8_link_at(&line, column)
+                            .map(crate::terminal_links::TerminalLink::Url)
+                    });
+                if let Some(link) = link {
+                    self.status_message = Some(format!(
+                        "Link selected: {} — Ctrl+O opens, Ctrl+C copies, Esc cancels",
+                        link.display()
+                    ));
+                    self.pending_terminal_link = Some(link);
+                    return;
+                }
+            }
+        }
+
         // The wheel scrolls this view's own scrollback rather than being
         // forwarded, unless the foreground app has actually negotiated a
         // mouse protocol (e.g. `htop`, `vim`) and is asking to receive
@@ -3640,6 +4293,43 @@ impl App {
             row,
             modifiers,
         });
+    }
+
+    pub fn confirm_terminal_link(&mut self, open: bool) {
+        let Some(link) = self.pending_terminal_link.take() else {
+            return;
+        };
+        if open {
+            match link {
+                crate::terminal_links::TerminalLink::Url(url) => {
+                    match std::process::Command::new("xdg-open").arg(&url).spawn() {
+                        Ok(_) => self.status_message = Some(format!("Opening {url}")),
+                        Err(error) => {
+                            self.status_message = Some(format!("Could not open link: {error}"))
+                        }
+                    }
+                }
+                crate::terminal_links::TerminalLink::File { path, line, column } => {
+                    let target = self.group_for_new_node();
+                    self.request_new_editor_at(target, path.clone(), line, column);
+                    self.status_message = Some(match line {
+                        Some(line) => format!("Opening {} at line {line}", path.display()),
+                        None => format!("Opening {}", path.display()),
+                    });
+                }
+            }
+        } else {
+            match arboard::Clipboard::new()
+                .and_then(|mut clipboard| clipboard.set_text(link.display()))
+            {
+                Ok(()) => self.status_message = Some("Link copied to clipboard".to_string()),
+                Err(error) => self.status_message = Some(format!("Could not copy link: {error}")),
+            }
+        }
+    }
+
+    pub fn resolve_session_recovery(&mut self, restore: bool) {
+        self.queue_request(ClientRequest::ResolveSessionRecovery { restore });
     }
 
     fn handle_board_pane_mouse(
@@ -4147,6 +4837,77 @@ mod tests {
     }
 
     #[test]
+    fn ollama_discovery_selects_a_returned_model_and_keeps_the_spinner_active() {
+        let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.request_ollama_model_refresh();
+
+        assert!(app.ollama_model_discovery.is_loading());
+        assert!(app.has_active_animation());
+
+        app.finish_ollama_model_discovery(
+            "http://127.0.0.1:11434".to_string(),
+            Duration::from_millis(125),
+            Ok(vec!["qwen3.6:latest".to_string(), "gemma4:12b".to_string()]),
+        );
+
+        assert_eq!(app.ollama_models, ["qwen3.6:latest", "gemma4:12b"]);
+        assert_eq!(app.inference_settings.ollama.model, "qwen3.6:latest");
+        assert!(matches!(
+            app.ollama_model_discovery,
+            OllamaModelDiscoveryState::Loaded { model_count: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn ollama_discovery_keeps_existing_models_and_exposes_the_transport_error() {
+        let mut app = app();
+        app.ollama_models = vec!["qwen3.6:latest".to_string()];
+        app.request_ollama_model_refresh();
+
+        app.finish_ollama_model_discovery(
+            "http://127.0.0.1:11434".to_string(),
+            Duration::from_millis(250),
+            Err("connection refused".to_string()),
+        );
+
+        assert_eq!(app.ollama_models, ["qwen3.6:latest"]);
+        assert!(matches!(
+            app.ollama_model_discovery,
+            OllamaModelDiscoveryState::Failed { ref error, .. } if error == "connection refused"
+        ));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Could not load Ollama models: connection refused")
+        );
+    }
+
+    #[test]
+    fn inference_test_lifecycle_animates_and_keeps_failures_visible() {
+        let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.request_inference_test();
+
+        assert!(app.inference_test_state.is_loading());
+        assert!(app.has_active_animation());
+
+        app.finish_inference_test(
+            ilium_inference::InferenceProviderKind::Ollama,
+            Duration::from_millis(250),
+            Err(anyhow::anyhow!("connection refused")),
+        );
+
+        assert!(matches!(
+            app.inference_test_state,
+            InferenceTestState::Failed { ref error, .. } if error == "connection refused"
+        ));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Inference test failed: connection refused")
+        );
+    }
+
+    #[test]
     fn scheduled_input_action_is_available_only_for_terminal_panes() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -4188,6 +4949,7 @@ mod tests {
             [ClientRequest::NewPane {
                 parent_group: ROOT_ID,
                 kind: ilium_ipc::NewPaneKind::Command(command_line),
+                ..
             }] if command_line == "agy"
         ));
     }
@@ -5262,17 +6024,22 @@ mod tests {
                     command_line: "codex".to_string(),
                     initial_input: "/goal custom task".to_string(),
                 },
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
             }]
         );
         assert!(matches!(app.mode, Mode::Normal));
     }
 
     #[test]
-    fn settings_tabs_cycle_through_kanban_board_sound_and_about() {
+    fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Keyboard);
-        assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::KanbanBoard);
+        assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
+        assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
+        assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
+        assert_eq!(SettingsTab::Session.next(), SettingsTab::KanbanBoard);
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
-        assert_eq!(SettingsTab::Sound.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::Sound.next(), SettingsTab::Inference);
+        assert_eq!(SettingsTab::Inference.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
     }
@@ -5490,6 +6257,23 @@ mod tests {
         };
         assert_eq!(state.results.len(), 1);
         assert_eq!(state.results[0].pane_id, pane_id);
+    }
+
+    #[test]
+    fn workspace_search_maintenance_preserves_an_active_settings_view() {
+        let mut app = app();
+        app.action_open_settings();
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = SearchWorkers::new(events_tx);
+
+        assert!(!app.tick_workspace_search(Instant::now(), &mut workers));
+        assert!(matches!(app.mode, Mode::Settings(_)));
+
+        assert!(!app.apply_workspace_search_result(SearchWorkerEvent {
+            revision: 1,
+            results: Vec::new(),
+        }));
+        assert!(matches!(app.mode, Mode::Settings(_)));
     }
 
     #[test]

@@ -16,7 +16,7 @@
 //! - [`render_cache`] -- applies incoming `ServerEvent`s to `App`.
 //! - [`keys`] / [`mouse`] -- crossterm input dispatch, by `App::mode`.
 //! - [`tick`] -- periodic (non-input-driven) maintenance.
-//! - [`naming_workers`] -- background `ilium-kilo-gateway` title
+//! - [`naming_workers`] -- background provider-neutral title
 //!   inference (`std::thread`, bridged into the tokio event loop).
 //! - [`run`] -- the actual entry point: terminal lifecycle, connects,
 //!   drives the event loop until the user quits or the connection drops.
@@ -25,7 +25,7 @@
 //! `settings_ui`, `text_prompt`, `explorer_overlay`, `editor_pane` and its
 //! chrome/highlight/toolbar/syntax/minimap helpers, `markdown`, `keymap`,
 //! `session_naming`, `project_naming`, `transcript_prompts`,
-//! `project_config`, `workspace_file`, `naming`) is
+//! `project_config`, `workspace_file`, `naming`, `restructure`) is
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
 
@@ -42,6 +42,7 @@ pub mod editor_toolbar;
 pub mod error;
 pub mod explorer_overlay;
 pub mod help;
+pub mod inference_test;
 pub mod keymap;
 pub mod keys;
 pub mod layout;
@@ -55,6 +56,7 @@ pub mod paths;
 pub mod project_config;
 pub mod project_naming;
 pub mod render_cache;
+pub mod restructure;
 pub mod scheduled_input;
 pub mod search_ui;
 pub mod search_workers;
@@ -63,6 +65,7 @@ pub mod settings_ui;
 pub mod split_layout;
 pub mod syntax;
 pub mod terminal_guard;
+pub mod terminal_links;
 pub mod terminal_naming;
 pub mod terminal_title_inference;
 pub mod terminal_view;
@@ -201,6 +204,10 @@ async fn run_inner(
     app.keyboard_settings = config.keyboard;
     app.kanban_board_settings = config.kanban_board;
     app.apply_sound_settings(config.sound);
+    app.apply_inference_settings(config.inference);
+    app.apply_terminal_settings(config.terminal);
+    app.apply_editor_settings(config.editor);
+    app.apply_session_settings(config.session);
     app.sound_discovery = sound_discovery;
     app.config_dir = config_dir;
     let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
@@ -209,7 +216,7 @@ async fn run_inner(
     let mut connection = Connection::connect(socket_path, options.session_name.clone()).await?;
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
-    let mut naming_workers = NamingWorkers::new(naming_events_tx);
+    let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
     let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
     let mut search_workers = SearchWorkers::new(search_events_tx);
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
@@ -407,7 +414,7 @@ fn maybe_start_title_inference(
     let Some(home_dir) = home_dir else {
         return;
     };
-    let Some((pane_id, agent_class, session_id)) =
+    let Some((pane_id, agent_class, session_id, title_generation)) =
         crate::title_inference::pane_ready_for_inference(app, applied)
     else {
         return;
@@ -416,14 +423,15 @@ fn maybe_start_title_inference(
     *app.title_inference_attempts
         .entry((pane_id, session_id.clone()))
         .or_insert(0) += 1;
-    naming_workers.spawn_session_title_worker(
+    naming_workers.spawn_session_title_worker(crate::naming_workers::SessionTitleWorkerRequest {
         pane_id,
-        home_dir.to_path_buf(),
-        app.session_cwd.clone(),
+        home: home_dir.to_path_buf(),
+        cwd: app.session_cwd.clone(),
         agent_class,
         session_id,
-        crate::naming_workers::TitleTrigger::Automatic,
-    );
+        title_generation,
+        trigger: crate::naming_workers::TitleTrigger::Automatic,
+    });
 }
 
 /// Applies and clears `pending`, if it holds a merged `ScreenUpdate` run --
@@ -464,6 +472,13 @@ fn dispatch_input_event(
         return;
     }
     app.handle_event(event);
+    naming_workers.set_inference_settings(app.inference_settings.clone());
+    if app.take_pending_inference_test() {
+        naming_workers.spawn_inference_test_worker();
+    }
+    if app.take_pending_ollama_model_refresh() {
+        naming_workers.spawn_ollama_models_worker();
+    }
 
     for request in app.take_pending_retitle_requests() {
         match request {
@@ -471,15 +486,19 @@ fn dispatch_input_event(
                 pane_id,
                 agent_class,
                 session_id,
+                title_generation,
                 trigger,
             } => match home_dir {
                 Some(home_dir) => naming_workers.spawn_session_title_worker(
-                    pane_id,
-                    home_dir.to_path_buf(),
-                    app.session_cwd.clone(),
-                    agent_class,
-                    session_id,
-                    trigger,
+                    crate::naming_workers::SessionTitleWorkerRequest {
+                        pane_id,
+                        home: home_dir.to_path_buf(),
+                        cwd: app.session_cwd.clone(),
+                        agent_class,
+                        session_id,
+                        title_generation,
+                        trigger,
+                    },
                 ),
                 None => {
                     app.titles_loading.remove(&pane_id);
@@ -493,6 +512,21 @@ fn dispatch_input_event(
                 trigger,
             } => {
                 naming_workers.spawn_terminal_title_worker(pane_id, screen_text, trigger);
+            }
+        }
+    }
+
+    if let Some(request) = app.take_pending_restructure_request() {
+        match home_dir {
+            Some(home_dir) => naming_workers.spawn_restructure_worker(
+                request.contexts,
+                home_dir.to_path_buf(),
+                app.session_cwd.clone(),
+            ),
+            None => {
+                app.structure_loading = false;
+                app.status_message =
+                    Some("Could not restructure: home directory unavailable".to_string());
             }
         }
     }

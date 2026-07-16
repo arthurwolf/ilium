@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use ilium_inference::InferenceSettings;
 use ilium_sound::SoundSettings;
 use ratatui::style::Color;
 use serde::Deserialize;
@@ -46,6 +47,14 @@ pub struct ClientConfig {
     pub sound: SoundSettings,
     /// Board presentation settings shown in the Kanban Board tab.
     pub kanban_board: KanbanBoardSettings,
+    /// Provider selection and credentials used only by client-owned naming workers.
+    pub inference: InferenceSettings,
+    /// Terminal presentation and creation defaults.
+    pub terminal: TerminalSettings,
+    /// Defaults applied when a local editor buffer is opened.
+    pub editor: EditorSettings,
+    /// Policy the detached server reads the next time it starts this session.
+    pub session: SessionSettings,
 }
 
 impl Default for ClientConfig {
@@ -57,8 +66,165 @@ impl Default for ClientConfig {
             ui: UiSettings::default(),
             sound: SoundSettings::default(),
             kanban_board: KanbanBoardSettings::default(),
+            inference: InferenceSettings::default(),
+            terminal: TerminalSettings::default(),
+            editor: EditorSettings::default(),
+            session: SessionSettings::default(),
         }
     }
+}
+
+/// A deliberate motion preference: reduced motion retains state feedback but
+/// removes spatial transitions, while off suppresses decorative animation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionLevel {
+    #[default]
+    Full,
+    Reduced,
+    Off,
+}
+impl MotionLevel {
+    pub const ALL: [Self; 3] = [Self::Full, Self::Reduced, Self::Off];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Full => "Full",
+            Self::Reduced => "Reduced",
+            Self::Off => "Off",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Vertical information density of the tree sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarDensity {
+    Compact,
+    #[default]
+    Standard,
+    Comfortable,
+}
+impl SidebarDensity {
+    pub const ALL: [Self; 3] = [Self::Compact, Self::Standard, Self::Comfortable];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Standard => "Standard",
+            Self::Comfortable => "Comfortable",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Amount of terminal history retained per pane, measured in MiB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSettings {
+    pub scrollback_budget_mib: u16,
+    pub new_pane_directory: NewPaneDirectory,
+}
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            scrollback_budget_mib: 32,
+            new_pane_directory: NewPaneDirectory::ProjectRoot,
+        }
+    }
+}
+impl TerminalSettings {
+    pub const MIN_SCROLLBACK_BUDGET_MIB: u16 = 4;
+    pub const MAX_SCROLLBACK_BUDGET_MIB: u16 = 512;
+    pub fn stepped_scrollback_budget_mib(self, direction: i32) -> u16 {
+        let value = self.scrollback_budget_mib as i32 + direction * 4;
+        value.clamp(
+            Self::MIN_SCROLLBACK_BUDGET_MIB as i32,
+            Self::MAX_SCROLLBACK_BUDGET_MIB as i32,
+        ) as u16
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NewPaneDirectory {
+    #[default]
+    ProjectRoot,
+    FocusedTerminal,
+    LastUsed,
+}
+impl NewPaneDirectory {
+    pub const ALL: [Self; 3] = [Self::ProjectRoot, Self::FocusedTerminal, Self::LastUsed];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ProjectRoot => "Project root",
+            Self::FocusedTerminal => "Focused terminal",
+            Self::LastUsed => "Last used",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Defaults for newly opened local editor panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorSettings {
+    pub show_line_numbers: bool,
+    pub show_minimap: bool,
+    pub autosave_enabled: bool,
+    pub autosave_delay_ms: u16,
+    pub markdown_rendered_by_default: bool,
+}
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            show_line_numbers: true,
+            show_minimap: true,
+            autosave_enabled: true,
+            autosave_delay_ms: 1000,
+            markdown_rendered_by_default: false,
+        }
+    }
+}
+impl EditorSettings {
+    pub fn stepped_autosave_delay_ms(self, direction: i32) -> u16 {
+        const VALUES: [u16; 5] = [250, 500, 1000, 2000, 5000];
+        let current = VALUES
+            .iter()
+            .position(|value| *value == self.autosave_delay_ms)
+            .unwrap_or(2);
+        let offset = if direction < 0 { VALUES.len() - 1 } else { 1 };
+        VALUES[(current + offset) % VALUES.len()]
+    }
+}
+
+/// Server startup behavior for a persisted project-session snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionRecoveryPolicy {
+    #[default]
+    RestoreAutomatically,
+    AskBeforeRestore,
+    StartFresh,
+}
+impl SessionRecoveryPolicy {
+    pub const ALL: [Self; 3] = [
+        Self::RestoreAutomatically,
+        Self::AskBeforeRestore,
+        Self::StartFresh,
+    ];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RestoreAutomatically => "Restore automatically",
+            Self::AskBeforeRestore => "Ask before restoring",
+            Self::StartFresh => "Start fresh",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SessionSettings {
+    pub recovery_policy: SessionRecoveryPolicy,
 }
 
 /// `[keyboard]` settings, validated before they reach input dispatch.
@@ -339,6 +505,8 @@ pub struct UiSettings {
     /// Split-view child order remains structural because it controls pane
     /// placement in the right panel.
     pub tree_order: TreeOrder,
+    pub motion_level: MotionLevel,
+    pub sidebar_density: SidebarDensity,
 }
 
 impl Default for UiSettings {
@@ -349,6 +517,8 @@ impl Default for UiSettings {
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
+            motion_level: MotionLevel::Full,
+            sidebar_density: SidebarDensity::Standard,
         }
     }
 }
@@ -376,6 +546,14 @@ struct RawClientConfig {
     sound: SoundSettings,
     #[serde(default)]
     kanban_board: RawKanbanBoardConfig,
+    #[serde(default)]
+    inference: InferenceSettings,
+    #[serde(default)]
+    terminal: RawTerminalConfig,
+    #[serde(default)]
+    editor: RawEditorConfig,
+    #[serde(default)]
+    session: RawSessionConfig,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -405,6 +583,26 @@ struct RawUiConfig {
     codex_agent_icon: Option<String>,
     antigravity_agent_icon: Option<String>,
     tree_order: Option<String>,
+    motion_level: Option<String>,
+    sidebar_density: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawTerminalConfig {
+    scrollback_budget_mib: Option<u16>,
+    new_pane_directory: Option<String>,
+}
+#[derive(Debug, Default, Deserialize)]
+struct RawEditorConfig {
+    show_line_numbers: Option<bool>,
+    show_minimap: Option<bool>,
+    autosave_enabled: Option<bool>,
+    autosave_delay_ms: Option<u16>,
+    markdown_rendered_by_default: Option<bool>,
+}
+#[derive(Debug, Default, Deserialize)]
+struct RawSessionConfig {
+    recovery_policy: Option<String>,
 }
 
 /// `[theme]`'s color overrides, each an optional `"#rrggbb"` (or `rrggbb`)
@@ -472,6 +670,16 @@ pub enum ConfigLoadError {
         "ui.tree_order = {0:?} must be \"manual\", \"type\", \"age_ascending\", \"age_descending\", \"name_ascending\", or \"name_descending\""
     )]
     InvalidTreeOrder(String),
+    #[error("ui.motion_level = {0:?} must be full, reduced, or off")]
+    InvalidMotionLevel(String),
+    #[error("ui.sidebar_density = {0:?} must be compact, standard, or comfortable")]
+    InvalidSidebarDensity(String),
+    #[error("terminal.scrollback_budget_mib = {0} must be between 4 and 512")]
+    InvalidScrollbackBudget(u16),
+    #[error("terminal.new_pane_directory = {0:?} is not supported")]
+    InvalidNewPaneDirectory(String),
+    #[error("session.recovery_policy = {0:?} is not supported")]
+    InvalidSessionRecoveryPolicy(String),
     /// `kanban_board.card_preview_lines` is outside the supported range.
     #[error(
         "kanban_board.card_preview_lines = {0} must be between {MIN_CARD_PREVIEW_LINES} and {MAX_CARD_PREVIEW_LINES}"
@@ -538,6 +746,15 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
             path: path.clone(),
             source,
         })?;
+    let terminal = merge_terminal(raw.terminal).map_err(|source| ClientError::ConfigLoad {
+        path: path.clone(),
+        source,
+    })?;
+    let editor = merge_editor(raw.editor);
+    let session = merge_session(raw.session).map_err(|source| ClientError::ConfigLoad {
+        path: path.clone(),
+        source,
+    })?;
     let theme =
         merge_theme(raw.theme, ui.color_scheme).map_err(|source| ClientError::ConfigLoad {
             path: path.clone(),
@@ -551,6 +768,10 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         ui,
         sound: raw.sound,
         kanban_board,
+        inference: raw.inference,
+        terminal,
+        editor,
+        session,
     })
 }
 
@@ -617,6 +838,18 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         Some(value) => parse_tree_order(&value)?,
         None => defaults.tree_order,
     };
+    let motion_level = raw
+        .motion_level
+        .as_deref()
+        .map(parse_motion_level)
+        .transpose()?
+        .unwrap_or_default();
+    let sidebar_density = raw
+        .sidebar_density
+        .as_deref()
+        .map(parse_sidebar_density)
+        .transpose()?
+        .unwrap_or_default();
     Ok(UiSettings {
         auto_resize_tree_on_focus: raw
             .auto_resize_tree_on_focus
@@ -630,7 +863,93 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             antigravity_icon,
         },
         tree_order,
+        motion_level,
+        sidebar_density,
     })
+}
+
+fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoadError> {
+    let defaults = TerminalSettings::default();
+    let scrollback_budget_mib = raw
+        .scrollback_budget_mib
+        .unwrap_or(defaults.scrollback_budget_mib);
+    if !(TerminalSettings::MIN_SCROLLBACK_BUDGET_MIB..=TerminalSettings::MAX_SCROLLBACK_BUDGET_MIB)
+        .contains(&scrollback_budget_mib)
+    {
+        return Err(ConfigLoadError::InvalidScrollbackBudget(
+            scrollback_budget_mib,
+        ));
+    }
+    let new_pane_directory = raw
+        .new_pane_directory
+        .as_deref()
+        .map(parse_new_pane_directory)
+        .transpose()?
+        .unwrap_or(defaults.new_pane_directory);
+    Ok(TerminalSettings {
+        scrollback_budget_mib,
+        new_pane_directory,
+    })
+}
+fn merge_editor(raw: RawEditorConfig) -> EditorSettings {
+    let defaults = EditorSettings::default();
+    EditorSettings {
+        show_line_numbers: raw.show_line_numbers.unwrap_or(defaults.show_line_numbers),
+        show_minimap: raw.show_minimap.unwrap_or(defaults.show_minimap),
+        autosave_enabled: raw.autosave_enabled.unwrap_or(defaults.autosave_enabled),
+        autosave_delay_ms: raw
+            .autosave_delay_ms
+            .unwrap_or(defaults.autosave_delay_ms)
+            .clamp(250, 5000),
+        markdown_rendered_by_default: raw
+            .markdown_rendered_by_default
+            .unwrap_or(defaults.markdown_rendered_by_default),
+    }
+}
+fn merge_session(raw: RawSessionConfig) -> Result<SessionSettings, ConfigLoadError> {
+    Ok(SessionSettings {
+        recovery_policy: raw
+            .recovery_policy
+            .as_deref()
+            .map(parse_session_recovery_policy)
+            .transpose()?
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_motion_level(value: &str) -> Result<MotionLevel, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "full" => Ok(MotionLevel::Full),
+        "reduced" => Ok(MotionLevel::Reduced),
+        "off" => Ok(MotionLevel::Off),
+        _ => Err(ConfigLoadError::InvalidMotionLevel(value.to_string())),
+    }
+}
+fn parse_sidebar_density(value: &str) -> Result<SidebarDensity, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "compact" => Ok(SidebarDensity::Compact),
+        "standard" => Ok(SidebarDensity::Standard),
+        "comfortable" => Ok(SidebarDensity::Comfortable),
+        _ => Err(ConfigLoadError::InvalidSidebarDensity(value.to_string())),
+    }
+}
+fn parse_new_pane_directory(value: &str) -> Result<NewPaneDirectory, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "project_root" => Ok(NewPaneDirectory::ProjectRoot),
+        "focused_terminal" => Ok(NewPaneDirectory::FocusedTerminal),
+        "last_used" => Ok(NewPaneDirectory::LastUsed),
+        _ => Err(ConfigLoadError::InvalidNewPaneDirectory(value.to_string())),
+    }
+}
+fn parse_session_recovery_policy(value: &str) -> Result<SessionRecoveryPolicy, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "restore_automatically" => Ok(SessionRecoveryPolicy::RestoreAutomatically),
+        "ask_before_restore" => Ok(SessionRecoveryPolicy::AskBeforeRestore),
+        "start_fresh" => Ok(SessionRecoveryPolicy::StartFresh),
+        _ => Err(ConfigLoadError::InvalidSessionRecoveryPolicy(
+            value.to_string(),
+        )),
+    }
 }
 
 /// Parses the stable on-disk name for the tree's agent identifier mode.
@@ -912,6 +1231,34 @@ pub fn save_ui_settings(config_dir: &Path, ui: &UiSettings) -> Result<(), Client
     write_toml_document(&path, &document)
 }
 
+pub fn save_terminal_settings(
+    config_dir: &Path,
+    settings: &TerminalSettings,
+) -> Result<(), ClientError> {
+    save_table(config_dir, "terminal", terminal_settings_to_toml(settings))
+}
+pub fn save_editor_settings(
+    config_dir: &Path,
+    settings: &EditorSettings,
+) -> Result<(), ClientError> {
+    save_table(config_dir, "editor", editor_settings_to_toml(settings))
+}
+pub fn save_session_settings(
+    config_dir: &Path,
+    settings: &SessionSettings,
+) -> Result<(), ClientError> {
+    save_table(config_dir, "session", session_settings_to_toml(settings))
+}
+fn save_table(config_dir: &Path, name: &str, value: toml::Value) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table")
+        .insert(name.to_string(), value);
+    write_toml_document(&path, &document)
+}
+
 /// Persists `[keyboard]` without replacing any unrelated config tables.
 pub fn save_keyboard_settings(
     config_dir: &Path,
@@ -958,6 +1305,26 @@ pub fn save_sound_settings(config_dir: &Path, sound: &SoundSettings) -> Result<(
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     table.insert("sound".to_string(), sound_value);
+    write_toml_document(&path, &document)
+}
+
+/// Persists only the client-owned `[inference]` table, preserving all server
+/// and unrelated client configuration. The settings UI deliberately avoids
+/// displaying API-key values after they are entered.
+pub fn save_inference_settings(
+    config_dir: &Path,
+    inference: &InferenceSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(inference).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("inference".to_string(), value);
     write_toml_document(&path, &document)
 }
 
@@ -1045,6 +1412,87 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "tree_order".to_string(),
         toml::Value::String(tree_order_name(ui.tree_order).to_string()),
     );
+    table.insert(
+        "motion_level".to_string(),
+        toml::Value::String(
+            match ui.motion_level {
+                MotionLevel::Full => "full",
+                MotionLevel::Reduced => "reduced",
+                MotionLevel::Off => "off",
+            }
+            .to_string(),
+        ),
+    );
+    table.insert(
+        "sidebar_density".to_string(),
+        toml::Value::String(
+            match ui.sidebar_density {
+                SidebarDensity::Compact => "compact",
+                SidebarDensity::Standard => "standard",
+                SidebarDensity::Comfortable => "comfortable",
+            }
+            .to_string(),
+        ),
+    );
+    toml::Value::Table(table)
+}
+
+fn terminal_settings_to_toml(settings: &TerminalSettings) -> toml::Value {
+    let mut table = toml::value::Table::new();
+    table.insert(
+        "scrollback_budget_mib".into(),
+        toml::Value::Integer(i64::from(settings.scrollback_budget_mib)),
+    );
+    table.insert(
+        "new_pane_directory".into(),
+        toml::Value::String(
+            match settings.new_pane_directory {
+                NewPaneDirectory::ProjectRoot => "project_root",
+                NewPaneDirectory::FocusedTerminal => "focused_terminal",
+                NewPaneDirectory::LastUsed => "last_used",
+            }
+            .into(),
+        ),
+    );
+    toml::Value::Table(table)
+}
+fn editor_settings_to_toml(settings: &EditorSettings) -> toml::Value {
+    let mut table = toml::value::Table::new();
+    table.insert(
+        "show_line_numbers".into(),
+        toml::Value::Boolean(settings.show_line_numbers),
+    );
+    table.insert(
+        "show_minimap".into(),
+        toml::Value::Boolean(settings.show_minimap),
+    );
+    table.insert(
+        "autosave_enabled".into(),
+        toml::Value::Boolean(settings.autosave_enabled),
+    );
+    table.insert(
+        "autosave_delay_ms".into(),
+        toml::Value::Integer(i64::from(settings.autosave_delay_ms)),
+    );
+    table.insert(
+        "markdown_rendered_by_default".into(),
+        toml::Value::Boolean(settings.markdown_rendered_by_default),
+    );
+    toml::Value::Table(table)
+}
+fn session_settings_to_toml(settings: &SessionSettings) -> toml::Value {
+    let mut table = toml::value::Table::new();
+    table.insert(
+        "recovery_policy".into(),
+        toml::Value::String(
+            match settings.recovery_policy {
+                SessionRecoveryPolicy::RestoreAutomatically => "restore_automatically",
+                SessionRecoveryPolicy::AskBeforeRestore => "ask_before_restore",
+                SessionRecoveryPolicy::StartFresh => "start_fresh",
+            }
+            .into(),
+        ),
+    );
     toml::Value::Table(table)
 }
 
@@ -1093,6 +1541,34 @@ mod tests {
         assert_eq!(config.keyboard, KeyboardSettings::default());
         assert_eq!(config.theme, Theme::default());
         assert_eq!(config.sound, SoundSettings::default());
+        assert_eq!(
+            config.inference.selected_provider,
+            ilium_inference::InferenceProviderKind::KiloGateway
+        );
+    }
+
+    #[test]
+    fn inference_settings_round_trip_without_replacing_server_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 5\n",
+        )
+        .unwrap();
+        let inference = InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::OpenRouter,
+            openrouter: ilium_inference::OpenRouterSettings {
+                api_key: "test-key".to_string(),
+                model: "openrouter/free".to_string(),
+            },
+            ..InferenceSettings::default()
+        };
+        save_inference_settings(&dir, &inference).unwrap();
+
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[detection]"));
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.inference, inference);
     }
 
     #[test]
@@ -1466,6 +1942,8 @@ mod tests {
                 antigravity_icon: AntigravityAgentIcon::Orbit,
             },
             tree_order: TreeOrder::NameDescending,
+            motion_level: MotionLevel::Reduced,
+            sidebar_density: SidebarDensity::Comfortable,
         };
         save_ui_settings(&dir, &ui).expect("save should succeed");
 

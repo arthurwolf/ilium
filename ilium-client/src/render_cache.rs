@@ -31,6 +31,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
             apply_tree_snapshot(app, tree);
             AppliedEvent::Other
         }
+        ServerEvent::SessionRecoveryAvailable { pane_count } => {
+            app.mode = crate::app::Mode::ConfirmSessionRecovery { pane_count };
+            AppliedEvent::Other
+        }
         ServerEvent::ScreenUpdate {
             pane_id,
             sequence,
@@ -110,7 +114,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
         ServerEvent::PaneSessionIdResolved {
             pane_id,
             session_id,
+            title_generation,
         } => {
+            app.agent_title_generations
+                .insert(pane_id, title_generation);
             let previous_session_id = app.agent_session_ids.insert(pane_id, session_id.clone());
             let changed = previous_session_id.as_ref() != Some(&session_id);
             if changed {
@@ -139,10 +146,29 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
             }
             AppliedEvent::SessionIdResolved { pane_id }
         }
-        ServerEvent::PaneSessionIdCleared { pane_id } => {
+        ServerEvent::PaneSessionIdCleared {
+            pane_id,
+            title_generation,
+        } => {
+            app.agent_title_generations
+                .insert(pane_id, title_generation);
             if let Some(previous_session_id) = app.agent_session_ids.remove(&pane_id) {
                 app.title_inference_attempts
                     .remove(&(pane_id, previous_session_id));
+            }
+            app.inferred_title_session_ids.remove(&pane_id);
+            app.titles_loading.remove(&pane_id);
+            AppliedEvent::Other
+        }
+        ServerEvent::PaneSessionTitleCleared {
+            pane_id,
+            title_generation,
+        } => {
+            app.agent_title_generations
+                .insert(pane_id, title_generation);
+            if let Some(session_id) = app.agent_session_ids.get(&pane_id) {
+                app.title_inference_attempts
+                    .remove(&(pane_id, session_id.clone()));
             }
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
@@ -207,6 +233,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|(pane_id, _), _| live_pane_ids.contains(pane_id));
     app.inferred_title_session_ids
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.agent_title_generations
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.enter_press_counts
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.terminal_retitle_content_hashes
@@ -236,20 +264,35 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
             PaneContentKind::Terminal => {
                 app.panes.insert(
                     pane_id,
-                    PaneRuntime::Terminal(Box::new(TerminalView::new(rows, cols))),
+                    PaneRuntime::Terminal(Box::new(TerminalView::with_scrollback_budget_mib(
+                        rows,
+                        cols,
+                        app.terminal_settings.scrollback_budget_mib,
+                    ))),
                 );
             }
             PaneContentKind::Editor => {
-                let path = app
+                let pending_open = app
                     .restored_editor_paths
                     .get(&pane_id)
                     .cloned()
-                    .or_else(|| app.take_matching_pending_editor_open(&name));
-                let Some(path) = path else {
+                    .map(|path| (path, None, None))
+                    .or_else(|| {
+                        app.take_matching_pending_editor_open(&name)
+                            .map(|pending| (pending.path, pending.line, pending.column))
+                    });
+                let Some((path, line, column)) = pending_open else {
                     continue;
                 };
                 match EditorPane::load(path) {
-                    Ok(editor) => {
+                    Ok(mut editor) => {
+                        editor.apply_defaults(&app.editor_settings);
+                        if let Some(line) = line {
+                            editor.jump_to_location(
+                                line.saturating_sub(1) as usize,
+                                column.unwrap_or(1_u32).saturating_sub(1) as usize,
+                            );
+                        }
                         app.panes
                             .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
                         newly_opened_editor = Some(pane_id);
@@ -646,6 +689,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                title_generation: 0,
             },
         );
         app.title_inference_attempts
@@ -703,6 +747,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                title_generation: 0,
             },
         );
         app.title_inference_attempts
@@ -713,6 +758,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-2".to_string(),
+                title_generation: 1,
             },
         );
 
@@ -735,6 +781,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                title_generation: 0,
             },
         );
         app.title_inference_attempts
@@ -743,9 +790,58 @@ mod tests {
             .insert(pane_id, "session-1".to_string());
         app.titles_loading.insert(pane_id);
 
-        apply(&mut app, ServerEvent::PaneSessionIdCleared { pane_id });
+        apply(
+            &mut app,
+            ServerEvent::PaneSessionIdCleared {
+                pane_id,
+                title_generation: 1,
+            },
+        );
 
         assert!(!app.agent_session_ids.contains_key(&pane_id));
+        assert!(!app
+            .title_inference_attempts
+            .contains_key(&(pane_id, "session-1".to_string())));
+        assert!(!app.inferred_title_session_ids.contains_key(&pane_id));
+        assert!(!app.titles_loading.contains(&pane_id));
+    }
+
+    #[test]
+    fn fresh_conversation_clear_keeps_the_session_but_drops_its_title_guards() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        apply(
+            &mut app,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id,
+                session_id: "session-1".to_string(),
+                title_generation: 0,
+            },
+        );
+        app.title_inference_attempts
+            .insert((pane_id, "session-1".to_string()), 2);
+        app.inferred_title_session_ids
+            .insert(pane_id, "session-1".to_string());
+        app.titles_loading.insert(pane_id);
+
+        apply(
+            &mut app,
+            ServerEvent::PaneSessionTitleCleared {
+                pane_id,
+                title_generation: 1,
+            },
+        );
+
+        assert_eq!(
+            app.agent_session_ids.get(&pane_id),
+            Some(&"session-1".to_string())
+        );
+        assert_eq!(app.agent_title_generations.get(&pane_id), Some(&1));
         assert!(!app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));

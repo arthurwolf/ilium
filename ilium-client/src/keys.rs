@@ -40,6 +40,9 @@ pub fn handle_event(app: &mut App, event: Event) {
         }
         Mode::Rename(state) => handle_rename_event(app, state, &event),
         Mode::CommandPrompt(state) => handle_command_prompt_event(app, state, &event),
+        Mode::InferenceSettingPrompt(field, state) => {
+            handle_inference_setting_prompt(app, field, state, &event)
+        }
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
@@ -69,6 +72,9 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_board_delete_confirm(app, pane_id, target, &event)
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
+        Mode::ConfirmSessionRecovery { pane_count } => {
+            handle_session_recovery_event(app, pane_count, &event)
+        }
         Mode::Settings(state) => handle_settings_event(app, state, &event),
         Mode::Search(state) => handle_search_event(app, state, &event),
         Mode::Move => {
@@ -87,6 +93,28 @@ pub fn handle_event(app: &mut App, event: Event) {
             app.mode = Mode::LeaderPending;
             handle_normal_or_leader(app, event);
         }
+    }
+}
+
+fn handle_session_recovery_event(app: &mut App, pane_count: usize, event: &Event) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::ConfirmSessionRecovery { pane_count };
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::ConfirmSessionRecovery { pane_count };
+        return;
+    }
+    match key.code {
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+            app.resolve_session_recovery(true);
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+            app.resolve_session_recovery(false);
+            app.mode = Mode::Normal;
+        }
+        _ => app.mode = Mode::ConfirmSessionRecovery { pane_count },
     }
 }
 
@@ -255,6 +283,22 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
     };
     if !is_press(&key) {
         return;
+    }
+
+    if app.pending_terminal_link.is_some() {
+        if key.code == KeyCode::Esc {
+            app.pending_terminal_link = None;
+            app.status_message = Some("Link action cancelled".to_string());
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('o') {
+            app.confirm_terminal_link(true);
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            app.confirm_terminal_link(false);
+            return;
+        }
     }
 
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('f') {
@@ -625,6 +669,42 @@ fn handle_command_prompt_event(app: &mut App, mut state: TextPromptState, event:
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::CommandPrompt(state),
+    }
+}
+
+/// Edits one inference provider field while preserving the Settings screen as
+/// the return destination rather than dropping the user into normal mode.
+fn handle_inference_setting_prompt(
+    app: &mut App,
+    field: crate::app::InferenceSettingField,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::InferenceSettingPrompt(field, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::InferenceSettingPrompt(field, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            app.settings_commit_inference_field(field, state.buf);
+            app.mode = Mode::Settings(crate::app::SettingsState {
+                tab: SettingsTab::Inference,
+                selected_row: 0,
+                scroll: 0,
+            });
+        }
+        PromptOutcome::Cancel => {
+            app.mode = Mode::Settings(crate::app::SettingsState {
+                tab: SettingsTab::Inference,
+                selected_row: 0,
+                scroll: 0,
+            })
+        }
+        PromptOutcome::Continue => app.mode = Mode::InferenceSettingPrompt(field, state),
     }
 }
 
@@ -1037,6 +1117,55 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.selected_row = 0;
             state.scroll = 0;
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Inference => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Inference => {
+            state.selected_row = (state.selected_row + 1).min(
+                crate::settings_ui::inference_rows(&app.inference_settings)
+                    .len()
+                    .saturating_sub(1),
+            );
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Inference => {
+            match crate::settings_ui::inference_rows(&app.inference_settings)
+                .get(state.selected_row)
+            {
+                Some(crate::app::InferenceRow::Provider) => {
+                    app.settings_adjust_inference_provider(-1)
+                }
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::OllamaModel,
+                )) => app.settings_adjust_ollama_model(-1),
+                _ => {}
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Inference =>
+        {
+            match crate::settings_ui::inference_rows(&app.inference_settings)
+                .get(state.selected_row)
+                .copied()
+            {
+                Some(crate::app::InferenceRow::Provider) => {
+                    app.settings_adjust_inference_provider(1)
+                }
+                Some(crate::app::InferenceRow::RefreshOllamaModels) => {
+                    app.request_ollama_model_refresh()
+                }
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::OllamaModel,
+                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
+                    app.settings_adjust_ollama_model(1)
+                }
+                Some(crate::app::InferenceRow::Field(field)) => {
+                    app.settings_open_inference_field(field);
+                    return;
+                }
+                Some(crate::app::InferenceRow::Test) => app.request_inference_test(),
+                None => {}
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Appearance => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -1054,6 +1183,61 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         {
             if let Some(row) = AppearanceRow::ALL.get(state.selected_row).copied() {
                 app.settings_adjust_row(row, 1);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Terminal => {
+            state.selected_row = state.selected_row.saturating_sub(1)
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Terminal => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::TerminalRow::ALL.len() - 1)
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Terminal => {
+            if let Some(row) = crate::app::TerminalRow::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                app.settings_adjust_terminal_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Terminal =>
+        {
+            if let Some(row) = crate::app::TerminalRow::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                app.settings_adjust_terminal_row(row, 1);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Editor => {
+            state.selected_row = state.selected_row.saturating_sub(1)
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Editor => {
+            state.selected_row = (state.selected_row + 1).min(crate::app::EditorRow::ALL.len() - 1)
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Editor => {
+            if let Some(row) = crate::app::EditorRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_editor_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Editor =>
+        {
+            if let Some(row) = crate::app::EditorRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_editor_row(row, 1);
+            }
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Session =>
+        {
+            if let Some(row) = crate::app::SessionRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_session_row(row, 1);
             }
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Keyboard => {

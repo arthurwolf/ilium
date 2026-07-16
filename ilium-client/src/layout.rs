@@ -40,6 +40,7 @@ pub struct TreeWidthAnimation {
     target_width: u16,
     transition_started_at: Instant,
     is_animating: bool,
+    motion_enabled: bool,
 }
 
 impl TreeWidthAnimation {
@@ -53,6 +54,18 @@ impl TreeWidthAnimation {
             target_width: base_width,
             transition_started_at: now,
             is_animating: false,
+            motion_enabled: true,
+        }
+    }
+
+    /// Disables spatial width easing while preserving the same focus-derived endpoint.
+    pub fn set_motion_enabled(&mut self, enabled: bool, now: Instant) {
+        self.motion_enabled = enabled;
+        if !enabled {
+            self.current_width = self.target_width;
+            self.transition_start_width = self.target_width;
+            self.is_animating = false;
+            self.transition_started_at = now;
         }
     }
 
@@ -92,6 +105,14 @@ impl TreeWidthAnimation {
             self.base_width
         };
         let sampled_width = self.sample(now);
+
+        if !self.motion_enabled {
+            self.current_width = requested_target;
+            self.target_width = requested_target;
+            self.transition_start_width = requested_target;
+            self.is_animating = false;
+            return requested_target;
+        }
 
         if requested_target != self.target_width {
             self.transition_start_width = sampled_width;

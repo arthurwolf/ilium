@@ -401,8 +401,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // (`TreeState::key_right`).
     tui.write(b"\x02t")
         .expect("writing Ctrl+B then t (FocusTree)");
-    tui.write(b"\x1b[B").expect("writing Down arrow"); // selects the first tree entry
-    tui.write(b"\x1b[C").expect("writing Right arrow"); // expands it
+    tui.write(b"j").expect("selecting the first tree entry");
+    tui.write(b"l").expect("expanding the selected tree entry");
     let pane_listed = wait_until(
         || {
             let screen = tui.screen_text();
@@ -421,6 +421,37 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         focused_footer_shown,
         "expected the settings sliders to be visible while the tree has keyboard focus, got: {:?}",
         tui.screen_text()
+    );
+
+    // Exercise the complete physical click. The release itself is harmless;
+    // the historical close happened on the next periodic maintenance tick,
+    // when the workspace-search poll replaced every non-search mode with
+    // Normal while merely checking whether a debounced scan was due.
+    let (settings_column, settings_row) = tui
+        .with_screen(|screen| first_cell_containing(screen, "🎚️"))
+        .expect("rendered settings toolbar icon should have a concrete cell");
+    tui.write(&sgr_mouse_down(0, settings_column, settings_row))
+        .expect("pressing the settings toolbar icon");
+    assert!(
+        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        "expected the settings press to open Settings, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_up(settings_column, settings_row))
+        .expect("releasing the settings toolbar icon");
+    // The default non-animation poll interval is 250 ms. Waiting through
+    // more than one cycle proves maintenance no longer destroys Settings.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        tui.screen_text().contains("⚙ Settings"),
+        "Settings closed after the opening click and maintenance ticks: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b")
+        .expect("closing mouse-opened Settings with Esc");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        "expected mouse-opened Settings to close before continuing"
     );
 
     // Move the real terminal pointer over the terminal row. This verifies
@@ -496,7 +527,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the complete checked Order by submenu, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\x1b[B\x1b[B\r")
+    // Avoid escape-prefixed arrows in the real PTY: under load the terminal
+    // can surface a standalone Escape before completing a CSI sequence,
+    // which correctly dismisses a context menu. `j` has the same menu
+    // navigation contract without that ambiguous prefix.
+    tui.write(b"jjj\r")
         .expect("selecting Age down from the Order by submenu");
     let age_order_persisted = wait_until(
         || {
@@ -543,7 +578,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // than only config/keymap units.
     tui.write(b"\x1b").expect("closing Help with Esc");
     assert!(
-        wait_until(|| !tui.screen_text().contains("keyboard reference"), WAIT_TIMEOUT).await,
+        wait_until(
+            || !tui.screen_text().contains("keyboard reference"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected Help to close before opening Settings"
     );
     tui.write(b"\x02S")
@@ -579,7 +618,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected all agent identifier controls in User Appearance, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\x1b[B\x1b[B\x1b[C\x1b[C\x1b[B\x1b[C\x1b[B\x1b[C")
+    // Use the settings view's `j`/`l` aliases rather than escape-prefixed
+    // arrows: a real PTY can deliver an isolated escape before the rest of
+    // a CSI sequence, which would legitimately close this full-screen view.
+    tui.write(b"jjjlljljl")
         .expect("selecting icon mode, Claude magic wand, and Codex tools");
     let agent_controls_persisted = wait_until(
         || {
@@ -614,6 +656,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected selected agent icon controls to update live, got: {:?}",
         tui.screen_text()
     );
+    // Keyboard remains the immediate tab successor to Appearance, keeping
+    // this navigation path keyboard-accessible as well as mouse-accessible.
     tui.write(b"\t")
         .expect("switching to the Keyboard settings tab");
     let keyboard_tab_shown = wait_until(
@@ -665,7 +709,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // The Kanban Board tab owns card compactness and column sizing
     // independently from general appearance. Prove both defaults, live
     // adjustment, and isolated persistence before continuing to Sound.
-    tui.write(b"\t")
+    tui.write(b"\t\t\t\t")
         .expect("switching to the Kanban Board settings tab");
     assert!(
         wait_until(
@@ -682,7 +726,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Kanban Board three-line default, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[C")
+    tui.write(b"l")
         .expect("increase board card previews to four lines");
     assert!(
         wait_until(
@@ -693,7 +737,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected Kanban Board setting to persist"
     );
-    tui.write(b"\x1b[B\x1b[C")
+    tui.write(b"jl")
         .expect("select and increase the minimum board column width");
     assert!(
         wait_until(
@@ -726,7 +770,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Sound settings tab, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\x1b[B\x1b[B ")
+    tui.write(b"jjj ")
         .expect("moving to and toggling Agent finished");
     let sound_event_disabled = wait_until(
         || {
@@ -1165,6 +1209,25 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
         })
         .map(|(index, _)| index as u16)
         .collect()
+}
+
+/// Finds the first terminal cell whose grapheme payload contains `needle`.
+/// Wide emoji can be stored as one multi-codepoint cell followed by a blank
+/// continuation cell, so matching cell contents is more reliable than byte
+/// offsets in a flattened screen row for mouse-coordinate assertions.
+fn first_cell_containing(screen: &vt100::Screen, needle: &str) -> Option<(u16, u16)> {
+    let (rows, columns) = screen.size();
+    for row in 0..rows {
+        for column in 0..columns {
+            if screen
+                .cell(row, column)
+                .is_some_and(|cell| cell.contents().contains(needle))
+            {
+                return Some((column, row));
+            }
+        }
+    }
+    None
 }
 
 /// True if any cell in `row` is currently rendered in inverse video --

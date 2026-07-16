@@ -659,6 +659,32 @@ pub fn checkbox_occurrences(title: &str) -> Vec<(usize, bool)> {
         .collect()
 }
 
+/// Plain-text rendering of a board's columns/cards, used as one pane's
+/// content extract when gathering context for the whole-tree restructure
+/// LLM call (`crate::restructure`). Unlike `serialize_markdown_board`, this
+/// never needs to round-trip back into a board and is never written to
+/// disk -- session_naming/terminal_naming have no board-equivalent reader,
+/// so this is the one genuinely new content source that feature needs.
+pub fn board_text_extract(columns: &[BoardColumn]) -> String {
+    let mut extract = String::new();
+    for column in columns {
+        extract.push_str("## ");
+        extract.push_str(&column.title);
+        extract.push('\n');
+        for card in &column.cards {
+            extract.push_str("- ");
+            extract.push_str(&card.title);
+            let body = card.body.trim();
+            if !body.is_empty() {
+                extract.push_str(": ");
+                extract.push_str(body);
+            }
+            extract.push('\n');
+        }
+    }
+    extract
+}
+
 fn load_folder_board(path: &Path) -> Result<Vec<BoardColumn>, String> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -1048,6 +1074,30 @@ mod tests {
             code,
             crossterm::event::KeyModifiers::NONE,
         )))
+    }
+
+    #[test]
+    fn board_text_extract_renders_columns_and_cards_with_nonempty_bodies_inline() {
+        let columns = vec![BoardColumn {
+            title: "Doing".to_string(),
+            cards: vec![
+                BoardCard {
+                    title: "Fix auth bug".to_string(),
+                    body: "Token expiry check uses < not <=".to_string(),
+                },
+                BoardCard {
+                    title: "No body card".to_string(),
+                    body: String::new(),
+                },
+            ],
+        }];
+
+        let extract = board_text_extract(&columns);
+
+        assert_eq!(
+            extract,
+            "## Doing\n- Fix auth bug: Token expiry check uses < not <=\n- No body card\n"
+        );
     }
 
     #[test]

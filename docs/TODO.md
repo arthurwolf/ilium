@@ -1,3 +1,10 @@
+# Settings toolbar click lifecycle
+
+- [x] Trace the full settings-toolbar mouse press/release path and reproduce the premature close through the real TUI.
+- [x] Preserve the active interaction mode while workspace-search maintenance checks for due work or receives a late result.
+- [x] Add focused and PTY regressions for press, release, maintenance ticks, and persistent settings visibility.
+- [ ] Run workspace gates, rebuild/install, and verify the installed binary through the real PTY/TUI.
+
 # Responsive workspace search
 
 - [x] Keep query edits and native-cursor rendering on the immediate TUI path.

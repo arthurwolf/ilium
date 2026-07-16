@@ -4,7 +4,7 @@
 //! (which only knows how to run one attempt) and from `crate::lib`'s event
 //! loop (which is the only place with a `NamingWorkers` handle to actually
 //! spawn one) so this decision stays unit-testable without a background
-//! thread or a real gateway call.
+//! thread or a real provider call.
 //!
 //! Three triggers, all driven by [`AppliedEvent`] (what `render_cache::apply`
 //! just observed):
@@ -35,7 +35,7 @@ use crate::app::App;
 
 /// Bounds the retry path so a pane whose transcript genuinely never has
 /// anything summarizable (e.g. a resumed session ilium can't read, or a
-/// gateway that's consistently down) doesn't retry on every single `Done`
+/// provider that's consistently down) doesn't retry on every single `Done`
 /// transition for the rest of a long-running session.
 pub const MAX_ATTEMPTS: u32 = 5;
 
@@ -55,7 +55,7 @@ pub enum AppliedEvent {
 pub fn pane_ready_for_inference(
     app: &App,
     applied: &AppliedEvent,
-) -> Option<(NodeId, AgentClass, String)> {
+) -> Option<(NodeId, AgentClass, String, u64)> {
     let pane_id = match applied {
         AppliedEvent::SessionIdResolved { pane_id }
         | AppliedEvent::PaneBecameAgent { pane_id }
@@ -91,7 +91,15 @@ pub fn pane_ready_for_inference(
         return None;
     }
     class.provider()?;
-    Some((pane_id, class.clone(), session_id))
+    Some((
+        pane_id,
+        class.clone(),
+        session_id,
+        app.agent_title_generations
+            .get(&pane_id)
+            .copied()
+            .unwrap_or(0),
+    ))
 }
 
 #[cfg(test)]
@@ -125,7 +133,7 @@ mod tests {
 
         assert_eq!(
             result,
-            Some((pane_id, AgentClass::Claude, SESSION_ID.to_string()))
+            Some((pane_id, AgentClass::Claude, SESSION_ID.to_string(), 0))
         );
     }
 
@@ -217,7 +225,7 @@ mod tests {
 
         assert_eq!(
             pane_ready_for_inference(&app, &AppliedEvent::SessionIdResolved { pane_id }),
-            Some((pane_id, AgentClass::Claude, SESSION_ID.to_string()))
+            Some((pane_id, AgentClass::Claude, SESSION_ID.to_string(), 0))
         );
     }
 

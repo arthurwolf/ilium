@@ -74,6 +74,7 @@ pub struct EditorPane {
     /// waiting for an explicit Save -- see `autosave_pending_since` and
     /// `autosave_if_due`.
     pub show_autosave: bool,
+    autosave_delay: Duration,
     /// Set to `Instant::now()` on every modifying edit while
     /// `show_autosave` is on; cleared once that edit has been written to
     /// disk (or autosave is toggled off). `main.rs`'s event loop polls
@@ -135,6 +136,7 @@ impl EditorPane {
             show_line_numbers: true,
             show_minimap: true,
             show_autosave: false,
+            autosave_delay: AUTOSAVE_DEBOUNCE,
             autosave_pending_since: None,
             rendered: None,
             rendered_scroll: 0,
@@ -176,6 +178,7 @@ impl EditorPane {
             show_line_numbers: true,
             show_minimap: true,
             show_autosave: false,
+            autosave_delay: AUTOSAVE_DEBOUNCE,
             autosave_pending_since: None,
             rendered: None,
             rendered_scroll: 0,
@@ -188,6 +191,17 @@ impl EditorPane {
         };
         pane.apply_line_number_style();
         Ok(pane)
+    }
+
+    pub fn apply_defaults(&mut self, settings: &crate::config::EditorSettings) {
+        self.show_line_numbers = settings.show_line_numbers;
+        self.show_minimap = settings.show_minimap;
+        self.show_autosave = settings.autosave_enabled;
+        self.autosave_delay = Duration::from_millis(u64::from(settings.autosave_delay_ms));
+        if settings.markdown_rendered_by_default && self.is_markdown() {
+            self.view_mode = EditorViewMode::Rendered;
+        }
+        self.apply_line_number_style();
     }
 
     /// `.md`/`.markdown` only -- the only extensions Rendered mode applies
@@ -314,7 +328,7 @@ impl EditorPane {
         }
         let due = self
             .autosave_pending_since
-            .is_some_and(|since| since.elapsed() >= AUTOSAVE_DEBOUNCE);
+            .is_some_and(|since| since.elapsed() >= self.autosave_delay);
         if !due {
             return None;
         }
@@ -444,6 +458,15 @@ impl EditorPane {
     pub fn jump_to_line(&mut self, line: usize) {
         self.textarea
             .move_cursor(CursorMove::Jump(saturating_u16(line), 0));
+        self.source_scroll_should_follow_cursor.set(true);
+    }
+
+    /// Moves to an editor location expressed in zero-based source coordinates.
+    pub fn jump_to_location(&mut self, line: usize, column: usize) {
+        self.textarea.move_cursor(CursorMove::Jump(
+            saturating_u16(line),
+            saturating_u16(column),
+        ));
         self.source_scroll_should_follow_cursor.set(true);
     }
 

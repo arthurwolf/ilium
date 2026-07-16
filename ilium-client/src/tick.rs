@@ -47,9 +47,16 @@ pub fn apply_naming_worker_event(
                 }
             }
         }
-        NamingWorkerEvent::SessionTitle(pane_id, session_id, result, trigger) => {
+        NamingWorkerEvent::SessionTitle(pane_id, session_id, title_generation, result, trigger) => {
             workers.session_title_worker_finished(pane_id, &session_id);
-            if app.agent_session_ids.get(&pane_id) == Some(&session_id) {
+            if app.agent_session_ids.get(&pane_id) == Some(&session_id)
+                && app
+                    .agent_title_generations
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or(0)
+                    == title_generation
+            {
                 app.titles_loading.remove(&pane_id);
             } else {
                 // Both automatic and user-requested workers read one exact
@@ -66,6 +73,7 @@ pub fn apply_naming_worker_event(
                         app.request_session_pane_title(
                             pane_id,
                             session_id,
+                            title_generation,
                             title.long,
                             Some(title.short),
                             ilium_core::PaneTitleSource::Automatic,
@@ -75,6 +83,7 @@ pub fn apply_naming_worker_event(
                         app.request_session_pane_title(
                             pane_id,
                             session_id,
+                            title_generation,
                             title.long,
                             Some(title.short),
                             ilium_core::PaneTitleSource::UserSpecified,
@@ -111,6 +120,34 @@ pub fn apply_naming_worker_event(
                 }
             }
         }
+        NamingWorkerEvent::InferenceTest {
+            provider,
+            elapsed,
+            result,
+        } => {
+            workers.inference_test_worker_finished();
+            app.finish_inference_test(provider, elapsed, result);
+        }
+        NamingWorkerEvent::OllamaModels {
+            endpoint,
+            elapsed,
+            result,
+        } => {
+            workers.ollama_models_worker_finished();
+            app.finish_ollama_model_discovery(
+                endpoint,
+                elapsed,
+                result.map_err(|error| error.to_string()),
+            );
+        }
+        NamingWorkerEvent::Restructure(result) => {
+            workers.restructure_worker_finished();
+            app.structure_loading = false;
+            match result {
+                Ok(plan) => app.request_apply_restructure_plan(plan),
+                Err(error) => app.status_message = Some(format!("Could not restructure: {error}")),
+            }
+        }
     }
 }
 
@@ -129,7 +166,8 @@ mod tests {
             .insert(pane_id, "new-session".to_string());
         app.titles_loading.insert(pane_id);
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = NamingWorkers::new(events_tx);
+        let mut workers =
+            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
 
         apply_naming_worker_event(
             &mut app,
@@ -137,6 +175,7 @@ mod tests {
             NamingWorkerEvent::SessionTitle(
                 pane_id,
                 "old-session".to_string(),
+                0,
                 Ok(DualTitle {
                     short: "Old Session".to_string(),
                     long: "Title From The Previous Agent Session".to_string(),

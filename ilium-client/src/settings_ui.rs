@@ -29,8 +29,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
-use crate::app::{App, AppearanceRow, KanbanBoardRow, SettingsState, SettingsTab, SoundRow};
-use crate::config::{KanbanBoardSettings, KeyboardSettings, UiSettings};
+use crate::app::{
+    App, AppearanceRow, InferenceRow, InferenceSettingField, InferenceTestState, KanbanBoardRow,
+    OllamaModelDiscoveryState, SettingsState, SettingsTab, SoundRow,
+};
+use crate::config::{
+    EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
+    UiSettings,
+};
 use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::theme::{self, ColorScheme};
 
@@ -123,10 +129,39 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     render_header(frame, layout.header_area);
     render_tab_list(frame, layout.tab_list_area, state.tab);
     match state.tab {
+        SettingsTab::Inference => {
+            let lines = inference_lines(
+                &app.inference_settings,
+                app.inference_test_result.as_ref(),
+                &app.inference_test_state,
+                &app.ollama_model_discovery,
+                &app.ollama_models,
+                state.selected_row,
+            );
+            render_scrollable(frame, layout.content_area, lines, state.scroll);
+        }
         SettingsTab::Appearance => {
             let lines = appearance_lines(&app.ui_settings, state.selected_row);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::Terminal => render_scrollable(
+            frame,
+            layout.content_area,
+            terminal_lines(&app.terminal_settings, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::Editor => render_scrollable(
+            frame,
+            layout.content_area,
+            editor_lines(&app.editor_settings, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::Session => render_scrollable(
+            frame,
+            layout.content_area,
+            session_lines(&app.session_settings, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::Keyboard => {
             let lines = keyboard_lines(&app.keyboard_settings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -256,7 +291,19 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     let total_lines = match tab {
+        SettingsTab::Inference => inference_lines(
+            &app.inference_settings,
+            app.inference_test_result.as_ref(),
+            &app.inference_test_state,
+            &app.ollama_model_discovery,
+            &app.ollama_models,
+            selected_row,
+        )
+        .len() as u16,
         SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
+        SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
+        SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
+        SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
         SettingsTab::Keyboard => keyboard_lines(&app.keyboard_settings).len() as u16,
         SettingsTab::KanbanBoard => {
             kanban_board_lines(&app.kanban_board_settings, selected_row).len() as u16
@@ -267,6 +314,469 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+/// Visible settings depend on the selected provider. This keeps Kilo's
+/// no-key configuration honest and prevents irrelevant empty fields.
+pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<InferenceRow> {
+    use ilium_inference::InferenceProviderKind;
+    let mut rows = vec![InferenceRow::Provider];
+    match settings.selected_provider {
+        InferenceProviderKind::KiloGateway => {}
+        InferenceProviderKind::Ollama => rows.extend([
+            InferenceRow::Field(InferenceSettingField::OllamaUrl),
+            InferenceRow::RefreshOllamaModels,
+            InferenceRow::Field(InferenceSettingField::OllamaModel),
+        ]),
+        InferenceProviderKind::OpenAi => rows.extend([
+            InferenceRow::Field(InferenceSettingField::OpenAiUrl),
+            InferenceRow::Field(InferenceSettingField::OpenAiApiKey),
+            InferenceRow::Field(InferenceSettingField::OpenAiModel),
+        ]),
+        InferenceProviderKind::Anthropic => rows.extend([
+            InferenceRow::Field(InferenceSettingField::AnthropicUrl),
+            InferenceRow::Field(InferenceSettingField::AnthropicApiKey),
+            InferenceRow::Field(InferenceSettingField::AnthropicModel),
+        ]),
+        InferenceProviderKind::OpenRouter => rows.extend([
+            InferenceRow::Field(InferenceSettingField::OpenRouterApiKey),
+            InferenceRow::Field(InferenceSettingField::OpenRouterModel),
+        ]),
+    }
+    rows.push(InferenceRow::Test);
+    rows
+}
+
+fn inference_value(
+    row: InferenceRow,
+    settings: &ilium_inference::InferenceSettings,
+    ollama_model_discovery: &OllamaModelDiscoveryState,
+) -> String {
+    match row {
+        InferenceRow::Provider => format!("‹ {} ›", settings.selected_provider.label()),
+        InferenceRow::RefreshOllamaModels => match ollama_model_discovery {
+            OllamaModelDiscoveryState::Loading { started_at, .. } => {
+                let frame_index = (started_at.elapsed().as_millis()
+                    / crate::tree_ui::SPINNER_FRAME_MS) as usize
+                    % crate::tree_ui::SPINNER_FRAMES.len();
+                format!(
+                    "[ {} Discovering models… ]",
+                    crate::tree_ui::SPINNER_FRAMES[frame_index]
+                )
+            }
+            OllamaModelDiscoveryState::Failed { .. } => "[ Retry model discovery ]".to_string(),
+            OllamaModelDiscoveryState::Idle | OllamaModelDiscoveryState::Loaded { .. } => {
+                "[ Load models from Ollama ]".to_string()
+            }
+        },
+        InferenceRow::Test => "[ Test provider ]".to_string(),
+        InferenceRow::Field(field) => match field {
+            InferenceSettingField::OllamaUrl => settings.ollama.base_url.clone(),
+            InferenceSettingField::OllamaModel => settings.ollama.model.clone(),
+            InferenceSettingField::OpenAiUrl => settings.openai.base_url.clone(),
+            InferenceSettingField::OpenAiApiKey => masked_key(&settings.openai.api_key),
+            InferenceSettingField::OpenAiModel => settings.openai.model.clone(),
+            InferenceSettingField::AnthropicUrl => settings.anthropic.base_url.clone(),
+            InferenceSettingField::AnthropicApiKey => masked_key(&settings.anthropic.api_key),
+            InferenceSettingField::AnthropicModel => settings.anthropic.model.clone(),
+            InferenceSettingField::OpenRouterApiKey => masked_key(&settings.openrouter.api_key),
+            InferenceSettingField::OpenRouterModel => settings.openrouter.model.clone(),
+        },
+    }
+}
+
+fn masked_key(key: &str) -> String {
+    if key.is_empty() {
+        "Not set (Enter to edit)".to_string()
+    } else {
+        format!(
+            "••••{}",
+            key.chars()
+                .rev()
+                .take(4)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>()
+        )
+    }
+}
+fn inference_label(row: InferenceRow) -> &'static str {
+    match row {
+        InferenceRow::Provider => "Provider",
+        InferenceRow::Field(field) => field.label(),
+        InferenceRow::RefreshOllamaModels => "Available models",
+        InferenceRow::Test => "Test",
+    }
+}
+fn inference_lines(
+    settings: &ilium_inference::InferenceSettings,
+    test_result: Option<&crate::inference_test::InferenceTestResult>,
+    test_state: &InferenceTestState,
+    ollama_model_discovery: &OllamaModelDiscoveryState,
+    ollama_models: &[String],
+    selected_row: usize,
+) -> Vec<Line<'static>> {
+    let rows = inference_rows(settings);
+    let mut lines = vec![Line::from("")];
+    if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway {
+        lines.push(Line::from(Span::styled("  Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.", Style::new().fg(Color::Yellow))));
+        lines.push(Line::from(""));
+    }
+    for (index, row) in rows.into_iter().enumerate() {
+        let label = inference_label(row);
+        let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+        let label_style = if index == selected_row {
+            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::new()
+        };
+        let value_style = if index == selected_row {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled(label, label_style),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(
+                inference_value(row, settings, ollama_model_discovery),
+                value_style,
+            ),
+        ]));
+        let description = match row {
+            InferenceRow::Provider => {
+                "Choose the backend used by background title and organization inference."
+            }
+            InferenceRow::Field(InferenceSettingField::OllamaModel) => {
+                "Use left/right to select a loaded local model, or Enter to type a model name."
+            }
+            InferenceRow::Field(_) => {
+                "Press Enter to edit this value. API keys remain masked in this view."
+            }
+            InferenceRow::RefreshOllamaModels => {
+                "Fetch the selectable model list from this Ollama API URL."
+            }
+            InferenceRow::Test => {
+                "Send a harmless title-and-organize prompt and preview the returned tree structure."
+            }
+        };
+        lines.push(Line::from(Span::styled(
+            format!("    {description}"),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::from(""));
+    }
+    if settings.selected_provider == ilium_inference::InferenceProviderKind::Ollama {
+        lines.extend(ollama_discovery_lines(
+            settings,
+            ollama_model_discovery,
+            ollama_models,
+        ));
+    }
+    lines.extend(inference_test_log_lines(test_state));
+    if let Some(result) = test_result {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  Test result · processed in {:.2}s",
+                result.elapsed.as_secs_f64()
+            ),
+            theme::selected_style().add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Preview (as it will appear in the left pane)",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        for group in &result.groups {
+            lines.push(Line::from(Span::styled(
+                format!("  ▾ {}", group.name),
+                Style::new().add_modifier(Modifier::BOLD),
+            )));
+            for (index, pane) in group.panes.iter().enumerate() {
+                let branch = if index + 1 == group.panes.len() {
+                    "└─"
+                } else {
+                    "├─"
+                };
+                lines.push(Line::from(format!("     {branch} ▣ {pane}")));
+            }
+        }
+    }
+    lines
+}
+
+/// Renders a durable boxed operation trace within Settings. The full-screen
+/// settings view hides the normal status bar, so explicit remote work must
+/// remain visible here from launch through success or failure.
+fn boxed_operation_log(
+    title: &str,
+    headline: String,
+    headline_style: Style,
+    log_lines: Vec<(String, Style)>,
+) -> Vec<Line<'static>> {
+    const HORIZONTAL_RULE: &str = "────────────────────────────────────────────────";
+    let mut lines = vec![Line::from(Span::styled(
+        format!("  ┌─ {title} {HORIZONTAL_RULE}┐"),
+        Style::new().fg(Color::DarkGray),
+    ))];
+    lines.push(Line::from(vec![
+        Span::styled("  │ ", Style::new().fg(Color::DarkGray)),
+        Span::styled(headline, headline_style),
+    ]));
+    for (line, style) in log_lines {
+        lines.push(Line::from(vec![
+            Span::styled("  │ ", Style::new().fg(Color::DarkGray)),
+            Span::styled(line, style),
+        ]));
+    }
+    lines.push(Line::from(Span::styled(
+        format!("  └{HORIZONTAL_RULE}┘"),
+        Style::new().fg(Color::DarkGray),
+    )));
+    lines
+}
+
+/// Renders test execution as an explicit operation log instead of relying on
+/// an invisible worker or a transient status-bar message.
+fn inference_test_log_lines(test_state: &InferenceTestState) -> Vec<Line<'static>> {
+    match test_state {
+        InferenceTestState::Idle => Vec::new(),
+        InferenceTestState::Running {
+            provider,
+            started_at,
+        } => {
+            let frame_index = (started_at.elapsed().as_millis() / crate::tree_ui::SPINNER_FRAME_MS)
+                as usize
+                % crate::tree_ui::SPINNER_FRAMES.len();
+            boxed_operation_log(
+                "Provider test log",
+                format!(
+                    "{} Testing {} · {:.1}s elapsed",
+                    crate::tree_ui::SPINNER_FRAMES[frame_index],
+                    provider.label(),
+                    started_at.elapsed().as_secs_f64()
+                ),
+                theme::selected_style().add_modifier(Modifier::BOLD),
+                vec![
+                    (
+                        "1. Build a harmless title-and-organize request.".to_string(),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                    (
+                        format!("2. Send it to {}.", provider.label()),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                    (
+                        "3. Wait for and validate the required JSON response.".to_string(),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                ],
+            )
+        }
+        InferenceTestState::Succeeded { provider, elapsed } => boxed_operation_log(
+            "Provider test log",
+            format!(
+                "✓ {} replied in {:.2}s",
+                provider.label(),
+                elapsed.as_secs_f64()
+            ),
+            theme::selected_style().add_modifier(Modifier::BOLD),
+            vec![
+                (
+                    "1. Provider request completed successfully.".to_string(),
+                    Style::new(),
+                ),
+                (
+                    "2. JSON response validated; preview is shown below.".to_string(),
+                    Style::new(),
+                ),
+            ],
+        ),
+        InferenceTestState::Failed {
+            provider,
+            error,
+            elapsed,
+        } => boxed_operation_log(
+            "Provider test log",
+            format!(
+                "✗ {} test failed after {:.2}s",
+                provider.label(),
+                elapsed.as_secs_f64()
+            ),
+            Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            vec![
+                (
+                    format!("Provider error: {error}"),
+                    Style::new().fg(Color::Red),
+                ),
+                (
+                    "No settings were changed. Correct the endpoint/model and retry.".to_string(),
+                    Style::new().add_modifier(Modifier::DIM),
+                ),
+            ],
+        ),
+    }
+}
+
+/// Renders the actual model-discovery trace inside Settings itself. The
+/// normal status bar is intentionally not visible while Settings replaces the
+/// whole screen, so an async operation must report its progress and outcome
+/// here rather than only through `App::status_message`.
+fn ollama_discovery_lines(
+    settings: &ilium_inference::InferenceSettings,
+    discovery: &OllamaModelDiscoveryState,
+    models: &[String],
+) -> Vec<Line<'static>> {
+    let endpoint = settings.ollama.base_url.trim_end_matches('/');
+    let tags_url = format!("{endpoint}/api/tags");
+    let mut lines = vec![Line::from("")];
+    match discovery {
+        OllamaModelDiscoveryState::Idle => {
+            lines.push(Line::from(Span::styled(
+                "  Model discovery has not run in this client session.",
+                Style::new().add_modifier(Modifier::DIM),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Load models calls GET {tags_url}, then extracts each model name."),
+                Style::new().add_modifier(Modifier::DIM),
+            )));
+        }
+        OllamaModelDiscoveryState::Loading {
+            endpoint,
+            started_at,
+        } => {
+            let frame_index = (started_at.elapsed().as_millis() / crate::tree_ui::SPINNER_FRAME_MS)
+                as usize
+                % crate::tree_ui::SPINNER_FRAMES.len();
+            let elapsed = started_at.elapsed().as_secs_f64();
+            lines.extend(boxed_operation_log(
+                "Ollama model discovery log",
+                format!(
+                    "{} Discovering local models from {endpoint} · {elapsed:.1}s elapsed",
+                    crate::tree_ui::SPINNER_FRAMES[frame_index],
+                ),
+                theme::selected_style().add_modifier(Modifier::BOLD),
+                vec![
+                    (
+                        format!("1. Connect to the configured Ollama API at {endpoint}."),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                    (
+                        format!("2. Request GET {endpoint}/api/tags."),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                    (
+                        "3. Validate the JSON response and extract model names.".to_string(),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                ],
+            ));
+        }
+        OllamaModelDiscoveryState::Loaded {
+            endpoint,
+            model_count,
+            elapsed,
+        } => {
+            lines.extend(boxed_operation_log(
+                "Ollama model discovery log",
+                format!("✓ GET /api/tags completed in {:.2}s", elapsed.as_secs_f64()),
+                theme::selected_style().add_modifier(Modifier::BOLD),
+                vec![
+                    (format!("1. Connected to {endpoint}."), Style::new()),
+                    (
+                        format!("2. Extracted {model_count} selectable model name(s)."),
+                        Style::new(),
+                    ),
+                    (
+                        "3. Updated the selected model when needed.".to_string(),
+                        Style::new(),
+                    ),
+                ],
+            ));
+        }
+        OllamaModelDiscoveryState::Failed {
+            endpoint,
+            error,
+            elapsed,
+        } => {
+            lines.extend(boxed_operation_log(
+                "Ollama model discovery log",
+                format!(
+                    "✗ Model discovery failed after {:.2}s",
+                    elapsed.as_secs_f64()
+                ),
+                Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+                vec![
+                    (format!("Endpoint: {endpoint}"), Style::new().fg(Color::Red)),
+                    (
+                        format!("Ollama reported: {error}"),
+                        Style::new().fg(Color::Red),
+                    ),
+                    (
+                        format!("Retry calls GET {tags_url} after Ollama is available."),
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                ],
+            ));
+        }
+    }
+    if !models.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Models returned by Ollama (use left/right on Ollama model to select)",
+            Style::new().add_modifier(Modifier::BOLD),
+        )));
+        for model in models {
+            let marker = if model == &settings.ollama.model {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            let style = if marker == "[x]" {
+                theme::selected_style().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("    {marker} {model}"),
+                style,
+            )));
+        }
+    }
+    lines
+}
+
+pub fn inference_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    settings: &ilium_inference::InferenceSettings,
+) -> Option<(InferenceRow, i32)> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let warning_lines =
+        if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway {
+            2
+        } else {
+            0
+        };
+    let line = usize::from(position.y.saturating_sub(content_area.y)) + usize::from(scroll);
+    let offset = line.checked_sub(usize::from(APPEARANCE_TOP_PADDING) + warning_lines)?;
+    if offset % usize::from(APPEARANCE_ROW_HEIGHT) != 0 {
+        return None;
+    }
+    let row = *inference_rows(settings).get(offset / usize::from(APPEARANCE_ROW_HEIGHT))?;
+    Some((
+        row,
+        if position.x < content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH + DECREMENT_ZONE_WIDTH
+        {
+            -1
+        } else {
+            1
+        },
+    ))
 }
 
 fn kanban_board_row_label(row: KanbanBoardRow) -> &'static str {
@@ -686,6 +1196,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::CodexAgentIcon => "Codex icon",
         AppearanceRow::AntigravityAgentIcon => "Antigravity icon",
         AppearanceRow::ColorScheme => "Color theme",
+        AppearanceRow::MotionLevel => "Motion level",
+        AppearanceRow::SidebarDensity => "Sidebar density",
     }
 }
 
@@ -711,6 +1223,10 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Icon used for Antigravity panes when Agent identifier is Selected icon."
         }
         AppearanceRow::ColorScheme => "ilium's built-in color presets.",
+        AppearanceRow::MotionLevel => {
+            "Full keeps spatial transitions; reduced and off minimise motion."
+        }
+        AppearanceRow::SidebarDensity => "Controls the vertical spacing used by the tree sidebar.",
     }
 }
 
@@ -735,6 +1251,107 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             ColorScheme::Dark => "Dark".to_string(),
             ColorScheme::Light => "Light".to_string(),
         },
+        AppearanceRow::MotionLevel => ui.motion_level.label().to_string(),
+        AppearanceRow::SidebarDensity => ui.sidebar_density.label().to_string(),
+    }
+}
+
+fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from("")];
+    for (index, (label, value, description)) in rows.iter().enumerate() {
+        let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+        let label_style = if index == selected_row {
+            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::new()
+        };
+        let control_style = if index == selected_row {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled((*label).to_string(), label_style),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(format!("‹ {value} ›"), control_style),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("    {description}"),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::from(""));
+    }
+    lines
+}
+fn terminal_lines(settings: &TerminalSettings, selected: usize) -> Vec<Line<'static>> {
+    setting_lines(
+        &[
+            (
+                "Scrollback budget",
+                format!("{} MiB", settings.scrollback_budget_mib),
+                "Maximum retained terminal output per pane; takes effect for new terminal views.",
+            ),
+            (
+                "New pane directory",
+                settings.new_pane_directory.label().to_string(),
+                "Choose the initial directory for a terminal pane.",
+            ),
+        ],
+        selected,
+    )
+}
+fn editor_lines(settings: &EditorSettings, selected: usize) -> Vec<Line<'static>> {
+    setting_lines(
+        &[
+            (
+                "Line numbers",
+                on_off(settings.show_line_numbers),
+                "Default visibility for local editor buffers.",
+            ),
+            (
+                "Minimap",
+                on_off(settings.show_minimap),
+                "Default minimap visibility for local editor buffers.",
+            ),
+            (
+                "Autosave",
+                on_off(settings.autosave_enabled),
+                "Save modified local files automatically.",
+            ),
+            (
+                "Autosave delay",
+                format!("{} ms", settings.autosave_delay_ms),
+                "Delay after the latest edit before autosaving.",
+            ),
+            (
+                "Markdown default",
+                if settings.markdown_rendered_by_default {
+                    "Rendered".into()
+                } else {
+                    "Source".into()
+                },
+                "Initial view for Markdown files opened in the editor.",
+            ),
+        ],
+        selected,
+    )
+}
+fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'static>> {
+    setting_lines(
+        &[(
+            "Recovery policy",
+            settings.recovery_policy.label().to_string(),
+            "Used by the detached server when it next starts this project session.",
+        )],
+        selected,
+    )
+}
+fn on_off(value: bool) -> String {
+    if value {
+        "On".into()
+    } else {
+        "Off".into()
     }
 }
 
@@ -820,6 +1437,36 @@ pub fn appearance_content_hit(
     Some((row, direction))
 }
 
+/// Shared hit geometry for the small fixed-row settings tabs.
+pub fn simple_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    row_count: usize,
+) -> Option<(usize, i32)> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line_index = i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll)
+        - i32::from(APPEARANCE_TOP_PADDING);
+    if line_index < 0 || line_index % i32::from(APPEARANCE_ROW_HEIGHT) != 0 {
+        return None;
+    }
+    let row = usize::try_from(line_index / i32::from(APPEARANCE_ROW_HEIGHT)).ok()?;
+    if row >= row_count {
+        return None;
+    }
+    let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+    (position.x >= control_start_x).then_some((
+        row,
+        if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+            -1
+        } else {
+            1
+        },
+    ))
+}
+
 /// Static "About" content: version plus a short description. No settings
 /// live here, per the design brief -- see the module doc comment.
 fn about_lines() -> Vec<Line<'static>> {
@@ -840,6 +1487,9 @@ fn about_lines() -> Vec<Line<'static>> {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
     use super::*;
 
     #[test]
@@ -865,14 +1515,167 @@ mod tests {
         );
         assert_eq!(
             tab_at(area, Position::new(2, 5)),
+            Some(SettingsTab::Terminal)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Editor));
+        assert_eq!(
+            tab_at(area, Position::new(2, 9)),
+            Some(SettingsTab::Session)
+        );
+        assert_eq!(
+            tab_at(area, Position::new(2, 11)),
             Some(SettingsTab::KanbanBoard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Sound));
-        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::Sound));
+        assert_eq!(
+            tab_at(area, Position::new(2, 15)),
+            Some(SettingsTab::Inference)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
         assert_eq!(tab_at(area, Position::new(2, 2)), None);
+    }
+
+    #[test]
+    fn inference_rows_hide_impossible_fields_and_warn_for_kilo() {
+        let settings = ilium_inference::InferenceSettings::default();
+        assert_eq!(
+            inference_rows(&settings),
+            vec![InferenceRow::Provider, InferenceRow::Test]
+        );
+        let text = inference_lines(
+            &settings,
+            None,
+            &InferenceTestState::Idle,
+            &OllamaModelDiscoveryState::Idle,
+            &[],
+            0,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
+        assert!(text.contains("Do not send secrets"));
+        assert!(text.contains("LLM training"));
+
+        let mut ollama = settings;
+        ollama.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
+        assert!(inference_rows(&ollama).contains(&InferenceRow::RefreshOllamaModels));
+
+        let discovered_models = vec!["qwen3.6:latest".to_string(), "gemma4:12b".to_string()];
+        let loading_text = inference_lines(
+            &ollama,
+            None,
+            &InferenceTestState::Idle,
+            &OllamaModelDiscoveryState::Loading {
+                endpoint: "http://127.0.0.1:11434".to_string(),
+                started_at: std::time::Instant::now(),
+            },
+            &discovered_models,
+            0,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
+        assert!(loading_text.contains("Discovering local models"));
+        assert!(loading_text.contains("Ollama model discovery log"));
+        assert!(loading_text.contains("GET http://127.0.0.1:11434/api/tags"));
+        assert!(loading_text.contains("qwen3.6:latest"));
+    }
+
+    #[test]
+    fn inference_test_lifecycle_renders_a_boxed_running_log_and_failure() {
+        let settings = ilium_inference::InferenceSettings::default();
+        let running = inference_lines(
+            &settings,
+            None,
+            &InferenceTestState::Running {
+                provider: ilium_inference::InferenceProviderKind::Ollama,
+                started_at: std::time::Instant::now(),
+            },
+            &OllamaModelDiscoveryState::Idle,
+            &[],
+            0,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
+        assert!(running.contains("Provider test log"));
+        assert!(running.contains("Testing Ollama (local)"));
+        assert!(running.contains("Wait for and validate the required JSON response"));
+
+        let failed = inference_test_log_lines(&InferenceTestState::Failed {
+            provider: ilium_inference::InferenceProviderKind::Ollama,
+            error: "connection refused".to_string(),
+            elapsed: std::time::Duration::from_millis(250),
+        })
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
+        assert!(failed.contains("test failed after 0.25s"));
+        assert!(failed.contains("Provider error: connection refused"));
+        assert!(failed.contains("No settings were changed"));
+    }
+
+    #[test]
+    fn running_inference_test_is_visibly_boxed_in_the_rendered_settings_screen() {
+        let mut app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.request_inference_test();
+        let state = SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row: 0,
+            scroll: 0,
+        };
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Provider test log"));
+        assert!(rendered.contains("Testing Ollama (local)"));
+        assert!(rendered.contains("Wait for and validate"));
+        assert!(rendered.contains("┌"));
+        assert!(rendered.contains("│"));
+    }
+
+    #[test]
+    fn running_ollama_discovery_is_visibly_boxed_in_the_rendered_settings_screen() {
+        let mut app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.request_ollama_model_refresh();
+        let state = SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row: 1,
+            scroll: 0,
+        };
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Ollama model discovery log"));
+        assert!(rendered.contains("Discovering local models"));
+        assert!(rendered.contains("Request GET"));
+        assert!(rendered.contains("┌"));
+        assert!(rendered.contains("│"));
     }
 
     #[test]

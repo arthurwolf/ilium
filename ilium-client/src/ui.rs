@@ -55,6 +55,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // connected `┬`/`┴` joint instead of losing to the pane's plain corner.
     draw_pane(frame, layout.pane_area, app);
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
+    let editor_paths = editor_pane_paths(&app.panes);
     tree_ui::render(
         frame,
         layout.tree_area,
@@ -62,7 +63,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         &mut app.tree_state,
         tree_ui::TreeRenderOptions {
             focused: tree_focused,
-            elapsed_ms: app.started_at.elapsed().as_millis(),
+            elapsed_ms: if matches!(
+                app.ui_settings.motion_level,
+                crate::config::MotionLevel::Off
+            ) {
+                0
+            } else {
+                app.started_at.elapsed().as_millis()
+            },
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
             project_name: app.project_name.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -71,11 +79,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
             tree_order: app.ui_settings.tree_order,
+            sidebar_density: app.ui_settings.sidebar_density,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
             },
+            editor_paths: &editor_paths,
         },
     );
 
@@ -161,11 +171,22 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if let Mode::CommandPrompt(state) = &app.mode {
         modal::render_text_prompt(frame, area, "Run command", state);
     }
+    if let Mode::InferenceSettingPrompt(field, state) = &app.mode {
+        modal::render_text_prompt(frame, area, field.label(), state);
+    }
     if let Mode::SaveAs(_, state) = &app.mode {
         modal::render_text_prompt(frame, area, "Save As", state);
     }
     if let Mode::ConfirmClose(target) = &app.mode {
         draw_confirm_close(frame, area, app, *target);
+    }
+    if let Mode::ConfirmSessionRecovery { pane_count } = &app.mode {
+        modal::render_confirm(
+            frame,
+            area,
+            "Restore previous session?",
+            &format!("Restore {pane_count} pane(s) from the stored snapshot?  Enter/Y: restore · N/Esc: start fresh"),
+        );
     }
 }
 
@@ -696,6 +717,22 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
     );
 }
 
+/// Every currently-open editor pane's backing file path, keyed by pane id --
+/// the tree panel's only view into `EditorPane.path`, which otherwise lives
+/// entirely in client-runtime state rather than the (server-mirrored) tree.
+/// See `tree_ui::TreeRenderOptions::editor_paths`.
+fn editor_pane_paths(
+    panes: &std::collections::HashMap<NodeId, PaneRuntime>,
+) -> std::collections::HashMap<NodeId, std::path::PathBuf> {
+    panes
+        .iter()
+        .filter_map(|(pane_id, runtime)| match runtime {
+            PaneRuntime::Editor(editor) => editor.path.clone().map(|path| (*pane_id, path)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Draws the focused pane's live content (terminal screen or editor
 /// buffer), or a placeholder when nothing is focused.
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
@@ -939,6 +976,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         // here -- the status bar only names the mode while one is open.
         Mode::Rename(_) => "RENAME",
         Mode::CommandPrompt(_) => "RUN COMMAND",
+        Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::SaveAs(..) => "SAVE AS",
         Mode::Help => "HELP",
         Mode::Explorer(..) => "FILE PICKER",
@@ -958,6 +996,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
+        Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
@@ -972,6 +1011,17 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw("\u{2139} "),
         Span::styled(mode_label, bar_style.add_modifier(Modifier::BOLD)),
     ];
+    if app.structure_loading {
+        let elapsed_ms = app.started_at.elapsed().as_millis();
+        let frame_index =
+            (elapsed_ms / tree_ui::SPINNER_FRAME_MS) as usize % tree_ui::SPINNER_FRAMES.len();
+        let spinner = tree_ui::SPINNER_FRAMES[frame_index];
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(
+            format!("{spinner} Restructuring workspace with AI…"),
+            bar_style.add_modifier(Modifier::BOLD),
+        ));
+    }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));
         // Borrow rather than `message.clone()` -- `app` outlives this

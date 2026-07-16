@@ -546,6 +546,10 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             app.action_open_settings();
             return;
         }
+        TreeToolbarAction::Restructure => {
+            app.action_request_restructure();
+            return;
+        }
         TreeToolbarAction::Shell => app.action_new_terminal(),
         TreeToolbarAction::Agent(provider) => app.action_new_command_pane(provider.command_line()),
     }
@@ -816,6 +820,36 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.selected_row = 0;
                     state.scroll = 0;
                 }
+            } else if state.tab == crate::app::SettingsTab::Inference {
+                if let Some((row, direction)) = crate::settings_ui::inference_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    &app.inference_settings,
+                ) {
+                    if let Some(index) = crate::settings_ui::inference_rows(&app.inference_settings)
+                        .iter()
+                        .position(|candidate| *candidate == row)
+                    {
+                        state.selected_row = index;
+                    }
+                    match row {
+                        crate::app::InferenceRow::Provider => {
+                            app.settings_adjust_inference_provider(direction)
+                        }
+                        crate::app::InferenceRow::RefreshOllamaModels => {
+                            app.request_ollama_model_refresh()
+                        }
+                        crate::app::InferenceRow::Field(
+                            crate::app::InferenceSettingField::OllamaModel,
+                        ) => app.settings_adjust_ollama_model(direction),
+                        crate::app::InferenceRow::Field(field) => {
+                            app.settings_open_inference_field(field);
+                            return;
+                        }
+                        crate::app::InferenceRow::Test => app.request_inference_test(),
+                    }
+                }
             } else if state.tab == crate::app::SettingsTab::Appearance {
                 if let Some((row, direction)) = crate::settings_ui::appearance_content_hit(
                     layout.content_area,
@@ -829,6 +863,42 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         state.selected_row = index;
                     }
                     app.settings_adjust_row(row, direction);
+                }
+            } else if state.tab == crate::app::SettingsTab::Terminal {
+                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::app::TerminalRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = crate::app::TerminalRow::ALL.get(index).copied() {
+                        app.settings_adjust_terminal_row(row, direction);
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Editor {
+                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::app::EditorRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = crate::app::EditorRow::ALL.get(index).copied() {
+                        app.settings_adjust_editor_row(row, direction);
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Session {
+                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::app::SessionRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = crate::app::SessionRow::ALL.get(index).copied() {
+                        app.settings_adjust_session_row(row, direction);
+                    }
                 }
             } else if state.tab == crate::app::SettingsTab::Keyboard {
                 if let Some(shortcut_base) = crate::settings_ui::keyboard_preset_at(
@@ -1082,6 +1152,7 @@ mod agent_from_line_mouse_tests {
                     command_line,
                     initial_input,
                 },
+                ..
             }] if *parent_group == group
                 && command_line == "claude"
                 && initial_input.contains("do_work();")
@@ -1390,9 +1461,36 @@ mod row_action_click_tests {
     }
 
     #[test]
-    fn settings_toolbar_action_opens_the_settings_view() {
+    fn settings_toolbar_press_and_release_keep_the_settings_view_open() {
         let mut app = test_app();
-        execute_tree_toolbar_action(&mut app, TreeToolbarAction::Settings);
+        let settings_area = tree_ui::toolbar_button_rects(app.layout.tree_area)
+            .into_iter()
+            .find_map(|(action, area)| (action == TreeToolbarAction::Settings).then_some(area))
+            .expect("settings button should fit in the default tree toolbar");
+        let settings_position = Position::new(settings_area.x, settings_area.y);
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: settings_position.x,
+                row: settings_position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(app.mode, Mode::Settings(_)));
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: settings_position.x,
+                row: settings_position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
         assert!(matches!(app.mode, Mode::Settings(_)));
     }
 

@@ -23,7 +23,7 @@ use ratatui::Frame;
 use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, TreeOrder};
+use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
 use crate::theme;
 use crate::tree_ordering;
 use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
@@ -31,8 +31,8 @@ use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
 /// Braille spinner frames for an actively-`Working` agent pane, cycled by
 /// elapsed wall-clock time so it animates smoothly across redraws
 /// regardless of the (much slower) detection poll interval.
-const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const SPINNER_FRAME_MS: u128 = 90;
+pub(crate) const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub(crate) const SPINNER_FRAME_MS: u128 = 90;
 
 /// Every half-hour clock face in chronological order for a
 /// `WaitingBackground` agent pane. The slower cadence keeps the full clock
@@ -128,6 +128,12 @@ pub enum TreeToolbarAction {
     Group,
     Split,
     Folder,
+    /// Triggers `App::action_request_restructure` -- a whole-tree LLM
+    /// regroup-and-retitle call, manual-only for now (see
+    /// `crate::restructure`'s module docs). Anchored next to `Settings`
+    /// rather than joining `LEFT_ALIGNED`: it acts on the whole session, not
+    /// on one new pane, the same reason `Settings` is anchored separately.
+    Restructure,
     Settings,
 }
 
@@ -162,6 +168,10 @@ impl TreeToolbarAction {
             Self::Group => "\u{1F4C1}",
             Self::Split => "▥",
             Self::Folder => "\u{1F5C0}",
+            // Reuses the same recycle glyph as the per-row `TreeRowAction::Retitle`
+            // -- one visual language for "ask the LLM to redo a title" whether
+            // it's scoped to one row or the whole tree.
+            Self::Restructure => TreeRowAction::Retitle.glyph(),
             Self::Settings => SETTINGS_ICON,
         }
     }
@@ -182,6 +192,7 @@ impl TreeToolbarAction {
             Self::Group => Color::Rgb(0x7a, 0xa2, 0xf7),
             Self::Split => Color::Rgb(0xbb, 0x9a, 0xf7),
             Self::Folder => Color::Cyan,
+            Self::Restructure => Color::Yellow,
             Self::Settings => Color::Gray,
         }
     }
@@ -198,6 +209,7 @@ impl TreeToolbarAction {
             Self::Group => "new group",
             Self::Split => "new split view",
             Self::Folder => "open folder",
+            Self::Restructure => "restructure with AI",
             Self::Settings => "settings",
         }
     }
@@ -369,7 +381,15 @@ pub struct TreeRenderOptions<'a> {
     /// Resolved user-global presentation settings for detected agent types.
     pub agent_identifiers: &'a AgentIdentifierSettings,
     pub tree_order: TreeOrder,
+    pub sidebar_density: SidebarDensity,
     pub hover: TreeHoverState,
+    /// File paths backing currently-open editor panes (see
+    /// `App::PaneRuntime::Editor`), keyed by pane id. A restructure's title
+    /// is now a genuinely descriptive title distinct from an editor's
+    /// filename (unlike a plain rename/automatic titler, which historically
+    /// left an editor's `Node::name` equal to its filename) -- see
+    /// `pane_label`'s Editor arms for how the two are composed.
+    pub editor_paths: &'a HashMap<NodeId, PathBuf>,
 }
 
 /// Shared immutable inputs for one recursive item-tree build. Keeping these
@@ -382,11 +402,13 @@ struct TreeItemBuildContext<'a> {
     recently_created: &'a HashMap<NodeId, u128>,
     agent_identifiers: &'a AgentIdentifierSettings,
     tree_order: TreeOrder,
+    sidebar_density: SidebarDensity,
     panel_width: u16,
     /// Full widget identifier paths that users have expanded. Folder nodes
     /// are materialized only along these paths, so a large unopened subtree
     /// never becomes render work merely because another row animates.
     opened_paths: &'a HashSet<Vec<NodeId>>,
+    editor_paths: &'a HashMap<NodeId, PathBuf>,
 }
 
 /// Builds the full recursive `TreeItem` tree from the root group's
@@ -421,8 +443,10 @@ pub(crate) fn visible_tree_node_ids(
             recently_created: &HashMap::new(),
             agent_identifiers: &AgentIdentifierSettings::default(),
             tree_order,
+            sidebar_density: SidebarDensity::default(),
             panel_width: 0,
             opened_paths: &opened_paths,
+            editor_paths: &HashMap::new(),
         },
     );
 
@@ -474,13 +498,23 @@ fn build_item(
             // `NodeId`s are unique across the whole `Tree` (its own
             // invariant), so they can't collide among siblings here --
             // the `Result` this returns is unreachable in practice.
-            TreeItem::new(node.id, label, children).expect("sibling NodeIds are always unique")
+            TreeItem::new(
+                node.id,
+                apply_sidebar_density(label, context.sidebar_density),
+                children,
+            )
+            .expect("sibling NodeIds are always unique")
         }
         NodeKind::Pane {
             status,
             scheduled_input,
             ..
         } => {
+            let editor_filename = context
+                .editor_paths
+                .get(&node.id)
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned());
             let label = scheduled_input.as_ref().map_or_else(
                 || {
                     pane_label(
@@ -489,6 +523,7 @@ fn build_item(
                         context.elapsed_ms,
                         context.titles_loading.contains(&node.id),
                         context.agent_identifiers,
+                        editor_filename.as_deref(),
                     )
                 },
                 |scheduled_input| {
@@ -498,12 +533,18 @@ fn build_item(
                         context.elapsed_ms,
                         context.current_unix_millis,
                         scheduled_input,
-                        context.titles_loading.contains(&node.id),
-                        context.agent_identifiers,
+                        ScheduledPaneLabelContext {
+                            is_title_loading: context.titles_loading.contains(&node.id),
+                            agent_identifiers: context.agent_identifiers,
+                            editor_filename: editor_filename.as_deref(),
+                        },
                     )
                 },
             );
-            TreeItem::new_leaf(node.id, apply_recent_pulse(label, flash_on))
+            TreeItem::new_leaf(
+                node.id,
+                apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density),
+            )
         }
         NodeKind::Folder { path } => {
             let label = node_label(Span::raw("\u{1F5C0}"), None, Span::raw(node.name.clone()));
@@ -515,10 +556,30 @@ fn build_item(
             } else {
                 Vec::new()
             };
-            TreeItem::new(node.id, apply_recent_pulse(label, flash_on), children)
-                .expect("folder node ids are unique")
+            TreeItem::new(
+                node.id,
+                apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density),
+                children,
+            )
+            .expect("folder node ids are unique")
         }
     }
+}
+
+/// Applies the sidebar's information-density preference without changing
+/// tree structure or mouse-row geometry. Tree rows remain one terminal cell
+/// high; density controls the deliberate horizontal breathing room around
+/// each label, preserving accessible hit targets.
+fn apply_sidebar_density(mut label: Line<'static>, density: SidebarDensity) -> Line<'static> {
+    let padding = match density {
+        SidebarDensity::Compact => 0,
+        SidebarDensity::Standard => 1,
+        SidebarDensity::Comfortable => 2,
+    };
+    if padding > 0 {
+        label.spans.insert(0, Span::raw(" ".repeat(padding)));
+    }
+    label
 }
 
 /// Virtual rows occupy the high-id range and never cross the IPC boundary.
@@ -569,9 +630,14 @@ fn folder_children(
             } else {
                 Vec::new()
             };
-            TreeItem::new(id, label, children).expect("filesystem ids are unique")
+            TreeItem::new(
+                id,
+                apply_sidebar_density(label, context.sidebar_density),
+                children,
+            )
+            .expect("filesystem ids are unique")
         } else {
-            TreeItem::new_leaf(id, label)
+            TreeItem::new_leaf(id, apply_sidebar_density(label, context.sidebar_density))
         };
         children.push(item);
     }
@@ -723,6 +789,7 @@ fn pane_label(
     elapsed_ms: u128,
     is_title_loading: bool,
     agent_identifiers: &AgentIdentifierSettings,
+    editor_filename: Option<&str>,
 ) -> Line<'static> {
     // While `session_naming::infer_pane_title` is still awaiting a result
     // for this pane, its name renders as the same braille spinner
@@ -735,6 +802,19 @@ fn pane_label(
             SPINNER_FRAMES[frame_index].to_string()
         } else {
             name.to_string()
+        }
+    };
+    // A restructure's title is a genuinely descriptive title, distinct from
+    // an editor's filename (unlike a plain rename or the pre-restructure
+    // default, where an editor's `Node::name` just *is* its filename) --
+    // compose "filename — title" whenever the two differ, so the filename
+    // stays visible even after the pane has been given a real title.
+    let editor_text = |current_title: String| -> String {
+        match editor_filename {
+            Some(filename) if filename != current_title => {
+                format!("{filename} \u{2014} {current_title}")
+            }
+            _ => current_title,
         }
     };
     match status {
@@ -762,12 +842,15 @@ fn pane_label(
         PaneStatus::Editor { dirty: true } => node_label(
             Span::styled(TEXT_EDITOR_ICON, Style::new().fg(Color::Magenta)),
             None,
-            Span::styled(format!("{name}*"), Style::new().fg(Color::Magenta)),
+            Span::styled(
+                format!("{}*", editor_text(title())),
+                Style::new().fg(Color::Magenta),
+            ),
         ),
         PaneStatus::Editor { dirty: false } => node_label(
             Span::raw(TEXT_EDITOR_ICON),
             None,
-            Span::raw(name.to_string()),
+            Span::raw(editor_text(title())),
         ),
         PaneStatus::Board => node_label(
             Span::styled("▦", Style::new().fg(Color::Cyan)),
@@ -848,15 +931,29 @@ fn agent_pane_label(
 /// Overrides the ordinary activity glyph while a durable input is pending.
 /// The clock frame is indexed by remaining time, so as the quotient decreases
 /// the familiar half-hour sequence visibly runs backwards.
+/// Bundles `scheduled_pane_label`'s trailing presentation-only inputs into
+/// one value, purely to stay under clippy's argument-count lint -- the same
+/// reason `TreeItemBuildContext` exists for `build_item`'s own growing
+/// parameter list.
+struct ScheduledPaneLabelContext<'a> {
+    is_title_loading: bool,
+    agent_identifiers: &'a AgentIdentifierSettings,
+    editor_filename: Option<&'a str>,
+}
+
 fn scheduled_pane_label(
     status: &PaneStatus,
     name: &str,
     elapsed_ms: u128,
     current_unix_millis: u64,
     scheduled_input: &ScheduledPaneInput,
-    is_title_loading: bool,
-    agent_identifiers: &AgentIdentifierSettings,
+    label_context: ScheduledPaneLabelContext<'_>,
 ) -> Line<'static> {
+    let ScheduledPaneLabelContext {
+        is_title_loading,
+        agent_identifiers,
+        editor_filename,
+    } = label_context;
     let remaining_millis = scheduled_input
         .execute_at_unix_millis
         .saturating_sub(current_unix_millis);
@@ -904,6 +1001,7 @@ fn scheduled_pane_label(
             elapsed_ms,
             is_title_loading,
             agent_identifiers,
+            editor_filename,
         ),
     }
 }
@@ -1065,9 +1163,10 @@ pub fn toolbar_action_at(area: Rect, position: Position) -> Option<TreeToolbarAc
 }
 
 /// Button rectangles shared by drawing and hit testing. Creation actions
-/// flow from the left; Settings is anchored at the far right and never moves
-/// as the panel expands. On a narrow panel, only left actions that fit before
-/// Settings are included.
+/// flow from the left; `Restructure` and `Settings` are anchored at the far
+/// right (Restructure immediately before Settings) and never move as the
+/// panel expands. On a narrow panel, only left actions that fit before
+/// Restructure are included.
 pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
     const BUTTON_VISIBLE_WIDTH: u16 = TOOLBAR_BUTTON_WIDTH - 1;
     let toolbar = toolbar_area(area);
@@ -1080,15 +1179,22 @@ pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
         BUTTON_VISIBLE_WIDTH,
         toolbar.height,
     );
-    let mut buttons = Vec::with_capacity(TreeToolbarAction::LEFT_ALIGNED.len() + 1);
+    let restructure_area = Rect::new(
+        settings_area.x.saturating_sub(TOOLBAR_BUTTON_WIDTH),
+        toolbar.y,
+        BUTTON_VISIBLE_WIDTH,
+        toolbar.height,
+    );
+    let mut buttons = Vec::with_capacity(TreeToolbarAction::LEFT_ALIGNED.len() + 2);
     for (index, action) in TreeToolbarAction::LEFT_ALIGNED.iter().enumerate() {
         let x = toolbar.x + index as u16 * TOOLBAR_BUTTON_WIDTH;
         let button_area = Rect::new(x, toolbar.y, BUTTON_VISIBLE_WIDTH, toolbar.height);
-        if button_area.right() > settings_area.x {
+        if button_area.right() > restructure_area.x {
             break;
         }
         buttons.push((*action, button_area));
     }
+    buttons.push((TreeToolbarAction::Restructure, restructure_area));
     buttons.push((TreeToolbarAction::Settings, settings_area));
     buttons
 }
@@ -1211,8 +1317,10 @@ impl TreeItemCache {
                     recently_created: &HashMap::new(),
                     agent_identifiers: &AgentIdentifierSettings::default(),
                     tree_order,
+                    sidebar_density: SidebarDensity::default(),
                     panel_width: 0,
                     opened_paths,
+                    editor_paths: &HashMap::new(),
                 },
             );
             self.version = Some(version);
@@ -1256,8 +1364,10 @@ pub fn render(
             recently_created: options.recently_created,
             agent_identifiers: options.agent_identifiers,
             tree_order: options.tree_order,
+            sidebar_density: options.sidebar_density,
             panel_width: area.width,
             opened_paths: state.opened(),
+            editor_paths: options.editor_paths,
         },
     );
     let block = theme::block(options.focused).title(theme::chrome_title(&sidebar_title(
@@ -1286,8 +1396,10 @@ pub fn render(
                 recently_created: options.recently_created,
                 agent_identifiers: options.agent_identifiers,
                 tree_order: options.tree_order,
+                sidebar_density: options.sidebar_density,
                 panel_width: area.width,
                 opened_paths: state.opened(),
+                editor_paths: options.editor_paths,
             },
         );
         let mut presentation_state = copy_tree_state_for_presentation(state);
@@ -1588,7 +1700,9 @@ mod tests {
                         transitions,
                         agent_identifiers: &agent_identifiers,
                         tree_order: TreeOrder::Manual,
+                        sidebar_density: SidebarDensity::default(),
                         hover: TreeHoverState::default(),
+                        editor_paths: &HashMap::new(),
                     },
                 );
             })
@@ -1726,24 +1840,24 @@ mod tests {
         let status = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
         let mut settings = AgentIdentifierSettings::default();
 
-        let full_name = pane_label(&status, "Fix auth", 0, false, &settings);
+        let full_name = pane_label(&status, "Fix auth", 0, false, &settings, None);
         assert_eq!(full_name.spans[0].content.trim(), "");
         assert!(line_text(&full_name).ends_with("Claude: Fix auth"));
 
         settings.mode = AgentIdentifierMode::Letter;
-        let letter = pane_label(&status, "Fix auth", 0, false, &settings);
+        let letter = pane_label(&status, "Fix auth", 0, false, &settings, None);
         assert_eq!(letter.spans[0].content.trim(), "");
         assert!(line_text(&letter).ends_with("C: Fix auth"));
 
         settings.mode = AgentIdentifierMode::Icon;
         settings.claude_icon = crate::config::ClaudeAgentIcon::Lobster;
-        let icon = pane_label(&status, "Fix auth", 0, false, &settings);
+        let icon = pane_label(&status, "Fix auth", 0, false, &settings, None);
         assert_eq!(icon.spans[0].content.trim_end(), "🦞");
         assert!(line_text(&icon).ends_with("Fix auth"));
         assert!(!line_text(&icon).contains("Claude:"));
 
         settings.mode = AgentIdentifierMode::Hidden;
-        let hidden = pane_label(&status, "Fix auth", 0, false, &settings);
+        let hidden = pane_label(&status, "Fix auth", 0, false, &settings, None);
         assert_eq!(hidden.spans[0].content.trim(), "");
         assert!(line_text(&hidden).ends_with("Fix auth"));
         assert!(!line_text(&hidden).contains("Claude:"));
@@ -1756,13 +1870,13 @@ mod tests {
             mode: AgentIdentifierMode::Letter,
             ..AgentIdentifierSettings::default()
         };
-        let letter = pane_label(&status, "Review", 0, false, &settings);
+        let letter = pane_label(&status, "Review", 0, false, &settings, None);
         assert!(line_text(&letter).ends_with("X: Review"));
 
         settings.mode = AgentIdentifierMode::Icon;
         for icon in crate::config::CodexAgentIcon::ALL {
             settings.codex_icon = icon;
-            let line = pane_label(&status, "Review", 0, false, &settings);
+            let line = pane_label(&status, "Review", 0, false, &settings, None);
             assert_eq!(line.spans[0].content.trim_end(), icon.glyph());
             assert_eq!(
                 UnicodeWidthStr::width(line.spans[0].content.as_ref()),
@@ -1793,6 +1907,7 @@ mod tests {
                 0,
                 false,
                 &settings,
+                None,
             );
             assert_eq!(line.spans[0].content.trim(), "");
             assert!(!line.spans[1].content.trim().is_empty());
@@ -1809,6 +1924,7 @@ mod tests {
             0,
             false,
             &settings,
+            None,
         );
         let ordinary_line = pane_label(
             &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
@@ -1816,6 +1932,7 @@ mod tests {
             0,
             false,
             &settings,
+            None,
         );
 
         assert_eq!(
@@ -1859,6 +1976,7 @@ mod tests {
             0,
             false,
             &AgentIdentifierSettings::default(),
+            None,
         );
         assert_eq!(shell_label.spans[0].content.trim_end(), TERMINAL_ICON);
 
@@ -1869,6 +1987,7 @@ mod tests {
                 0,
                 false,
                 &AgentIdentifierSettings::default(),
+                None,
             );
             assert_eq!(label.spans[0].content.trim_end(), TEXT_EDITOR_ICON);
             assert_eq!(
@@ -1876,6 +1995,47 @@ mod tests {
                 NODE_ICON_COLUMN_WIDTH
             );
         }
+    }
+
+    #[test]
+    fn editor_label_composes_filename_and_title_only_when_they_differ() {
+        // No distinct title yet (a fresh editor's `name` still just is its
+        // filename, the pre-restructure default) -- shown plain, no dash.
+        let untitled = pane_label(
+            &PaneStatus::Editor { dirty: false },
+            "notes.md",
+            0,
+            false,
+            &AgentIdentifierSettings::default(),
+            Some("notes.md"),
+        );
+        assert!(line_text(&untitled).trim_end().ends_with("notes.md"));
+        assert!(!line_text(&untitled).contains('\u{2014}'));
+
+        // A restructure-authored title distinct from the filename: both
+        // must appear, filename first.
+        let retitled = pane_label(
+            &PaneStatus::Editor { dirty: false },
+            "Auth Config Notes",
+            0,
+            false,
+            &AgentIdentifierSettings::default(),
+            Some("notes.md"),
+        );
+        assert!(line_text(&retitled)
+            .trim_end()
+            .ends_with("notes.md \u{2014} Auth Config Notes"));
+
+        // Dirty marker still lands after the composed text, not the filename alone.
+        let dirty = pane_label(
+            &PaneStatus::Editor { dirty: true },
+            "Auth Config Notes",
+            0,
+            false,
+            &AgentIdentifierSettings::default(),
+            Some("notes.md"),
+        );
+        assert!(line_text(&dirty).trim().ends_with("Auth Config Notes*"));
     }
 
     #[test]
@@ -1913,7 +2073,9 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         tree_order: TreeOrder::Manual,
+                        sidebar_density: SidebarDensity::default(),
                         hover: TreeHoverState::default(),
+                        editor_paths: &HashMap::new(),
                     },
                 );
             })
@@ -1946,6 +2108,7 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         tree_order: TreeOrder::Manual,
+                        sidebar_density: SidebarDensity::default(),
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
                                 id: first_group,
@@ -1953,6 +2116,7 @@ mod tests {
                             }),
                             ..TreeHoverState::default()
                         },
+                        editor_paths: &HashMap::new(),
                     },
                 );
             })
@@ -1989,7 +2153,9 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         tree_order: TreeOrder::Manual,
+                        sidebar_density: SidebarDensity::default(),
                         hover: TreeHoverState::default(),
+                        editor_paths: &HashMap::new(),
                     },
                 );
             })
@@ -2115,8 +2281,10 @@ mod tests {
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                editor_paths: &HashMap::new(),
             },
         );
         assert!(root_items[0].children()[0].children().is_empty());
@@ -2131,8 +2299,10 @@ mod tests {
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                editor_paths: &HashMap::new(),
             },
         );
         let first_item = &first_level_items[0].children()[0].children()[0];
@@ -2150,8 +2320,10 @@ mod tests {
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                editor_paths: &HashMap::new(),
             },
         );
         let deep_file = &deep_items[0].children()[0].children()[0].children()[0].children()[0];
@@ -2212,6 +2384,7 @@ mod tests {
             0,
             false,
             &AgentIdentifierSettings::default(),
+            None,
         );
         let text: String = line
             .spans
@@ -2232,6 +2405,7 @@ mod tests {
                 frame_index as u128 * BACKGROUND_FRAME_MS,
                 false,
                 &AgentIdentifierSettings::default(),
+                None,
             );
             assert_eq!(line.spans[1].content.trim_end(), expected_clock.to_string());
             assert_eq!(
@@ -2246,6 +2420,7 @@ mod tests {
             BACKGROUND_CLOCK_FRAMES.len() as u128 * BACKGROUND_FRAME_MS,
             false,
             &AgentIdentifierSettings::default(),
+            None,
         );
         assert_eq!(
             wrapped.spans[1].content.trim_end(),
@@ -2265,8 +2440,11 @@ mod tests {
                 text: "continue".to_string(),
                 send_enter: true,
             },
-            false,
-            &AgentIdentifierSettings::default(),
+            ScheduledPaneLabelContext {
+                is_title_loading: false,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                editor_filename: None,
+            },
         );
 
         assert_eq!(line.spans[2].content, "1h 01m 01s Claude: Fix auth");
@@ -2286,8 +2464,11 @@ mod tests {
             0,
             10_000,
             &scheduled_input,
-            false,
-            &AgentIdentifierSettings::default(),
+            ScheduledPaneLabelContext {
+                is_title_loading: false,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                editor_filename: None,
+            },
         );
         let second = scheduled_pane_label(
             &PaneStatus::PlainShell,
@@ -2295,8 +2476,11 @@ mod tests {
             0,
             10_000 + BACKGROUND_FRAME_MS as u64,
             &scheduled_input,
-            false,
-            &AgentIdentifierSettings::default(),
+            ScheduledPaneLabelContext {
+                is_title_loading: false,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                editor_filename: None,
+            },
         );
 
         assert_eq!(
@@ -2320,6 +2504,7 @@ mod tests {
             0,
             true,
             &AgentIdentifierSettings::default(),
+            None,
         );
         let text: String = line
             .spans
@@ -2405,8 +2590,10 @@ mod tests {
                 recently_created: &recently_created,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                editor_paths: &HashMap::new(),
             },
         );
         assert_eq!(items[0].children().len(), 2);
@@ -2441,15 +2628,19 @@ mod tests {
     #[test]
     fn toolbar_keeps_settings_right_aligned_without_overlapping_left_actions() {
         // `layout::MIN_TREE_WIDTH` (16) with a 1-cell border each side
-        // leaves a 14-column-wide toolbar -- room for three left actions and
-        // the right-anchored settings button.
+        // leaves a 14-column-wide toolbar -- room for two left actions plus
+        // the right-anchored Restructure and Settings buttons.
         let area = Rect::new(0, 0, 16, 12);
         let toolbar = toolbar_area(area);
         assert_eq!(toolbar.width, 14);
 
         assert_eq!(
+            toolbar_action_at(area, Position::new(toolbar.x + 4, toolbar.y)),
+            Some(TreeToolbarAction::Shell)
+        );
+        assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 8, toolbar.y)),
-            Some(TreeToolbarAction::Agent(BuiltinAgentProvider::Claude))
+            Some(TreeToolbarAction::Restructure)
         );
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 12, toolbar.y)),
@@ -2588,8 +2779,10 @@ mod tests {
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                editor_paths: &HashMap::new(),
             },
         );
 
