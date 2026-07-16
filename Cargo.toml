@@ -6,6 +6,7 @@ members = [
     "ilium-core",
     "ilium-detect",
     "ilium-ipc",
+    "ilium-inference",
     "ilium-kilo-gateway",
     "ilium-pty",
     "ilium-server",
