@@ -9,7 +9,8 @@
 use std::path::PathBuf;
 
 use ilium_core::{
-    BoardStorage, NodeId, PaneStatus, PaneTitleSource, SplitOrientation, Tree, TreeMoveDirection,
+    BoardStorage, NodeId, PaneStatus, PaneTitleSource, RestructurePlan, SplitOrientation, Tree,
+    TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,16 @@ pub enum NewPaneKind {
         command_line: String,
         initial_input: String,
     },
+}
+
+/// Server-side starting-directory strategy for a newly spawned terminal.
+/// The client chooses the policy from its persisted settings, while the
+/// server resolves live process cwd information it alone owns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewPaneWorkingDirectory {
+    ProjectRoot,
+    FocusedTerminal,
+    LastUsed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +96,7 @@ pub enum ClientRequest {
     NewPane {
         parent_group: NodeId,
         kind: NewPaneKind,
+        working_directory: NewPaneWorkingDirectory,
     },
     /// Close a pane (and terminate its PTY/process).
     ClosePane { pane_id: NodeId },
@@ -227,10 +239,28 @@ pub enum ClientRequest {
     SetSessionPaneTitle {
         pane_id: NodeId,
         expected_session_id: String,
+        /// Monotonic per-pane generation that changes whenever ilium sees
+        /// the agent return to a fresh conversation. Prevents a worker that
+        /// summarized the pre-clear screen from restoring its stale title.
+        expected_title_generation: u64,
         title: String,
         short_title: Option<String>,
         title_source: PaneTitleSource,
     },
+    /// Replaces everything under the session root with `plan`'s shape --
+    /// mirrors `Tree::apply_restructure` directly. The server keeps the
+    /// pre-restructure tree in a one-slot undo buffer before applying, so a
+    /// single `RevertLastRestructure` can undo it. Appended last to keep
+    /// every earlier variant's bincode discriminant stable.
+    ApplyRestructurePlan(RestructurePlan),
+    /// Restores the tree exactly as it was immediately before the most
+    /// recent successfully-applied `ApplyRestructurePlan` on this server, if
+    /// any is still held in its one-slot undo buffer. A no-op (surfaced as
+    /// `ServerEvent::Error`) if the buffer is empty or has already been
+    /// consumed by an earlier revert.
+    RevertLastRestructure,
+    /// Resolves an attach-time crash-recovery prompt for this session.
+    ResolveSessionRecovery { restore: bool },
 }
 
 /// Events pushed from `ilium-server` to `ilium-client`, asynchronously
@@ -275,12 +305,18 @@ pub enum ServerEvent {
     /// displayed, and `PaneStatusChanged` already broadcasts far more
     /// often (every detection tick a pane's activity changes) than a
     /// session ID -- which changes much less often -- needs to travel.
-    /// Appended last so existing bincode variant indexes remain stable.
-    PaneSessionIdResolved { pane_id: NodeId, session_id: String },
+    PaneSessionIdResolved {
+        pane_id: NodeId,
+        session_id: String,
+        title_generation: u64,
+    },
     /// The previously resolved ID no longer belongs to the detected agent
     /// process (the agent exited or its class changed). Clients must discard
     /// every title-inference cache keyed by that stale identity.
-    PaneSessionIdCleared { pane_id: NodeId },
+    PaneSessionIdCleared {
+        pane_id: NodeId,
+        title_generation: u64,
+    },
     /// Replays the server-owned path for an editor pane when a client
     /// attaches to an already-restored session. Editor buffers stay local to
     /// each client, but the path is required to create that local buffer.
@@ -303,4 +339,14 @@ pub enum ServerEvent {
         bytes: Vec<u8>,
         is_complete: bool,
     },
+    /// An agent remains in the same process/session, but its visible
+    /// conversation was cleared. Clients discard local title-worker state;
+    /// the following tree snapshot restores the normal fresh-agent label.
+    /// Appended last to preserve every existing bincode discriminant.
+    PaneSessionTitleCleared {
+        pane_id: NodeId,
+        title_generation: u64,
+    },
+    /// A stored session snapshot awaits an explicit recovery decision.
+    SessionRecoveryAvailable { pane_count: usize },
 }

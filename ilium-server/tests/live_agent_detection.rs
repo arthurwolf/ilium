@@ -139,7 +139,7 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     let sound_calls = Arc::new(Mutex::new(Vec::new()));
     let mut initially_disabled_sound = ilium_sound::SoundSettings::default();
     initially_disabled_sound.events.agent_finished = false;
-    let server = TestServer::start_with_sound_player(
+    let mut server = TestServer::start_with_sound_player(
         "live-agent-detection-test",
         detection_config,
         initially_disabled_sound,
@@ -183,6 +183,7 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_claude_path.to_string_lossy().to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -292,7 +293,7 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 /// Writes an executable POSIX shell script named exactly `name` (same
@@ -413,7 +414,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
     };
-    let server =
+    let mut server =
         TestServer::start_with_detection_config("live-session-id-discovery-test", detection_config)
             .await;
     let transcript_path = write_verified_claude_transcript(&server, resumed_session_id);
@@ -446,6 +447,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line.clone()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -486,6 +488,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::SetSessionPaneTitle {
             pane_id,
             expected_session_id: resumed_session_id.to_string(),
+            expected_title_generation: 0,
             title: "Title From The Old Session".to_string(),
             short_title: Some("Old Session".to_string()),
             title_source: ilium_core::PaneTitleSource::Automatic,
@@ -502,6 +505,82 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     })
     .await;
 
+    // `/clear` preserves this fake process's resolved session ID, exactly
+    // the case where an ID-only title compare-and-set would let an old LLM
+    // worker put the stale title back. The real input path must reset both
+    // displayed title forms and advance the independent title generation.
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"/clear\r".to_vec(),
+        },
+    )
+    .await
+    .expect("submit /clear to the live fake agent");
+    let clear_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionTitleCleared {
+                pane_id: changed_id,
+                title_generation: 1,
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+    assert!(matches!(
+        clear_event,
+        ServerEvent::PaneSessionTitleCleared { .. }
+    ));
+    let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TreeSnapshot(tree)
+                if tree.get(pane_id).is_some_and(|node| {
+                    node.name == command_line && node.short_name.is_none()
+                })
+        )
+    })
+    .await;
+    assert!(matches!(reset_after_clear, ServerEvent::TreeSnapshot(_)));
+
+    write_frame(
+        &mut client,
+        &ClientRequest::SetSessionPaneTitle {
+            pane_id,
+            expected_session_id: resumed_session_id.to_string(),
+            expected_title_generation: 0,
+            title: "Stale Clear Result Must Not Return".to_string(),
+            short_title: Some("Stale Clear".to_string()),
+            title_source: ilium_core::PaneTitleSource::Automatic,
+        },
+    )
+    .await
+    .expect("send the pre-clear title-worker result");
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "live-session-id-discovery-test".to_string(),
+        },
+    )
+    .await
+    .expect("request authoritative tree after the stale clear result");
+    let tree_after_stale_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree_after_stale_clear) = tree_after_stale_clear else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    assert_eq!(
+        tree_after_stale_clear.get(pane_id).unwrap().name,
+        command_line
+    );
+    assert_eq!(
+        tree_after_stale_clear.get(pane_id).unwrap().short_name,
+        None
+    );
+
     write_frame(
         &mut client,
         &ClientRequest::KeyInput {
@@ -512,22 +591,9 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("submit an in-process session transition");
     let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::PaneSessionIdCleared { pane_id: changed_id } if *changed_id == pane_id)
+        matches!(event, ServerEvent::PaneSessionIdCleared { pane_id: changed_id, .. } if *changed_id == pane_id)
     })
     .await;
-    let reset_event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == command_line)
-        )
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(reset_tree) = reset_event else {
-        unreachable!("predicate only matches TreeSnapshot");
-    };
-    assert_eq!(reset_tree.get(pane_id).unwrap().short_name, None);
-
     // The old transcript is deliberately still open on the exact same PID.
     // It must remain quarantined instead of immediately rebinding the ID and
     // retriggering a title request on the next fixed one-second detection tick.
@@ -541,6 +607,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
                 ServerEvent::PaneSessionIdResolved {
                     pane_id: changed_id,
                     session_id,
+                    ..
                 } if changed_id == pane_id && session_id == resumed_session_id
             ) {
                 return;
@@ -561,6 +628,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::SetSessionPaneTitle {
             pane_id,
             expected_session_id: resumed_session_id.to_string(),
+            expected_title_generation: 0,
             title: "Stale Result Must Not Return".to_string(),
             short_title: Some("Stale Result".to_string()),
             title_source: ilium_core::PaneTitleSource::Automatic,
@@ -588,7 +656,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 /// Same proof as
@@ -610,7 +678,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
     };
-    let server = TestServer::start_with_detection_config(
+    let mut server = TestServer::start_with_detection_config(
         "live-codex-session-id-discovery-test",
         detection_config,
     )
@@ -637,6 +705,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -675,7 +744,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 /// Proves the second admissible source end-to-end: an agent with no session
@@ -690,7 +759,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
     };
-    let server = TestServer::start_with_detection_config(
+    let mut server = TestServer::start_with_detection_config(
         "live-open-transcript-discovery-test",
         detection_config,
     )
@@ -720,6 +789,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
                 fake_codex_path.display(),
                 transcript_path.display()
             )),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -754,5 +824,5 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }

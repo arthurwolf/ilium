@@ -32,6 +32,7 @@ async fn create_plain_shell(
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -49,11 +50,18 @@ async fn create_plain_shell(
     pane_id
 }
 
-async fn stop(server: TestServer, client: &mut tokio::net::UnixStream) {
+async fn stop(mut server: TestServer, client: &mut tokio::net::UnixStream) {
     write_frame(client, &ClientRequest::KillSession)
         .await
         .expect("kill test session");
-    tokio::time::timeout(Duration::from_secs(5), server.server_task)
+    // Await through a `&mut` reference rather than moving `server_task` out
+    // of `server` by value: `TestServer` has a `Drop` impl (see
+    // `common::TestServer`), and Rust forbids partially moving a field out
+    // of a type that implements `Drop`. Keeping the field in place also
+    // means that if any `.expect()` below panics (e.g. a genuine shutdown
+    // timeout), unwinding still drops `server` as a whole and its `Drop`
+    // impl aborts the task instead of leaving it detached and running.
+    tokio::time::timeout(Duration::from_secs(5), &mut server.server_task)
         .await
         .expect("server shutdown timed out")
         .expect("server task panicked")
@@ -191,6 +199,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command("cat".to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await

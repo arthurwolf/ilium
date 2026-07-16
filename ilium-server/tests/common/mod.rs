@@ -90,6 +90,21 @@ pub struct TestServer {
     _tempdir: tempfile::TempDir,
 }
 
+impl Drop for TestServer {
+    /// Aborts the spawned server task unconditionally, including when it
+    /// already finished on its own (`JoinHandle::abort` is a harmless no-op
+    /// on a completed task). Without this, a test that panics on an
+    /// assertion or a timed-out `expect_event` before it ever reaches its
+    /// own `KillSession`/shutdown-join code leaves this `TestServer` value
+    /// dropped mid-unwind -- and dropping a `JoinHandle` alone only detaches
+    /// it, it does not cancel the task. The spawned server (its PTYs, UDS
+    /// listener, and detection loop) would otherwise keep running forever
+    /// in the background for the rest of this test binary's process.
+    fn drop(&mut self) {
+        self.server_task.abort();
+    }
+}
+
 impl TestServer {
     /// Starts a real server for `session_name` with the default detection
     /// cadence (README "Poll cadence" -- `working_poll_interval` measured
@@ -141,6 +156,7 @@ impl TestServer {
             sound_config_path: None,
             sound_player,
             custom_signatures: Vec::new(),
+            session_recovery: ilium_server::config::SessionRecoveryConfig::RestoreAutomatically,
         };
 
         let server_task = tokio::spawn(run(options));

@@ -38,7 +38,7 @@ use tokio::net::UnixListener;
 
 use ilium_detect::AgentSignature;
 
-use crate::config::{DetectionConfig, NotificationsConfig};
+use crate::config::{DetectionConfig, NotificationsConfig, SessionRecoveryConfig};
 use crate::error::ServerError;
 use crate::state::{ServerState, ServerStateOptions};
 
@@ -69,6 +69,7 @@ pub struct ServerOptions {
     /// straight through to `ServerState` and from there into every
     /// detection-loop tick's `identify_agent_with_extra` call.
     pub custom_signatures: Vec<AgentSignature>,
+    pub session_recovery: SessionRecoveryConfig,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -104,16 +105,26 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         custom_signatures: options.custom_signatures,
     }));
 
-    match persistence::load_snapshot_or_migrate(
-        &state.snapshot_path,
-        &state.session_cwd,
-        &state.home_dir,
-    )
-    .await
-    {
-        Ok(Some(snapshot)) => restore_snapshot(&state, snapshot).await,
-        Ok(None) => {}
-        Err(error) => tracing::warn!("failed to load crash-recovery snapshot: {error}"),
+    if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
+        match persistence::load_snapshot_or_migrate(
+            &state.snapshot_path,
+            &state.session_cwd,
+            &state.home_dir,
+        )
+        .await
+        {
+            Ok(Some(snapshot))
+                if matches!(
+                    options.session_recovery,
+                    SessionRecoveryConfig::AskBeforeRestore
+                ) =>
+            {
+                *state.pending_session_recovery.lock().await = Some(snapshot);
+            }
+            Ok(Some(snapshot)) => restore_snapshot(&state, snapshot).await,
+            Ok(None) => {}
+            Err(error) => tracing::warn!("failed to load crash-recovery snapshot: {error}"),
+        }
     }
 
     let detection_task = detection::spawn(Arc::clone(&state));
@@ -210,7 +221,10 @@ fn prepare_socket_path(socket_path: &Path) -> Result<(), ServerError> {
 /// ever produce. A single pane failing to respawn must never abort the
 /// rest of the restore, matching this crate's top-level error-boundary
 /// rule.
-async fn restore_snapshot(state: &Arc<ServerState>, snapshot: persistence::SessionSnapshot) {
+pub(crate) async fn restore_snapshot(
+    state: &Arc<ServerState>,
+    snapshot: persistence::SessionSnapshot,
+) {
     let pane_count = snapshot.panes.len();
     {
         let mut tree = state.tree.write().await;
@@ -382,6 +396,7 @@ mod restore_tests {
             sound_config_path: None,
             sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
+            session_recovery: SessionRecoveryConfig::RestoreAutomatically,
         };
         let server_task = tokio::spawn(run(options));
 
@@ -464,6 +479,7 @@ mod restore_tests {
             sound_config_path: None,
             sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
+            session_recovery: SessionRecoveryConfig::RestoreAutomatically,
         };
         let server_task = tokio::spawn(run(options));
 

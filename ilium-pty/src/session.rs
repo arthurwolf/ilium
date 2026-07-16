@@ -487,6 +487,22 @@ impl PtySession {
         self.process_id
     }
 
+    /// Best-effort cwd of the directly spawned shell or command. Linux
+    /// exposes it through procfs; other targets deliberately return `None`
+    /// so higher layers can fall back to the project root safely.
+    pub fn current_working_directory(&self) -> Option<PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            let process_id = self.process_id?;
+            std::fs::read_link(format!("/proc/{process_id}/cwd")).ok()
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
     pub fn foreground_process_group_id(&self) -> Option<u32> {
         #[cfg(unix)]
         {

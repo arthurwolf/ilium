@@ -88,6 +88,15 @@ pub struct ServerConfig {
     /// `ilium_detect::identify_agent_with_extra`, the registry extension
     /// point this list feeds.
     pub custom_signatures: Vec<AgentSignature>,
+    pub session_recovery: SessionRecoveryConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionRecoveryConfig {
+    #[default]
+    RestoreAutomatically,
+    AskBeforeRestore,
+    StartFresh,
 }
 
 /// The on-disk shape of `config.toml`. Kept separate from [`ServerConfig`]
@@ -104,6 +113,12 @@ struct RawConfig {
     notifications: RawNotificationsConfig,
     #[serde(default)]
     sound: SoundSettings,
+    #[serde(default)]
+    session: RawSessionConfig,
+}
+#[derive(Debug, Default, Deserialize)]
+struct RawSessionConfig {
+    recovery_policy: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -243,6 +258,18 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         notifications: NotificationsConfig::from_raw(raw.notifications),
         sound: raw.sound,
         custom_signatures,
+        session_recovery: match raw
+            .session
+            .recovery_policy
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("start_fresh") => SessionRecoveryConfig::StartFresh,
+            Some("ask_before_restore") => SessionRecoveryConfig::AskBeforeRestore,
+            _ => SessionRecoveryConfig::RestoreAutomatically,
+        },
     })
 }
 

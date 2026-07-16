@@ -21,7 +21,7 @@ use common::{expect_event, TestServer};
 
 #[tokio::test]
 async fn attach_returns_a_tree_snapshot_with_just_the_root() {
-    let server = TestServer::start("attach-test").await;
+    let mut server = TestServer::start("attach-test").await;
     let mut client = server.connect().await;
 
     write_frame(
@@ -50,7 +50,7 @@ async fn attach_returns_a_tree_snapshot_with_just_the_root() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    tokio::time::timeout(Duration::from_secs(5), server.server_task)
+    tokio::time::timeout(Duration::from_secs(5), &mut server.server_task)
         .await
         .expect("server should shut down after KillSession")
         .expect("server task should not panic")
@@ -59,7 +59,7 @@ async fn attach_returns_a_tree_snapshot_with_just_the_root() {
 
 #[tokio::test]
 async fn attach_to_the_wrong_session_name_gets_an_error() {
-    let server = TestServer::start("right-session").await;
+    let mut server = TestServer::start("right-session").await;
     let mut client = server.connect().await;
 
     write_frame(
@@ -79,19 +79,19 @@ async fn attach_to_the_wrong_session_name_gets_an_error() {
 
     // `KillSession` is handled regardless of whether `Attach` ever
     // succeeded on this connection (see `ipc::handlers::handle_request`),
-    // so use it here too -- otherwise the server task spawned by
-    // `TestServer::start` would keep running (holding its UDS listener
-    // and detection loop alive) for the rest of this test binary's
-    // process, since `TestServer` has no `Drop` that aborts it.
+    // so use it here too -- it lets the server task spawned by
+    // `TestServer::start` shut down on its own instead of relying on
+    // `TestServer`'s `Drop` impl to abort it (that's only the fallback for
+    // a test that panics before reaching this point).
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it() {
-    let server = TestServer::start("new-pane-test").await;
+    let mut server = TestServer::start("new-pane-test").await;
     let mut client = server.connect().await;
 
     write_frame(
@@ -112,6 +112,7 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -143,12 +144,12 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
-    let server = TestServer::start("initial-input-test").await;
+    let mut server = TestServer::start("initial-input-test").await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -173,6 +174,7 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
                 command_line: "IFS= read -r line; printf 'submitted:<%s>\\n' \"$line\"".to_string(),
                 initial_input: "/goal inspect the selected line".to_string(),
             },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -192,12 +194,12 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .unwrap();
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown() {
-    let server = TestServer::start("scheduled-input-test").await;
+    let mut server = TestServer::start("scheduled-input-test").await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -218,6 +220,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
             kind: NewPaneKind::Command(
                 "IFS= read -r line; printf 'scheduled:<%s>\\n' \"$line\"".to_string(),
             ),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -281,12 +284,12 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
     write_frame(&mut reattached, &ClientRequest::KillSession)
         .await
         .unwrap();
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
-    let server = TestServer::start("split-view-test").await;
+    let mut server = TestServer::start("split-view-test").await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -309,6 +312,7 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
             &ClientRequest::NewPane {
                 parent_group: ROOT_ID,
                 kind: NewPaneKind::PlainShell,
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
             },
         )
         .await
@@ -367,12 +371,12 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .unwrap();
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
-    let server = TestServer::start("invalid-split-view-test").await;
+    let mut server = TestServer::start("invalid-split-view-test").await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -451,12 +455,12 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .unwrap();
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn reattached_client_receives_terminal_output_produced_before_it_connected() {
-    let server = TestServer::start("terminal-replay-test").await;
+    let mut server = TestServer::start("terminal-replay-test").await;
     let mut first_client = server.connect().await;
 
     write_frame(
@@ -477,6 +481,7 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -553,12 +558,12 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     write_frame(&mut reattached_client, &ClientRequest::KillSession)
         .await
         .expect("kill test session");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
-    let server = TestServer::start("resize-error-test").await;
+    let mut server = TestServer::start("resize-error-test").await;
     let mut client = server.connect().await;
 
     write_frame(
@@ -594,12 +599,12 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
-    let server = TestServer::start("reparent-test").await;
+    let mut server = TestServer::start("reparent-test").await;
     let mut client = server.connect().await;
 
     // Two groups, each with one pane: `source`'s pane will move into
@@ -653,6 +658,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
         &ClientRequest::NewPane {
             parent_group: source_group,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -671,6 +677,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
         &ClientRequest::NewPane {
             parent_group: dest_group,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -717,12 +724,12 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
 async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
-    let server = TestServer::start("close-pane-test").await;
+    let mut server = TestServer::start("close-pane-test").await;
     let mut creator = server.connect().await;
     let mut observer = server.connect().await;
 
@@ -731,6 +738,7 @@ async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
@@ -769,5 +777,5 @@ async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
     write_frame(&mut creator, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
-    let _ = tokio::time::timeout(Duration::from_secs(5), server.server_task).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }

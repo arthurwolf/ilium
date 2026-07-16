@@ -277,6 +277,10 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
         .send(ilium_ipc::ClientRequest::NewPane {
             parent_group: ilium_core::ROOT_ID,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
+            // The non-interactive CLI has no focused client-side terminal
+            // or per-client settings, so preserve its established behavior
+            // of starting new panes at the project session root.
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         })
         .await
         .map_err(|_send_error| {

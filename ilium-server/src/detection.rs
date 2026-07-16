@@ -321,6 +321,7 @@ async fn run_due_panes(
         pane_id: NodeId,
         status: PaneStatus,
         identity: Option<ilium_detect::AgentIdentity>,
+        is_fresh_agent_screen: bool,
         is_session_identity_invalidated: bool,
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
@@ -337,10 +338,14 @@ async fn run_due_panes(
                 &due_pane.screen_text,
                 &state.custom_signatures,
             );
+            let is_fresh_agent_screen = identity.as_ref().is_some_and(|identity| {
+                ilium_detect::is_fresh_agent_screen(&identity.class, &due_pane.screen_text)
+            });
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
                 status,
                 identity,
+                is_fresh_agent_screen,
                 is_session_identity_invalidated: due_pane.is_session_identity_invalidated,
                 invalidated_session_id: due_pane.invalidated_session_id,
                 session_process_id: due_pane.session_process_id,
@@ -440,6 +445,7 @@ async fn run_due_panes(
     let sound_settings = state.sound_settings.read().await.clone();
     let mut pending_notifications = Vec::new();
     let mut pending_sounds = Vec::new();
+    let mut pending_title_clears = Vec::new();
     let mut tree_snapshot_changed = false;
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
@@ -496,6 +502,24 @@ async fn run_due_panes(
                 .identity
                 .as_ref()
                 .map(|identity| identity.class.clone());
+            let became_fresh_agent_screen =
+                classified_pane.is_fresh_agent_screen && !runtime.is_showing_fresh_agent_screen;
+            runtime.is_showing_fresh_agent_screen = classified_pane.is_fresh_agent_screen;
+            if became_fresh_agent_screen {
+                runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                pending_title_clears.push((pane_id, runtime.title_generation));
+                match tree.set_automatic_pane_title(
+                    pane_id,
+                    runtime.origin.pane_name_without_stale_session(),
+                    None,
+                ) {
+                    Ok(changed) => tree_snapshot_changed |= changed,
+                    Err(error) => tracing::warn!(
+                        "detection loop: failed to reset automatic title for fresh agent pane \
+                         {pane_id:?}: {error}"
+                    ),
+                }
+            }
             if classified_pane.pending_generated_session_id.is_some()
                 && detected_agent_class
                     .as_ref()
@@ -539,12 +563,16 @@ async fn run_due_panes(
                     runtime.is_session_identity_invalidated = true;
                 }
                 runtime.session_id = None;
+                runtime.title_generation = runtime.title_generation.wrapping_add(1);
                 runtime.session_agent_class = None;
                 if !runtime.is_session_identity_invalidated {
                     runtime.session_process_id = None;
                 }
                 state.request_snapshot_save();
-                state.broadcast(ServerEvent::PaneSessionIdCleared { pane_id });
+                state.broadcast(ServerEvent::PaneSessionIdCleared {
+                    pane_id,
+                    title_generation: runtime.title_generation,
+                });
                 match tree.set_automatic_pane_title(
                     pane_id,
                     runtime.origin.pane_name_without_stale_session(),
@@ -573,6 +601,7 @@ async fn run_due_panes(
                     state.broadcast(ServerEvent::PaneSessionIdResolved {
                         pane_id,
                         session_id: session_id.clone(),
+                        title_generation: runtime.title_generation,
                     });
                 } else {
                     runtime.session_agent_class = detected_agent_class;
@@ -649,9 +678,17 @@ async fn run_due_panes(
         }
     }
 
+    for (pane_id, title_generation) in pending_title_clears {
+        state.broadcast(ServerEvent::PaneSessionTitleCleared {
+            pane_id,
+            title_generation,
+        });
+    }
+
     if tree_snapshot_changed {
         let snapshot = state.tree.read().await.clone();
         state.broadcast(ServerEvent::TreeSnapshot(snapshot));
+        state.request_snapshot_save();
     }
 
     for pending in pending_notifications {
@@ -730,7 +767,7 @@ fn classify_pane(
         extra_signatures,
     ) {
         Some(identity) => {
-            let activity = ilium_detect::classify_activity(screen_text);
+            let activity = ilium_detect::classify_activity_for_agent(&identity.class, screen_text);
             let status = if ilium_detect::has_visible_goal(screen_text) {
                 PaneStatus::AgentWithGoal(identity.class.clone(), activity)
             } else {

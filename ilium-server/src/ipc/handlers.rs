@@ -10,10 +10,10 @@
 use std::sync::Arc;
 
 use ilium_core::{
-    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
+    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, RestructurePlan,
     ScheduledPaneInput, Tree, TreeError,
 };
-use ilium_ipc::{ClientRequest, NewPaneKind, ServerEvent};
+use ilium_ipc::{ClientRequest, NewPaneKind, NewPaneWorkingDirectory, ServerEvent};
 use ilium_pty::PtyError;
 use tokio::sync::mpsc;
 
@@ -36,8 +36,16 @@ pub async fn handle_request(
             handle_attach(state, &session, direct_tx).await;
             false
         }
-        ClientRequest::NewPane { parent_group, kind } => {
-            handle_new_pane(state, parent_group, kind, direct_tx).await;
+        ClientRequest::ResolveSessionRecovery { restore } => {
+            handle_session_recovery_resolution(state, restore, direct_tx).await;
+            false
+        }
+        ClientRequest::NewPane {
+            parent_group,
+            kind,
+            working_directory,
+        } => {
+            handle_new_pane(state, parent_group, kind, working_directory, direct_tx).await;
             false
         }
         ClientRequest::NewGroup { parent_group, name } => {
@@ -113,6 +121,7 @@ pub async fn handle_request(
         ClientRequest::SetSessionPaneTitle {
             pane_id,
             expected_session_id,
+            expected_title_generation,
             title,
             short_title,
             title_source,
@@ -121,6 +130,7 @@ pub async fn handle_request(
                 state,
                 pane_id,
                 &expected_session_id,
+                expected_title_generation,
                 title,
                 short_title,
                 title_source,
@@ -206,6 +216,14 @@ pub async fn handle_request(
         } => {
             handle_schedule_pane_input(state, pane_id, delay_seconds, text, send_enter, direct_tx)
                 .await;
+            false
+        }
+        ClientRequest::ApplyRestructurePlan(plan) => {
+            handle_apply_restructure_plan(state, plan, direct_tx).await;
+            false
+        }
+        ClientRequest::RevertLastRestructure => {
+            handle_revert_last_restructure(state, direct_tx).await;
             false
         }
     }
@@ -316,6 +334,15 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
     let snapshot = tree.clone();
     drop(tree);
     send_direct(direct_tx, ServerEvent::TreeSnapshot(snapshot)).await;
+    if let Some(snapshot) = state.pending_session_recovery.lock().await.as_ref() {
+        send_direct(
+            direct_tx,
+            ServerEvent::SessionRecoveryAvailable {
+                pane_count: snapshot.panes.len(),
+            },
+        )
+        .await;
+    }
 
     // Terminal scrollback, session IDs, and editor paths belong to live pane
     // resources rather than the persisted tree wire shape, so replay them
@@ -350,6 +377,7 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
                         events.push(ServerEvent::PaneSessionIdResolved {
                             pane_id: *pane_id,
                             session_id,
+                            title_generation: runtime.title_generation,
                         });
                     }
                     events
@@ -364,6 +392,33 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
 
     for event in replay_events {
         send_direct(direct_tx, event).await;
+    }
+}
+
+async fn handle_session_recovery_resolution(
+    state: &Arc<ServerState>,
+    restore: bool,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let Some(snapshot) = state.pending_session_recovery.lock().await.take() else {
+        send_direct_error(
+            direct_tx,
+            "No session recovery decision is pending".to_string(),
+        )
+        .await;
+        return;
+    };
+    if restore {
+        crate::restore_snapshot(state, snapshot).await;
+        broadcast_and_persist(state).await;
+    } else if let Err(error) = tokio::fs::remove_file(&state.snapshot_path).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            send_direct_error(
+                direct_tx,
+                format!("Could not discard stored session snapshot: {error}"),
+            )
+            .await;
+        }
     }
 }
 
@@ -387,6 +442,79 @@ async fn handle_tree_mutation(
     match result {
         Ok(()) => broadcast_and_persist(state).await,
         Err(error) => send_direct_error(direct_tx, format!("tree operation failed: {error}")).await,
+    }
+}
+
+/// Applies a full-tree restructure plan (see `ilium_core::Tree::apply_restructure`).
+/// The tree exactly as it was before this mutation is kept in
+/// `state.restructure_undo`'s one slot only when the plan actually applies
+/// cleanly -- a rejected plan leaves both the tree and any earlier undo
+/// buffer untouched.
+async fn handle_apply_restructure_plan(
+    state: &Arc<ServerState>,
+    plan: RestructurePlan,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let mut tree = state.tree.write().await;
+    let before = tree.clone();
+    let result = tree.apply_restructure(plan);
+    drop(tree);
+    match result {
+        Ok(()) => {
+            *state.restructure_undo.lock().await = Some(before);
+            broadcast_and_persist(state).await;
+        }
+        Err(error) => send_direct_error(direct_tx, format!("restructure failed: {error}")).await,
+    }
+}
+
+/// Restores the tree from the one-slot undo buffer left by the most recent
+/// successful `ApplyRestructurePlan`, if any. Consumes the slot: reverting
+/// twice in a row without a new restructure in between is a no-op reported
+/// as an error, not a toggle back and forth between two states.
+///
+/// The undo buffer is not time-boxed on the client -- arbitrary structural
+/// work (most notably `NewPane`) can happen between the restructure and this
+/// revert. `Tree::apply_restructure` itself guarantees the pane/folder leaf
+/// set never changes, so any pane present in the tree being discarded here
+/// but absent from the restored tree must have been created *after* that
+/// restructure. Once `*tree` below is overwritten, such a pane's tree node
+/// is gone, but its `PaneResource` (PTY session, output-forwarder task) is
+/// still sitting in `state.panes` with nothing left to ever remove it --
+/// exactly like the descendant teardown `handle_close_pane` does, this
+/// tears those orphaned resources down before returning.
+async fn handle_revert_last_restructure(
+    state: &Arc<ServerState>,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let previous = state.restructure_undo.lock().await.take();
+    match previous {
+        Some(previous_tree) => {
+            let mut tree = state.tree.write().await;
+            let orphaned_pane_ids: Vec<NodeId> =
+                collect_pane_descendants(&tree, ilium_core::ROOT_ID)
+                    .into_iter()
+                    .filter(|pane_id| previous_tree.get(*pane_id).is_none())
+                    .collect();
+            *tree = previous_tree;
+            // Drop the write guard before the pane-registry teardown below
+            // (which needs no tree access) and before `broadcast_and_persist`'s
+            // own read-locked clone -- see that function's docs.
+            drop(tree);
+
+            if !orphaned_pane_ids.is_empty() {
+                let mut panes = state.panes.write().await;
+                for pane_id in orphaned_pane_ids {
+                    if let Some(resource) = panes.remove(&pane_id) {
+                        teardown_pane_resource(pane_id, resource);
+                    }
+                }
+                drop(panes);
+            }
+
+            broadcast_and_persist(state).await;
+        }
+        None => send_direct_error(direct_tx, "no restructure to revert").await,
     }
 }
 
@@ -420,6 +548,7 @@ async fn handle_session_pane_title(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     expected_session_id: &str,
+    expected_title_generation: u64,
     title: String,
     short_title: Option<String>,
     title_source: PaneTitleSource,
@@ -434,6 +563,7 @@ async fn handle_session_pane_title(
     };
     if runtime.is_session_identity_invalidated
         || runtime.session_id.as_deref() != Some(expected_session_id)
+        || runtime.title_generation != expected_title_generation
     {
         return;
     }
@@ -625,6 +755,7 @@ async fn handle_new_pane(
     state: &Arc<ServerState>,
     parent_group: NodeId,
     kind: NewPaneKind,
+    working_directory: NewPaneWorkingDirectory,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let plan = new_pane_plan(kind);
@@ -644,7 +775,8 @@ async fn handle_new_pane(
     // eventual broadcast snapshot's O(n) clone -- see `broadcast_and_persist`.
     drop(tree);
 
-    match spawn_and_register_pane(state, pane_id, plan.spawn_kind).await {
+    let cwd = resolve_new_pane_working_directory(state, working_directory).await;
+    match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
         Err(error) => {
             // The tree node exists (created just above) but has no resource
@@ -668,6 +800,35 @@ async fn handle_new_pane(
     broadcast_and_persist(state).await;
 }
 
+async fn resolve_new_pane_working_directory(
+    state: &Arc<ServerState>,
+    policy: NewPaneWorkingDirectory,
+) -> std::path::PathBuf {
+    match policy {
+        NewPaneWorkingDirectory::ProjectRoot => state.session_cwd.clone(),
+        NewPaneWorkingDirectory::LastUsed => state
+            .last_terminal_working_directory
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_else(|| state.session_cwd.clone()),
+        NewPaneWorkingDirectory::FocusedTerminal => {
+            let panes = state.panes.read().await;
+            panes
+                .values()
+                .find_map(|resource| match resource {
+                    PaneResource::Terminal(runtime)
+                        if runtime.detection_schedule.client_focused =>
+                    {
+                        runtime.session.current_working_directory()
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| state.session_cwd.clone())
+        }
+    }
+}
+
 /// Spawns (for a `Terminal` origin) or registers (for an `Editor`) the
 /// `PaneResource` for `pane_id` per `kind`, inserting it into
 /// `state.panes`. `pane_id` must already exist in `state.tree` as a pane
@@ -686,10 +847,21 @@ pub(crate) async fn spawn_and_register_pane(
     pane_id: NodeId,
     kind: PaneSnapshotKind,
 ) -> Result<(), PtyError> {
+    let cwd = state.session_cwd.clone();
+    spawn_and_register_pane_in_directory(state, pane_id, kind, &cwd).await
+}
+
+pub(crate) async fn spawn_and_register_pane_in_directory(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    kind: PaneSnapshotKind,
+    cwd: &std::path::Path,
+) -> Result<(), PtyError> {
+    let is_terminal = matches!(kind, PaneSnapshotKind::Terminal(_));
     let resource = match kind {
         PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
         PaneSnapshotKind::Terminal(origin) => {
-            let spawned = pane::spawn_terminal_session(&origin, &state.session_cwd)?;
+            let spawned = pane::spawn_terminal_session(&origin, cwd)?;
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
             let forward_task = tokio::spawn(forward_output_bytes(
@@ -710,6 +882,9 @@ pub(crate) async fn spawn_and_register_pane(
 
     let mut panes = state.panes.write().await;
     panes.insert(pane_id, resource);
+    if is_terminal {
+        *state.last_terminal_working_directory.lock().await = Some(cwd.to_path_buf());
+    }
     Ok(())
 }
 
@@ -895,6 +1070,9 @@ pub(crate) async fn write_key_input(
     let mut panes = state.panes.write().await;
     let mut observed_title = None;
     let mut cleared_session_origin_name = None;
+    let mut cleared_session_title_generation = None;
+    let mut cleared_conversation_origin_name = None;
+    let mut cleared_conversation_title_generation = None;
     let error_message = match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
@@ -917,19 +1095,35 @@ pub(crate) async fn write_key_input(
                         tracker.reset_pending_line();
                     }
                 }
-                let session_identity_invalidated = runtime
-                    .session_command_tracker
-                    .observe(bytes)
-                    .is_some_and(|line| crate::pane::invalidates_agent_session_identity(&line));
+                let submitted_line = runtime.session_command_tracker.observe(bytes);
+                let session_identity_invalidated = submitted_line
+                    .as_deref()
+                    .is_some_and(crate::pane::invalidates_agent_session_identity);
                 if session_identity_invalidated {
                     runtime.is_session_identity_invalidated = true;
                     runtime.pending_generated_session_id = None;
+                    runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    cleared_session_title_generation = Some(runtime.title_generation);
                     if let Some(invalidated_session_id) = runtime.session_id.take() {
                         runtime.invalidated_session_id = Some(invalidated_session_id);
                         runtime.session_agent_class = None;
                         cleared_session_origin_name =
                             Some(runtime.origin.pane_name_without_stale_session().to_string());
                     }
+                } else if submitted_line
+                    .as_deref()
+                    .is_some_and(crate::pane::clears_agent_conversation)
+                    && runtime.session_agent_class.is_some()
+                {
+                    // `/clear` can retain the same live agent process and
+                    // transcript identity. Its title lifecycle is separate
+                    // from session discovery, so invalidate only the
+                    // LLM-title generation and retain the verified ID.
+                    runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    runtime.is_showing_fresh_agent_screen = true;
+                    cleared_conversation_title_generation = Some(runtime.title_generation);
+                    cleared_conversation_origin_name =
+                        Some(runtime.origin.pane_name_without_stale_session().to_string());
                 }
                 if bytes.contains(&b'\r') {
                     crate::detection::force_check(
@@ -951,16 +1145,27 @@ pub(crate) async fn write_key_input(
         return Err(message);
     }
 
-    if cleared_session_origin_name.is_some() {
+    if let Some(title_generation) = cleared_session_title_generation {
         state.request_snapshot_save();
-        state.broadcast(ServerEvent::PaneSessionIdCleared { pane_id });
+        state.broadcast(ServerEvent::PaneSessionIdCleared {
+            pane_id,
+            title_generation,
+        });
+    }
+    if let Some(title_generation) = cleared_conversation_title_generation {
+        state.broadcast(ServerEvent::PaneSessionTitleCleared {
+            pane_id,
+            title_generation,
+        });
     }
 
     // A session-transition reset takes precedence over a shell title from
     // the same byte batch. In practice they are mutually exclusive, but the
     // ordering makes the stale LLM title impossible to retain if input and
     // foreground detection race.
-    let automatic_title = cleared_session_origin_name.or(observed_title);
+    let automatic_title = cleared_session_origin_name
+        .or(cleared_conversation_origin_name)
+        .or(observed_title);
     let Some(title) = automatic_title else {
         return Ok(());
     };

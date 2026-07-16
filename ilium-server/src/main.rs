@@ -76,6 +76,7 @@ async fn async_main(launch: ServerLaunch) -> ExitCode {
         sound_config_path: Some(config_dir.join("config.toml")),
         sound_player: std::sync::Arc::new(ilium_server::SystemSoundPlayer),
         custom_signatures: server_config.custom_signatures,
+        session_recovery: server_config.session_recovery,
     };
     match ilium_server::run(options).await {
         Ok(()) => ExitCode::SUCCESS,

@@ -571,6 +571,55 @@ pub enum TreeError {
     DuplicateSplitViewPane(NodeId),
     #[error("board storage is already open at {}", .0.display())]
     BoardStorageAlreadyOpen(PathBuf),
+    #[error("node {0:?} is not a folder")]
+    NotAFolder(NodeId),
+    #[error("node {0:?} was referenced more than once in a restructure plan")]
+    RestructureDuplicateLeaf(NodeId),
+    #[error(
+        "restructure plan referenced {actual} existing pane/folder(s), expected exactly {expected}"
+    )]
+    RestructureLeafSetMismatch { expected: usize, actual: usize },
+}
+
+/// One node in a proposed new tree shape, as produced by a restructure
+/// inference call and consumed by [`Tree::apply_restructure`]. This
+/// describes a full replacement of everything under [`ROOT_ID`], not a diff:
+/// `Pane`/`Folder` always reference an existing node by id (their identity
+/// and any backing resource -- a PTY, an open editor buffer -- must survive
+/// unchanged), while `Group`/`SplitView` are always freshly authored, since
+/// there is no meaningful sense in which a proposed new container "is" one
+/// of the old ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RestructureNode {
+    Pane {
+        id: NodeId,
+        title: String,
+        short_title: Option<String>,
+    },
+    Folder {
+        id: NodeId,
+        title: String,
+        short_title: Option<String>,
+    },
+    Group {
+        title: String,
+        short_title: Option<String>,
+        children: Vec<RestructureNode>,
+    },
+    SplitView {
+        orientation: SplitOrientation,
+        title: String,
+        short_title: Option<String>,
+        /// Enforced pane-only and `<= MAXIMUM_SPLIT_VIEW_PANES` by
+        /// [`Tree::apply_restructure`], mirroring [`Tree::create_split_view`].
+        children: Vec<RestructureNode>,
+    },
+}
+
+/// A complete proposed replacement for everything under [`ROOT_ID`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestructurePlan {
+    pub children: Vec<RestructureNode>,
 }
 
 /// One entry in the flattened, top-level-first listing returned by
@@ -904,6 +953,190 @@ impl Tree {
         }
         *self = updated_tree;
         Ok(split_view_id)
+    }
+
+    /// Replaces everything under [`ROOT_ID`] with `plan`'s shape. Every
+    /// existing pane and folder must appear exactly once as a leaf somewhere
+    /// in the plan -- no id missing, none invented, none duplicated -- which
+    /// is validated in full against the current tree before anything is
+    /// mutated; any single violation rejects the whole plan and leaves the
+    /// tree untouched. On success, groups/split views are entirely rebuilt
+    /// (old container ids are discarded, new ones allocated), while every
+    /// referenced pane/folder keeps its `NodeId` -- and therefore whatever
+    /// PTY, editor buffer, or board storage a runtime layer keeps keyed by
+    /// that id -- and only has its parent and title updated.
+    pub fn apply_restructure(&mut self, plan: RestructurePlan) -> Result<(), TreeError> {
+        let mut referenced = std::collections::HashSet::new();
+        self.validate_restructure_children(&plan.children, false, &mut referenced)?;
+
+        let existing_leaf_count = self
+            .nodes
+            .values()
+            .filter(|node| node.is_pane() || node.is_folder())
+            .count();
+        if referenced.len() != existing_leaf_count {
+            return Err(TreeError::RestructureLeafSetMismatch {
+                expected: existing_leaf_count,
+                actual: referenced.len(),
+            });
+        }
+
+        let mut updated = self.clone();
+        if let NodeKind::Container(container) = &mut updated.get_mut(ROOT_ID)?.kind {
+            container.children.clear();
+        }
+        let old_container_ids: Vec<NodeId> = updated
+            .nodes
+            .values()
+            .filter(|node| node.is_container() && node.id != ROOT_ID)
+            .map(|node| node.id)
+            .collect();
+        for id in old_container_ids {
+            updated.nodes.remove(&id);
+        }
+
+        Self::rebuild_restructure_children(&mut updated, ROOT_ID, &plan.children)?;
+
+        *self = updated;
+        Ok(())
+    }
+
+    /// Validates a plan subtree against the *current* (pre-restructure) tree:
+    /// every referenced id exists and is the kind it claims to be, no id is
+    /// referenced twice anywhere in the whole plan, and a split view's
+    /// children are pane-only and within capacity. Whether the whole plan
+    /// covers every existing leaf is checked once by the caller after this
+    /// returns, since that requires the full referenced set.
+    fn validate_restructure_children(
+        &self,
+        nodes: &[RestructureNode],
+        in_split_view: bool,
+        referenced: &mut std::collections::HashSet<NodeId>,
+    ) -> Result<(), TreeError> {
+        if in_split_view && nodes.len() > MAXIMUM_SPLIT_VIEW_PANES {
+            return Err(TreeError::SplitViewCapacityReached);
+        }
+        for node in nodes {
+            match node {
+                RestructureNode::Pane { id, .. } => {
+                    if !self.get(*id).ok_or(TreeError::NodeNotFound(*id))?.is_pane() {
+                        return Err(TreeError::NotAPane(*id));
+                    }
+                    if !referenced.insert(*id) {
+                        return Err(TreeError::RestructureDuplicateLeaf(*id));
+                    }
+                }
+                RestructureNode::Folder { id, .. } => {
+                    if !self
+                        .get(*id)
+                        .ok_or(TreeError::NodeNotFound(*id))?
+                        .is_folder()
+                    {
+                        return Err(TreeError::NotAFolder(*id));
+                    }
+                    if !referenced.insert(*id) {
+                        return Err(TreeError::RestructureDuplicateLeaf(*id));
+                    }
+                }
+                RestructureNode::Group { children, .. } => {
+                    if in_split_view {
+                        return Err(TreeError::SplitViewOnlyAcceptsPanes);
+                    }
+                    self.validate_restructure_children(children, false, referenced)?;
+                }
+                RestructureNode::SplitView { children, .. } => {
+                    if in_split_view {
+                        return Err(TreeError::SplitViewOnlyAcceptsPanes);
+                    }
+                    self.validate_restructure_children(children, true, referenced)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Builds `nodes` as the children of `parent` on an already-validated
+    /// plan: reattaches referenced panes/folders in place (updating parent
+    /// and title), and allocates fresh ids for every group/split view.
+    fn rebuild_restructure_children(
+        tree: &mut Tree,
+        parent: NodeId,
+        nodes: &[RestructureNode],
+    ) -> Result<(), TreeError> {
+        for node in nodes {
+            let child_id = match node {
+                RestructureNode::Pane {
+                    id,
+                    title,
+                    short_title,
+                } => {
+                    let existing = tree.get_mut(*id)?;
+                    existing.parent = Some(parent);
+                    existing.name = title.clone();
+                    existing.short_name = short_title.clone();
+                    // A restructure-authored title is curated, not a
+                    // per-turn automatic guess: freeze it the same way a
+                    // plain user rename does, so the background per-pane
+                    // titler never overwrites it on the pane's next turn.
+                    if let NodeKind::Pane { title_source, .. } = &mut existing.kind {
+                        *title_source = PaneTitleSource::UserSpecified;
+                    }
+                    *id
+                }
+                RestructureNode::Folder {
+                    id,
+                    title,
+                    short_title,
+                } => {
+                    let existing = tree.get_mut(*id)?;
+                    existing.parent = Some(parent);
+                    existing.name = title.clone();
+                    existing.short_name = short_title.clone();
+                    *id
+                }
+                RestructureNode::Group {
+                    title,
+                    short_title,
+                    children,
+                } => {
+                    let group_id = tree.alloc_id();
+                    tree.nodes.insert(
+                        group_id,
+                        Node {
+                            id: group_id,
+                            parent: Some(parent),
+                            name: title.clone(),
+                            short_name: short_title.clone(),
+                            kind: NodeKind::Container(ContainerNode::group()),
+                        },
+                    );
+                    Self::rebuild_restructure_children(tree, group_id, children)?;
+                    group_id
+                }
+                RestructureNode::SplitView {
+                    orientation,
+                    title,
+                    short_title,
+                    children,
+                } => {
+                    let split_id = tree.alloc_id();
+                    tree.nodes.insert(
+                        split_id,
+                        Node {
+                            id: split_id,
+                            parent: Some(parent),
+                            name: title.clone(),
+                            short_name: short_title.clone(),
+                            kind: NodeKind::Container(ContainerNode::split_view(*orientation)),
+                        },
+                    );
+                    Self::rebuild_restructure_children(tree, split_id, children)?;
+                    split_id
+                }
+            };
+            tree.push_child(parent, child_id)?;
+        }
+        Ok(())
     }
 
     /// Removes a node. If it is a container, removes its whole subtree.
@@ -2063,5 +2296,263 @@ mod tests {
             BuiltinAgentProvider::resume_binding(&format!("agy --conversation {session_id}")),
             Some((provider, session_id.to_string()))
         );
+    }
+
+    #[test]
+    fn apply_restructure_regroups_and_retitles_in_one_shot() {
+        let mut tree = Tree::new();
+        let flat_group = tree.add_group(ROOT_ID, "misc").unwrap();
+        let pane_a = tree
+            .add_pane(flat_group, "shell-a", PaneContentKind::Terminal)
+            .unwrap();
+        let pane_b = tree
+            .add_pane(flat_group, "shell-b", PaneContentKind::Terminal)
+            .unwrap();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Group {
+                title: "Auth refactor".to_string(),
+                short_title: Some("Auth".to_string()),
+                children: vec![
+                    RestructureNode::Pane {
+                        id: pane_a,
+                        title: "Backend agent".to_string(),
+                        short_title: None,
+                    },
+                    RestructureNode::Pane {
+                        id: pane_b,
+                        title: "Frontend shell".to_string(),
+                        short_title: None,
+                    },
+                ],
+            }],
+        };
+        tree.apply_restructure(plan).unwrap();
+
+        assert!(tree.get(flat_group).is_none(), "old group id is discarded");
+        let new_group = tree.children_of(ROOT_ID).unwrap()[0];
+        assert_eq!(tree.get(new_group).unwrap().name, "Auth refactor");
+        assert_eq!(tree.children_of(new_group).unwrap(), &[pane_a, pane_b]);
+        assert_eq!(tree.get(pane_a).unwrap().name, "Backend agent");
+        assert_eq!(tree.parent_of(pane_a), Some(new_group));
+        let NodeKind::Pane { title_source, .. } = &tree.get(pane_a).unwrap().kind else {
+            panic!("expected a pane");
+        };
+        assert_eq!(*title_source, PaneTitleSource::UserSpecified);
+    }
+
+    #[test]
+    fn apply_restructure_preserves_split_views_and_folders() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_a = tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let pane_b = tree
+            .add_pane(group, "b", PaneContentKind::Terminal)
+            .unwrap();
+        let folder = tree
+            .add_folder(group, PathBuf::from("/tmp/project"))
+            .unwrap();
+
+        let plan = RestructurePlan {
+            children: vec![
+                RestructureNode::SplitView {
+                    orientation: SplitOrientation::Vertical,
+                    title: "Split".to_string(),
+                    short_title: None,
+                    children: vec![
+                        RestructureNode::Pane {
+                            id: pane_a,
+                            title: "a2".to_string(),
+                            short_title: None,
+                        },
+                        RestructureNode::Pane {
+                            id: pane_b,
+                            title: "b2".to_string(),
+                            short_title: None,
+                        },
+                    ],
+                },
+                RestructureNode::Folder {
+                    id: folder,
+                    title: "Project root".to_string(),
+                    short_title: None,
+                },
+            ],
+        };
+        tree.apply_restructure(plan).unwrap();
+
+        assert!(tree.get(group).is_none());
+        let split_view = tree.children_of(ROOT_ID).unwrap()[0];
+        assert!(tree.get(split_view).unwrap().is_split_view());
+        assert_eq!(tree.children_of(split_view).unwrap(), &[pane_a, pane_b]);
+        assert_eq!(tree.get(folder).unwrap().name, "Project root");
+        assert_eq!(tree.parent_of(folder), Some(ROOT_ID));
+    }
+
+    #[test]
+    fn apply_restructure_rejects_a_missing_leaf_and_leaves_tree_untouched() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_a = tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let _pane_b = tree
+            .add_pane(group, "b", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Pane {
+                id: pane_a,
+                title: "only a".to_string(),
+                short_title: None,
+            }],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TreeError::RestructureLeafSetMismatch {
+                expected: 2,
+                actual: 1
+            }
+        ));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn apply_restructure_rejects_a_duplicated_leaf() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_a = tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![
+                RestructureNode::Pane {
+                    id: pane_a,
+                    title: "a1".to_string(),
+                    short_title: None,
+                },
+                RestructureNode::Pane {
+                    id: pane_a,
+                    title: "a2".to_string(),
+                    short_title: None,
+                },
+            ],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(err, TreeError::RestructureDuplicateLeaf(id) if id == pane_a));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn apply_restructure_rejects_an_invented_id() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let _pane_a = tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Pane {
+                id: NodeId(9999),
+                title: "ghost".to_string(),
+                short_title: None,
+            }],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(err, TreeError::NodeNotFound(NodeId(9999))));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn apply_restructure_rejects_a_group_id_referenced_as_a_pane() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Pane {
+                id: group,
+                title: "not a pane".to_string(),
+                short_title: None,
+            }],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(err, TreeError::NotAPane(id) if id == group));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn apply_restructure_rejects_a_split_view_over_capacity() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let panes: Vec<NodeId> = (0..5)
+            .map(|index| {
+                tree.add_pane(group, format!("p{index}"), PaneContentKind::Terminal)
+                    .unwrap()
+            })
+            .collect();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::SplitView {
+                orientation: SplitOrientation::Vertical,
+                title: "too many".to_string(),
+                short_title: None,
+                children: panes
+                    .into_iter()
+                    .map(|id| RestructureNode::Pane {
+                        id,
+                        title: "p".to_string(),
+                        short_title: None,
+                    })
+                    .collect(),
+            }],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(err, TreeError::SplitViewCapacityReached));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn apply_restructure_rejects_a_non_pane_child_of_a_split_view() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_a = tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::SplitView {
+                orientation: SplitOrientation::Vertical,
+                title: "bad".to_string(),
+                short_title: None,
+                children: vec![RestructureNode::Group {
+                    title: "nested".to_string(),
+                    short_title: None,
+                    children: vec![RestructureNode::Pane {
+                        id: pane_a,
+                        title: "a".to_string(),
+                        short_title: None,
+                    }],
+                }],
+            }],
+        };
+        let err = tree.apply_restructure(plan).unwrap_err();
+
+        assert!(matches!(err, TreeError::SplitViewOnlyAcceptsPanes));
+        assert_eq!(tree, before);
     }
 }

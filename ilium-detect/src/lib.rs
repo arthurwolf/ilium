@@ -125,6 +125,77 @@ pub fn classify_activity(screen_text: &str) -> AgentActivity {
     AgentActivity::Idle
 }
 
+/// Classifies activity with the detected provider's status-line vocabulary.
+///
+/// Claude Code's current live status uses a whimsical verb, a Unicode ellipsis,
+/// and an elapsed-time token. Codex also renders elapsed times in completed
+/// transcript rows, so applying that shape to every provider turns finished
+/// Codex panes back into `Working`. Provider-specific status recognition keeps
+/// the shared activity contract while isolating each CLI's volatile UI text.
+pub fn classify_activity_for_agent(class: &AgentClass, screen_text: &str) -> AgentActivity {
+    if screen_text.contains(WORKING_MARKER)
+        || (matches!(class, AgentClass::Claude) && looks_like_live_status_line(screen_text))
+        || (matches!(class, AgentClass::Codex) && looks_like_codex_live_status_line(screen_text))
+    {
+        return AgentActivity::Working;
+    }
+
+    if looks_like_background_wait_line(screen_text) {
+        return AgentActivity::WaitingBackground;
+    }
+
+    if looks_like_confirmation_prompt(screen_text) || looks_like_selection_prompt(screen_text) {
+        return AgentActivity::WaitingApproval;
+    }
+
+    AgentActivity::Idle
+}
+
+/// Returns whether a detected first-party agent is visibly at the start of
+/// a fresh conversation. This is intentionally stricter than `Idle`: an
+/// agent that has merely finished a turn also shows an empty composer, and
+/// clearing that pane's useful title would be a false positive.
+///
+/// The universal cleared/new-conversation notice catches the explicit state
+/// each provider renders immediately after `/clear`. Codex also has a stable
+/// empty-composer screen with no transcript text, so it remains detectable
+/// after that transient notice disappears. Unknown/custom agents fail closed.
+pub fn is_fresh_agent_screen(class: &AgentClass, screen_text: &str) -> bool {
+    let normalized = screen_text.to_ascii_lowercase();
+    if [
+        "conversation cleared",
+        "conversation reset",
+        "new conversation started",
+        "started a new conversation",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        return matches!(
+            class,
+            AgentClass::Claude | AgentClass::Codex | AgentClass::Antigravity
+        );
+    }
+
+    matches!(class, AgentClass::Codex)
+        && normalized.contains("send a message")
+        && screen_has_only_empty_composer_chrome(screen_text, "send a message")
+}
+
+/// Ignores the box drawing around a known empty composer, then rejects any
+/// remaining user/agent text. A completed Codex turn keeps transcript text
+/// above its composer, so it cannot satisfy this deliberately narrow rule.
+fn screen_has_only_empty_composer_chrome(screen_text: &str, composer_label: &str) -> bool {
+    screen_text.lines().all(|line| {
+        let trimmed = line.trim();
+        trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case(composer_label)
+            || trimmed
+                .chars()
+                .all(|character| matches!(character, '╭' | '╮' | '╰' | '╯' | '─' | '│' | ' '))
+    })
+}
+
 /// Returns whether an agent's persistent task goal is visible on screen.
 ///
 /// Codex represents a configured goal as a non-empty `Goal:` status row.
@@ -189,6 +260,25 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
             line.split(|c: char| c.is_whitespace() || c == '·')
                 .any(is_elapsed_time_token)
         })
+}
+
+/// True when Codex's visible status line explicitly names an active turn.
+///
+/// Codex keeps completed timing summaries on screen, often alongside an
+/// ellipsis and an elapsed-time token. Requiring a present-tense activity word
+/// prevents those historical rows from being mistaken for a live turn.
+fn looks_like_codex_live_status_line(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        let lower = line.trim().to_ascii_lowercase();
+        let names_active_turn = ["thinking", "working", "generating", "planning", "running"]
+            .iter()
+            .any(|marker| lower.starts_with(marker));
+        names_active_turn
+            && (lower.contains("…") || lower.contains("..."))
+            && lower
+                .split(|character: char| character.is_whitespace() || character == '·')
+                .any(is_elapsed_time_token)
+    })
 }
 
 /// True if `token` looks like an elapsed-time reading: one or more ASCII
@@ -509,8 +599,19 @@ mod tests {
     #[test]
     fn codex_mid_turn_is_working() {
         assert_eq!(
-            classify_activity(&fixture("codex_working.txt")),
+            classify_activity_for_agent(&AgentClass::Codex, &fixture("codex_working.txt"),),
             AgentActivity::Working
+        );
+    }
+
+    #[test]
+    fn codex_completed_timing_summary_is_idle() {
+        assert_eq!(
+            classify_activity_for_agent(
+                &AgentClass::Codex,
+                "Implemented the requested change… 12s\n\nSend a message",
+            ),
+            AgentActivity::Idle
         );
     }
 
@@ -582,6 +683,32 @@ mod tests {
             classify_activity(&fixture("plain_shell.txt")),
             AgentActivity::Idle
         );
+    }
+
+    #[test]
+    fn fresh_screen_detection_covers_all_builtin_agents_without_treating_idle_as_fresh() {
+        for class in [
+            AgentClass::Claude,
+            AgentClass::Codex,
+            AgentClass::Antigravity,
+        ] {
+            assert!(is_fresh_agent_screen(
+                &class,
+                "Conversation cleared\n\nStart a new task"
+            ));
+        }
+        assert!(is_fresh_agent_screen(
+            &AgentClass::Codex,
+            &fixture("codex_idle.txt")
+        ));
+        assert!(!is_fresh_agent_screen(
+            &AgentClass::Claude,
+            &fixture("claude_code_idle.txt")
+        ));
+        assert!(!is_fresh_agent_screen(
+            &AgentClass::Antigravity,
+            "Finished the requested task\nType a message"
+        ));
     }
 
     #[test]

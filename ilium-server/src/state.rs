@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
+use crate::persistence::SessionSnapshot;
 use crate::sounds::PlaybackRequest;
 
 /// Capacity of the per-session broadcast channel. Sized generously for
@@ -67,6 +68,15 @@ pub struct ServerState {
     pub custom_signatures: Vec<AgentSignature>,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
+    /// Most recently selected terminal launch directory in this session.
+    pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
+    pub pending_session_recovery: Mutex<Option<SessionSnapshot>>,
+    /// The tree exactly as it was immediately before the most recently
+    /// applied `ApplyRestructurePlan`, if any -- a one-slot undo buffer, not
+    /// a history stack. Consumed (taken, not just read) by
+    /// `RevertLastRestructure`, so reverting twice in a row is a no-op
+    /// surfaced as an error rather than bouncing between two states.
+    pub restructure_undo: Mutex<Option<Tree>>,
     pub snapshot_write_lock: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
     /// check and PTY write. Lock ordering is this mutex, then `tree`, then
@@ -123,6 +133,9 @@ impl ServerState {
             custom_signatures: options.custom_signatures,
             tree: RwLock::new(Tree::new()),
             panes: RwLock::new(HashMap::new()),
+            last_terminal_working_directory: Mutex::new(None),
+            pending_session_recovery: Mutex::new(None),
+            restructure_undo: Mutex::new(None),
             snapshot_write_lock: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             snapshot_dirty: AtomicBool::new(false),

@@ -225,6 +225,13 @@ fn locate_server_binary() -> PathBuf {
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(directory) = current_exe.parent() {
             candidate_paths.insert(0, directory.join(&binary_name));
+            // Integration-test executables live under `debug/deps`, while
+            // Cargo places sibling binaries one level above in `debug`.
+            // Prefer that matching target directory before falling back to
+            // the workspace's potentially stale default target output.
+            if let Some(build_output_directory) = directory.parent() {
+                candidate_paths.insert(1, build_output_directory.join(&binary_name));
+            }
         }
     }
     first_existing_server_binary(candidate_paths).unwrap_or_else(|| PathBuf::from(binary_name))

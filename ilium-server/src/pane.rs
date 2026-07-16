@@ -89,6 +89,13 @@ pub struct TerminalPaneRuntime {
     /// published or persisted as an active session until detection confirms
     /// that this pane actually owns a live Claude process.
     pub pending_generated_session_id: Option<String>,
+    /// Changes whenever the pane's visible agent conversation is reset.
+    /// Title workers carry this through IPC so an older result cannot rename
+    /// the newly-fresh pane after `/clear`.
+    pub title_generation: u64,
+    /// Edge detector for provider-specific fresh screens. A fresh screen can
+    /// persist for many detection ticks, but it must reset titles once only.
+    pub is_showing_fresh_agent_screen: bool,
     pub detection_schedule: DetectionSchedule,
     /// This pane's agent session/thread ID, once `crate::session_id`
     /// discovers one. Rechecked while an agent is detected because `/resume`
@@ -125,6 +132,8 @@ impl TerminalPaneRuntime {
             is_session_identity_invalidated: false,
             invalidated_session_id: None,
             pending_generated_session_id,
+            title_generation: 0,
+            is_showing_fresh_agent_screen: false,
             origin,
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
@@ -162,6 +171,13 @@ pub fn invalidates_agent_session_identity(submitted_line: &str) -> bool {
         submitted_line.split_whitespace().next(),
         Some("/resume" | "/branch" | "/new")
     )
+}
+
+/// Returns true only for the shared interactive command that starts a fresh
+/// visible conversation without necessarily replacing the agent process or
+/// its externally discoverable session identity.
+pub fn clears_agent_conversation(submitted_line: &str) -> bool {
+    submitted_line.trim() == "/clear"
 }
 
 impl Drop for TerminalPaneRuntime {
@@ -332,6 +348,15 @@ mod tests {
             "resume",
         ] {
             assert!(!invalidates_agent_session_identity(input));
+        }
+    }
+
+    #[test]
+    fn only_the_exact_clear_command_resets_visible_agent_history() {
+        assert!(clears_agent_conversation("/clear"));
+        assert!(clears_agent_conversation("  /clear  "));
+        for command in ["/clear later", "please /clear", "/clearance", "/new"] {
+            assert!(!clears_agent_conversation(command));
         }
     }
 

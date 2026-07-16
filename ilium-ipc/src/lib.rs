@@ -17,7 +17,8 @@ mod protocol;
 pub use error::IpcError;
 pub use framing::{read_frame, write_frame, MAX_FRAME_LEN};
 pub use protocol::{
-    ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind, ServerEvent,
+    ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
+    NewPaneWorkingDirectory, ServerEvent,
 };
 
 #[cfg(test)]
@@ -46,14 +47,17 @@ mod tests {
             ClientRequest::NewPane {
                 parent_group: NodeId(1),
                 kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
             ClientRequest::NewPane {
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Command("claude".to_string()),
+                working_directory: NewPaneWorkingDirectory::FocusedTerminal,
             },
             ClientRequest::NewPane {
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Editor(PathBuf::from("/tmp/notes.md")),
+                working_directory: NewPaneWorkingDirectory::LastUsed,
             },
             ClientRequest::NewPane {
                 parent_group: NodeId(1),
@@ -61,6 +65,7 @@ mod tests {
                     command_line: "codex".to_string(),
                     initial_input: "/goal inspect this line".to_string(),
                 },
+                working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
             ClientRequest::MoveNode {
@@ -165,6 +170,7 @@ mod tests {
             ClientRequest::SetSessionPaneTitle {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                expected_title_generation: 0,
                 title: "Fix Auth Bug In Login Flow".to_string(),
                 short_title: Some("Fix Auth".to_string()),
                 title_source: ilium_core::PaneTitleSource::Automatic,
@@ -172,10 +178,42 @@ mod tests {
             ClientRequest::SetSessionPaneTitle {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                expected_title_generation: 0,
                 title: "My Agent Name".to_string(),
                 short_title: None,
                 title_source: ilium_core::PaneTitleSource::UserSpecified,
             },
+            ClientRequest::ApplyRestructurePlan(ilium_core::RestructurePlan {
+                children: vec![
+                    ilium_core::RestructureNode::Group {
+                        title: "Auth refactor".to_string(),
+                        short_title: Some("Auth".to_string()),
+                        children: vec![
+                            ilium_core::RestructureNode::Pane {
+                                id: NodeId(2),
+                                title: "Backend agent".to_string(),
+                                short_title: None,
+                            },
+                            ilium_core::RestructureNode::SplitView {
+                                orientation: SplitOrientation::Vertical,
+                                title: "Split".to_string(),
+                                short_title: None,
+                                children: vec![ilium_core::RestructureNode::Pane {
+                                    id: NodeId(3),
+                                    title: "Frontend shell".to_string(),
+                                    short_title: None,
+                                }],
+                            },
+                        ],
+                    },
+                    ilium_core::RestructureNode::Folder {
+                        id: NodeId(4),
+                        title: "Project root".to_string(),
+                        short_title: None,
+                    },
+                ],
+            }),
+            ClientRequest::RevertLastRestructure,
         ]
     }
 
@@ -226,8 +264,16 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id: NodeId(2),
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                title_generation: 0,
             },
-            ServerEvent::PaneSessionIdCleared { pane_id: NodeId(2) },
+            ServerEvent::PaneSessionIdCleared {
+                pane_id: NodeId(2),
+                title_generation: 1,
+            },
+            ServerEvent::PaneSessionTitleCleared {
+                pane_id: NodeId(2),
+                title_generation: 2,
+            },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
                 path: Some(PathBuf::from("/tmp/notes.md")),
