@@ -389,16 +389,9 @@ fn masked_key(key: &str) -> String {
     if key.is_empty() {
         "Not set (Enter to edit)".to_string()
     } else {
-        format!(
-            "••••{}",
-            key.chars()
-                .rev()
-                .take(4)
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect::<String>()
-        )
+        // API keys are always ASCII; safe to use byte slicing to get last 4 chars
+        let start = key.len().saturating_sub(4);
+        format!("••••{}", &key[start..])
     }
 }
 fn inference_label(row: InferenceRow) -> &'static str {

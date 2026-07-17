@@ -997,8 +997,6 @@ fn save_markdown_board(
         .write(true)
         .open(path)
         .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    file.lock()
-        .map_err(|error| format!("Could not lock {}: {error}", path.display()))?;
     let mut current_source = String::new();
     file.read_to_string(&mut current_source)
         .map_err(|error| format!("Could not read {}: {error}", path.display()))?;

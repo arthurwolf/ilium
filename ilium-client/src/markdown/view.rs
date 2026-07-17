@@ -87,7 +87,7 @@ fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64) -> i
             let visible = visible_rect(area, area_top, area_bottom, y, height);
             if let Some((visible_top, _, rect)) = visible {
                 let skip = (visible_top - y) as u16;
-                frame.render_widget(Paragraph::new(lines.clone()).scroll((skip, 0)), rect);
+                frame.render_widget(Paragraph::new((**lines).clone()).scroll((skip, 0)), rect);
             }
             i64::from(height)
         }
@@ -140,6 +140,8 @@ fn visible_rect(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
@@ -150,9 +152,9 @@ mod tests {
     fn spaced_document() -> RenderedDocument {
         RenderedDocument {
             blocks: vec![
-                RenderedBlock::Text(vec![Line::from("before")]),
-                RenderedBlock::BlankLines(vec![Line::default(), Line::default()]),
-                RenderedBlock::Text(vec![Line::from("after")]),
+                RenderedBlock::Text(Arc::new(vec![Line::from("before")])),
+                RenderedBlock::BlankLines(Arc::new(vec![Line::default(), Line::default()])),
+                RenderedBlock::Text(Arc::new(vec![Line::from("after")])),
             ],
         }
     }

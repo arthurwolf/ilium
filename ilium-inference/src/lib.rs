@@ -2,6 +2,7 @@
 //! features. Every backend implements [`InferenceProvider`], insulating the
 //! client from individual HTTP envelopes and authentication details.
 
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use ilium_kilo_gateway::{ChatMessage, CompletionRequest, KiloGatewayClient};
@@ -167,11 +168,17 @@ pub trait InferenceProvider: Send + Sync {
 pub fn provider_from_settings(settings: &InferenceSettings) -> Box<dyn InferenceProvider> {
     match settings.selected_provider {
         InferenceProviderKind::KiloGateway => Box::new(KiloGatewayProvider),
-        InferenceProviderKind::Ollama => Box::new(OllamaProvider(settings.ollama.clone())),
-        InferenceProviderKind::OpenAi => Box::new(OpenAiProvider(settings.openai.clone())),
-        InferenceProviderKind::Anthropic => Box::new(AnthropicProvider(settings.anthropic.clone())),
+        InferenceProviderKind::Ollama => {
+            Box::new(OllamaProvider(Arc::new(settings.ollama.clone())))
+        }
+        InferenceProviderKind::OpenAi => {
+            Box::new(OpenAiProvider(Arc::new(settings.openai.clone())))
+        }
+        InferenceProviderKind::Anthropic => {
+            Box::new(AnthropicProvider(Arc::new(settings.anthropic.clone())))
+        }
         InferenceProviderKind::OpenRouter => {
-            Box::new(OpenRouterProvider(settings.openrouter.clone()))
+            Box::new(OpenRouterProvider(Arc::new(settings.openrouter.clone())))
         }
     }
 }
@@ -183,8 +190,8 @@ impl InferenceProvider for KiloGatewayProvider {
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         let request = CompletionRequest::with_default_free_model(vec![
-            ChatMessage::system(request.system_prompt.clone()),
-            ChatMessage::user(request.user_prompt.clone()),
+            ChatMessage::system(request.system_prompt.as_str()),
+            ChatMessage::user(request.user_prompt.as_str()),
         ]);
         KiloGatewayClient::default()
             .complete_text(&request)
@@ -193,7 +200,7 @@ impl InferenceProvider for KiloGatewayProvider {
     }
 }
 
-struct OllamaProvider(OllamaSettings);
+struct OllamaProvider(Arc<OllamaSettings>);
 impl InferenceProvider for OllamaProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::Ollama
@@ -227,58 +234,51 @@ impl InferenceProvider for OllamaProvider {
     }
 }
 
-/// Shared OpenAI-chat adapter, composed by OpenAI and OpenRouter instead of
-/// allowing their endpoint/auth details to leak into naming workers.
-struct OpenAiCompatibleProvider {
-    settings: ApiKeyProviderSettings,
+/// Shared OpenAI-chat adapter logic working with borrowed settings.
+/// Used by OpenAI and OpenRouter to avoid cloning settings.
+fn complete_openai_compatible(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    request: &InferenceRequest,
+) -> Result<InferenceResponse, InferenceError> {
+    require(
+        api_key,
+        "Enter an API key before testing or using inference",
+    )?;
+    require(model, "Enter a model before testing or using inference")?;
+    let response = post_json(
+        &format_url(base_url, "chat/completions"),
+        &[("Authorization", format!("Bearer {}", api_key))],
+        serde_json::json!({"model":model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":false}),
+    )?;
+    response_text(&response, &["choices", "0", "message", "content"])
 }
-impl OpenAiCompatibleProvider {
-    fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        require(
-            &self.settings.api_key,
-            "Enter an API key before testing or using inference",
-        )?;
-        require(
-            &self.settings.model,
-            "Enter a model before testing or using inference",
-        )?;
-        let response = post_json(
-            &format_url(&self.settings.base_url, "chat/completions"),
-            &[("Authorization", format!("Bearer {}", self.settings.api_key))],
-            serde_json::json!({"model":self.settings.model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":false}),
-        )?;
-        response_text(&response, &["choices", "0", "message", "content"])
-    }
-}
-struct OpenAiProvider(ApiKeyProviderSettings);
+
+struct OpenAiProvider(Arc<ApiKeyProviderSettings>);
 impl InferenceProvider for OpenAiProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::OpenAi
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        OpenAiCompatibleProvider {
-            settings: self.0.clone(),
-        }
-        .complete(request)
+        complete_openai_compatible(&self.0.base_url, &self.0.api_key, &self.0.model, request)
     }
 }
-struct OpenRouterProvider(OpenRouterSettings);
+struct OpenRouterProvider(Arc<OpenRouterSettings>);
 impl InferenceProvider for OpenRouterProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::OpenRouter
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        OpenAiCompatibleProvider {
-            settings: ApiKeyProviderSettings {
-                base_url: DEFAULT_OPENROUTER_URL.to_string(),
-                api_key: self.0.api_key.clone(),
-                model: self.0.model.clone(),
-            },
-        }
-        .complete(request)
+        complete_openai_compatible(
+            DEFAULT_OPENROUTER_URL,
+            &self.0.api_key,
+            &self.0.model,
+            request,
+        )
     }
 }
-struct AnthropicProvider(ApiKeyProviderSettings);
+struct AnthropicProvider(Arc<ApiKeyProviderSettings>);
 impl InferenceProvider for AnthropicProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::Anthropic
@@ -295,7 +295,7 @@ impl InferenceProvider for AnthropicProvider {
         let response = post_json(
             &format_url(&self.0.base_url, "v1/messages"),
             &[
-                ("x-api-key", self.0.api_key.clone()),
+                ("x-api-key", self.0.api_key.as_str().to_string()),
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
             serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0}),
@@ -314,12 +314,15 @@ fn require(value: &str, message: &str) -> Result<(), InferenceError> {
 fn format_url(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
 }
-fn agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
-            .build(),
-    )
+fn agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_global(Some(REQUEST_TIMEOUT))
+                .build(),
+        )
+    })
 }
 fn get_json(url: &str, headers: &[(&str, String)]) -> Result<serde_json::Value, InferenceError> {
     let mut request = agent().get(url);

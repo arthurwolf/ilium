@@ -462,10 +462,11 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         source: SnapshotError::Json(source),
     })?;
 
+    let path_buf = path.to_path_buf();
     let to_snapshot_io_error =
         |operation: &'static str, source: std::io::Error| ServerError::Snapshot {
             operation,
-            path: path.to_path_buf(),
+            path: path_buf.clone(),
             source: SnapshotError::Io(source),
         };
 
@@ -505,11 +506,12 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
 /// invalid JSON), so the caller can log "nothing to recover" separately
 /// from "something to warn about."
 pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, ServerError> {
+    let path_buf = path.to_path_buf();
     let exists = tokio::fs::try_exists(path)
         .await
         .map_err(|source| ServerError::Snapshot {
             operation: "check existence of",
-            path: path.to_path_buf(),
+            path: path_buf.clone(),
             source: SnapshotError::Io(source),
         })?;
     if !exists {
@@ -520,13 +522,13 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
         .await
         .map_err(|source| ServerError::Snapshot {
             operation: "read",
-            path: path.to_path_buf(),
+            path: path_buf.clone(),
             source: SnapshotError::Io(source),
         })?;
     let snapshot: SessionSnapshot =
         serde_json::from_slice(&contents).map_err(|source| ServerError::Snapshot {
             operation: "parse",
-            path: path.to_path_buf(),
+            path: path_buf,
             source: SnapshotError::Json(source),
         })?;
     Ok(Some(snapshot))

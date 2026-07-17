@@ -197,9 +197,8 @@ fn antigravity_recent_user_prompts(transcript_path: &Path) -> anyhow::Result<Vec
                 entry
                     .get("display")
                     .and_then(Value::as_str)
-                    .map(str::to_string)
+                    .map(|s| s.trim().to_string())
             })
-            .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty()),
         RECENT_PROMPT_COUNT,
     )

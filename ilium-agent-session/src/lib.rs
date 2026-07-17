@@ -10,7 +10,6 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use ilium_core::AgentClass;
 use serde_json::Value;
@@ -28,8 +27,6 @@ pub struct VerifiedTranscript {
 pub struct TranscriptLocator {
     home: PathBuf,
     project_cwd: PathBuf,
-    codex_candidate_paths: OnceLock<Vec<PathBuf>>,
-    antigravity_candidate_paths: OnceLock<Vec<PathBuf>>,
 }
 
 impl TranscriptLocator {
@@ -38,8 +35,6 @@ impl TranscriptLocator {
         Self {
             home: home.to_path_buf(),
             project_cwd: canonical_or_original(project_cwd),
-            codex_candidate_paths: OnceLock::new(),
-            antigravity_candidate_paths: OnceLock::new(),
         }
     }
 
@@ -100,16 +95,10 @@ impl TranscriptLocator {
     fn candidate_paths(&self, class: &AgentClass) -> Vec<PathBuf> {
         match class {
             AgentClass::Claude => transcript_files_directly_under(&self.claude_project_dir()),
-            AgentClass::Codex => self
-                .codex_candidate_paths
-                .get_or_init(|| transcript_files_recursively_under(&self.codex_sessions_dir()))
-                .clone(),
-            AgentClass::Antigravity => self
-                .antigravity_candidate_paths
-                .get_or_init(|| {
-                    antigravity_conversation_databases(&self.antigravity_conversations_dir())
-                })
-                .clone(),
+            AgentClass::Codex => transcript_files_recursively_under(&self.codex_sessions_dir()),
+            AgentClass::Antigravity => {
+                antigravity_conversation_databases(&self.antigravity_conversations_dir())
+            }
             AgentClass::Other(_) => Vec::new(),
         }
     }

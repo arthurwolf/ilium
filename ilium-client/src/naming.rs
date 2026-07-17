@@ -149,8 +149,9 @@ fn extract_bounded_word_field(
 /// `min_words..=max_words` words, is at most 64 characters, and contains no
 /// control characters -- the shared validity bar for an inferred name/title.
 pub fn normalize_word_bounded(value: &str, min_words: usize, max_words: usize) -> Option<String> {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let word_count = normalized.split_whitespace().count();
+    let words: Vec<_> = value.split_whitespace().collect();
+    let word_count = words.len();
+    let normalized = words.join(" ");
     ((min_words..=max_words).contains(&word_count)
         && normalized.chars().count() <= 64
         && normalized.chars().all(|character| !character.is_control()))

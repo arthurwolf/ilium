@@ -12,6 +12,7 @@
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
@@ -36,8 +37,8 @@ pub enum Block {
     /// Source-authored empty rows between visible Markdown constructs.
     /// Keeping spacing explicit prevents later rendering and viewport
     /// layers from having to guess paragraph margins.
-    BlankLines(Vec<Line<'static>>),
-    Text(Vec<Line<'static>>),
+    BlankLines(Arc<Vec<Line<'static>>>),
+    Text(Arc<Vec<Line<'static>>>),
 }
 
 /// A resolved (but not yet loaded) image reference.
@@ -206,7 +207,7 @@ impl<'a> Builder<'a> {
         }
 
         self.flush_text_block();
-        self.blocks.push(Block::BlankLines(blank_lines));
+        self.blocks.push(Block::BlankLines(Arc::new(blank_lines)));
     }
 
     /// Advances source-line ownership without letting closing events move
@@ -271,7 +272,7 @@ impl<'a> Builder<'a> {
         self.flush_line();
         if !self.lines.is_empty() {
             self.blocks
-                .push(Block::Text(std::mem::take(&mut self.lines)));
+                .push(Block::Text(Arc::new(std::mem::take(&mut self.lines))));
         }
     }
 
@@ -381,8 +382,9 @@ impl<'a> Builder<'a> {
             }
             Event::Rule => {
                 self.flush_text_block();
-                self.blocks
-                    .push(Block::Text(vec![Line::from("─".repeat(RULE_WIDTH))]));
+                self.blocks.push(Block::Text(Arc::new(vec![Line::from(
+                    "─".repeat(RULE_WIDTH),
+                )])));
             }
             Event::TaskListMarker(checked) => {
                 let glyph = if *checked { "[x] " } else { "[ ] " };
@@ -555,7 +557,7 @@ impl<'a> Builder<'a> {
                             ))
                         })
                         .collect();
-                    self.blocks.push(Block::Text(code_lines));
+                    self.blocks.push(Block::Text(Arc::new(code_lines)));
                 }
             }
             TagEnd::List(_) => {
@@ -570,7 +572,8 @@ impl<'a> Builder<'a> {
             }
             TagEnd::Table => {
                 if let Some(table) = self.table.take() {
-                    self.blocks.push(Block::Text(render_table(&table)));
+                    self.blocks
+                        .push(Block::Text(Arc::new(render_table(&table))));
                 }
             }
             // The header row's cells are wrapped directly in `TableHead`

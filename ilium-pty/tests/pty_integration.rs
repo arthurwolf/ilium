@@ -241,3 +241,67 @@ fn kill_terminates_a_running_child_and_is_idempotent() {
         .kill()
         .expect("killing an already-exited child should be a no-op, not an error");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reader_thread_stops_after_drop_even_when_a_descendant_still_holds_the_tty() {
+    // Reproduces the scenario `impl Drop for PtySession` exists to bound.
+    // Note this specifically needs a descendant that detaches into its
+    // *own* session (`setsid sleep 30`) while still inheriting the pty's
+    // slave fds unredirected: Linux hangs up a pty for every fd still
+    // referencing it, but only when the *session leader* of that
+    // controlling terminal exits (portable_pty's spawned child always is
+    // one -- see its `setsid()` call). A plain same-session background job
+    // (`sleep 30 &` with no `setsid`) is already unblocked by that hangup
+    // once the direct child dies, so it does not reproduce this leak; a
+    // descendant that re-parents itself into a separate session is exactly
+    // the "backgrounded job/daemon that didn't redirect stdio" case the
+    // `Drop` doc comment describes, and the kernel does not extend that
+    // same hangup to it. Before cancellation existed, the background
+    // reader thread's blocking `read()` would stay stuck on such an
+    // orphan's fd for the full 30 seconds (or forever, for a longer-lived
+    // orphan), keeping its `Arc` clones of the parser/journal/child alive
+    // the whole time.
+    let command = PtyCommand::new("sh", std::env::temp_dir(), 24, 80)
+        .arg("-c")
+        .arg("setsid sleep 30 & sleep 100");
+    let mut session = PtySession::spawn(command).expect("spawning sh should succeed");
+
+    // Give the shell time to fork and `setsid` its orphan before killing
+    // it -- killing too early could tear down the orphan along with its
+    // still-forming parent instead of leaving it detached and running.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    session
+        .kill()
+        .expect("killing the still-running direct child (sh) should succeed");
+    let shell_exited = wait_until(|| session.has_exited(), Duration::from_secs(5));
+    assert!(
+        shell_exited,
+        "the directly-spawned sh should be dead after kill(), leaving only the orphaned, \
+         separately-sessioned sleep holding the pty open"
+    );
+
+    // The reader thread's `watch::Sender` (moved into the thread at spawn
+    // time) is only dropped when the thread itself returns; observing
+    // `changed()` fail with the sender gone is a black-box proxy for "the
+    // reader thread actually terminated", since this crate exposes no
+    // other way to observe that thread from outside.
+    let mut screen_changed = session.subscribe_screen_changed();
+    drop(session);
+
+    let reader_thread_stopped = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if screen_changed.changed().await.is_err() {
+                return;
+            }
+        }
+    })
+    .await
+    .is_ok();
+
+    assert!(
+        reader_thread_stopped,
+        "expected the reader thread to exit (dropping its watch::Sender) within a few poll \
+         intervals of Drop, well inside the 30 seconds the orphaned sleep keeps the pty open"
+    );
+}

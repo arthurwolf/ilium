@@ -237,9 +237,32 @@ fn locate_server_binary() -> PathBuf {
     first_existing_server_binary(candidate_paths).unwrap_or_else(|| PathBuf::from(binary_name))
 }
 
+/// Spawns `ilium-server` as a true Unix daemon: double-forked so the
+/// running server is reparented to init (PID 1) rather than staying a
+/// direct child of this CLI process.
+///
+/// A single fork (the previous approach, via `.process_group(0)`) only
+/// isolates the server's signal/terminal group -- it remains this
+/// process's child in the kernel's process table. `attach_or_create`'s
+/// caller can run the TUI for days, and `restart_client_process` later
+/// `exec()`s a replacement image in the *same* PID, which preserves the
+/// parent/child relationship (children are never reparented by `exec`)
+/// but destroys every bit of Rust-level state -- including any reaper
+/// thread this process could spawn. Either way, a server that later
+/// crashes or is killed (`kill-session`, `--restart-server` from another
+/// terminal) would sit as an unreaped zombie for the rest of this
+/// process's lifetime, because nothing is left that could call `wait()`
+/// on it.
+///
+/// Reparenting to init sidesteps the problem instead of chasing it: init
+/// reaps its orphans unconditionally, so no reaper needs to survive
+/// attach, restart, or exec for the server's exit status to be collected.
+/// The short-lived middle process this fork creates is reaped
+/// immediately below, so this still leaves nothing unwaited.
 fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
     let server_binary = locate_server_binary();
-    Command::new(&server_binary)
+    let mut command = Command::new(&server_binary);
+    command
         .args([
             "--session-name",
             &session.name,
@@ -255,19 +278,52 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
         .current_dir(&session.project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                CliError::ServerBinaryNotFound(server_binary)
-            } else {
-                CliError::SpawnServer {
-                    session: session.name.clone(),
-                    source,
+        .stderr(Stdio::null());
+
+    // SAFETY: this closure runs in the forked child between `fork()` and
+    // `execve()`, while the child is still single-threaded and must only
+    // call async-signal-safe functions (see `Command::pre_exec`'s safety
+    // contract). `libc::fork`, `libc::setsid`, and `libc::_exit` all are;
+    // nothing here allocates, locks, or touches Rust-level global state.
+    // `std::io::Error::last_os_error` merely reads `errno`.
+    unsafe {
+        command.pre_exec(|| match libc::fork() {
+            -1 => Err(std::io::Error::last_os_error()),
+            0 => {
+                // Grandchild: leave the middle process's session/group so
+                // it can never reacquire a controlling terminal, then
+                // fall through to `execve` for the real server binary.
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
                 }
+                Ok(())
             }
-        })?;
+            _ => {
+                // Middle process: exit immediately without unwinding --
+                // `std::process::exit` is not async-signal-safe this soon
+                // after `fork()`, `_exit` is. The parent reaps this pid
+                // right below.
+                libc::_exit(0);
+            }
+        });
+    }
+
+    let mut middle_process = command.spawn().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            CliError::ServerBinaryNotFound(server_binary)
+        } else {
+            CliError::SpawnServer {
+                session: session.name.clone(),
+                source,
+            }
+        }
+    })?;
+    // `spawn()` only returns `Ok` once the exec-status pipe closes, which
+    // requires the middle process to have already run `_exit` above --
+    // so this reaps an already-dead process and does not block. Without
+    // it the middle process would sit as a zombie for this CLI's
+    // lifetime, the exact leak this function exists to avoid.
+    let _ = middle_process.wait();
     Ok(())
 }
 

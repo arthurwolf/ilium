@@ -237,9 +237,14 @@ fn escape_sequence_len(bytes: &[u8]) -> usize {
 
 fn normalize_title(command: &str) -> String {
     let compact = command.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut title = compact.chars().take(MAX_TITLE_CHARS).collect::<String>();
-    if compact.chars().count() > MAX_TITLE_CHARS {
-        title.push('…');
+    let mut chars = compact.chars();
+    let mut title = String::new();
+    for (count, ch) in (&mut chars).enumerate() {
+        if count >= MAX_TITLE_CHARS {
+            title.push('…');
+            break;
+        }
+        title.push(ch);
     }
     title
 }

@@ -1494,17 +1494,21 @@ fn translate_row_left(frame: &mut Frame, list: Rect, row: u16, motion: TreeRowMo
     }
 
     let buffer = frame.buffer_mut();
-    let mut cells = (list.x..list.right())
-        .map(|column| buffer[(column, row)].clone())
-        .collect::<Vec<_>>();
-    if motion.is_dimmed {
-        for cell in &mut cells {
-            cell.set_style(Style::new().add_modifier(Modifier::DIM));
-        }
-    }
+    // Collect cells once, in order, then rewrite in-place after transformation.
+    let cells: Vec<_> = (list.x..list.right())
+        .map(|column| {
+            let mut cell = buffer[(column, row)].clone();
+            if motion.is_dimmed {
+                cell.set_style(Style::new().add_modifier(Modifier::DIM));
+            }
+            cell
+        })
+        .collect();
+    // Clear the row first.
     for column in list.x..list.right() {
         buffer[(column, row)].reset();
     }
+    // Write transformed cells back at offset position.
     for (source_index, cell) in cells.into_iter().enumerate() {
         let Ok(source_column_offset) = u16::try_from(source_index) else {
             break;

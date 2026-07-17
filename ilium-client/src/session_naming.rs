@@ -60,7 +60,7 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
             anyhow::anyhow!("no project-verified transcript found for session {session_id}")
         })?;
     let prompts = transcript_prompts::recent_user_prompts(agent_class, &transcript.path)?;
-    infer_session_title(generator, agent_label(agent_class), &prompts)
+    infer_session_title(generator, agent_label(agent_class), prompts)
 }
 
 /// Human-readable label for the `<agent>` context tag -- distinct from
@@ -79,7 +79,7 @@ fn agent_label(class: &AgentClass) -> &str {
 fn infer_session_title<G: PromptCompletionClient>(
     generator: &G,
     agent_label: &str,
-    prompts: &[String],
+    prompts: Vec<String>,
 ) -> anyhow::Result<DualTitle> {
     if prompts.is_empty() {
         anyhow::bail!("no user prompts available to infer a session title from");
@@ -87,7 +87,7 @@ fn infer_session_title<G: PromptCompletionClient>(
 
     let context = SessionTitleContext {
         agent_label: agent_label.to_string(),
-        prompts: prompts.to_vec(),
+        prompts,
     };
     let response =
         naming::render_and_complete(generator, "session-title", SESSION_TITLE_TEMPLATE, &context)?;
@@ -161,7 +161,7 @@ mod tests {
         let generator = FakeGenerator::new(
             r#"{"session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}"#,
         );
-        let result = infer_session_title(&generator, "Claude Code", &[]);
+        let result = infer_session_title(&generator, "Claude Code", vec![]);
         assert!(result.is_err());
         assert_eq!(generator.calls.get(), 0);
     }
@@ -174,7 +174,7 @@ mod tests {
         let result = infer_session_title(
             &generator,
             "Claude Code",
-            &["fix the login bug".to_string()],
+            vec!["fix the login bug".to_string()],
         )
         .unwrap();
         assert_eq!(result.short, "Auth Bug");
@@ -190,7 +190,7 @@ mod tests {
         infer_session_title(
             &generator,
             "Codex",
-            &["oldest prompt".to_string(), "newest prompt".to_string()],
+            vec!["oldest prompt".to_string(), "newest prompt".to_string()],
         )
         .unwrap();
 

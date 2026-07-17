@@ -108,6 +108,7 @@ impl ProjectContext {
 fn root_listing(cwd: &Path) -> anyhow::Result<String> {
     let mut entries: Vec<String> = std::fs::read_dir(cwd)?
         .filter_map(Result::ok)
+        .take(ROOT_LISTING_MAX_LINES)
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             match entry.file_type() {
@@ -118,11 +119,7 @@ fn root_listing(cwd: &Path) -> anyhow::Result<String> {
         })
         .collect();
     entries.sort_unstable_by_key(|entry| entry.to_lowercase());
-    Ok(entries
-        .into_iter()
-        .take(ROOT_LISTING_MAX_LINES)
-        .collect::<Vec<_>>()
-        .join("\n"))
+    Ok(entries.join("\n"))
 }
 
 /// Reads at most `DOCUMENT_MAX_LINES` lines of `path` without materializing

@@ -28,6 +28,7 @@ mod session_id;
 mod shell_title;
 mod sounds;
 mod state;
+mod task_guard;
 
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,7 @@ use ilium_detect::AgentSignature;
 use crate::config::{DetectionConfig, NotificationsConfig, SessionRecoveryConfig};
 use crate::error::ServerError;
 use crate::state::{ServerState, ServerStateOptions};
+use crate::task_guard::AbortOnDropHandle;
 
 pub use crate::sounds::{NoopSoundPlayer, SoundPlayer, SystemSoundPlayer};
 
@@ -93,6 +95,12 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         })?;
 
     let (sound_requests, sound_playback_task) = sounds::spawn(Arc::clone(&options.sound_player));
+    // See `task_guard`'s module doc: wrapping every long-lived child task's
+    // handle here, immediately at the spawn site, ties each task's lifetime
+    // to this `run` future's own stack frame -- so cancelling `run`'s task
+    // from the outside (rather than only this function's own post-`select!`
+    // cleanup below) is now guaranteed to stop all of them too.
+    let sound_playback_task = AbortOnDropHandle::new(sound_playback_task);
     let state = Arc::new(ServerState::new(ServerStateOptions {
         session_name: options.session_name,
         session_cwd: options.session_cwd,
@@ -127,13 +135,14 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         }
     }
 
-    let detection_task = detection::spawn(Arc::clone(&state));
-    let scheduled_input_task = scheduled_input::spawn(Arc::clone(&state));
-    let snapshot_writer_task = persistence::spawn_snapshot_writer(Arc::clone(&state));
+    let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
+    let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
+    let snapshot_writer_task =
+        AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
     let sound_config_watcher_task = options
         .sound_config_path
         .clone()
-        .map(|path| sounds::spawn_config_watcher(Arc::clone(&state), path));
+        .map(|path| AbortOnDropHandle::new(sounds::spawn_config_watcher(Arc::clone(&state), path)));
 
     tokio::select! {
         () = ipc::accept_loop(Arc::clone(&state), listener) => {}
@@ -204,11 +213,26 @@ fn prepare_socket_path(socket_path: &Path) -> Result<(), ServerError> {
     }
 }
 
-/// Applies a crash-recovery snapshot found at startup: replaces
-/// `state.tree` wholesale (the snapshot already *is* the tree -- no need to
-/// rebuild it node-by-node) and respawns/registers every snapshotted
-/// pane's resource via `ipc::handlers::spawn_and_register_pane`, the same
-/// function a live client's `NewPane` request uses.
+/// Applies a crash-recovery snapshot: replaces `state.tree` wholesale (the
+/// snapshot already *is* the tree -- no need to rebuild it node-by-node) and
+/// respawns/registers every snapshotted pane's resource via
+/// `ipc::handlers::spawn_and_register_pane`, the same function a live
+/// client's `NewPane` request uses.
+///
+/// This function has two callers: `run`'s own boot sequence (when
+/// `SessionRecoveryConfig` is not `AskBeforeRestore`, the tree is still
+/// empty at this point so there is nothing to orphan) and
+/// `ipc::handlers::handle_session_recovery_resolution` (when it *is*
+/// `AskBeforeRestore`, the server serves requests -- including `NewPane` --
+/// against an empty tree for as long as the restore decision is pending,
+/// so by the time this runs `state.tree`/`state.panes` may already hold
+/// live panes the snapshot knows nothing about). Any such pre-existing pane
+/// whose node id does not survive into `snapshot.tree` is torn down here
+/// before the tree is overwritten, exactly like the analogous tree-overwrite
+/// in `ipc::handlers::handle_revert_last_restructure` -- otherwise its
+/// `PaneResource` (PTY child process, reader thread, output journal,
+/// forwarder task) would stay registered in `state.panes` forever, keyed by
+/// a node id no longer reachable from any tree.
 ///
 /// A pane that fails to respawn (most commonly: its command's binary no
 /// longer exists) is logged and dropped from the restored tree rather than
@@ -228,31 +252,68 @@ pub(crate) async fn restore_snapshot(
     let pane_count = snapshot.panes.len();
     {
         let mut tree = state.tree.write().await;
+        // Computed before the overwrite below, against the tree as it
+        // stood the instant before this snapshot replaces it -- see this
+        // function's doc comment for why that tree can already contain
+        // live panes the snapshot predates.
+        let orphaned_pane_ids: Vec<ilium_core::NodeId> =
+            ipc::handlers::collect_pane_descendants(&tree, ilium_core::ROOT_ID)
+                .into_iter()
+                .filter(|pane_id| snapshot.tree.get(*pane_id).is_none())
+                .collect();
         *tree = snapshot.tree;
+        // Keep the write guard held across the pane-registry sweep below --
+        // see `ipc::handlers::spawn_and_register_pane_in_directory`'s doc
+        // comment for why this tree-overwrite-then-sweep pair must stay
+        // atomic with respect to that function's own tree-check-then-
+        // panes-insert pair, under the "tree before panes" ordering
+        // `state.rs` documents. Only dropped once this whole block ends,
+        // which is also before the per-pane respawn loop below takes its
+        // own `tree` lock per iteration.
+        if !orphaned_pane_ids.is_empty() {
+            let mut panes = state.panes.write().await;
+            for pane_id in orphaned_pane_ids {
+                if let Some(resource) = panes.remove(&pane_id) {
+                    ipc::handlers::teardown_pane_resource(pane_id, resource);
+                }
+            }
+            drop(panes);
+        }
     }
 
     let mut failed_pane_ids = Vec::new();
     for pane_snapshot in snapshot.panes {
         let node_id = pane_snapshot.node_id;
-        if let Err(error) =
-            ipc::handlers::spawn_and_register_pane(state, node_id, pane_snapshot.kind).await
-        {
-            tracing::warn!(
-                "failed to respawn pane {node_id:?} from crash-recovery snapshot, dropping it \
-                 from the restored tree: {error}"
-            );
-            let mut tree = state.tree.write().await;
-            // `node_id` was just loaded as part of this same snapshot's
-            // tree above, so it is expected to always be present here;
-            // still logged rather than silently discarded in case that
-            // invariant is ever violated by a future bug.
-            if let Err(remove_error) = tree.remove_node(node_id) {
-                tracing::warn!(
-                    "crash-recovery restore could not remove failed pane {node_id:?} from the \
-                     tree: {remove_error}"
-                );
+        match ipc::handlers::spawn_and_register_pane(state, node_id, pane_snapshot.kind).await {
+            Ok(()) => {}
+            Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
+                // A concurrent request removed `node_id` from the tree
+                // (e.g. `ClosePane`) while this snapshot's own respawn loop
+                // was mid-flight on it; `spawn_and_register_pane` already
+                // tore the freshly-spawned resource back down, and the tree
+                // node is already gone, so -- unlike the `Spawn` failure
+                // case below -- there is no tree cleanup left to do and
+                // this is not a respawn failure worth reporting to the
+                // user.
             }
-            failed_pane_ids.push(node_id);
+            Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
+                tracing::warn!(
+                    "failed to respawn pane {node_id:?} from crash-recovery snapshot, dropping \
+                     it from the restored tree: {error}"
+                );
+                let mut tree = state.tree.write().await;
+                // `node_id` was just loaded as part of this same snapshot's
+                // tree above, so it is expected to always be present here;
+                // still logged rather than silently discarded in case that
+                // invariant is ever violated by a future bug.
+                if let Err(remove_error) = tree.remove_node(node_id) {
+                    tracing::warn!(
+                        "crash-recovery restore could not remove failed pane {node_id:?} from \
+                         the tree: {remove_error}"
+                    );
+                }
+                failed_pane_ids.push(node_id);
+            }
         }
     }
 
@@ -459,7 +520,149 @@ mod restore_tests {
         write_frame(&mut client, &ClientRequest::KillSession)
             .await
             .expect("write KillSession request");
-        let _ = tokio::time::timeout(Duration::from_secs(5), server_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("server did not exit after KillSession")
+            .expect("server task panicked");
+    }
+
+    /// Reproduces the `AskBeforeRestore` orphan-leak scenario directly
+    /// against `restore_snapshot` (no socket needed): a pane gets
+    /// registered in `state.panes`/`state.tree` -- exactly what a live
+    /// client's `NewPane` request does while a recovery decision is still
+    /// pending, see `crate::run`'s doc comment on
+    /// `SessionRecoveryConfig::AskBeforeRestore` -- and then a snapshot
+    /// that never knew about that pane overwrites the tree. Asserts the
+    /// orphaned pane's registry entry (and therefore its pty child, reader
+    /// thread, and forwarder task) does not survive the overwrite.
+    #[tokio::test]
+    async fn restore_snapshot_tears_down_a_pane_orphaned_by_the_tree_overwrite() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "orphan-test".to_string(),
+            session_cwd: dir.path().to_path_buf(),
+            home_dir: dir.path().to_path_buf(),
+            snapshot_path: dir.path().join("orphan-test.snapshot.json"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+        }));
+
+        let orphan_pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree
+                .add_group(ROOT_ID, "leftover-group")
+                .expect("add the soon-to-be-orphaned pane's parent group");
+            tree.add_pane(group, "leftover", PaneContentKind::Terminal)
+                .expect("add the soon-to-be-orphaned pane's tree node")
+        };
+        crate::ipc::handlers::spawn_and_register_pane(
+            &state,
+            orphan_pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+        )
+        .await
+        .expect("spawn the soon-to-be-orphaned pane's live pty");
+        assert!(
+            state.panes.read().await.contains_key(&orphan_pane_id),
+            "test setup: the pane must be live before the overwrite it's meant to survive"
+        );
+
+        // The snapshot being restored predates the pane above entirely --
+        // it was created after this snapshot was written to disk, during
+        // the `AskBeforeRestore` window.
+        let snapshot = SessionSnapshot {
+            version: 1,
+            tree: Tree::new(),
+            panes: Vec::new(),
+        };
+        restore_snapshot(&state, snapshot).await;
+
+        assert!(
+            !state.panes.read().await.contains_key(&orphan_pane_id),
+            "restore_snapshot must tear down a pane orphaned by the tree overwrite, not leak it"
+        );
+        assert!(
+            state.tree.read().await.get(orphan_pane_id).is_none(),
+            "the orphaned pane's node must not survive in the overwritten tree either"
+        );
+    }
+
+    /// Reproduces the race `spawn_and_register_pane_in_directory`'s "tree
+    /// before panes" locking now closes: a concurrent structural removal
+    /// (here, standing in for any of `handle_close_pane`,
+    /// `handle_revert_last_restructure`, or `restore_snapshot`) can remove
+    /// `pane_id` from the tree while this function's own pty spawn is
+    /// still in flight, i.e. before its resource is inserted into
+    /// `state.panes`. Simulates "the removal already happened" by removing
+    /// the node from `state.tree` before calling
+    /// `spawn_and_register_pane_in_directory`, then asserts the call
+    /// notices, tears its own freshly-spawned resource back down, and
+    /// returns `NodeRemoved` -- rather than leaking a live pty (child
+    /// process, reader thread, forwarder task) keyed by a node id no
+    /// longer reachable from any tree, which no later sweep could ever
+    /// find again.
+    #[tokio::test]
+    async fn spawn_and_register_pane_tears_down_its_own_resource_if_the_node_was_removed_first() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "new-pane-race-test".to_string(),
+            session_cwd: dir.path().to_path_buf(),
+            home_dir: dir.path().to_path_buf(),
+            snapshot_path: dir.path().join("new-pane-race-test.snapshot.json"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+        }));
+
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree
+                .add_group(ROOT_ID, "about-to-be-closed")
+                .expect("add the pane's parent group");
+            tree.add_pane(group, "cat", PaneContentKind::Terminal)
+                .expect("add the pane's tree node")
+        };
+
+        // Stand in for a second connection's `ClosePane` (or
+        // `RevertLastRestructure`, or a session-recovery restore) landing
+        // while this pane's spawn is still in flight: the node is already
+        // gone from the tree by the time
+        // `spawn_and_register_pane_in_directory`'s own presence check runs.
+        state
+            .tree
+            .write()
+            .await
+            .remove_node(pane_id)
+            .expect("remove the pane's node, simulating a concurrent close");
+
+        let cwd = dir.path().to_path_buf();
+        let result = crate::ipc::handlers::spawn_and_register_pane_in_directory(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+            &cwd,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::ipc::handlers::RegisterPaneError::NodeRemoved(id)) if id == pane_id
+            ),
+            "expected NodeRemoved for a node the tree no longer has, got {result:?}"
+        );
+        assert!(
+            !state.panes.read().await.contains_key(&pane_id),
+            "a resource must never be registered under a node id absent from the tree -- that \
+             is the leak this test guards against"
+        );
     }
 
     #[tokio::test]

@@ -34,14 +34,24 @@
 //! may be skipped, and `broadcast` (unlike `watch`) supports that plus
 //! multiple independent subscribers (`ilium-server` may run more than one
 //! forwarder per pane across reconnects).
+//!
+//! The reader thread's own cancellation path is `PtySession::drop`, via
+//! `reader_should_stop` and the `CancellableReader` trait -- see their doc
+//! comments. That exists specifically so a killed pane's thread (and the
+//! `Arc` clones of the parser/journal/child it holds) doesn't stay alive
+//! for the rest of the server process just because some descendant of the
+//! spawned child inherited the pty's slave fd and is still holding it open.
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crossterm::event::MouseEvent;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use tokio::sync::{broadcast, watch};
 
 use crate::error::PtyError;
@@ -142,6 +152,14 @@ pub struct PtySession {
     /// pane began producing output, so a live-only broadcast cannot be the
     /// sole source for its terminal parser or its scrollback.
     output_journal: Arc<Mutex<OutputJournal>>,
+    /// Cancellation flag for the background reader thread, set by `Drop`.
+    /// The thread checks this between (and, on unix, *during*) its waits
+    /// for pty output, so it can exit -- and release its `Arc` clones of
+    /// `parser`/`output_journal`/`child` above -- even when a descendant of
+    /// the spawned child is still holding the pty's slave fd open and would
+    /// otherwise keep a plain blocking `read()` stuck forever. See
+    /// `CancellableReader`.
+    reader_should_stop: Arc<AtomicBool>,
 }
 
 /// One ordered piece of raw output from a PTY. The sequence belongs to the
@@ -220,6 +238,157 @@ impl OutputJournal {
     }
 }
 
+/// Outcome of one attempt to fetch the next chunk of pty output, reported
+/// by a [`CancellableReader`] to the background reader thread's loop in
+/// [`PtySession::spawn`].
+enum ReadOutcome {
+    /// `usize` bytes were read into the caller's buffer.
+    Data(usize),
+    /// The pty's slave side is fully closed; nothing more will ever arrive.
+    Eof,
+    /// The owning `PtySession` asked this thread to stop (see
+    /// `reader_should_stop`) before any more data arrived.
+    Stopped,
+    /// An unrecoverable I/O error; treated the same as `Eof` by the caller.
+    Error,
+}
+
+/// Reads the next chunk of a pty's output while being able to notice a
+/// cancellation request even when no output is currently available. A plain
+/// blocking `Read::read` cannot do this: killing the directly-spawned child
+/// (always the pty's session leader and controlling-terminal owner --
+/// `portable_pty` calls `setsid()`/`TIOCSCTTY` for it) makes Linux hang up
+/// the pty for every remaining fd still referencing it, which is enough to
+/// unblock a plain `read()` for most descendants. It is *not* enough for one
+/// that called `setsid()` itself and re-parented into its own session while
+/// still holding the inherited, unredirected slave fd (verified empirically
+/// -- see the crate's test suite): that descendant is no longer a member of
+/// the session the hangup tears down, so it can keep the fd open
+/// indefinitely, and a `read()` blocked on it has no way to be woken by
+/// anything other than bytes actually arriving. See the `unix` impl below
+/// for how this is solved with a bounded `poll()` wait instead of an
+/// unbounded `read()`.
+trait CancellableReader: Send {
+    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome;
+}
+
+/// Unix `CancellableReader`: an owned, `CLOEXEC` duplicate of the pty
+/// master's fd, polled with a short timeout so the reader thread's loop
+/// wakes up regularly to re-check `should_stop` instead of only ever waking
+/// on incoming bytes.
+#[cfg(unix)]
+struct PollableMasterReader {
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl PollableMasterReader {
+    /// How long a single `poll()` call waits before returning control to
+    /// the caller to re-check `should_stop`. Short enough that cancellation
+    /// (pane close) is never noticeably delayed; long enough to avoid
+    /// spinning the thread on an idle pane.
+    const POLL_TIMEOUT_MILLIS: libc::c_int = 200;
+
+    /// Duplicates `master`'s raw fd (via `F_DUPFD_CLOEXEC`, matching
+    /// `portable_pty`'s own `cloexec()` treatment of the master fd it
+    /// hands out elsewhere) into a `std::fs::File` this struct owns
+    /// outright, so it can be polled independently of `portable_pty`'s own
+    /// `try_clone_reader`, which only ever exposes a plain blocking
+    /// `Box<dyn Read + Send>`.
+    fn duplicate_from(master: &(dyn MasterPty + Send)) -> Result<Self, PtyError> {
+        let master_fd = master
+            .as_raw_fd()
+            .ok_or_else(|| PtyError::Io(anyhow::anyhow!("pty master exposed no raw fd")))?;
+        // SAFETY: `master_fd` is a valid, currently-open fd owned by
+        // `master` for the duration of this call; `fcntl(F_DUPFD_CLOEXEC)`
+        // only reads it to create an independent duplicate, it does not
+        // consume or close it.
+        let duplicated_fd = unsafe { libc::fcntl(master_fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if duplicated_fd < 0 {
+            return Err(PtyError::Io(anyhow::Error::from(
+                std::io::Error::last_os_error(),
+            )));
+        }
+        // SAFETY: `duplicated_fd` was just returned by a successful
+        // `fcntl(F_DUPFD_CLOEXEC)` above, so it is a fresh, valid,
+        // exclusively-owned fd -- nothing else holds or will close it.
+        let file = unsafe { std::fs::File::from_raw_fd(duplicated_fd) };
+        Ok(Self { file })
+    }
+}
+
+#[cfg(unix)]
+impl CancellableReader for PollableMasterReader {
+    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome {
+        loop {
+            if should_stop.load(Ordering::Acquire) {
+                return ReadOutcome::Stopped;
+            }
+            let mut poll_fd = libc::pollfd {
+                fd: self.file.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: `poll_fd` is a single, valid, stack-local `pollfd`
+            // entry and `1` matches its own length; `poll` only reads/
+            // writes through the pointer for the duration of this call.
+            let poll_result = unsafe { libc::poll(&mut poll_fd, 1, Self::POLL_TIMEOUT_MILLIS) };
+            if poll_result < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return ReadOutcome::Error;
+            }
+            if poll_result == 0 {
+                // Timed out with nothing readable -- loop back around to
+                // re-check `should_stop` rather than polling forever.
+                continue;
+            }
+            // `revents` may report `POLLHUP`/`POLLERR` instead of (or
+            // alongside) `POLLIN` once the slave side closes; reading
+            // either yields the real answer (`Ok(0)`/`EIO` below) without
+            // needing to interpret the bitmask ourselves.
+            match self.file.read(buf) {
+                Ok(0) => return ReadOutcome::Eof,
+                Ok(bytes_read) => return ReadOutcome::Data(bytes_read),
+                // `portable_pty`'s own reader translates EIO (raised once
+                // the slave is fully closed) to a clean EOF -- see
+                // `PtyFd::read` in `portable-pty`'s `unix.rs`. Match that
+                // behavior here since this bypasses that wrapper.
+                Err(error) if error.raw_os_error() == Some(libc::EIO) => return ReadOutcome::Eof,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return ReadOutcome::Error,
+            }
+        }
+    }
+}
+
+/// Non-unix `CancellableReader`: falls back to `portable_pty`'s own plain
+/// blocking reader. There is no portable equivalent of `poll()` available
+/// here, so `should_stop` can only be observed *between* reads, not while
+/// one is in flight -- on this platform a descendant holding the pty's
+/// slave side open still blocks the reader thread indefinitely, same as
+/// before this module gained cancellation support. `ilium` has no Windows
+/// users today; revisit with a platform-appropriate wait primitive (e.g. an
+/// `OVERLAPPED` read against the named pipe) if that changes.
+#[cfg(not(unix))]
+struct BlockingMasterReader(Box<dyn Read + Send>);
+
+#[cfg(not(unix))]
+impl CancellableReader for BlockingMasterReader {
+    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome {
+        if should_stop.load(Ordering::Acquire) {
+            return ReadOutcome::Stopped;
+        }
+        match self.0.read(buf) {
+            Ok(0) => ReadOutcome::Eof,
+            Ok(bytes_read) => ReadOutcome::Data(bytes_read),
+            Err(_) => ReadOutcome::Error,
+        }
+    }
+}
+
 impl PtySession {
     /// Spawns `command` behind a new pty and starts the background reader
     /// thread that feeds its output into the shared `vt100::Parser`.
@@ -284,7 +453,7 @@ impl PtySession {
         // *and reap* the child explicitly before returning `Err`, or it
         // leaks as a zombie: `child` is a plain `std::process::Child` under
         // the hood, which neither terminates nor reaps its process on drop.
-        let mut reader = match pair.master.try_clone_reader() {
+        let mut reader = match Self::open_cancellable_reader(&*pair.master) {
             Ok(reader) => reader,
             Err(err) => {
                 let _ = child.kill();
@@ -293,7 +462,7 @@ impl PtySession {
                 // early-return path can never leave a zombie behind (see
                 // the `child` field doc comment).
                 let _ = child.wait();
-                return Err(PtyError::Io(err));
+                return Err(err);
             }
         };
         let writer: Arc<Mutex<Box<dyn Write + Send>>> = match pair.master.take_writer() {
@@ -330,30 +499,38 @@ impl PtySession {
             next_sequence: 0,
             is_complete: true,
         }));
+        let reader_should_stop = Arc::new(AtomicBool::new(false));
         {
             let parser = Arc::clone(&parser);
             let output_bytes_tx = output_bytes_tx.clone();
             let output_journal = Arc::clone(&output_journal);
             let child = Arc::clone(&child);
-            // Deliberately not keeping the `JoinHandle` around: this thread
-            // has no way to be woken up short of the pty actually reaching
-            // EOF/error, so the correct "cancellation path" for it (see
-            // the crate-level rule that every spawned task needs one) is
-            // ensuring the child gets killed -- which unblocks the read
-            // and lets the thread exit on its own -- rather than joining
-            // it, which could block the caller indefinitely if joined
-            // from `Drop` before the child has actually exited. See
-            // `impl Drop for PtySession` below for where that
-            // cancellation is triggered.
+            let reader_should_stop = Arc::clone(&reader_should_stop);
+            // Not keeping the `JoinHandle` around, but this thread is not
+            // fire-and-forget: `reader_should_stop` (set by `Drop` below) is
+            // its cancellation path, checked by `CancellableReader::read_next`
+            // between -- and, on unix, *during*, via a bounded `poll()` --
+            // waits for more pty output. That is what lets this thread exit
+            // (and release its `Arc` clones of `parser`/`output_journal`/
+            // `child`) promptly even if a descendant of the spawned child
+            // is still holding the pty's slave fd open, which killing only
+            // the direct child (see the `child` field doc comment) cannot
+            // by itself unblock a plain blocking `read()` from. Not joining
+            // the handle is deliberate too: joining from `Drop` could block
+            // the caller for up to one `POLL_TIMEOUT_MILLIS` interval, which
+            // callers tearing down a pane synchronously should not pay.
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
-                loop {
-                    let read_result = reader.read(&mut buf);
-                    let bytes_read = match read_result {
-                        Ok(0) => break,
-                        Ok(n) => n,
-                        Err(_) => break,
-                    };
+                while let ReadOutcome::Data(bytes_read) =
+                    reader.read_next(&mut buf, &reader_should_stop)
+                {
+                    // A chunk may have arrived in the same instant `Drop`
+                    // requested a stop; drop it rather than growing the
+                    // parser/journal state past the point the owner asked
+                    // this thread to stop retaining anything.
+                    if reader_should_stop.load(Ordering::Acquire) {
+                        break;
+                    }
                     // Scope the write guard to this single `process()` call
                     // so a concurrent `with_screen`/`resize` never waits on
                     // us longer than one chunk's worth of parsing.
@@ -386,16 +563,21 @@ impl PtySession {
                         .append(buf[..bytes_read].to_vec());
                     let _ = output_bytes_tx.send(output_chunk);
                 }
-                // The read loop above only ends once the pty's slave side
-                // is fully closed (EOF) or errors, which happens once the
-                // child is gone. `kill()`/`Drop` below deliberately only
-                // *signal* the child (see the `child` field doc comment
-                // for why), so this thread is the one place that actually
-                // collects the exit status -- without this, a child that
-                // needed a SIGKILL escalation to die would be left as a
-                // zombie for the rest of this process's life. Blocking
-                // here is fine: by this point the child is already dead
-                // or dying, and nothing else waits on this thread.
+                // The read loop above ends once the pty's slave side is
+                // fully closed (EOF), an unrecoverable I/O error occurs, or
+                // `Drop` requested a stop. `kill()`/`Drop` deliberately only
+                // *signal* the direct child (see the `child` field doc
+                // comment for why), so this thread is the one place that
+                // actually collects its exit status -- without this, a
+                // child that needed a SIGKILL escalation to die would be
+                // left as a zombie for the rest of this process's life.
+                // Blocking here is fine even on the `Stopped` path: `Drop`
+                // always kills the direct child *before* requesting a
+                // stop (see `impl Drop for PtySession`), and SIGKILL is
+                // unignorable, so this `wait()` only ever blocks on a
+                // process that is already dying, never on an orphaned
+                // descendant this thread was never waiting on in the first
+                // place.
                 let _ = child.lock().unwrap().wait();
             });
         }
@@ -408,8 +590,28 @@ impl PtySession {
             process_id,
             screen_changed: screen_changed_rx,
             output_bytes: output_bytes_tx,
+            reader_should_stop,
             output_journal,
         })
+    }
+
+    /// Opens the `CancellableReader` the background reader thread will use
+    /// for the lifetime of this session. Unix gets a `poll()`-capable
+    /// duplicate of the master fd; every other target falls back to
+    /// `portable_pty`'s own plain blocking reader (see `BlockingMasterReader`).
+    #[cfg(unix)]
+    fn open_cancellable_reader(
+        master: &(dyn MasterPty + Send),
+    ) -> Result<Box<dyn CancellableReader>, PtyError> {
+        Ok(Box::new(PollableMasterReader::duplicate_from(master)?))
+    }
+
+    #[cfg(not(unix))]
+    fn open_cancellable_reader(
+        master: &(dyn MasterPty + Send),
+    ) -> Result<Box<dyn CancellableReader>, PtyError> {
+        let reader = master.try_clone_reader().map_err(PtyError::Io)?;
+        Ok(Box::new(BlockingMasterReader(reader)))
     }
 
     /// Writes raw bytes (already-encoded key input) to the pty.
@@ -572,34 +774,52 @@ impl PtySession {
 }
 
 impl Drop for PtySession {
-    /// Best-effort kill of the spawned child on teardown, so a `PtySession`
-    /// dropped without a preceding, successful `kill()` call (an error
-    /// path, a future call site that forgets, a panic unwind) can't leave
-    /// the background reader thread (see `spawn`) blocked in `read()` on a
-    /// still-running child forever. That thread owns its own clone of
-    /// `Arc<RwLock<vt100::Parser>>` (the "fairly large" screen state
-    /// described in the module docs), a clone of the `output_bytes`
-    /// broadcast sender, a clone of the `Arc<Mutex<_>>`-wrapped child
-    /// handle (which it uses to reap the exit status once its read loop
-    /// ends), and a separately-cloned pty reader file descriptor -- none
-    /// of those are released until the thread's `read` call returns,
-    /// which only happens once the child (and thus the pty's slave side)
-    /// is gone. Killing it here bounds that to "until the OS finishes
-    /// tearing down a killed process" instead of "until the
-    /// process happens to exit on its own, which may be never."
+    /// Best-effort kill of the spawned child, then an unconditional request
+    /// for the background reader thread (see `spawn`) to stop, so a
+    /// `PtySession` dropped without a preceding, successful `kill()` call
+    /// (an error path, a future call site that forgets, a panic unwind)
+    /// can't leave that thread -- and its `Arc` clones of the (fairly
+    /// large) `vt100::Parser` screen state, the bounded output journal, and
+    /// the child handle -- alive for the rest of this (potentially
+    /// long-lived) server process.
+    ///
+    /// Order matters: the child is killed *before* `reader_should_stop` is
+    /// set. `kill()` sends an unignorable SIGKILL-equivalent to the direct
+    /// child, so it dies promptly regardless of whether anything is
+    /// reading its output; only once that signal is sent do we ask the
+    /// reader thread to stop, so its final `child.lock().unwrap().wait()`
+    /// (see `spawn`) blocks on an already-dying process rather than a live
+    /// one still waiting to be killed.
+    ///
+    /// This does not depend on the direct child's tty actually closing.
+    /// Killing the direct child -- the pty's session leader -- makes Linux
+    /// hang up the pty for every fd still referencing it *within that
+    /// session*, which already unblocks a plain `read()` for most
+    /// descendants (an ordinary backgrounded job, for instance). It does
+    /// not reach a descendant that called `setsid()` itself and re-parented
+    /// into its own session while still holding the inherited, unredirected
+    /// slave fd (some daemonizing code does this without also redirecting
+    /// stdio away) -- that fd can stay open indefinitely. For exactly that
+    /// remaining case, `CancellableReader::read_next` re-checks
+    /// `reader_should_stop` on a bounded interval (via `poll()` on unix --
+    /// see `PollableMasterReader`) instead of only ever waking on incoming
+    /// bytes, so the reader thread exits within about one poll interval
+    /// regardless of what any descendant does. That descendant itself is
+    /// not signaled -- `kill()`/`Drop` only ever reach the directly-spawned
+    /// child, the same limitation every terminal multiplexer has -- but its
+    /// orphaned output no longer has anywhere in this process left to
+    /// accumulate into once the reader thread has exited and dropped its
+    /// `Arc` clones.
     ///
     /// Matches `kill()`'s own semantics: a child that already exited (the
     /// ordinary case, since callers normally call `kill()` explicitly
     /// before a `PtySession` is dropped) is not an error, and a failure to
     /// signal an already-gone process is not worth surfacing from `Drop`.
-    /// Like `kill()`, this only signals the directly-spawned child, not
-    /// any descendant that may have inherited the pty and kept its slave
-    /// side open independently -- the same limitation every terminal
-    /// multiplexer has, and not fixable from inside this crate.
     fn drop(&mut self) {
         if !self.has_exited() {
             // Poisoned-lock panic is an invariant violation (see `spawn`).
             let _ = self.child.lock().unwrap().kill();
         }
+        self.reader_should_stop.store(true, Ordering::Release);
     }
 }

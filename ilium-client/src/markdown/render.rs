@@ -10,6 +10,8 @@
 //! `mdfried`-style background worker thread this could otherwise need
 //! isn't earning its complexity here.
 
+use std::sync::Arc;
+
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui_image::picker::Picker;
@@ -22,11 +24,11 @@ use super::raster::HeaderRasterizer;
 /// One block of a document, ready to render: text and authored spacing
 /// passed through as-is, or a header/image converted to a graphics protocol.
 pub enum RenderedBlock {
-    Text(Vec<Line<'static>>),
+    Text(Arc<Vec<Line<'static>>>),
     /// Source-authored vertical space. It remains a first-class block so
     /// content-height and scroll calculations count the same rows the
     /// viewport leaves unpainted.
-    BlankLines(Vec<Line<'static>>),
+    BlankLines(Arc<Vec<Line<'static>>>),
     /// Rasterized header image, two terminal rows tall.
     Header(Protocol),
     /// A loaded content image, sized to fit within the document width.
@@ -69,8 +71,8 @@ fn render_block(
     cell_px: (u16, u16),
 ) -> RenderedBlock {
     match block {
-        Block::Text(lines) => RenderedBlock::Text(lines.clone()),
-        Block::BlankLines(lines) => RenderedBlock::BlankLines(lines.clone()),
+        Block::Text(lines) => RenderedBlock::Text(Arc::clone(lines)),
+        Block::BlankLines(lines) => RenderedBlock::BlankLines(Arc::clone(lines)),
         Block::Heading { text, level } => {
             let image = rasterizer.rasterize(text, *level, width_cols, cell_px);
             let size = ratatui::layout::Size::new(width_cols, 2);

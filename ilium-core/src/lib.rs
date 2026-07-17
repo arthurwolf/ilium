@@ -250,22 +250,37 @@ fn claude_session_id_from_arguments(arguments: &[String]) -> Option<String> {
     {
         return None;
     }
-    let mut candidates = std::collections::BTreeSet::new();
+    // Track the first candidate found and whether we've seen a conflicting one.
+    // Same UUID multiple times is OK; different UUIDs cancel each other out.
+    let mut found_candidate: Option<String> = None;
+    let mut seen_conflict = false;
     for (index, argument) in option_arguments.iter().enumerate() {
         if let Some((flag, value)) = argument.split_once('=') {
             if SESSION_FLAGS.contains(&flag) && looks_like_uuid(value) {
-                candidates.insert(value.to_string());
+                if let Some(ref candidate) = found_candidate {
+                    if candidate != value {
+                        seen_conflict = true;
+                    }
+                } else {
+                    found_candidate = Some(value.to_string());
+                }
             }
         } else if SESSION_FLAGS.contains(&argument.as_str()) {
             if let Some(value) = option_arguments
                 .get(index + 1)
                 .filter(|value| looks_like_uuid(value))
             {
-                candidates.insert(value.clone());
+                if let Some(ref candidate) = found_candidate {
+                    if candidate != value {
+                        seen_conflict = true;
+                    }
+                } else {
+                    found_candidate = Some(value.to_string());
+                }
             }
         }
     }
-    (candidates.len() == 1).then(|| candidates.into_iter().next().unwrap())
+    (!seen_conflict).then_some(found_candidate).flatten()
 }
 
 fn codex_session_id_from_arguments(arguments: &[String]) -> Option<String> {
@@ -1156,7 +1171,7 @@ impl Tree {
                 ..
             }) = self.nodes.get(&current)
             {
-                for child in children.clone() {
+                for &child in children {
                     to_remove.push(child);
                     frontier.push(child);
                 }

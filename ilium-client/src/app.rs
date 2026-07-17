@@ -4303,7 +4303,17 @@ impl App {
             match link {
                 crate::terminal_links::TerminalLink::Url(url) => {
                     match std::process::Command::new("xdg-open").arg(&url).spawn() {
-                        Ok(_) => self.status_message = Some(format!("Opening {url}")),
+                        Ok(child) => {
+                            self.status_message = Some(format!("Opening {url}"));
+                            // `xdg-open` hands the URL to the preferred
+                            // browser and exits almost immediately, but a
+                            // dropped `Child` is never reaped on Unix --
+                            // without this it stays a zombie in the process
+                            // table for the rest of this long-lived TUI
+                            // process. Reap it on a detached thread instead
+                            // of blocking the UI on it.
+                            reap_child_on_thread(child);
+                        }
                         Err(error) => {
                             self.status_message = Some(format!("Could not open link: {error}"))
                         }
@@ -4757,6 +4767,22 @@ fn checkbox_at(
     checkbox_span
         .contains(&clicked_col_on_screen)
         .then_some((row, bracket_col, checked))
+}
+
+/// Reaps a spawned child process on a detached thread so it never lingers
+/// as a zombie for the rest of this long-lived TUI process. Only suitable
+/// for short-lived, fire-and-forget children (e.g. `xdg-open` handing a URL
+/// to a browser) -- the thread's only job is to block on `wait()` until the
+/// child exits, then it ends on its own, so there is nothing to cancel or
+/// track a `JoinHandle` for.
+fn reap_child_on_thread(mut child: std::process::Child) {
+    std::thread::spawn(move || match child.wait() {
+        Ok(status) if !status.success() => {
+            tracing::warn!("child process exited with {status}");
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!("failed to reap child process: {error}"),
+    });
 }
 
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {

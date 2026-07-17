@@ -15,7 +15,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::text_prompt::TextPromptState;
 use crate::theme;
@@ -562,7 +562,7 @@ fn visible_query(state: &TextPromptState, available_width: u16) -> (String, u16)
     let mut start = cursor;
     let mut used_width: usize = 0;
     while start > 0 {
-        let character_width = characters[start - 1].to_string().width();
+        let character_width = characters[start - 1].width().unwrap_or(0);
         if used_width.saturating_add(character_width) > content_width {
             break;
         }
@@ -572,7 +572,7 @@ fn visible_query(state: &TextPromptState, available_width: u16) -> (String, u16)
     let mut text = String::new();
     let mut rendered_width: usize = 0;
     for character in &characters[start..] {
-        let character_width = character.to_string().width();
+        let character_width = character.width().unwrap_or(0);
         if rendered_width.saturating_add(character_width) > content_width {
             break;
         }
@@ -581,7 +581,7 @@ fn visible_query(state: &TextPromptState, available_width: u16) -> (String, u16)
     }
     let cursor_offset = characters[start..cursor]
         .iter()
-        .map(|character| character.to_string().width())
+        .map(|character| character.width().unwrap_or(0))
         .sum::<usize>();
     (text, u16::try_from(cursor_offset).unwrap_or(u16::MAX))
 }

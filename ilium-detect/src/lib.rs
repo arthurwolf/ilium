@@ -234,7 +234,8 @@ pub fn has_visible_goal(screen_text: &str) -> bool {
 /// same way, per this crate's registry-over-branching convention.
 fn looks_like_background_wait_line(screen_text: &str) -> bool {
     screen_text.lines().any(|line| {
-        let lower = line.to_lowercase();
+        // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
+        let lower = line.to_ascii_lowercase();
         lower.contains("waiting for")
             && lower.contains("background")
             && (lower.contains("agent") || lower.contains("task"))
@@ -269,6 +270,7 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 /// prevents those historical rows from being mistaken for a live turn.
 fn looks_like_codex_live_status_line(screen_text: &str) -> bool {
     screen_text.lines().any(|line| {
+        // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
         let lower = line.trim().to_ascii_lowercase();
         let names_active_turn = ["thinking", "working", "generating", "planning", "running"]
             .iter()
@@ -310,11 +312,11 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
         if !trimmed.ends_with('?') {
             return false;
         }
-        let tokens: HashSet<String> = trimmed
-            .split(|c: char| !c.is_alphanumeric())
-            .map(|token| token.to_lowercase())
-            .collect();
-        tokens.contains("yes") && tokens.contains("no")
+        // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
+        let lower = trimmed.to_ascii_lowercase();
+        lower.contains(" yes") && lower.contains(" no")
+            || lower.contains("yes ") && lower.contains("no ")
+            || lower.contains("yes)") && lower.contains("no)")
     })
 }
 
@@ -338,19 +340,19 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
 ///   that exact character, and it doesn't mean the numbered lines above it
 ///   are a selection menu.
 fn looks_like_selection_prompt(screen_text: &str) -> bool {
-    let lines: Vec<&str> = screen_text.lines().collect();
-
-    let has_selection_footer = lines.iter().any(|line| {
+    // Check for selection footer first (early exit, avoids Vec collection if found)
+    if screen_text.lines().any(|line| {
         let lower = line.to_lowercase();
         let names_a_confirm_action = lower.contains("to select")
             || lower.contains("to confirm")
             || lower.contains("to choose");
         names_a_confirm_action && lower.contains("cancel")
-    });
-    if has_selection_footer {
+    }) {
         return true;
     }
 
+    // Only collect lines if footer wasn't found
+    let lines: Vec<&str> = screen_text.lines().collect();
     let numbered_option_lines = lines
         .iter()
         .filter(|line| is_numbered_option_line(line))
@@ -491,10 +493,9 @@ pub fn identify_agent_with_extra(
             }
         }
         if let Some(process) = system.process(pid) {
-            if let Some(class) = classify_process_name_with_extra(
-                &process.name().to_string_lossy().to_lowercase(),
-                extra_signatures,
-            ) {
+            // Cache lowercase name once per process (avoids repeated allocation per classification attempt)
+            let lowercased = process.name().to_string_lossy().to_lowercase();
+            if let Some(class) = classify_process_name_with_extra(&lowercased, extra_signatures) {
                 let key = (depth, pid.as_u32());
                 let is_better = match &best {
                     None => true,

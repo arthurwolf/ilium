@@ -497,11 +497,14 @@ async fn handle_revert_last_restructure(
                     .filter(|pane_id| previous_tree.get(*pane_id).is_none())
                     .collect();
             *tree = previous_tree;
-            // Drop the write guard before the pane-registry teardown below
-            // (which needs no tree access) and before `broadcast_and_persist`'s
-            // own read-locked clone -- see that function's docs.
-            drop(tree);
-
+            // Keep the write guard held across the pane-registry teardown
+            // below -- see `spawn_and_register_pane_in_directory`'s doc
+            // comment for why this tree-overwrite-then-sweep pair must stay
+            // atomic with respect to that function's own tree-check-then-
+            // panes-insert pair, under the "tree before panes" ordering
+            // `state.rs` documents. Only dropped afterward, still before
+            // `broadcast_and_persist`'s own read-locked clone -- see that
+            // function's docs.
             if !orphaned_pane_ids.is_empty() {
                 let mut panes = state.panes.write().await;
                 for pane_id in orphaned_pane_ids {
@@ -511,6 +514,7 @@ async fn handle_revert_last_restructure(
                 }
                 drop(panes);
             }
+            drop(tree);
 
             broadcast_and_persist(state).await;
         }
@@ -778,7 +782,17 @@ async fn handle_new_pane(
     let cwd = resolve_new_pane_working_directory(state, working_directory).await;
     match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
-        Err(error) => {
+        Err(RegisterPaneError::NodeRemoved(_)) => {
+            // A concurrent request (`ClosePane` on an ancestor group,
+            // `RevertLastRestructure`, a session-recovery restore) removed
+            // `pane_id` from the tree while the spawn above was in flight.
+            // That request already removed the node and broadcast the tree
+            // without it, and `spawn_and_register_pane_in_directory` has
+            // already torn the now-orphaned resource back down -- there is
+            // nothing left for this call to remove or report.
+            return;
+        }
+        Err(RegisterPaneError::Spawn(error)) => {
             // The tree node exists (created just above) but has no resource
             // behind it -- nothing was broadcast yet, so no attached client has
             // seen it; remove it rather than leaving a phantom node no client
@@ -829,11 +843,33 @@ async fn resolve_new_pane_working_directory(
     }
 }
 
+/// Failure from [`spawn_and_register_pane_in_directory`]. Distinguishes an
+/// actual pty spawn failure (`Spawn`, unchanged behavior: report it to the
+/// requesting client and remove the tree node that has no resource behind
+/// it) from a node the tree no longer has by the time the spawned resource
+/// was ready to register (`NodeRemoved`): a concurrent `ClosePane` on an
+/// ancestor group, `RevertLastRestructure`, or a session-recovery restore
+/// can remove `pane_id` from the tree while the pty spawn above is still in
+/// flight. That is not a spawn failure -- the resource spawned fine -- and
+/// the concurrent request that removed the node already broadcast the tree
+/// without it, so callers must not try to remove the (already gone) tree
+/// node again or report a spurious spawn error. See this function's doc
+/// comment for how `NodeRemoved` is made unreachable-without-cleanup.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RegisterPaneError {
+    #[error(transparent)]
+    Spawn(#[from] PtyError),
+    #[error("pane node {0:?} was removed before it could be registered")]
+    NodeRemoved(NodeId),
+}
+
 /// Spawns (for a `Terminal` origin) or registers (for an `Editor`) the
 /// `PaneResource` for `pane_id` per `kind`, inserting it into
 /// `state.panes`. `pane_id` must already exist in `state.tree` as a pane
-/// node -- this function only ever touches the pane registry, never the
-/// tree.
+/// node when this is called, but -- unlike its name once implied -- this
+/// function does read the tree, precisely to guard against that node
+/// having stopped existing by the time the (possibly slow) pty spawn below
+/// completes; see [`RegisterPaneError::NodeRemoved`].
 ///
 /// Shared by two callers that both need exactly this "given a tree node
 /// id and what it should run, make it live" step: `handle_new_pane` above
@@ -846,7 +882,7 @@ pub(crate) async fn spawn_and_register_pane(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     kind: PaneSnapshotKind,
-) -> Result<(), PtyError> {
+) -> Result<(), RegisterPaneError> {
     let cwd = state.session_cwd.clone();
     spawn_and_register_pane_in_directory(state, pane_id, kind, &cwd).await
 }
@@ -856,7 +892,7 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
     pane_id: NodeId,
     kind: PaneSnapshotKind,
     cwd: &std::path::Path,
-) -> Result<(), PtyError> {
+) -> Result<(), RegisterPaneError> {
     let is_terminal = matches!(kind, PaneSnapshotKind::Terminal(_));
     let resource = match kind {
         PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
@@ -880,8 +916,35 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
         }
     };
 
+    // Hold `tree` (read suffices -- this never mutates it) across both the
+    // presence check and the `panes` insert below, per this crate's
+    // documented "tree before panes" lock ordering (see `state.rs`).
+    // `handle_close_pane`, `handle_revert_last_restructure`, and
+    // `crate::restore_snapshot` each hold `tree`'s *write* lock across
+    // their own remove-node-then-sweep-`panes` pair, so a `tokio::sync::
+    // RwLock` read/write conflict makes this critical section and theirs
+    // mutually exclusive: either this whole check-and-insert finishes
+    // before such a removal starts (the node was live, the insert
+    // succeeds, and that remover's later sweep correctly finds and tears
+    // this entry down when it does run) or the removal -- and its sweep,
+    // which finds nothing here yet because this resource is not inserted
+    // until this line -- finishes first, and the check below observes the
+    // node gone. Without this, the two operations could interleave with
+    // the insert landing after the sweep had already run, permanently
+    // orphaning the resource: its tree node would already be gone, so no
+    // future sweep would ever look for it again.
+    let tree = state.tree.read().await;
+    if tree.get(pane_id).is_none() {
+        drop(tree);
+        teardown_pane_resource(pane_id, resource);
+        return Err(RegisterPaneError::NodeRemoved(pane_id));
+    }
+
     let mut panes = state.panes.write().await;
     panes.insert(pane_id, resource);
+    drop(panes);
+    drop(tree);
+
     if is_terminal {
         *state.last_terminal_working_directory.lock().await = Some(cwd.to_path_buf());
     }
@@ -922,7 +985,7 @@ async fn forward_output_bytes(
 /// one call but has no reason to know about `ilium-server`'s pane
 /// registry, so this crate computes the affected set itself before
 /// calling it.
-fn collect_pane_descendants(tree: &Tree, id: NodeId) -> Vec<NodeId> {
+pub(crate) fn collect_pane_descendants(tree: &Tree, id: NodeId) -> Vec<NodeId> {
     let mut result = Vec::new();
     let mut frontier = vec![id];
     while let Some(current) = frontier.pop() {
@@ -938,7 +1001,7 @@ fn collect_pane_descendants(tree: &Tree, id: NodeId) -> Vec<NodeId> {
     result
 }
 
-fn teardown_pane_resource(pane_id: NodeId, mut resource: PaneResource) {
+pub(crate) fn teardown_pane_resource(pane_id: NodeId, mut resource: PaneResource) {
     resource.abort_background_tasks();
     if let PaneResource::Terminal(runtime) = &mut resource {
         if let Err(error) = runtime.session.kill() {
@@ -966,11 +1029,13 @@ async fn handle_close_pane(
         send_direct_error(direct_tx, format!("failed to close pane: {error}")).await;
         return;
     }
-    // Drop the write guard before the pane-registry teardown below (which
-    // needs no tree access) and before the eventual broadcast snapshot's
-    // O(n) clone -- see `broadcast_and_persist`.
-    drop(tree);
-
+    // Keep the write guard held across the pane-registry teardown below --
+    // see `spawn_and_register_pane_in_directory`'s doc comment for why this
+    // remove-then-sweep pair must stay atomic with respect to that
+    // function's own tree-check-then-panes-insert pair, under the same
+    // "tree before panes" ordering `state.rs` documents. Only dropped
+    // afterward, still before the eventual broadcast snapshot's O(n) clone
+    // -- see `broadcast_and_persist`.
     let mut panes = state.panes.write().await;
     for id in descendant_pane_ids {
         if let Some(resource) = panes.remove(&id) {
@@ -978,6 +1043,7 @@ async fn handle_close_pane(
         }
     }
     drop(panes);
+    drop(tree);
 
     broadcast_and_persist(state).await;
     state.scheduled_input_changed.notify_one();

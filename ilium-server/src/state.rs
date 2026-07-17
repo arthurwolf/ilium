@@ -160,8 +160,12 @@ impl ServerState {
         tasks.push(handle);
     }
 
-    /// Aborts every tracked connection task. Called once, at session
-    /// shutdown.
+    /// Aborts every tracked connection task. Called explicitly, once, on
+    /// `run`'s own clean-shutdown path; also invoked automatically by
+    /// `Drop` below as a safety net for the abnormal path where this
+    /// `ServerState` is torn down without `run` ever reaching that code
+    /// (see `crate::task_guard`'s module doc for the matching guard on the
+    /// background tasks that otherwise keep this state's `Arc` alive).
     pub fn abort_all_connection_tasks(&self) {
         let tasks = self.connection_tasks.lock().unwrap();
         for task in tasks.iter() {
@@ -184,5 +188,26 @@ impl ServerState {
     pub fn request_snapshot_save(&self) {
         self.snapshot_dirty.store(true, Ordering::Release);
         self.snapshot_requested.notify_one();
+    }
+}
+
+impl Drop for ServerState {
+    /// Last-resort cleanup for every still-tracked per-connection task.
+    /// `run`'s own `select!` cleanup already calls
+    /// [`ServerState::abort_all_connection_tasks`] on a clean shutdown, at
+    /// which point this state still has other `Arc` owners alive and this
+    /// `Drop` does not run yet; it only fires once the very last
+    /// `Arc<ServerState>` owner goes away. That only happens on the
+    /// abnormal path this exists to guard: `run`'s own task cancelled from
+    /// the outside before it reaches its normal cleanup, whose background
+    /// tasks (detection loop, scheduled-input executor, snapshot writer,
+    /// sound actor, config watcher) are each the *other* `Arc` owners --
+    /// once `crate::task_guard::AbortOnDropHandle` stops every one of
+    /// those on `run`'s own cancellation, their `Arc<ServerState>` clones
+    /// release, and this `Drop` is what finally reaches the one resource
+    /// (`connection_tasks`) that was never one of `run`'s own local
+    /// variables and so could not be covered by that same guard.
+    fn drop(&mut self) {
+        self.abort_all_connection_tasks();
     }
 }

@@ -384,9 +384,9 @@ fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event
             app.mode = Mode::Search(state);
         }
         _ => {
-            let query_before = state.query.buf.clone();
+            let query_len_before = state.query.buf.len();
             let _ = text_prompt::handle_key(&mut state.query, key.code);
-            if state.query.buf != query_before {
+            if state.query.buf.len() != query_len_before {
                 state.note_query_changed(Instant::now());
             }
             app.mode = Mode::Search(state);

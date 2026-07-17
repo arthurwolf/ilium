@@ -183,8 +183,8 @@ pub fn agent_type_at(area: Rect, position: Position) -> Option<AgentLaunchType> 
     let mut column = usize::from(area.x) + 7;
     let position_column = usize::from(position.x);
     for agent_type in AgentLaunchType::ALL {
-        let option = format!("( ) {}", agent_type.label());
-        let option_width = UnicodeWidthStr::width(option.as_str());
+        // Compute width without allocation: "( ) " prefix + label width.
+        let option_width = "( ) ".width() + agent_type.label().width();
         if (column..column.saturating_add(option_width)).contains(&position_column) {
             return Some(agent_type);
         }

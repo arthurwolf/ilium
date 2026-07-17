@@ -136,7 +136,6 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     if !options.session_cwd.is_dir() {
         return Err(ClientError::InvalidSessionCwd(options.session_cwd));
     }
-    let socket_path = options.socket_path.clone();
 
     // Resolved and installed once, before the terminal enters raw/
     // alternate-screen mode and before any render call -- see
@@ -150,7 +149,7 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     // `TerminalGuard::drop` restores the terminal whether this function
     // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
     let guard = TerminalGuard::enter()?;
-    let result = run_inner(options, &socket_path, config, config_dir, sound_discovery).await;
+    let result = run_inner(&options, config, config_dir, sound_discovery).await;
     drop(guard);
     result
 }
@@ -190,8 +189,7 @@ fn init_config() -> (crate::config::ClientConfig, Option<PathBuf>) {
 }
 
 async fn run_inner(
-    options: RunOptions,
-    socket_path: &std::path::Path,
+    options: &RunOptions,
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
     sound_discovery: ilium_sound::SoundDiscovery,
@@ -213,7 +211,8 @@ async fn run_inner(
     let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
     app.set_screen_area(Rect::new(0, 0, initial_size.width, initial_size.height));
 
-    let mut connection = Connection::connect(socket_path, options.session_name.clone()).await?;
+    let mut connection =
+        Connection::connect(&options.socket_path, options.session_name.clone()).await?;
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());

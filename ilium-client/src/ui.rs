@@ -683,13 +683,15 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
             } else {
                 GROUP_ICON
             };
-            let name = if is_top_level {
-                "Top level".to_string()
+            // Build name via format! to avoid cloning node.name — format! reads
+            // the source and produces a new owned String only once needed.
+            let name_str = if is_top_level {
+                "Top level"
             } else {
                 app.tree
                     .get(destination.id)
-                    .map(|node| node.name.clone())
-                    .unwrap_or_else(|| "group".to_string())
+                    .map(|node| node.name.as_str())
+                    .unwrap_or("group")
             };
             let row_style = if index == state.selected_index {
                 theme::selected_style().add_modifier(Modifier::BOLD)
@@ -698,7 +700,10 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
             } else {
                 Style::new()
             };
-            Line::from(Span::styled(format!(" {indent}{icon} {name}"), row_style))
+            Line::from(Span::styled(
+                format!(" {indent}{icon} {name_str}"),
+                row_style,
+            ))
         })
         .collect();
     frame.render_widget(Paragraph::new(rows), layout.list_area);
