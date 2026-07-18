@@ -196,29 +196,37 @@ fn screen_has_only_empty_composer_chrome(screen_text: &str, composer_label: &str
     })
 }
 
-/// Returns whether an agent's persistent task goal is visible on screen.
+/// Returns whether `class` visibly reports an active persistent task goal.
 ///
-/// Codex represents a configured goal as a non-empty `Goal:` status row.
-/// Matching its label rather than any occurrence of "goal" avoids false
-/// positives from ordinary agent prose, markdown, and Codex's explicit
-/// no-goal response. The server calls this only after a pane has already
-/// been identified as an agent process.
-pub fn has_visible_goal(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        // A terminal may preserve the leading checkered-flag/icon cell from
-        // Codex's own row, so ignore decoration but retain the anchored label.
-        let trimmed = line
-            .trim_start()
-            .trim_start_matches(|character: char| !character.is_alphanumeric());
-        let Some(goal_value) = trimmed
-            .get(..5)
-            .filter(|label| label.eq_ignore_ascii_case("goal:"))
-            .and_then(|_| trimmed.get(5..))
-        else {
-            return false;
-        };
-        !goal_value.trim().is_empty()
-    })
+/// Goal UI is provider-owned and changes independently from the stable
+/// process identity. Current Codex shows `Goal active Objective:`; current
+/// Claude Code keeps `/goal active` in its footer. The historical Codex
+/// forms remain supported without treating ordinary transcript prose as a
+/// goal. The server calls this only after process-tree identification.
+pub fn has_visible_goal_for_agent(class: &AgentClass, screen_text: &str) -> bool {
+    screen_text
+        .lines()
+        .map(goal_status_line)
+        .any(|line| match class {
+            AgentClass::Codex => {
+                line.starts_with("pursuing goal")
+                    || line.starts_with("goal active objective:")
+                    || line
+                        .strip_prefix("goal:")
+                        .is_some_and(|goal_value| !goal_value.trim().is_empty())
+            }
+            AgentClass::Claude => {
+                line.starts_with("goal active (") || line.starts_with("goal active:")
+            }
+            AgentClass::Antigravity | AgentClass::Other(_) => false,
+        })
+}
+
+/// Removes only leading terminal decoration before matching a status label.
+fn goal_status_line(line: &str) -> String {
+    line.trim_start()
+        .trim_start_matches(|character: char| !character.is_alphanumeric())
+        .to_ascii_lowercase()
 }
 
 /// True if a line reads as "the agent is waiting on background
@@ -713,14 +721,44 @@ mod tests {
     }
 
     #[test]
-    fn visible_goal_row_is_detected_without_matching_goal_prose() {
-        assert!(has_visible_goal("  🏁 Goal: Finish the detection pass"));
-        assert!(has_visible_goal("gOaL: keep the goal paused"));
-        assert!(!has_visible_goal(
+    fn visible_goal_status_is_detected_for_current_codex_and_claude_code() {
+        assert!(has_visible_goal_for_agent(
+            &AgentClass::Codex,
+            "  • Goal active Objective: Finish the detection pass"
+        ));
+        assert!(has_visible_goal_for_agent(
+            &AgentClass::Codex,
+            "  ◒ Pursuing goal (5m)"
+        ));
+        assert!(has_visible_goal_for_agent(
+            &AgentClass::Codex,
+            "🏁 Goal: keep the goal paused"
+        ));
+        assert!(has_visible_goal_for_agent(
+            &AgentClass::Claude,
+            "◎ /goal active (11s)"
+        ));
+        assert!(has_visible_goal_for_agent(
+            &AgentClass::Claude,
+            " /goal active: finish the detection pass"
+        ));
+        assert!(!has_visible_goal_for_agent(
+            &AgentClass::Codex,
+            "Goal achieved"
+        ));
+        assert!(!has_visible_goal_for_agent(
+            &AgentClass::Codex,
             "This thread does not currently have a goal."
         ));
-        assert!(!has_visible_goal("Goal:"));
-        assert!(!has_visible_goal("The project's goal: keep tests green."));
+        assert!(!has_visible_goal_for_agent(&AgentClass::Codex, "Goal:"));
+        assert!(!has_visible_goal_for_agent(
+            &AgentClass::Codex,
+            "The project's goal: keep tests green."
+        ));
+        assert!(!has_visible_goal_for_agent(
+            &AgentClass::Claude,
+            "Goal set: an old transcript row is still visible"
+        ));
     }
 
     #[test]

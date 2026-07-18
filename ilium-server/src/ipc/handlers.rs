@@ -50,6 +50,7 @@ pub async fn handle_request(
         }
         ClientRequest::NewGroup { parent_group, name } => {
             handle_tree_mutation(state, direct_tx, |tree| {
+                let parent_group = resolve_parent_group(tree, parent_group, &state.session_cwd);
                 tree.add_group(parent_group, name).map(|_id| ())
             })
             .await;
@@ -57,9 +58,18 @@ pub async fn handle_request(
         }
         ClientRequest::NewFolder { parent_group, path } => {
             handle_tree_mutation(state, direct_tx, |tree| {
+                let parent_group = resolve_parent_group(tree, parent_group, &state.session_cwd);
                 tree.add_folder(parent_group, path).map(|_id| ())
             })
             .await;
+            false
+        }
+        ClientRequest::NewProject { path } => {
+            handle_new_project(state, path, direct_tx).await;
+            false
+        }
+        ClientRequest::ChangeProjectFolder { project_id, path } => {
+            handle_change_project_folder(state, project_id, path, direct_tx).await;
             false
         }
         ClientRequest::NewBoard {
@@ -68,7 +78,7 @@ pub async fn handle_request(
             storage,
         } => {
             handle_tree_mutation(state, direct_tx, |tree| {
-                let parent_group = resolve_parent_group(tree, parent_group);
+                let parent_group = resolve_parent_group(tree, parent_group, &state.session_cwd);
                 tree.add_board(parent_group, name, storage).map(|_id| ())
             })
             .await;
@@ -81,7 +91,7 @@ pub async fn handle_request(
             pane_ids,
         } => {
             handle_tree_mutation(state, direct_tx, |tree| {
-                let parent_group = resolve_parent_group(tree, parent_group);
+                let parent_group = resolve_parent_group(tree, parent_group, &state.session_cwd);
                 tree.create_split_view(parent_group, name, orientation, &pane_ids)
                     .map(|_id| ())
             })
@@ -224,6 +234,14 @@ pub async fn handle_request(
         }
         ClientRequest::RevertLastRestructure => {
             handle_revert_last_restructure(state, direct_tx).await;
+            false
+        }
+        ClientRequest::ApplyProjectRestructurePlan { project_id, plan } => {
+            handle_apply_project_restructure_plan(state, project_id, plan, direct_tx).await;
+            false
+        }
+        ClientRequest::RevertProjectRestructure { project_id } => {
+            handle_revert_project_restructure(state, project_id, direct_tx).await;
             false
         }
     }
@@ -445,6 +463,50 @@ async fn handle_tree_mutation(
     }
 }
 
+async fn handle_new_project(
+    state: &Arc<ServerState>,
+    path: std::path::PathBuf,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let path = match canonical_project_directory(path) {
+        Ok(path) => path,
+        Err(message) => {
+            send_direct_error(direct_tx, message).await;
+            return;
+        }
+    };
+    handle_tree_mutation(state, direct_tx, |tree| tree.add_project(path).map(|_| ())).await;
+}
+
+async fn handle_change_project_folder(
+    state: &Arc<ServerState>,
+    project_id: NodeId,
+    path: std::path::PathBuf,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let path = match canonical_project_directory(path) {
+        Ok(path) => path,
+        Err(message) => {
+            send_direct_error(direct_tx, message).await;
+            return;
+        }
+    };
+    handle_tree_mutation(state, direct_tx, |tree| {
+        tree.change_project_folder(project_id, path)
+    })
+    .await;
+}
+
+fn canonical_project_directory(path: std::path::PathBuf) -> Result<std::path::PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("project folder is unavailable: {error}"))?;
+    if !canonical.is_dir() {
+        return Err("project folder must be a directory".to_string());
+    }
+    Ok(canonical)
+}
+
 /// Applies a full-tree restructure plan (see `ilium_core::Tree::apply_restructure`).
 /// The tree exactly as it was before this mutation is kept in
 /// `state.restructure_undo`'s one slot only when the plan actually applies
@@ -456,22 +518,40 @@ async fn handle_apply_restructure_plan(
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let mut tree = state.tree.write().await;
+    let Some(project_id) = tree.project_ids().into_iter().next() else {
+        drop(tree);
+        send_direct_error(direct_tx, "restructure failed: no project exists").await;
+        return;
+    };
+    if tree.project_ids().len() != 1 {
+        drop(tree);
+        send_direct_error(
+            direct_tx,
+            "restructure failed: select a project to restructure",
+        )
+        .await;
+        return;
+    }
     let before = tree.clone();
-    let result = tree.apply_restructure(plan);
+    let result = tree.apply_project_restructure(project_id, plan);
     drop(tree);
     match result {
         Ok(()) => {
-            *state.restructure_undo.lock().await = Some(before);
+            state
+                .restructure_undo
+                .lock()
+                .await
+                .insert(project_id, before);
             broadcast_and_persist(state).await;
         }
         Err(error) => send_direct_error(direct_tx, format!("restructure failed: {error}")).await,
     }
 }
 
-/// Restores the tree from the one-slot undo buffer left by the most recent
-/// successful `ApplyRestructurePlan`, if any. Consumes the slot: reverting
-/// twice in a row without a new restructure in between is a no-op reported
-/// as an error, not a toggle back and forth between two states.
+/// Restores one project's one-slot undo buffer from its latest successful
+/// restructure. A successful revert consumes that project's slot, so a
+/// second revert without another restructure is an error rather than a
+/// toggle back and forth between two states.
 ///
 /// The undo buffer is not time-boxed on the client -- arbitrary structural
 /// work (most notably `NewPane`) can happen between the restructure and this
@@ -487,16 +567,62 @@ async fn handle_revert_last_restructure(
     state: &Arc<ServerState>,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let previous = state.restructure_undo.lock().await.take();
+    let project_ids = state.tree.read().await.project_ids();
+    if project_ids.len() != 1 {
+        send_direct_error(direct_tx, "select a project to revert its restructure").await;
+        return;
+    }
+    handle_revert_project_restructure(state, project_ids[0], direct_tx).await;
+}
+
+async fn handle_apply_project_restructure_plan(
+    state: &Arc<ServerState>,
+    project_id: NodeId,
+    plan: RestructurePlan,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let mut tree = state.tree.write().await;
+    let before = tree.clone();
+    let result = tree.apply_project_restructure(project_id, plan);
+    drop(tree);
+    match result {
+        Ok(()) => {
+            state
+                .restructure_undo
+                .lock()
+                .await
+                .insert(project_id, before);
+            broadcast_and_persist(state).await;
+        }
+        Err(error) => send_direct_error(direct_tx, format!("restructure failed: {error}")).await,
+    }
+}
+
+async fn handle_revert_project_restructure(
+    state: &Arc<ServerState>,
+    project_id: NodeId,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let previous = state.restructure_undo.lock().await.remove(&project_id);
     match previous {
         Some(previous_tree) => {
             let mut tree = state.tree.write().await;
-            let orphaned_pane_ids: Vec<NodeId> =
-                collect_pane_descendants(&tree, ilium_core::ROOT_ID)
-                    .into_iter()
-                    .filter(|pane_id| previous_tree.get(*pane_id).is_none())
-                    .collect();
-            *tree = previous_tree;
+            let orphaned_pane_ids: Vec<NodeId> = collect_pane_descendants(&tree, project_id)
+                .into_iter()
+                .filter(|pane_id| previous_tree.get(*pane_id).is_none())
+                .collect();
+            let result = tree.restore_project_from(project_id, &previous_tree);
+            if let Err(error) = result {
+                drop(tree);
+                state
+                    .restructure_undo
+                    .lock()
+                    .await
+                    .insert(project_id, previous_tree);
+                send_direct_error(direct_tx, format!("could not revert restructure: {error}"))
+                    .await;
+                return;
+            }
             // Keep the write guard held across the pane-registry teardown
             // below -- see `spawn_and_register_pane_in_directory`'s doc
             // comment for why this tree-overwrite-then-sweep pair must stay
@@ -518,7 +644,7 @@ async fn handle_revert_last_restructure(
 
             broadcast_and_persist(state).await;
         }
-        None => send_direct_error(direct_tx, "no restructure to revert").await,
+        None => send_direct_error(direct_tx, "no restructure to revert for this project").await,
     }
 }
 
@@ -666,9 +792,14 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
 /// request with `TreeError::PanesRequireGroup`. `NewGroup` needs no
 /// equivalent fallback: the domain tree allows a group directly under the
 /// root, so its `parent_group` is used as-is.
-fn resolve_parent_group(tree: &mut Tree, requested: NodeId) -> NodeId {
+fn resolve_parent_group(
+    tree: &mut Tree,
+    requested: NodeId,
+    session_cwd: &std::path::Path,
+) -> NodeId {
     if requested == ilium_core::ROOT_ID {
-        tree.ensure_default_group("default")
+        tree.ensure_launch_project(session_cwd.to_path_buf())
+            .expect("the session root can always create its launch project")
     } else {
         requested
     }
@@ -759,13 +890,21 @@ async fn handle_new_pane(
     state: &Arc<ServerState>,
     parent_group: NodeId,
     kind: NewPaneKind,
-    working_directory: NewPaneWorkingDirectory,
+    _working_directory: NewPaneWorkingDirectory,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let plan = new_pane_plan(kind);
 
     let mut tree = state.tree.write().await;
-    let parent_group = resolve_parent_group(&mut tree, parent_group);
+    let parent_group = if parent_group == ilium_core::ROOT_ID {
+        let project_id = tree
+            .ensure_launch_project(state.session_cwd.clone())
+            .expect("the session root can always create its launch project");
+        tree.ensure_project_default_group(project_id, "default")
+            .expect("a launch project always accepts its default group")
+    } else {
+        resolve_parent_group(&mut tree, parent_group, &state.session_cwd)
+    };
     let pane_id = match tree.add_pane(parent_group, plan.name, plan.content_kind) {
         Ok(id) => id,
         Err(error) => {
@@ -774,13 +913,17 @@ async fn handle_new_pane(
             return;
         }
     };
+    let project_cwd = tree
+        .project_path_for(pane_id)
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| state.session_cwd.clone());
     // Drop the write guard before spawning (a pty spawn + registering it
     // in `state.panes` needs no tree access at all) and before the
     // eventual broadcast snapshot's O(n) clone -- see `broadcast_and_persist`.
     drop(tree);
 
-    let cwd = resolve_new_pane_working_directory(state, working_directory).await;
-    match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
+    match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &project_cwd).await
+    {
         Ok(()) => {}
         Err(RegisterPaneError::NodeRemoved(_)) => {
             // A concurrent request (`ClosePane` on an ancestor group,
@@ -812,35 +955,6 @@ async fn handle_new_pane(
     }
 
     broadcast_and_persist(state).await;
-}
-
-async fn resolve_new_pane_working_directory(
-    state: &Arc<ServerState>,
-    policy: NewPaneWorkingDirectory,
-) -> std::path::PathBuf {
-    match policy {
-        NewPaneWorkingDirectory::ProjectRoot => state.session_cwd.clone(),
-        NewPaneWorkingDirectory::LastUsed => state
-            .last_terminal_working_directory
-            .lock()
-            .await
-            .clone()
-            .unwrap_or_else(|| state.session_cwd.clone()),
-        NewPaneWorkingDirectory::FocusedTerminal => {
-            let panes = state.panes.read().await;
-            panes
-                .values()
-                .find_map(|resource| match resource {
-                    PaneResource::Terminal(runtime)
-                        if runtime.detection_schedule.client_focused =>
-                    {
-                        runtime.session.current_working_directory()
-                    }
-                    _ => None,
-                })
-                .unwrap_or_else(|| state.session_cwd.clone())
-        }
-    }
 }
 
 /// Failure from [`spawn_and_register_pane_in_directory`]. Distinguishes an
@@ -883,7 +997,13 @@ pub(crate) async fn spawn_and_register_pane(
     pane_id: NodeId,
     kind: PaneSnapshotKind,
 ) -> Result<(), RegisterPaneError> {
-    let cwd = state.session_cwd.clone();
+    let cwd = state
+        .tree
+        .read()
+        .await
+        .project_path_for(pane_id)
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| state.session_cwd.clone());
     spawn_and_register_pane_in_directory(state, pane_id, kind, &cwd).await
 }
 
@@ -962,11 +1082,43 @@ async fn forward_output_bytes(
 ) {
     loop {
         match receiver.recv().await {
-            Ok(chunk) => state.broadcast(ServerEvent::ScreenUpdate {
-                pane_id,
-                sequence: chunk.sequence,
-                bytes: chunk.bytes,
-            }),
+            Ok(first_chunk) => {
+                // A bursty PTY reader commonly splits one visual update into
+                // many tiny chunks.  Merge only already-queued chunks: this
+                // adds no deliberate latency, while avoiding one broadcast,
+                // one frame encode, and one client event per tiny read.
+                const MAX_MERGED_CHUNKS: usize = 32;
+                // Keep one forwarded frame below two PTY reader buffers so
+                // a single chatty pane cannot monopolize a client turn even
+                // after batching.
+                const MAX_MERGED_BYTES: usize = 16 * 1024;
+                let mut sequence = first_chunk.sequence;
+                let mut bytes = first_chunk.bytes;
+                for _ in 1..MAX_MERGED_CHUNKS {
+                    if bytes.len() >= MAX_MERGED_BYTES {
+                        break;
+                    }
+                    match receiver.try_recv() {
+                        Ok(mut chunk) => {
+                            sequence = chunk.sequence;
+                            bytes.append(&mut chunk.bytes);
+                        }
+                        Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
+                            tracing::warn!(
+                                "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
+                            );
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+                    }
+                }
+                state.broadcast(ServerEvent::ScreenUpdate {
+                    pane_id,
+                    sequence,
+                    bytes,
+                });
+            }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::warn!(
                     "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"

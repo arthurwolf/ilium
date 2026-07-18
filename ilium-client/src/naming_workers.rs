@@ -57,7 +57,7 @@ pub enum NamingWorkerEvent {
         elapsed: Duration,
         result: anyhow::Result<Vec<String>>,
     },
-    Restructure(anyhow::Result<ilium_core::RestructurePlan>),
+    Restructure(NodeId, anyhow::Result<ilium_core::RestructurePlan>),
 }
 
 /// All immutable inputs captured when a session-title worker starts. Keeping
@@ -85,7 +85,7 @@ pub struct NamingWorkers {
     terminal_title_in_flight: HashSet<NodeId>,
     inference_test_in_flight: bool,
     ollama_models_in_flight: bool,
-    restructure_in_flight: bool,
+    restructure_in_flight: HashSet<NodeId>,
 }
 
 impl NamingWorkers {
@@ -101,7 +101,7 @@ impl NamingWorkers {
             terminal_title_in_flight: HashSet::new(),
             inference_test_in_flight: false,
             ollama_models_in_flight: false,
-            restructure_in_flight: false,
+            restructure_in_flight: HashSet::new(),
         }
     }
 
@@ -264,26 +264,31 @@ impl NamingWorkers {
     /// disk-I/O-inside-the-closure pattern.
     pub fn spawn_restructure_worker(
         &mut self,
+        project_id: NodeId,
         mut contexts: Vec<crate::restructure::LeafContext>,
+        current_structure: String,
         home: PathBuf,
         cwd: PathBuf,
     ) {
-        if self.restructure_in_flight {
+        if !self.restructure_in_flight.insert(project_id) {
             return;
         }
-        self.restructure_in_flight = true;
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         std::thread::spawn(move || {
             crate::restructure::resolve_content_extracts(&mut contexts, &home, &cwd);
-            let result = crate::restructure::infer_restructure_plan(&inference_settings, &contexts);
+            let result = crate::restructure::infer_restructure_plan_with_structure(
+                &inference_settings,
+                &contexts,
+                &current_structure,
+            );
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::Restructure(result));
+            let _ = events_tx.blocking_send(NamingWorkerEvent::Restructure(project_id, result));
         });
     }
 
-    pub fn restructure_worker_finished(&mut self) {
-        self.restructure_in_flight = false;
+    pub fn restructure_worker_finished(&mut self, project_id: NodeId) {
+        self.restructure_in_flight.remove(&project_id);
     }
 }

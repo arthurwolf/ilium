@@ -42,6 +42,7 @@ pub mod editor_toolbar;
 pub mod error;
 pub mod explorer_overlay;
 pub mod help;
+pub mod icon_settings;
 pub mod inference_test;
 pub mod keymap;
 pub mod keys;
@@ -81,7 +82,7 @@ pub mod ui;
 pub mod workspace_file;
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crossterm::event::Event;
 use ratatui::backend::CrosstermBackend;
@@ -94,7 +95,6 @@ pub use crate::app::ClientExitReason;
 use crate::app::App;
 use crate::connection::Connection;
 use crate::error::ClientError;
-use crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL;
 use crate::naming_workers::NamingWorkers;
 use crate::search_workers::SearchWorkers;
 use crate::terminal_guard::TerminalGuard;
@@ -110,10 +110,6 @@ pub struct RunOptions {
     pub socket_path: PathBuf,
 }
 
-/// Idle-state redraw/poll cadence -- matches the pre-client/server
-/// design's own `POLL_INTERVAL`.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
 /// Bounded capacity for the crossterm-input and naming-worker-result
 /// channels the event loop selects on. A generous "few hundred" headroom
 /// for interactive latency (a burst of pasted text, a flurry of mouse-move
@@ -128,6 +124,15 @@ const INPUT_CHANNEL_CAPACITY: usize = 256;
 /// bounded at all purely for consistency with every other channel in this
 /// crate, not because it could plausibly fill up.
 const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
+/// Upper bound for server events applied in one select turn. Terminal output
+/// can arrive continuously; yielding after a bounded batch gives pointer and
+/// keyboard events a reliable chance to run instead of making hover depend
+/// on how chatty the displayed PTY happens to be.
+const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
+/// Input is intentionally favoured over render-cache updates, but it remains
+/// bounded so a key-repeat or pointer flood cannot starve incoming terminal
+/// frames forever.
+const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
 
 /// Runs ilium-client until the user quits, requests a client-only restart, or
 /// loses the server connection. The typed result lets the CLI wrapper re-exec
@@ -248,17 +253,19 @@ async fn run_inner(
     let mut needs_redraw = true;
 
     while app.exit_reason.is_none() {
-        let tick_delay = if app.is_spatial_animation_active() {
-            TREE_WIDTH_ANIMATION_FRAME_INTERVAL
-        } else {
-            POLL_INTERVAL
-        };
+        let tick_delay = app.next_maintenance_delay(Instant::now());
 
         tokio::select! {
             input_event = input_rx.recv() => {
                 match input_event {
                     Some(event) => {
-                        dispatch_input_event(&mut app, &mut naming_workers, home_dir.as_deref(), event);
+                        dispatch_ready_input_events(
+                            &mut app,
+                            &mut input_rx,
+                            &mut naming_workers,
+                            home_dir.as_deref(),
+                            event,
+                        );
                         needs_redraw = true;
                     }
                     // The input-reading thread ended (a crossterm read
@@ -333,8 +340,8 @@ async fn run_inner(
     Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
 }
 
-/// Applies `first` (already received) and then drains + applies every
-/// `ServerEvent` already queued on `events_rx` without waiting for more --
+/// Applies `first` (already received) and then drains + applies a bounded
+/// batch of queued `ServerEvent`s without waiting for more --
 /// coalescing consecutive `ScreenUpdate`s for the *same* `pane_id` into one
 /// concatenated feed instead of applying each queued chunk individually.
 /// Bytes are concatenated, never dropped: `ScreenUpdate` carries raw PTY
@@ -349,7 +356,8 @@ async fn run_inner(
 /// or a `ScreenUpdate` for a *different* pane, are applied immediately in
 /// arrival order -- only a same-pane_id run of consecutive `ScreenUpdate`s
 /// is ever merged, so no ordering between different panes or event kinds
-/// changes.
+/// changes. The batch limit is deliberately applied only between complete
+/// events, so it preserves the stream order while allowing input to run.
 fn apply_server_events(
     app: &mut App,
     events_rx: &mut mpsc::Receiver<ilium_ipc::ServerEvent>,
@@ -361,7 +369,7 @@ fn apply_server_events(
 
     let mut pending_screen_update: Option<(ilium_core::NodeId, u64, Vec<u8>)> = None;
     let mut next = Some(first);
-    loop {
+    for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
         let event = match next.take() {
             Some(event) => event,
             None => match events_rx.try_recv() {
@@ -396,6 +404,64 @@ fn apply_server_events(
         }
     }
     flush_pending_screen_update(app, &mut pending_screen_update);
+}
+
+/// Applies one received input event and any immediately queued successors.
+/// Consecutive mouse-motion reports are coalesced to their newest position:
+/// only that position can determine the current hover state, while keeping
+/// every non-motion event in order preserves click, drag, and scroll input.
+fn dispatch_ready_input_events(
+    app: &mut App,
+    input_rx: &mut mpsc::Receiver<Event>,
+    naming_workers: &mut NamingWorkers,
+    home_dir: Option<&std::path::Path>,
+    first: Event,
+) {
+    let mut next = Some(first);
+
+    for _ in 0..MAX_INPUT_EVENTS_PER_BATCH {
+        let Some(event) = next.take() else {
+            break;
+        };
+        let event = if matches!(
+            event,
+            Event::Mouse(crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Moved,
+                ..
+            })
+        ) {
+            let mut newest_motion = event;
+            loop {
+                match input_rx.try_recv() {
+                    Ok(candidate)
+                        if matches!(
+                            candidate,
+                            Event::Mouse(crossterm::event::MouseEvent {
+                                kind: crossterm::event::MouseEventKind::Moved,
+                                ..
+                            })
+                        ) =>
+                    {
+                        newest_motion = candidate;
+                    }
+                    Ok(candidate) => {
+                        next = Some(candidate);
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+            newest_motion
+        } else {
+            event
+        };
+
+        dispatch_input_event(app, naming_workers, home_dir, event);
+
+        if next.is_none() {
+            next = input_rx.try_recv().ok();
+        }
+    }
 }
 
 /// Spawns a background session-title-inference worker for whichever pane
@@ -515,17 +581,20 @@ fn dispatch_input_event(
         }
     }
 
-    if let Some(request) = app.take_pending_restructure_request() {
+    for request in app.take_pending_restructure_requests() {
         match home_dir {
             Some(home_dir) => naming_workers.spawn_restructure_worker(
+                request.project_id,
                 request.contexts,
+                request.current_structure,
                 home_dir.to_path_buf(),
-                app.session_cwd.clone(),
+                request.project_cwd,
             ),
             None => {
-                app.structure_loading = false;
-                app.status_message =
-                    Some("Could not restructure: home directory unavailable".to_string());
+                app.finish_project_restructure(
+                    request.project_id,
+                    Err(anyhow::anyhow!("home directory unavailable")),
+                );
             }
         }
     }

@@ -1,3 +1,27 @@
+# Performance and interaction responsiveness (20 improvements)
+
+- [x] Replace the unconditional 50 ms idle client wakeup with event-driven, deadline-aware maintenance scheduling.
+- [x] Wake exactly at the workspace-search debounce deadline instead of polling while the user waits.
+- [x] Wake exactly at pending editor-autosave deadlines instead of scanning all editors twenty times per second.
+- [x] Preserve 16 ms spatial animation frames only while a spatial animation is actually active.
+- [x] Preserve 50 ms semantic animation frames only while an indicator, countdown, or transition needs them.
+- [x] Defer costly rendered-Markdown parse/raster work until sidebar-width animation settles.
+- [x] Fast-path ordinary terminal output around the OSC-8 hyperlink parser.
+- [x] Merge immediately queued PTY output chunks before server broadcast/frame encoding.
+- [x] Cap merged PTY frames so one noisy pane cannot monopolize client parsing.
+- [x] Bound each client server-event batch to protect keyboard and pointer turns under output floods.
+- [x] Coalesce consecutive screen updates in the client before parsing them.
+- [x] Coalesce pointer-motion input to the latest position while preserving clicks, drags, and scrolls.
+- [x] Skip redundant PTY resizes during animated layout changes.
+- [x] Avoid terminal redraws when no visible state changed.
+- [x] Bound client input, client event, server reply, and session broadcast queues to prevent latency-growing backlogs.
+- [x] Keep detector process refresh off the async runtime and skip it when no pane is due.
+- [x] Perform detection classification outside tree/pane write locks and share one child-process index per tick.
+- [x] Use adaptive detection cadence with focused panes prioritized and forced checks debounced.
+- [x] Keep workspace search and title/inference work in owned background workers, rejecting stale results.
+- [x] Cache large icon-catalogue filtering and render only its viewport rows.
+- [x] Run focused performance regressions, full workspace checks, release installation, and an installed-binary PTY responsiveness proof.
+
 # Settings toolbar click lifecycle
 
 - [x] Trace the full settings-toolbar mouse press/release path and reproduce the premature close through the real TUI.
@@ -122,8 +146,19 @@
 # Tree row-action clarity and icons
 
 - [x] Clear the complete row-action strip so title characters cannot bleed through icon gaps.
-- [x] Replace edit, up, down, remove, and refresh with the requested emoji while preserving hit behavior.
-- [ ] Cover rendered gaps and hit geometry, run workspace gates, verify the live TUI, rebuild, and install. (BLOCKED: unrelated in-progress agent-identifier/session-id changes currently fail strict Clippy and test compilation.)
+- [x] Use stable single-cell edit, up, down, remove, and refresh controls in the title-replacing hover overlay.
+- [x] Cover rendered gaps and hit geometry, run workspace gates, verify the installed TUI in a real PTY, rebuild, and install.
+
+# Sidebar selected-row wide-glyph rendering
+
+- [x] Diagnose the selection and hover-overlay width failures around multi-cell icons without changing sidebar selection semantics.
+- [x] Add buffer and installed-PTY regression coverage, run workspace gates, and verify the installed release in an isolated tmux session.
+
+# Normal row-action icon rendering
+
+- [x] Restore normal UTF-8 row-action icons as the default and emit each icon plus its cleanup spaces as one terminal run.
+- [x] Add the opt-in `Use stable glyphs` User Interface preference, defaulting to off and persisting it in `[ui]`.
+- [x] Cover the rendering run, setting persistence, PTY interaction, workspace gates, and installed-binary parity.
 
 # Waiting-background clock animation
 
@@ -152,6 +187,42 @@
 - [x] Implement shared client viewport geometry, multi-pane rendering, per-slot sizing, focus, and input routing.
 - [x] Add split creation dialogs, shortcut, tree toolbar/context integration, and tree presentation.
 - [x] Run focused tests, full workspace checks, and live PTY/TUI verification.
+
+# Comprehensive icon catalogue
+
+- [x] Replace the short hand-written picker list with the complete named Unicode emoji catalogue, retaining terminal-friendly quick picks.
+- [x] Present the 3,500+ choices in detailed CLDR categories, including animals, signs, mathematics, computer, travel, tools, food, flags, and more.
+- [x] Add responsive category/grid navigation, live name/category search, and matching mouse hit testing.
+- [x] Cover catalogue size/category/search and picker geometry; run client, PTY, formatting, Clippy, release-install, and installed-TUI verification.
+
+# Triple-size icon catalogue
+
+- [x] Add the complete Nerd Font icon families alongside the Unicode catalogue, preserving the detailed category/search model.
+- [x] Prove the picker has at least three times the original 3,560 choices and still works in the installed TUI.
+
+# Official UTF-8 and Nerd Font catalogue boundary
+
+- [x] Keep portable official UTF-8 categories first and Private Use Area Nerd Font categories second in the catalogue data contract.
+- [x] Make the picker show separate family counts and label every category/grid with its family.
+- [x] Cover the ordering invariant and run client tests, PTY settings verification, formatting, Clippy, release build, and install.
+
+# Chaptered icon catalogue picker
+
+- [x] Replace the category-sidebar/glyph-grid picker with one official-first chapter document containing aligned icon-and-description cells.
+- [x] Add an in-place search field that filters icon cells and removes chapters with no matching icon.
+- [x] Cover document ordering, filtering, rendering, keyboard/mouse selection, and verify the installed TUI through an isolated PTY.
+
+# Icon catalogue viewport performance and rendering integrity
+
+- [x] Identify the repeated full-catalogue rebuild and the grapheme-splitting source of leaked emoji fragments from the reported screenshot.
+- [x] Cache filtered search results, render only viewport rows, and add keyboard, wheel, page, and scrollbar-track scrolling.
+- [x] Prove fast large-catalogue traversal and clean open/scroll/close repainting in the installed TUI, then run workspace gates. (The full workspace test run has one unrelated folder-browser failure in the concurrent project-tree work; the icon PTY test and workspace Clippy/format gates pass.)
+
+# Icon catalogue density switch
+
+- [x] Map the existing viewport-only catalogue renderer, selection geometry, and mouse scrolling contract.
+- [x] Restore efficient multi-column rendering as the default while retaining the reliable one-column mode.
+- [x] Add a top-right view switch with keyboard and mouse control, then cover and verify both modes in the installed TUI.
 
 # Keyboard shortcut base and sidebar settings access
 
@@ -240,3 +311,10 @@
 - [x] Make a repeat click on a visible folder choose that folder rather than the picker's current directory.
 - [x] Cover folder-overlay double-click selection and retain real PTY recursive folder coverage.
 - [x] Run focused and lint gates, rebuild/install, and prove the installed binary through the real PTY folder workflow.
+
+# Top-level projects and project-scoped AI restructure
+
+- [x] Add a persisted, top-level-only project container with a canonical project directory and migrate existing session trees into their launch project.
+- [x] Route entry creation, pickers, moves, folder changes, and project actions through project ownership/cwd rules.
+- [x] Replace whole-workspace AI restructuring with concurrent, project-scoped workers, per-project undo, aggregate status, and per-project recycle controls.
+- [x] Cover domain/IPC/client behavior, then run workspace gates, install, and prove the flow through an isolated installed-binary TUI session.

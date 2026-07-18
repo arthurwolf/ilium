@@ -478,7 +478,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     .await;
     assert!(
         row_actions_shown,
-        "expected the complete original row actions after hover, got: {:?}",
+        "expected the complete normal-icon row actions after hover, got: {:?}",
         tui.screen_text()
     );
 
@@ -656,8 +656,79 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected selected agent icon controls to update live, got: {:?}",
         tui.screen_text()
     );
-    // Keyboard remains the immediate tab successor to Appearance, keeping
-    // this navigation path keyboard-accessible as well as mouse-accessible.
+    // Icons follows Appearance. Exercise the live table, demo/real toolbar,
+    // and full-screen catalogue before continuing to Keyboard.
+    tui.write(b"\t")
+        .expect("switching to the Icons settings tab");
+    let icons_tab_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Icon assignments")
+                && screen.contains("Sidebar preview")
+                && screen.contains("Terminal")
+                && screen.contains("[+]")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        icons_tab_shown,
+        "expected the two-sided Icons settings tab, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"lr")
+        .expect("changing the group icon and switching the preview to the real tree");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("group = \"📂\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected a live Icons-table change to persist"
+    );
+    tui.write(b"\r")
+        .expect("opening the full-screen icon catalogue");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Icon catalogue")
+                    && screen.contains("Quick picks")
+                    && screen.contains("Official UTF-8 chapters first")
+                    && screen.contains("12372 total")
+                    && screen.contains("[● Multi-column]")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the full-screen grouped icon catalogue, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"v")
+        .expect("switching the catalogue to its single-column inspection view");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("[● Single column]"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the icon catalogue single-column switch, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"v")
+        .expect("restoring the default multi-column catalogue view");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("[● Multi-column]"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the icon catalogue multi-column switch, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"j\r")
+        .expect("selecting a catalogue icon for the group");
     tui.write(b"\t")
         .expect("switching to the Keyboard settings tab");
     let keyboard_tab_shown = wait_until(
@@ -1053,11 +1124,10 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         tui.screen_text()
     );
 
-    // Focus and expand the default group, then open the split dialog from
-    // the real default leader binding (Ctrl+A, Shift+W).
+    // The project and its default group are restored expanded, so select the
+    // default group directly before opening the split dialog.
     tui.write(b"\x01t").expect("focus tree");
     tui.write(b"\x1b[B").expect("select default group");
-    tui.write(b"\x1b[C").expect("expand default group");
     let both_fixture_panes = wait_until(
         || tui.screen_text().matches("cat").count() >= 2,
         WAIT_TIMEOUT,
@@ -1124,21 +1194,33 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     // while split presentation continues rendering every member.
     tui.write(b"\x1b[C").expect("expand selected split view");
     let split_children_visible = wait_until(
-        || tui.screen_text().matches("cat").count() >= 4,
+        || tui.screen_text().matches("cat").count() >= 2,
         WAIT_TIMEOUT,
     )
     .await;
-    assert!(split_children_visible, "split child rows did not render");
-    tui.write(b"\x1b[B").expect("select first split child");
-    tui.write(b"\r").expect("focus first split child");
+    assert!(
+        split_children_visible,
+        "split child rows did not render: {:?}",
+        tui.screen_text()
+    );
+    let split_child_rows = tui.with_screen(|screen| rows_containing(screen, "📟   cat"));
+    assert_eq!(split_child_rows.len(), 2, "expected two split child rows");
+    tui.write(&sgr_mouse_down(0, 8, split_child_rows[0]))
+        .expect("focus first split child");
+    tui.write(&sgr_mouse_up(8, split_child_rows[0]))
+        .expect("release first split child click");
+    tui.write(b"\r").expect("display first split child");
     tui.write(b"left-route\r")
         .expect("type into first split child");
     let first_routed = wait_until(|| tui.screen_text().contains("left-route"), WAIT_TIMEOUT).await;
     assert!(first_routed, "first split child did not receive input");
 
     tui.write(b"\x01t").expect("return focus to split tree");
-    tui.write(b"\x1b[B").expect("select second split child");
-    tui.write(b"\r").expect("focus second split child");
+    tui.write(&sgr_mouse_down(0, 8, split_child_rows[1]))
+        .expect("focus second split child");
+    tui.write(&sgr_mouse_up(8, split_child_rows[1]))
+        .expect("release second split child click");
+    tui.write(b"\r").expect("display second split child");
     tui.write(b"right-route\r")
         .expect("type into second split child");
     let both_routed = wait_until(
@@ -1355,13 +1437,11 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
 
-    // A freshly attached client starts with every group collapsed --
-    // expand the default group (same technique as this file's other test)
-    // so the two new "shell" panes are actually listed.
+    // The restored project/default hierarchy is already expanded, so select
+    // the default group without toggling it closed.
     tui.write(b"\x01t")
         .expect("writing Ctrl+A then t (FocusTree)");
     tui.write(b"\x1b[B").expect("writing Down arrow");
-    tui.write(b"\x1b[C").expect("writing Right arrow");
 
     // Wait for the spatial insertion transition itself to settle, not merely
     // for two partial labels to become visible while their rows are still
@@ -1446,7 +1526,8 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // should remain on screen briefly with one of the two labels translated
     // left. Two names plus only one settled fixed-width label distinguishes
     // that exit frame from both the pre-close and post-transition states.
-    tui.write(b"\x1b[B").expect("selecting the first pane row");
+    tui.write(b"\x1b[B\x1b[B")
+        .expect("selecting the first pane row below the default group");
     tui.write(b"\x01x")
         .expect("writing Ctrl+A then x (ClosePane)");
     let removal_motion_observed = wait_until(
@@ -2255,11 +2336,9 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         tui.screen_text()
     );
 
-    // Expand the group, select the `cat` pane, and display its viewport so
-    // delayed input is observable independently of the sidebar countdown.
-    tui.write(b"\x01t").expect("focus tree");
-    tui.write(b"\x1b[B").expect("select default group");
-    tui.write(b"\x1b[C").expect("expand default group");
+    // The restored default group is already expanded. Locate the real pane
+    // row and use its context menu directly, avoiding unrelated selection
+    // state while verifying scheduling.
     assert!(
         wait_until(
             || tui.screen_text().contains("\u{1f4df}   cat"),
@@ -2269,9 +2348,6 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         "expected terminal row after expanding default group, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\r")
-        .expect("select and display the cat pane");
-
     // Locate the actual rendered row and right-click it. The popup's second
     // content row is the terminal-only scheduled-input action.
     let terminal_rows = tui.with_screen(|screen| rows_containing(screen, "\u{1f4df}   cat"));
@@ -2283,6 +2359,10 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     );
     let terminal_row = terminal_rows[0];
     let menu_column = 8;
+    tui.write(&sgr_mouse_down(0, menu_column, terminal_row))
+        .expect("focus terminal row before scheduling");
+    tui.write(&sgr_mouse_up(menu_column, terminal_row))
+        .expect("release terminal row focus click");
     tui.write(&sgr_mouse_down(2, menu_column, terminal_row))
         .expect("right-click terminal row");
     assert!(
@@ -2439,7 +2519,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     );
 
     // Hover reveals the action overlay and expands the tree horizontally.
-    // Read the Up glyph's actual terminal cell rather than duplicating the
+    // Read the Up icon's actual terminal cell rather than duplicating the
     // renderer's animated width or fixed-slot geometry in this PTY test.
     tui.write(&sgr_mouse_move(8, shell_row_before))
         .expect("hover boundary pane row");
@@ -2458,7 +2538,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
             WAIT_TIMEOUT,
         )
         .await,
-        "expected the hovered pane's Up control, got: {:?}",
+        "expected the hovered pane's Up icon, got: {:?}",
         tui.screen_text()
     );
     let move_up_column = tui.with_screen(|screen| {
@@ -2566,14 +2646,29 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
 
+    // Wait for the server-confirmed folder node, not merely for the already
+    // visible project row. Both share a basename and the client restores the
+    // project's persisted expanded state when that snapshot arrives.
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| rows_containing(screen, "folder-project").len() >= 2),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected server-confirmed folder root inside project, got: {:?}",
+        tui.screen_text()
+    );
+
     // Locate rows after each render so indentation never becomes a guessed
     // coordinate; each click follows the same hit-test and expansion path a
     // real user uses.
     let root_rows = tui.with_screen(|screen| rows_containing(screen, "folder-project"));
-    assert_eq!(root_rows.len(), 1, "expected one folder-root row");
-    tui.write(&sgr_mouse_down(0, 8, root_rows[0]))
+    let folder_row = *root_rows
+        .last()
+        .expect("expected persisted folder-root row");
+    tui.write(&sgr_mouse_down(0, 8, folder_row))
         .expect("expand folder root");
-    tui.write(&sgr_mouse_up(8, root_rows[0]))
+    tui.write(&sgr_mouse_up(8, folder_row))
         .expect("release folder-root click");
     assert!(
         wait_until(|| tui.screen_text().contains("alpha"), WAIT_TIMEOUT).await,

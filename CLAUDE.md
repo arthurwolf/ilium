@@ -81,8 +81,12 @@ Use the `directories` crate, never hardcode `~`:
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
 - Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see README "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
 - Milestones in the README (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read the README "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
+
+## Icon rendering
+
+- Never "fix" an icon rendering or width issue by replacing the normal UTF-8 icons with plain stable glyphs. Diagnose and correct the rendering, cell-width, or diff behavior while keeping normal icons as the default. A stable-glyph mode may exist only as an explicit, opt-in user preference.
 <!-- NEXUS:START -->
 ## Nexus Memory Substrate
-- Identity: [Soul](/home/developer/.config/nexus/soul.md)
+- Identity: [Soul](/ram/is.HghxSc/config/nexus/soul.md)
 - Project Context: [Project Context](/home/developer/dev/ai/ilium/.nexus/context.md)
 <!-- NEXUS:END -->

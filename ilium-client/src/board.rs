@@ -468,14 +468,30 @@ impl BoardPane {
     }
 
     /// Applies one editing input and commits the resulting card immediately.
-    /// Storage rejection restores both the document and editor cursor/history
-    /// so the panel never displays text that was not written to disk.
+    /// Storage rejection restores the edited field's prior buffer and the
+    /// touched card's prior title/body -- never the whole board -- so the
+    /// panel still never displays text that was not written to disk, but a
+    /// keystroke's rollback snapshot stays bounded by that one card instead
+    /// of growing with the size of the whole document (all columns, every
+    /// other card, and the full backing Markdown source for
+    /// `MarkdownFile`-backed boards).
     pub fn input_detail_editor(&mut self, input: Input) -> Result<bool, String> {
-        let previous = self.clone();
         let Some(editor) = self.detail_editor.as_mut() else {
             return Ok(false);
         };
-        let modified = match editor.focus {
+        let focus = editor.focus;
+        // Snapshot only the one field about to receive input -- not the
+        // other field, not the rest of the editor, not the board -- so a
+        // rejected edit can be reverted exactly. Must happen before
+        // `.input()` mutates the buffer in place, since ratatui-textarea's
+        // own undo history can hold more than one entry per `.input()` call
+        // (e.g. typing over an active selection deletes-then-inserts), so a
+        // single `.undo()` call cannot be relied on to fully revert it.
+        let field_before = match focus {
+            CardEditorField::Title => editor.title.clone(),
+            CardEditorField::Body => editor.body.clone(),
+        };
+        let modified = match focus {
             CardEditorField::Title => editor.title.input(input),
             CardEditorField::Body => editor.body.input(input),
         };
@@ -485,21 +501,45 @@ impl BoardPane {
 
         let title = editor.title_text();
         if title.trim().is_empty() {
-            *self = previous;
+            match focus {
+                CardEditorField::Title => editor.title = field_before,
+                CardEditorField::Body => editor.body = field_before,
+            }
             return Err("A card title cannot be empty".to_string());
         }
         let body = editor.body_text();
+        let selected_column = self.selected_column;
         let selected_card = self
             .selected_card
             .ok_or_else(|| "No card selected".to_string())?;
         let card = self
             .columns
-            .get_mut(self.selected_column)
+            .get_mut(selected_column)
             .and_then(|column| column.cards.get_mut(selected_card))
             .ok_or_else(|| "No card selected".to_string())?;
+        // Rollback scope for a failed save: this one card's prior title and
+        // body. Nothing else on the board changes as part of this call, so
+        // nothing else needs restoring.
+        let card_before = card.clone();
         card.title = title;
         card.body = body;
-        self.persist_or_restore(previous)?;
+
+        if let Err(error) = self.save() {
+            if let Some(card) = self
+                .columns
+                .get_mut(selected_column)
+                .and_then(|column| column.cards.get_mut(selected_card))
+            {
+                *card = card_before;
+            }
+            if let Some(editor) = self.detail_editor.as_mut() {
+                match focus {
+                    CardEditorField::Title => editor.title = field_before,
+                    CardEditorField::Body => editor.body = field_before,
+                }
+            }
+            return Err(error);
+        }
         Ok(true)
     }
 

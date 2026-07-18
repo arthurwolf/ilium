@@ -26,16 +26,26 @@
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 use ratatui::Frame;
+use tui_tree_widget::TreeState;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, AppearanceRow, InferenceRow, InferenceSettingField, InferenceTestState, KanbanBoardRow,
-    OllamaModelDiscoveryState, SettingsState, SettingsTab, SoundRow,
+    App, AppearanceRow, IconPickerColumnMode, InferenceRow, InferenceSettingField,
+    InferenceTestState, KanbanBoardRow, OllamaModelDiscoveryState, SettingsState, SettingsTab,
+    SoundRow,
 };
 use crate::config::{
     EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
     UiSettings,
+};
+use crate::icon_settings::{
+    catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
+    IconPickerChapter, IconPickerSearchResults, IconTarget,
 };
 use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::theme::{self, ColorScheme};
@@ -70,6 +80,42 @@ const ROW_LEFT_INSET: u16 = 2;
 /// Width of the `‹ ` hot zone that decrements/cycles-back a value; a click
 /// anywhere else in the control increments/cycles-forward.
 const DECREMENT_ZONE_WIDTH: u16 = 2;
+
+/// The icon table uses fixed terminal-cell columns rather than Rust string
+/// formatting widths. Emoji and bracketed selected choices have different
+/// UTF-8 byte lengths, but must never move a later column or its hit target.
+const ICON_TABLE_LABEL_WIDTH: usize = 18;
+const ICON_TABLE_CURRENT_WIDTH: usize = 7;
+const ICON_TABLE_CHOICE_WIDTH: usize = 4;
+const ICON_TABLE_CHOICE_COUNT: usize = 4;
+const ICON_TABLE_PICKER_LABEL: &str = "[+]";
+const ICON_TABLE_LEFT_INSET: usize = 1;
+const ICON_TABLE_PICKER_COLUMN: usize = ICON_TABLE_LEFT_INSET
+    + ICON_TABLE_LABEL_WIDTH
+    + 1
+    + ICON_TABLE_CURRENT_WIDTH
+    + 1
+    + (ICON_TABLE_CHOICE_WIDTH * ICON_TABLE_CHOICE_COUNT)
+    + (ICON_TABLE_CHOICE_COUNT - 1)
+    + 1;
+/// Outer width needed to show the fixed-width table row, including its two
+/// border cells. At this width the `[+]` button is visible and clickable.
+const ICON_TABLE_MIN_OUTER_WIDTH: u16 =
+    (ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.len() + 2) as u16;
+
+/// Result of a click on one visible row in the icon assignment table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconTableAction {
+    CycleSuggestion,
+    OpenCatalogue,
+}
+
+/// A target plus the precise control clicked on its table row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IconTableHit {
+    pub target: IconTarget,
+    pub action: IconTableAction,
+}
 
 /// The screen regions [`render`] draws into and mouse hit-testing reads
 /// back out -- computed fresh from `area` every frame/event rather than
@@ -124,10 +170,34 @@ const CLOSE_LABEL: &str = "\u{2715} Close";
 /// `crate::keys::handle_settings_event`/`crate::mouse::handle_settings_mouse`.
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     frame.render_widget(Clear, area);
+
+    // The catalogue is a complete interaction mode, not a translucent
+    // overlay. Rendering its frame before the dense Icons settings table
+    // prevents previous wide-glyph cells from becoming terminal-diff debris
+    // while the user scrolls or closes the picker.
+    if let Some(picker) = &state.icon_picker {
+        render_icon_picker(frame, area, picker);
+        return;
+    }
+
+    // The Icons assignment table follows a picker full of wide emoji. Give
+    // it its own near-black canvas so returning from either density mode
+    // repaints every physical terminal cell before this compact table draws.
+    if state.tab == SettingsTab::Icons {
+        frame.render_widget(
+            Block::default().style(Style::new().bg(Color::Rgb(2, 2, 2))),
+            area,
+        );
+    }
+
     let layout = compute_layout(area);
 
     render_header(frame, layout.header_area);
     render_tab_list(frame, layout.tab_list_area, state.tab);
+    if state.tab == SettingsTab::Icons {
+        render_icons_tab(frame, layout.content_area, app, state);
+        return;
+    }
     match state.tab {
         SettingsTab::Inference => {
             let lines = inference_lines(
@@ -181,6 +251,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::About => {
             render_scrollable(frame, layout.content_area, about_lines(), state.scroll);
         }
+        SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
     }
 }
 
@@ -301,6 +372,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         )
         .len() as u16,
         SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
+        SettingsTab::Icons => 0,
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
@@ -314,6 +386,626 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+/// Two-sided icon editor: a compact three-column selector table on the left,
+/// and an always-live miniature sidebar on the right. The preview stays
+/// intentionally independent from `tree_ui` so it can show every icon role
+/// even when the live session happens not to contain that node/status.
+fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
+    let (left, right) = icon_tab_columns(area);
+    let table_height = left.height.saturating_sub(2) as usize;
+    let start = usize::from(state.scroll).min(IconTarget::ALL.len());
+    let mut lines = vec![Line::from(Span::styled(
+        " Type                Now     Choices",
+        Style::new().add_modifier(Modifier::BOLD),
+    ))];
+    for (index, target) in IconTarget::ALL
+        .into_iter()
+        .enumerate()
+        .skip(start)
+        .take(table_height.saturating_sub(1))
+    {
+        let selected = index == state.selected_row;
+        let style = if selected {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new()
+        };
+        let suggestions = target
+            .suggestions()
+            .iter()
+            .map(|glyph| icon_choice_slot(glyph, *glyph == app.ui_settings.icons.glyph(target)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(Line::from(Span::styled(
+            format_icon_assignment_row(
+                target.label(),
+                app.ui_settings.icons.glyph(target),
+                &suggestions,
+            ),
+            style,
+        )));
+    }
+    let table = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Icon assignments "),
+    );
+    frame.render_widget(table, left);
+
+    let mode = if state.icons_preview_real {
+        "[ Demo ]  [● Real tree]"
+    } else {
+        "[● Demo ]  [ Real tree ]"
+    };
+    let toolbar = vec![
+        Line::from(Span::styled(
+            mode,
+            theme::selected_style().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            " click a mode; changes apply immediately",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+    ];
+    let toolbar_area = Rect::new(right.x, right.y, right.width, right.height.min(2));
+    frame.render_widget(Paragraph::new(toolbar), toolbar_area);
+    let preview_area = Rect::new(
+        right.x,
+        right.y.saturating_add(2),
+        right.width,
+        right.height.saturating_sub(2),
+    );
+    if state.icons_preview_real {
+        let mut preview_tree_state = TreeState::default();
+        crate::tree_ui::render(
+            frame,
+            preview_area,
+            &app.tree,
+            &mut preview_tree_state,
+            crate::tree_ui::TreeRenderOptions {
+                focused: false,
+                elapsed_ms: app.started_at.elapsed().as_millis(),
+                current_unix_millis: crate::scheduled_input::unix_millis_now(),
+                project_name: app.project_name.as_deref(),
+                is_project_name_loading: app.is_project_name_loading,
+                titles_loading: &app.titles_loading,
+                recently_created: &app.recently_created,
+                transitions: &app.tree_transitions,
+                agent_identifiers: &app.ui_settings.agent_identifiers,
+                icons: &app.ui_settings.icons,
+                tree_order: app.ui_settings.tree_order,
+                sidebar_density: app.ui_settings.sidebar_density,
+                use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+                hover: crate::tree_ui::TreeHoverState::default(),
+                panes: &app.panes,
+            },
+        );
+    } else {
+        let mut preview = vec![Line::from("")];
+        let icons = &app.ui_settings.icons;
+        preview.extend([
+            Line::from(format!("{} Workspace", icons.glyph(IconTarget::Group))),
+            Line::from(format!(
+                "  {} vertical build",
+                icons.glyph(IconTarget::SplitVertical)
+            )),
+            Line::from(format!(
+                "    {} {} {} Claude task",
+                icons.glyph(IconTarget::Claude),
+                icons.glyph(IconTarget::Working),
+                icons.glyph(IconTarget::Goal)
+            )),
+            Line::from(format!(
+                "    {} {} Codex review",
+                icons.glyph(IconTarget::Codex),
+                icons.glyph(IconTarget::WaitingApproval)
+            )),
+            Line::from(format!("  {} Notes", icons.glyph(IconTarget::Folder))),
+            Line::from(format!("    {} README.md", icons.glyph(IconTarget::Editor))),
+            Line::from(format!(
+                "    {} Planning board",
+                icons.glyph(IconTarget::Board)
+            )),
+            Line::from(format!(
+                "  {} {} shell",
+                icons.glyph(IconTarget::Terminal),
+                icons.glyph(IconTarget::Idle)
+            )),
+            Line::from(format!(
+                "  {} {} background task",
+                icons.glyph(IconTarget::OtherAgent),
+                icons.glyph(IconTarget::WaitingBackground)
+            )),
+            Line::from(format!(
+                "  {} {} finished agent",
+                icons.glyph(IconTarget::Antigravity),
+                icons.glyph(IconTarget::Done)
+            )),
+        ]);
+        frame.render_widget(
+            Paragraph::new(preview).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Sidebar preview "),
+            ),
+            preview_area,
+        );
+    }
+}
+
+/// Uses the exact same horizontal split for rendering and icon-table
+/// hit-testing, preventing a layout tweak from making pointer input drift.
+fn icon_tab_columns(area: Rect) -> (Rect, Rect) {
+    let percentage_width = area.width.saturating_mul(57) / 100;
+    // Keep the catalogue control on screen at compact sizes. Without this
+    // floor a 120-column terminal clipped `[+]`, making it impossible for
+    // the pointer to reach the full picker even though the row was visible.
+    let left_width = percentage_width
+        .max(ICON_TABLE_MIN_OUTER_WIDTH)
+        .min(area.width.saturating_sub(3));
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(left_width),
+            Constraint::Length(2),
+            Constraint::Min(1),
+        ])
+        .split(area);
+    (columns[0], columns[2])
+}
+
+/// Pads a value to a terminal-cell width. `format!("{value:<width$}")` is
+/// wrong for emoji because it measures Rust characters, not rendered cells.
+fn pad_icon_text(value: &str, width: usize) -> String {
+    let padding = width.saturating_sub(UnicodeWidthStr::width(value));
+    format!("{value}{}", " ".repeat(padding))
+}
+
+/// Renders one fixed-width quick-choice slot. Both ` 📁 ` and `[📁]` occupy
+/// four terminal cells, so selecting an icon cannot shift the later choices
+/// or the catalogue button.
+fn icon_choice_slot(glyph: &str, is_selected: bool) -> String {
+    let value = if is_selected {
+        format!("[{glyph}]")
+    } else {
+        format!(" {glyph} ")
+    };
+    pad_icon_text(&value, ICON_TABLE_CHOICE_WIDTH)
+}
+
+/// Builds a row with stable display-cell columns for label, current glyph,
+/// suggestions, and the catalogue action.
+fn format_icon_assignment_row(label: &str, current_glyph: &str, suggestions: &str) -> String {
+    format!(
+        " {} {} {} {}",
+        pad_icon_text(label, ICON_TABLE_LABEL_WIDTH),
+        pad_icon_text(current_glyph, ICON_TABLE_CURRENT_WIDTH),
+        suggestions,
+        ICON_TABLE_PICKER_LABEL,
+    )
+}
+
+/// The scalable catalogue overlay geometry. The body is a single scrollable
+/// document rather than a category menu paired with a disconnected grid.
+pub struct IconPickerLayout {
+    pub popup: Rect,
+    pub search_area: Rect,
+    pub view_switch_area: Rect,
+    pub document_area: Rect,
+}
+
+const ICON_PICKER_HEADER_HEIGHT: u16 = 4;
+/// A three-column desktop catalogue remains dense without forcing the five
+/// narrow cells that made emoji-width differences visually fragile.
+const ICON_PICKER_MULTICOLUMN_CELL_WIDTH: u16 = 48;
+const ICON_PICKER_MIN_MULTICOLUMNS: usize = 2;
+const ICON_PICKER_MAX_MULTICOLUMNS: usize = 3;
+const ICON_PICKER_VIEW_SWITCH_WIDTH: u16 = 39;
+
+pub fn icon_picker_layout(area: Rect) -> IconPickerLayout {
+    let popup = Rect::new(
+        area.x.saturating_add(2),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(4),
+        area.height.saturating_sub(2),
+    );
+    let inner = popup.inner(ratatui::layout::Margin::new(1, 1));
+    IconPickerLayout {
+        popup,
+        search_area: Rect::new(inner.x, inner.y, inner.width, ICON_PICKER_HEADER_HEIGHT),
+        view_switch_area: Rect::new(
+            inner
+                .x
+                .saturating_add(inner.width.saturating_sub(ICON_PICKER_VIEW_SWITCH_WIDTH)),
+            inner.y,
+            inner.width.min(ICON_PICKER_VIEW_SWITCH_WIDTH),
+            1,
+        ),
+        document_area: Rect::new(
+            inner.x,
+            inner.y.saturating_add(ICON_PICKER_HEADER_HEIGHT),
+            inner.width,
+            inner.height.saturating_sub(ICON_PICKER_HEADER_HEIGHT),
+        ),
+    }
+}
+
+/// Result of a click inside [`icon_picker_layout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconPickerHit {
+    Close,
+    ToggleColumnMode,
+    ActivateSearch,
+    Entry(usize),
+    ScrollTo(usize),
+}
+
+enum IconPickerDocumentRow<'a> {
+    Chapter(&'a IconPickerChapter),
+    Entries {
+        chapter: &'a IconPickerChapter,
+        chapter_offset: usize,
+        entry_offset: usize,
+    },
+    Spacer,
+}
+
+pub fn icon_picker_document_row_count(results: &IconPickerSearchResults, columns: usize) -> usize {
+    results
+        .chapters
+        .iter()
+        .map(|chapter| 2 + chapter.entries.len().div_ceil(columns))
+        .sum()
+}
+
+/// Resolves only one visible document row. This avoids allocating thousands
+/// of row/index objects for every terminal paint while scrolling.
+fn icon_picker_document_row_at(
+    results: &IconPickerSearchResults,
+    columns: usize,
+    mut row_index: usize,
+) -> Option<IconPickerDocumentRow<'_>> {
+    let mut entry_offset = 0;
+    for chapter in &results.chapters {
+        if row_index == 0 {
+            return Some(IconPickerDocumentRow::Chapter(chapter));
+        }
+        row_index -= 1;
+        let entry_row_count = chapter.entries.len().div_ceil(columns);
+        if row_index < entry_row_count {
+            return Some(IconPickerDocumentRow::Entries {
+                chapter,
+                chapter_offset: row_index * columns,
+                entry_offset,
+            });
+        }
+        row_index -= entry_row_count;
+        if row_index == 0 {
+            return Some(IconPickerDocumentRow::Spacer);
+        }
+        row_index -= 1;
+        entry_offset += chapter.entries.len();
+    }
+    None
+}
+
+fn picker_document_columns(area: Rect, column_mode: IconPickerColumnMode) -> usize {
+    match column_mode {
+        IconPickerColumnMode::SingleColumn => 1,
+        IconPickerColumnMode::MultiColumn => usize::from(area.width)
+            .saturating_div(usize::from(ICON_PICKER_MULTICOLUMN_CELL_WIDTH))
+            .clamp(ICON_PICKER_MIN_MULTICOLUMNS, ICON_PICKER_MAX_MULTICOLUMNS),
+    }
+}
+
+/// Returns the current keyboard stride from the same responsive document
+/// geometry the renderer and mouse hit tester use.
+pub fn icon_picker_grid_columns(screen_area: Rect, column_mode: IconPickerColumnMode) -> usize {
+    let layout = icon_picker_layout(screen_area);
+    picker_document_columns(layout.document_area, column_mode)
+}
+
+fn truncate_icon_text(value: &str, width: usize) -> String {
+    let mut result = String::new();
+    let mut occupied_width = 0;
+    for grapheme in UnicodeSegmentation::graphemes(value, true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if occupied_width + grapheme_width > width {
+            break;
+        }
+        result.push_str(grapheme);
+        occupied_width += grapheme_width;
+    }
+    result
+}
+
+fn icon_picker_cell(entry: &IconCatalogEntry, is_selected: bool, width: usize) -> String {
+    let marker = if is_selected { "[" } else { " " };
+    let suffix = if is_selected { "]" } else { " " };
+    truncate_icon_text(
+        &format!("{marker}{}{suffix} {}", entry.glyph, entry.name),
+        width,
+    )
+}
+
+/// Gives each density mode a distinct near-black canvas style. Switching the
+/// style forces the terminal diff to rewrite otherwise-blank cells that can
+/// be physical continuations of a previously rendered wide emoji.
+fn icon_picker_canvas_style(column_mode: IconPickerColumnMode) -> Style {
+    match column_mode {
+        IconPickerColumnMode::MultiColumn => Style::new().bg(Color::Black),
+        IconPickerColumnMode::SingleColumn => Style::new().bg(Color::Rgb(1, 1, 1)),
+    }
+}
+
+pub fn icon_picker_row_for_entry(
+    results: &IconPickerSearchResults,
+    columns: usize,
+    selected_entry: usize,
+) -> usize {
+    let mut entry_offset = 0;
+    let mut row_offset = 0;
+    for chapter in &results.chapters {
+        if selected_entry < entry_offset + chapter.entries.len() {
+            return row_offset + 1 + (selected_entry - entry_offset) / columns;
+        }
+        entry_offset += chapter.entries.len();
+        row_offset += 2 + chapter.entries.len().div_ceil(columns);
+    }
+    0
+}
+
+pub fn icon_picker_scroll_for_entry(
+    screen_area: Rect,
+    picker: &crate::app::IconPickerState,
+) -> usize {
+    let layout = icon_picker_layout(screen_area);
+    let columns = picker_document_columns(layout.document_area, picker.column_mode);
+    let visible_rows = usize::from(layout.document_area.height).max(1);
+    let total_rows = icon_picker_document_row_count(&picker.search_results, columns);
+    let selected_row =
+        icon_picker_row_for_entry(&picker.search_results, columns, picker.selected_entry);
+    let max_scroll = total_rows.saturating_sub(visible_rows);
+    if selected_row < picker.scroll_row {
+        selected_row
+    } else if selected_row >= picker.scroll_row + visible_rows {
+        selected_row
+            .saturating_sub(visible_rows.saturating_sub(1))
+            .min(max_scroll)
+    } else {
+        picker.scroll_row.min(max_scroll)
+    }
+}
+
+fn render_icon_picker(frame: &mut Frame, area: Rect, picker: &crate::app::IconPickerState) {
+    let layout = icon_picker_layout(area);
+    let entry_count = picker.search_results.entry_count;
+    let selected_entry = picker.selected_entry.min(entry_count.saturating_sub(1));
+    let columns = picker_document_columns(layout.document_area, picker.column_mode);
+    let visible_rows = usize::from(layout.document_area.height).max(1);
+    let total_rows = icon_picker_document_row_count(&picker.search_results, columns);
+    let start = picker
+        .scroll_row
+        .min(total_rows.saturating_sub(visible_rows));
+    // Paint a concrete dark canvas, rather than merely resetting cells. This
+    // forces crossterm to overwrite every cell that belonged to the dense
+    // settings table in the previous frame, including a terminal's stale
+    // continuation cell after an emoji whose width differs from Unicode's
+    // table. The catalogue deliberately owns the entire screen while open.
+    frame.render_widget(
+        Block::default().style(icon_picker_canvas_style(picker.column_mode)),
+        area,
+    );
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                format!(
+                    "Choose an icon for {} · {} official UTF-8 · {} Nerd Font · {} total",
+                    picker.target.label(),
+                    catalogue_icon_count_for(IconCatalogFamily::OfficialUtf8),
+                    catalogue_icon_count_for(IconCatalogFamily::NerdFont),
+                    catalogue_icon_count(),
+                ),
+                Style::new().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "Official UTF-8 chapters first · Nerd Font chapters afterwards · / searches every name",
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+            Line::from(if picker.is_searching {
+                format!("Search: {}_", picker.search_query)
+            } else if picker.search_query.is_empty() {
+                "Search: / to find by icon name or category".to_string()
+            } else {
+                format!("Search: {}", picker.search_query)
+            }),
+            Line::from(Span::styled(
+                format!(
+                    "{} chapter{} · {} icon{} · arrows move · V switches view · Enter chooses · Esc closes",
+                    picker.search_results.chapters.len(),
+                    if picker.search_results.chapters.len() == 1 { "" } else { "s" },
+                    entry_count,
+                    if entry_count == 1 { "" } else { "s" },
+                ),
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+        ]),
+        layout.search_area,
+    );
+    let view_switch = match picker.column_mode {
+        IconPickerColumnMode::MultiColumn => "[● Multi-column]  [ Single column ]",
+        IconPickerColumnMode::SingleColumn => "[ Multi-column ]  [● Single column]",
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            view_switch,
+            theme::selected_style().add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Right),
+        layout.view_switch_area,
+    );
+
+    let cell_width = usize::from(layout.document_area.width)
+        .div_ceil(columns)
+        .max(1);
+    for (visible_offset, row_index) in (start..(start + visible_rows).min(total_rows)).enumerate() {
+        let row_area = Rect::new(
+            layout.document_area.x,
+            layout.document_area.y.saturating_add(visible_offset as u16),
+            layout.document_area.width,
+            1,
+        );
+        match icon_picker_document_row_at(&picker.search_results, columns, row_index) {
+            Some(IconPickerDocumentRow::Chapter(chapter)) => frame.render_widget(
+                Paragraph::new(Span::styled(
+                    truncate_icon_text(
+                        &format!(
+                            "── {} · {} ({}) ──",
+                            chapter.family.label(),
+                            chapter.label,
+                            chapter.entries.len()
+                        ),
+                        usize::from(row_area.width),
+                    ),
+                    Style::new().add_modifier(Modifier::BOLD),
+                )),
+                row_area,
+            ),
+            Some(IconPickerDocumentRow::Entries {
+                chapter,
+                chapter_offset,
+                entry_offset,
+            }) => {
+                for (column, entry) in chapter.entries
+                    [chapter_offset..(chapter_offset + columns).min(chapter.entries.len())]
+                    .iter()
+                    .enumerate()
+                {
+                    let cell_x = row_area.x.saturating_add((column * cell_width) as u16);
+                    let remaining_width = row_area.right().saturating_sub(cell_x);
+                    let cell_area = Rect::new(
+                        cell_x,
+                        row_area.y,
+                        remaining_width.min(cell_width as u16),
+                        1,
+                    );
+                    frame.render_widget(
+                        Paragraph::new(icon_picker_cell(
+                            entry,
+                            entry_offset + chapter_offset + column == selected_entry,
+                            usize::from(cell_area.width),
+                        )),
+                        cell_area,
+                    );
+                }
+            }
+            Some(IconPickerDocumentRow::Spacer) | None => {}
+        }
+    }
+    if total_rows > visible_rows {
+        let mut scrollbar_state = ScrollbarState::new(total_rows)
+            .viewport_content_length(visible_rows)
+            .position(start);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            layout.document_area,
+            &mut scrollbar_state,
+        );
+    }
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Icon catalogue "),
+        layout.popup,
+    );
+}
+
+/// Resolves mouse coordinates using the exact single-document geometry the
+/// overlay renders. `Entry` is a filtered document ordinal.
+pub fn icon_picker_hit(
+    area: Rect,
+    picker: &crate::app::IconPickerState,
+    position: Position,
+) -> Option<IconPickerHit> {
+    let layout = icon_picker_layout(area);
+    if !layout.popup.contains(position) {
+        return Some(IconPickerHit::Close);
+    }
+    if position
+        == Position::new(
+            layout.popup.x + layout.popup.width.saturating_sub(1),
+            layout.popup.y,
+        )
+    {
+        return Some(IconPickerHit::Close);
+    }
+    if layout.view_switch_area.contains(position) {
+        return Some(IconPickerHit::ToggleColumnMode);
+    }
+    if layout.search_area.contains(position) {
+        return Some(IconPickerHit::ActivateSearch);
+    }
+    if layout.document_area.contains(position) {
+        let columns = picker_document_columns(layout.document_area, picker.column_mode);
+        let visible_rows = usize::from(layout.document_area.height).max(1);
+        let total_rows = icon_picker_document_row_count(&picker.search_results, columns);
+        let start = picker
+            .scroll_row
+            .min(total_rows.saturating_sub(visible_rows));
+        if position.x == layout.document_area.right().saturating_sub(1) && total_rows > visible_rows
+        {
+            let track_row = usize::from(position.y.saturating_sub(layout.document_area.y));
+            let max_scroll = total_rows.saturating_sub(visible_rows);
+            let target =
+                max_scroll.saturating_mul(track_row) / visible_rows.saturating_sub(1).max(1);
+            return Some(IconPickerHit::ScrollTo(target));
+        }
+        let row = start + usize::from(position.y.saturating_sub(layout.document_area.y));
+        let Some(IconPickerDocumentRow::Entries {
+            chapter,
+            chapter_offset,
+            entry_offset,
+        }) = icon_picker_document_row_at(&picker.search_results, columns, row)
+        else {
+            return None;
+        };
+        let cell_width = layout.document_area.width.div_ceil(columns as u16).max(1);
+        let column = usize::from(position.x.saturating_sub(layout.document_area.x) / cell_width)
+            .min(columns.saturating_sub(1));
+        let entry_index = entry_offset + chapter_offset + column;
+        return (entry_index < entry_offset + chapter.entries.len())
+            .then_some(IconPickerHit::Entry(entry_index));
+    }
+    None
+}
+
+pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<IconTableHit> {
+    let (table, _) = icon_tab_columns(area);
+    let table_inner = table.inner(ratatui::layout::Margin::new(1, 1));
+    if !table_inner.contains(position) || position.y <= table_inner.y {
+        return None;
+    }
+
+    let target_index = usize::from(position.y - table_inner.y - 1) + usize::from(scroll);
+    let target = IconTarget::ALL.get(target_index).copied()?;
+    let picker_start = table_inner
+        .x
+        .saturating_add(ICON_TABLE_PICKER_COLUMN as u16);
+    let picker_end = picker_start.saturating_add(ICON_TABLE_PICKER_LABEL.width() as u16);
+    let action = if position.x >= picker_start && position.x < picker_end {
+        IconTableAction::OpenCatalogue
+    } else {
+        IconTableAction::CycleSuggestion
+    };
+    Some(IconTableHit { target, action })
+}
+
+pub fn icons_preview_mode_hit(area: Rect, position: Position) -> Option<bool> {
+    let (_, right) = icon_tab_columns(area);
+    let right_start = right.x;
+    (position.y == area.y && position.x >= right_start).then_some(position.x >= right_start + 11)
 }
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
@@ -1191,6 +1883,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ColorScheme => "Color theme",
         AppearanceRow::MotionLevel => "Motion level",
         AppearanceRow::SidebarDensity => "Sidebar density",
+        AppearanceRow::UseStableGlyphs => "Use stable glyphs",
     }
 }
 
@@ -1220,6 +1913,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Full keeps spatial transitions; reduced and off minimise motion."
         }
         AppearanceRow::SidebarDensity => "Controls the vertical spacing used by the tree sidebar.",
+        AppearanceRow::UseStableGlyphs => {
+            "Use plain one-cell symbols for hover actions on terminals that cannot render emoji; normal icons remain the default."
+        }
     }
 }
 
@@ -1246,6 +1942,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         },
         AppearanceRow::MotionLevel => ui.motion_level.label().to_string(),
         AppearanceRow::SidebarDensity => ui.sidebar_density.label().to_string(),
+        AppearanceRow::UseStableGlyphs => {
+            if ui.use_stable_glyphs {
+                "On".to_string()
+            } else {
+                "Off (normal icons)".to_string()
+            }
+        }
     }
 }
 
@@ -1502,33 +2205,218 @@ mod tests {
             tab_at(area, Position::new(2, 1)),
             Some(SettingsTab::Appearance)
         );
+        assert_eq!(tab_at(area, Position::new(2, 3)), Some(SettingsTab::Icons));
         assert_eq!(
-            tab_at(area, Position::new(2, 3)),
+            tab_at(area, Position::new(2, 5)),
             Some(SettingsTab::Keyboard)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 5)),
+            tab_at(area, Position::new(2, 7)),
             Some(SettingsTab::Terminal)
         );
-        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Editor));
+        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::Editor));
         assert_eq!(
-            tab_at(area, Position::new(2, 9)),
+            tab_at(area, Position::new(2, 11)),
             Some(SettingsTab::Session)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 11)),
+            tab_at(area, Position::new(2, 13)),
             Some(SettingsTab::KanbanBoard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::Sound));
+        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Sound));
         assert_eq!(
-            tab_at(area, Position::new(2, 15)),
+            tab_at(area, Position::new(2, 17)),
             Some(SettingsTab::Inference)
         );
-        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 19)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
         assert_eq!(tab_at(area, Position::new(2, 2)), None);
+    }
+
+    #[test]
+    fn icons_tab_renders_the_assignment_preview_and_chaptered_catalogue() {
+        let app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let state = SettingsState {
+            tab: SettingsTab::Icons,
+            ..SettingsState::default()
+        };
+        let backend = TestBackend::new(160, 45);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Icon assignments"));
+        assert!(rendered.contains("Sidebar preview"));
+        assert!(rendered.contains("Terminal"));
+        assert!(rendered.contains("[+]"));
+
+        let picker_state = SettingsState {
+            tab: SettingsTab::Icons,
+            icon_picker: Some(crate::app::IconPickerState::new(IconTarget::Terminal)),
+            ..SettingsState::default()
+        };
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &picker_state))
+            .unwrap();
+        let picker_rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(picker_rendered.contains("Icon catalogue"));
+        assert!(picker_rendered.contains("Quick picks"));
+        assert!(picker_rendered.contains("Official UTF-8 chapters first"));
+        assert!(picker_rendered.contains("Multi-column"));
+        assert!(picker_rendered.contains("folder"));
+        assert!(picker_rendered.contains("Nerd Font"));
+        assert!(
+            !picker_rendered.contains("Sidebar preview"),
+            "the catalogue must render as its own frame, without stale Icons-tab content"
+        );
+        assert!(
+            !picker_rendered.contains("[+]"),
+            "the previous assignment table must not leak through the catalogue"
+        );
+
+        let filtered_picker_state = SettingsState {
+            tab: SettingsTab::Icons,
+            icon_picker: Some(crate::app::IconPickerState {
+                search_query: "rocket".to_string(),
+                search_results: crate::icon_settings::picker_search_results("rocket"),
+                ..crate::app::IconPickerState::new(IconTarget::Terminal)
+            }),
+            ..SettingsState::default()
+        };
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &filtered_picker_state))
+            .unwrap();
+        let filtered_rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(filtered_rendered.contains("rocket"));
+        assert!(!filtered_rendered.contains("Quick picks"));
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let returned_to_icons = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(returned_to_icons.contains("Icon assignments"));
+        assert!(
+            !returned_to_icons.contains("rocket"),
+            "returning to icon assignments must not retain catalogue cells"
+        );
+    }
+
+    #[test]
+    fn icons_tab_keeps_the_catalogue_button_visible_at_compact_width() {
+        let app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let state = SettingsState {
+            tab: SettingsTab::Icons,
+            ..SettingsState::default()
+        };
+        let backend = TestBackend::new(120, 45);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("[+]"));
+    }
+
+    #[test]
+    fn icon_table_hit_uses_the_rendered_data_row_and_exact_catalogue_button() {
+        let area = Rect::new(0, 0, 120, 30);
+        let (table, _) = icon_tab_columns(area);
+        let inner = table.inner(ratatui::layout::Margin::new(1, 1));
+
+        // The first inner line is the table heading. The first target starts
+        // one row below it, and must not be interpreted as the second target.
+        assert_eq!(
+            icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 1)),
+            Some(IconTableHit {
+                target: IconTarget::Group,
+                action: IconTableAction::CycleSuggestion,
+            })
+        );
+        assert_eq!(
+            icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 2)),
+            Some(IconTableHit {
+                target: IconTarget::SplitVertical,
+                action: IconTableAction::CycleSuggestion,
+            })
+        );
+        assert_eq!(
+            icons_table_hit(
+                area,
+                0,
+                Position::new(inner.x + ICON_TABLE_PICKER_COLUMN as u16, inner.y + 1),
+            ),
+            Some(IconTableHit {
+                target: IconTarget::Group,
+                action: IconTableAction::OpenCatalogue,
+            })
+        );
+        assert_eq!(
+            icons_table_hit(area, 0, Position::new(inner.x, inner.y)),
+            None
+        );
+    }
+
+    #[test]
+    fn icon_choices_keep_fixed_terminal_cell_width_when_selected() {
+        for target in IconTarget::ALL {
+            for glyph in target.suggestions() {
+                let unselected_slot = icon_choice_slot(glyph, false);
+                let selected_slot = icon_choice_slot(glyph, true);
+                assert_eq!(
+                    UnicodeWidthStr::width(unselected_slot.as_str()),
+                    ICON_TABLE_CHOICE_WIDTH
+                );
+                assert_eq!(
+                    UnicodeWidthStr::width(selected_slot.as_str()),
+                    ICON_TABLE_CHOICE_WIDTH
+                );
+            }
+        }
+
+        let choices = IconTarget::Folder
+            .suggestions()
+            .iter()
+            .map(|glyph| icon_choice_slot(glyph, *glyph == "🗂️"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let row = format_icon_assignment_row("Folder", "🗂️", &choices);
+        assert_eq!(
+            UnicodeWidthStr::width(row.as_str()),
+            ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.width()
+        );
     }
 
     #[test]
@@ -1620,6 +2508,7 @@ mod tests {
             tab: SettingsTab::Inference,
             selected_row: 0,
             scroll: 0,
+            ..SettingsState::default()
         };
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1650,6 +2539,7 @@ mod tests {
             tab: SettingsTab::Inference,
             selected_row: 1,
             scroll: 0,
+            ..SettingsState::default()
         };
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1714,7 +2604,7 @@ mod tests {
     }
 
     #[test]
-    fn appearance_lines_expose_agent_mode_and_both_icon_selectors() {
+    fn appearance_lines_expose_agent_mode_icon_selectors_and_stable_glyph_opt_in() {
         let ui = UiSettings {
             tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
@@ -1739,6 +2629,8 @@ mod tests {
         assert!(rendered.contains("🪄 Magic wand"));
         assert!(rendered.contains("Codex icon"));
         assert!(rendered.contains("🛠️ Tools"));
+        assert!(rendered.contains("Use stable glyphs"));
+        assert!(rendered.contains("Off (normal icons)"));
     }
 
     #[test]
@@ -1862,6 +2754,126 @@ mod tests {
             }],
             was_truncated: false,
         }
+    }
+
+    #[test]
+    fn icon_picker_hit_tracks_the_rendered_search_and_document_windows() {
+        let area = Rect::new(0, 0, 160, 45);
+        let picker = crate::app::IconPickerState::new(IconTarget::Terminal);
+        let layout = icon_picker_layout(area);
+
+        assert_eq!(
+            icon_picker_hit(
+                area,
+                &picker,
+                Position::new(layout.search_area.x, layout.search_area.y),
+            ),
+            Some(IconPickerHit::ActivateSearch),
+        );
+        assert_eq!(
+            icon_picker_hit(
+                area,
+                &picker,
+                Position::new(layout.view_switch_area.x, layout.view_switch_area.y),
+            ),
+            Some(IconPickerHit::ToggleColumnMode),
+        );
+        assert_eq!(
+            icon_picker_hit(
+                area,
+                &picker,
+                Position::new(layout.document_area.x, layout.document_area.y + 1),
+            ),
+            Some(IconPickerHit::Entry(0)),
+        );
+        assert_eq!(
+            icon_picker_hit(area, &picker, Position::new(0, 0)),
+            Some(IconPickerHit::Close),
+        );
+        assert!(matches!(
+            icon_picker_hit(
+                area,
+                &picker,
+                Position::new(
+                    layout.document_area.right().saturating_sub(1),
+                    layout.document_area.y + 4,
+                ),
+            ),
+            Some(IconPickerHit::ScrollTo(_)),
+        ));
+    }
+
+    #[test]
+    fn icon_picker_defaults_to_multi_column_and_maps_cells_without_crossing_rows() {
+        let area = Rect::new(0, 0, 160, 45);
+        let picker = crate::app::IconPickerState::new(IconTarget::Terminal);
+        let layout = icon_picker_layout(area);
+        let multi_columns = picker_document_columns(layout.document_area, picker.column_mode);
+        let single_columns =
+            picker_document_columns(layout.document_area, IconPickerColumnMode::SingleColumn);
+
+        assert_eq!(picker.column_mode, IconPickerColumnMode::MultiColumn);
+        assert_eq!(multi_columns, 3);
+        assert_eq!(single_columns, 1);
+        assert_eq!(
+            icon_picker_row_for_entry(&picker.search_results, multi_columns, 2),
+            1,
+            "the third icon belongs in the first multi-column entry row"
+        );
+        assert_eq!(
+            icon_picker_row_for_entry(&picker.search_results, single_columns, 2),
+            3,
+            "the same icon remains independently addressable in one-column mode"
+        );
+
+        let cell_width = layout.document_area.width.div_ceil(multi_columns as u16);
+        assert_eq!(
+            icon_picker_hit(
+                area,
+                &picker,
+                Position::new(
+                    layout.document_area.x + cell_width * 2,
+                    layout.document_area.y + 1
+                ),
+            ),
+            Some(IconPickerHit::Entry(2)),
+        );
+    }
+
+    #[test]
+    fn icon_picker_density_modes_use_distinct_dark_canvases_for_safe_repaint() {
+        let multi_canvas = icon_picker_canvas_style(IconPickerColumnMode::MultiColumn);
+        let single_canvas = icon_picker_canvas_style(IconPickerColumnMode::SingleColumn);
+
+        assert_ne!(multi_canvas, single_canvas);
+        assert_eq!(multi_canvas.bg, Some(Color::Black));
+        assert_eq!(single_canvas.bg, Some(Color::Rgb(1, 1, 1)));
+    }
+
+    #[test]
+    fn icon_picker_never_splits_a_multi_codepoint_emoji_while_clipping_a_cell() {
+        let glyph = "👩‍❤️‍💋‍👩";
+        assert_eq!(
+            truncate_icon_text(glyph, UnicodeWidthStr::width(glyph)),
+            glyph,
+            "the terminal must receive a complete emoji grapheme, never a dangling gender sign"
+        );
+    }
+
+    #[test]
+    fn icon_picker_keeps_a_far_keyboard_selection_inside_its_viewport() {
+        let area = Rect::new(0, 0, 160, 45);
+        let mut picker = crate::app::IconPickerState::new(IconTarget::Terminal);
+        picker.selected_entry = 1_000;
+        let scroll_row = icon_picker_scroll_for_entry(area, &picker);
+        let layout = icon_picker_layout(area);
+        let columns = picker_document_columns(layout.document_area, picker.column_mode);
+        let selected_row = icon_picker_row_for_entry(&picker.search_results, columns, 1_000);
+        let viewport_height = usize::from(layout.document_area.height);
+
+        assert!(scroll_row > 0);
+        assert!(selected_row >= scroll_row);
+        assert!(selected_row < scroll_row + viewport_height);
     }
 
     #[test]

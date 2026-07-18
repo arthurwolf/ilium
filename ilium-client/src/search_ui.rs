@@ -247,6 +247,19 @@ impl SearchState {
     pub fn is_searching(&self) -> bool {
         self.search_in_flight_revision.is_some()
     }
+
+    /// Returns the exact instant at which a quiet query becomes eligible for
+    /// its background scan.  The client event loop uses this to sleep until
+    /// useful maintenance is due instead of waking every 50 ms while a user
+    /// is merely waiting for the debounce to expire.
+    pub fn next_due_search_at(&self) -> Option<Instant> {
+        self.is_waiting_for_debounce()
+            .then(|| {
+                self.last_query_edit
+                    .map(|edited_at| edited_at + SEARCH_DEBOUNCE)
+            })
+            .flatten()
+    }
 }
 
 /// Scans an immutable workspace snapshot. It is deliberately pure and owns
@@ -262,9 +275,15 @@ pub fn search_workspace(
         }
         match &source.content {
             WorkspaceSearchContent::Terminal(history) => {
-                let last_command = terminal_last_command(history);
+                // Strip control sequences exactly once per pane per search:
+                // the last-command lookup and the match scan below both walk
+                // the same stripped text/offset-map instead of each running
+                // its own full-history strip over a multi-megabyte journal.
+                let searchable = strip_terminal_controls(history);
+                let last_command = last_command_from_text(&searchable.text);
                 find_terminal_results(
-                    history,
+                    &searchable,
+                    history.len(),
                     &request.query,
                     |before, matched, after, history_end_byte| {
                         result_from_source(
@@ -363,11 +382,17 @@ pub fn find_text_results(
     }
 }
 
-/// Searches raw terminal history after removing control sequences. The byte
-/// offset table preserves a route back into the original raw PTY stream, so
-/// click-to-open can recreate the visual terminal exactly around a hit.
-pub fn find_terminal_results(
-    history: &[u8],
+/// Searches text already stripped of terminal control sequences by
+/// [`strip_terminal_controls`]. Callers that need both the last command and
+/// the match scan strip the raw history once and reuse the same
+/// [`SearchableTerminalText`] for both, instead of each re-running the strip
+/// over the full retained PTY journal. `raw_len` is only the fallback used
+/// when a match's offset table lookup misses (it should never miss in
+/// practice); it lets this function avoid holding the raw byte slice just
+/// for that one case.
+fn find_terminal_results(
+    searchable: &SearchableTerminalText,
+    raw_len: usize,
     query: &str,
     make_result: impl Fn(&str, &str, &str, usize) -> SearchResult,
     results: &mut Vec<SearchResult>,
@@ -375,7 +400,6 @@ pub fn find_terminal_results(
     if query.is_empty() || results.len() >= MAX_RESULTS {
         return;
     }
-    let searchable = strip_terminal_controls(history);
     let folded_text = searchable.text.to_ascii_lowercase();
     let folded_query = query.to_ascii_lowercase();
     let mut start = 0;
@@ -393,7 +417,8 @@ pub fn find_terminal_results(
             .raw_ends
             .get(match_end.saturating_sub(1))
             .copied()
-            .unwrap_or(history.len());
+            .map(|raw_end| raw_end as usize)
+            .unwrap_or(raw_len);
         results.push(make_result(before, matched, after, history_end_byte));
         if results.len() >= MAX_RESULTS {
             return;
@@ -405,8 +430,11 @@ pub fn find_terminal_results(
     }
 }
 
-pub fn terminal_last_command(history: &[u8]) -> Option<String> {
-    let text = strip_terminal_controls(history).text;
+/// Scans already-stripped terminal text for the most recent shell prompt
+/// line, without re-stripping the raw history. Kept separate from
+/// [`find_terminal_results`] so a single [`strip_terminal_controls`] call can
+/// feed both without either re-deriving the other's input.
+fn last_command_from_text(text: &str) -> Option<String> {
     text.lines().rev().find_map(|line| {
         let line = line.trim();
         ["$ ", "❯ ", "> "]
@@ -728,7 +756,11 @@ fn truncate(value: &str, max_chars: usize) -> String {
 
 struct SearchableTerminalText {
     text: String,
-    raw_ends: Vec<usize>,
+    // `u32` instead of `usize` halves this table's footprint. Retained PTY
+    // history is bounded well under 4 GiB in practice, and a byte offset
+    // that somehow exceeds `u32::MAX` just saturates, at worst degrading a
+    // single match's raw-stream jump target rather than panicking.
+    raw_ends: Vec<u32>,
 }
 
 fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
@@ -795,8 +827,9 @@ fn skip_escape(bytes: &[u8], index: usize) -> usize {
     (index + 2).min(bytes.len())
 }
 
-fn push_mapped_char(text: &mut String, raw_ends: &mut Vec<usize>, character: char, raw_end: usize) {
+fn push_mapped_char(text: &mut String, raw_ends: &mut Vec<u32>, character: char, raw_end: usize) {
     let byte_count = character.len_utf8();
+    let raw_end = u32::try_from(raw_end).unwrap_or(u32::MAX);
     text.push(character);
     raw_ends.extend(std::iter::repeat_n(raw_end, byte_count));
 }
@@ -812,8 +845,10 @@ mod tests {
     fn terminal_search_ignores_ansi_and_preserves_a_raw_jump_offset() {
         let mut results = Vec::new();
         let history = b"before \x1b[31mneedle\x1b[0m after";
+        let searchable = strip_terminal_controls(history);
         find_terminal_results(
-            history,
+            &searchable,
+            history.len(),
             "NEEDLE",
             |before, matched, after, history_end_byte| SearchResult {
                 pane_id: NodeId(1),

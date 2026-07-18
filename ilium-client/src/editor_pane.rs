@@ -336,6 +336,17 @@ impl EditorPane {
         Some(self.save())
     }
 
+    /// Returns the one autosave deadline this editor currently contributes
+    /// to the event loop.  Keeping this calculation beside the debounce
+    /// state prevents the client from polling every editor on a fixed tick
+    /// simply to discover that no write can happen yet.
+    pub fn autosave_deadline(&self) -> Option<Instant> {
+        (self.show_autosave && self.dirty)
+            .then_some(self.autosave_pending_since)
+            .flatten()
+            .map(|pending_since| pending_since + self.autosave_delay)
+    }
+
     /// Feeds one input event into the textarea; sets `self.dirty = true` if
     /// it actually changed the buffer content. Returns whether it was
     /// modified (same as `TextArea::input`'s return value).

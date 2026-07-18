@@ -19,8 +19,24 @@ use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent
 mod common;
 use common::{expect_event, TestServer};
 
+/// A fresh session always owns one launch project. Root-level shortcuts are
+/// resolved inside that project, keeping the test fixtures aligned with the
+/// user-visible `project -> group -> pane` hierarchy.
+fn launch_project_id(tree: &ilium_core::Tree) -> NodeId {
+    tree.project_ids()
+        .into_iter()
+        .next()
+        .expect("a launch project should exist")
+}
+
+fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
+    let project_id = launch_project_id(tree);
+    let default_group = tree.children_of(project_id).unwrap()[0];
+    tree.children_of(default_group).unwrap()[0]
+}
+
 #[tokio::test]
-async fn attach_returns_a_tree_snapshot_with_just_the_root() {
+async fn attach_returns_a_tree_snapshot_with_an_empty_launch_project() {
     let mut server = TestServer::start("attach-test").await;
     let mut client = server.connect().await;
 
@@ -43,9 +59,10 @@ async fn attach_returns_a_tree_snapshot_with_just_the_root() {
     );
     assert_eq!(
         tree.children_of(ROOT_ID).unwrap().len(),
-        0,
-        "a brand-new session's tree should have no panes yet"
+        1,
+        "a brand-new session should contain its launch project"
     );
+    assert!(tree.get(launch_project_id(&tree)).unwrap().is_project());
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -126,12 +143,8 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
         unreachable!("predicate only matches TreeSnapshot");
     };
 
-    let default_group = tree
-        .children_of(ROOT_ID)
-        .expect("root is a group")
-        .first()
-        .copied()
-        .expect("a default group should have been created for the pane");
+    let project_id = launch_project_id(&tree);
+    let default_group = tree.children_of(project_id).expect("project has children")[0];
     let pane_ids = tree.children_of(default_group).expect("group has children");
     assert_eq!(
         pane_ids.len(),
@@ -324,7 +337,7 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
         let ServerEvent::TreeSnapshot(tree) = event else {
             unreachable!();
         };
-        parent_group = tree.children_of(ROOT_ID).unwrap()[0];
+        parent_group = tree.children_of(launch_project_id(&tree)).unwrap()[0];
         pane_ids = tree.panes().map(|node| node.id).collect();
     }
     pane_ids.sort();
@@ -407,7 +420,9 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     let ServerEvent::TreeSnapshot(tree_before) = created else {
         unreachable!();
     };
-    let group_id = tree_before.children_of(ROOT_ID).unwrap()[0];
+    let group_id = tree_before
+        .children_of(launch_project_id(&tree_before))
+        .unwrap()[0];
 
     // A group is not an eligible split member. The domain validates every
     // requested member before inserting the split, so this must fail as one
@@ -626,7 +641,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
         unreachable!()
     };
     let source_group = *tree
-        .children_of(ROOT_ID)
+        .children_of(launch_project_id(&tree))
         .unwrap()
         .last()
         .expect("source group present");
@@ -648,7 +663,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
         unreachable!()
     };
     let dest_group = *tree
-        .children_of(ROOT_ID)
+        .children_of(launch_project_id(&tree))
         .unwrap()
         .last()
         .expect("dest group present");
@@ -750,8 +765,7 @@ async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!()
     };
-    let group = tree.children_of(ROOT_ID).unwrap()[0];
-    let pane_id = tree.children_of(group).unwrap()[0];
+    let pane_id = first_launch_project_pane(&tree);
 
     write_frame(&mut creator, &ClientRequest::ClosePane { pane_id })
         .await

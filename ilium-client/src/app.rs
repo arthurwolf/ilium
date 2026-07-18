@@ -77,6 +77,13 @@ fn normalize_path_lexically(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Gives an existing board path one stable lexical identity without using a
+/// currently selected project as an implicit base directory.
+fn normalize_board_path(path: PathBuf) -> PathBuf {
+    path.canonicalize()
+        .unwrap_or_else(|_| normalize_path_lexically(&path))
+}
+
 /// Upper bound on `App::pending_editor_opens` -- see that field's doc
 /// comment for why an entry can otherwise outlive its request forever (a
 /// `NewPane` request the server rejects, or one whose confirming node never
@@ -148,6 +155,9 @@ pub enum Mode {
     ExplorerFileMenu(ExplorerFileMenu),
     /// A directory-only picker; the selected directory becomes one Folder node.
     FolderExplorer(Box<ExplorerOverlay>, NodeId),
+    /// A directory-only picker that creates a project or changes one
+    /// project's inherited cwd.
+    ProjectFolderExplorer(Box<ExplorerOverlay>, ProjectFolderSelection),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
     /// Form for one server-owned terminal input countdown.
@@ -199,6 +209,7 @@ pub enum ClientExitReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Inference,
+    Icons,
     Appearance,
     Terminal,
     Editor,
@@ -308,8 +319,9 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 9] = [
+    pub const ALL: [SettingsTab; 10] = [
         Self::Appearance,
+        Self::Icons,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -323,6 +335,7 @@ impl SettingsTab {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Inference => "Inference",
+            Self::Icons => "Icons",
             Self::Appearance => "User Interface",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -369,10 +382,11 @@ pub enum AppearanceRow {
     ColorScheme,
     MotionLevel,
     SidebarDensity,
+    UseStableGlyphs,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 10] = [
+    pub const ALL: [AppearanceRow; 11] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
@@ -383,6 +397,7 @@ impl AppearanceRow {
         Self::ColorScheme,
         Self::MotionLevel,
         Self::SidebarDensity,
+        Self::UseStableGlyphs,
     ];
 }
 
@@ -498,6 +513,76 @@ pub struct SettingsState {
     /// terminal too short to show every row at once. See
     /// `crate::settings_ui::content_scroll_bounds`.
     pub scroll: u16,
+    /// Whether the Icons preview renders the current session tree or the
+    /// complete dummy specimen tree.
+    pub icons_preview_real: bool,
+    /// Full-screen catalogue picker layered over the Icons tab.
+    pub icon_picker: Option<IconPickerState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconPickerState {
+    pub target: crate::icon_settings::IconTarget,
+    /// Selected entry in the single, category-preserving picker document.
+    pub selected_entry: usize,
+    /// First visible row in the chapter document. It is independent from the
+    /// selection so wheel/trackpad scrolling works like a normal text view.
+    pub scroll_row: usize,
+    /// Live case-insensitive search over CLDR names and category labels.
+    pub search_query: String,
+    /// Pre-filtered chapter document, rebuilt only after a query edit.
+    pub search_results: crate::icon_settings::IconPickerSearchResults,
+    /// Whether typed characters are currently editing `search_query`.
+    pub is_searching: bool,
+    /// The temporary catalogue density choice. It belongs to this picker
+    /// interaction only: it is a reading preference, not an application-wide
+    /// icon setting that should be persisted with assignments.
+    pub column_mode: IconPickerColumnMode,
+}
+
+/// Catalogue density options. Multi-column is the normal, information-dense
+/// view; one column remains available for deliberate inspection of long icon
+/// names or terminals whose emoji widths are unusual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconPickerColumnMode {
+    MultiColumn,
+    SingleColumn,
+}
+
+impl IconPickerColumnMode {
+    pub const fn toggle(self) -> Self {
+        match self {
+            Self::MultiColumn => Self::SingleColumn,
+            Self::SingleColumn => Self::MultiColumn,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::MultiColumn => "Multi-column",
+            Self::SingleColumn => "Single column",
+        }
+    }
+}
+
+impl IconPickerState {
+    pub fn new(target: crate::icon_settings::IconTarget) -> Self {
+        Self {
+            target,
+            selected_entry: 0,
+            scroll_row: 0,
+            search_query: String::new(),
+            search_results: crate::icon_settings::picker_search_results(""),
+            is_searching: false,
+            column_mode: IconPickerColumnMode::MultiColumn,
+        }
+    }
+
+    pub fn refresh_search_results(&mut self) {
+        self.search_results = crate::icon_settings::picker_search_results(&self.search_query);
+        self.selected_entry = 0;
+        self.scroll_row = 0;
+    }
 }
 
 impl SettingsState {
@@ -506,6 +591,8 @@ impl SettingsState {
             tab: SettingsTab::Appearance,
             selected_row: 0,
             scroll: 0,
+            icons_preview_real: false,
+            icon_picker: None,
         }
     }
 }
@@ -514,6 +601,12 @@ impl Default for SettingsState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectFolderSelection {
+    NewProject,
+    ChangeProject(NodeId),
 }
 
 /// Actions exposed by a right-click on a tree entry. These deliberately map
@@ -545,6 +638,7 @@ pub enum ContextMenuAction {
     NewGroup,
     NewSplitView,
     NewFolder,
+    ChangeProjectFolder,
     Rename,
     MoveUp,
     MoveDown,
@@ -578,6 +672,7 @@ impl ContextMenuAction {
             Self::NewGroup => "New group\u{2026}".to_string(),
             Self::NewSplitView => "New split view\u{2026}".to_string(),
             Self::NewFolder => "Open folder\u{2026}".to_string(),
+            Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
             Self::Rename => "Rename".to_string(),
             Self::MoveUp => "Move up".to_string(),
             Self::MoveDown => "Move down".to_string(),
@@ -657,6 +752,9 @@ pub enum BoardStorageKind {
 
 #[derive(Debug, Clone)]
 pub struct CreateBoardState {
+    /// The destination captured when the dialog opened. Keeping it stable
+    /// ensures a later selection change cannot move a board into another project.
+    pub parent_group: NodeId,
     pub name: TextPromptState,
     pub path: TextPromptState,
     pub storage_kind: BoardStorageKind,
@@ -717,13 +815,34 @@ pub enum PendingRetitleRequest {
     },
 }
 
-/// A whole-tree restructure worker `App` has decided to start but can't
-/// spawn itself -- see `App::pending_restructure_request`'s doc comment.
+/// One project-scoped restructure worker `App` has decided to start but
+/// cannot spawn itself; the event loop owns the worker lifecycle.
 /// `contexts` is already fully gathered except for agent panes' transcript
 /// text (see `crate::restructure`'s module docs on why that step is left to
 /// the worker thread).
 pub struct PendingRestructureRequest {
+    pub project_id: NodeId,
+    pub project_name: String,
+    pub project_cwd: PathBuf,
     pub contexts: Vec<LeafContext>,
+    /// Exact project-local hierarchy captured on the main loop alongside
+    /// item extracts, before the asynchronous LLM worker begins.
+    pub current_structure: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectRestructureState {
+    Queued,
+    Running,
+    Complete,
+    Failed(String),
+    Skipped,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectRestructureJob {
+    pub project_name: String,
+    pub state: ProjectRestructureState,
 }
 
 pub struct App {
@@ -886,18 +1005,15 @@ pub struct App {
     /// Retitle workers `App` has decided to start but can't spawn itself --
     /// see `PendingRetitleRequest`'s doc comment.
     pending_retitle_requests: Vec<PendingRetitleRequest>,
-    /// Set while a whole-tree restructure LLM call is in flight -- blocks a
-    /// second click from starting another one, and drives the footer
-    /// button's loading indicator (`tree_ui`). Cleared once the worker's
-    /// result is applied (success or failure) in `crate::tick`.
+    /// True while at least one project-scoped restructure worker is active.
+    /// Retained for the global redraw gate; detailed progress lives in
+    /// `project_restructure_jobs`.
     pub structure_loading: bool,
-    /// A whole-tree restructure `App` has decided to start but can't spawn
-    /// itself -- see `PendingRetitleRequest`'s doc comment for the same
-    /// "propose here, spawn there" split. Contexts are gathered
-    /// synchronously in `action_request_restructure` since only `App` has
-    /// `&Tree`/`&PaneRuntime`; the worker thread only resolves agent
-    /// transcripts (disk I/O) and calls the LLM.
-    pending_restructure_request: Option<PendingRestructureRequest>,
+    /// Status of the latest project-scoped restructure batch, keyed by the
+    /// stable project node id so footer and row indicators agree.
+    pub project_restructure_jobs: HashMap<NodeId, ProjectRestructureJob>,
+    /// Project workers waiting for the event loop to spawn them.
+    pending_restructure_requests: Vec<PendingRestructureRequest>,
     /// Bumped every time `render_cache::apply_tree_snapshot` replaces
     /// `self.tree`. Exists purely so `tree_hit_test_cache` can tell whether
     /// its cached `TreeItem`s are still valid without comparing the whole
@@ -995,7 +1111,8 @@ impl App {
             terminal_retitle_content_hashes: HashMap::new(),
             pending_retitle_requests: Vec::new(),
             structure_loading: false,
-            pending_restructure_request: None,
+            project_restructure_jobs: HashMap::new(),
+            pending_restructure_requests: Vec::new(),
             tree_version: 0,
             tree_hit_test_cache: tree_ui::TreeItemCache::default(),
         }
@@ -1189,12 +1306,19 @@ impl App {
         self.layout = layout;
         self.resize_displayed_panes();
 
+        // Markdown parsing and rasterization can be materially more
+        // expensive than terminal sizing.  A sidebar-width animation emits
+        // roughly eleven intermediate layouts, none of whose rendered
+        // document can remain visible at its final width, so rebuild only
+        // after the animation's final layout settles.
+        let is_markdown_rebuild_deferred = self.is_layout_animating();
+
         for id in self.displayed_pane_ids() {
             let is_rendered_editor = matches!(
                 self.panes.get(&id),
                 Some(PaneRuntime::Editor(editor)) if editor.view_mode == EditorViewMode::Rendered
             );
-            if is_rendered_editor {
+            if is_rendered_editor && !is_markdown_rebuild_deferred {
                 self.rebuild_rendered_markdown(id);
             }
         }
@@ -1219,7 +1343,7 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
-        self.ui_settings = ui;
+        self.ui_settings = ui.clone();
         let now = Instant::now();
         self.tree_width_animation.set_motion_enabled(
             matches!(ui.motion_level, crate::config::MotionLevel::Full),
@@ -1298,6 +1422,33 @@ impl App {
                 self.status_message = Some(format!("Could not save settings: {error}"));
             }
         }
+    }
+
+    /// Replaces one globally persisted tree glyph. The value has already
+    /// come from the bundled picker catalog or a curated row suggestion.
+    pub fn settings_set_icon(&mut self, target: crate::icon_settings::IconTarget, glyph: String) {
+        let mut ui = self.ui_settings.clone();
+        ui.icons.set(target, glyph);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_cycle_icon(
+        &mut self,
+        target: crate::icon_settings::IconTarget,
+        direction: i32,
+    ) {
+        let choices = target.suggestions();
+        let current = self.ui_settings.icons.glyph(target);
+        let index = choices
+            .iter()
+            .position(|glyph| *glyph == current)
+            .unwrap_or(0);
+        let next = if direction < 0 {
+            (index + choices.len() - 1) % choices.len()
+        } else {
+            (index + 1) % choices.len()
+        };
+        self.settings_set_icon(target, choices[next].to_string());
     }
 
     /// Applies a validated shortcut base immediately and persists it without
@@ -1896,7 +2047,7 @@ impl App {
     /// Flips the "auto-resize tree panel on focus" toggle -- the Appearance
     /// tab's first row.
     pub fn settings_toggle_auto_resize_tree(&mut self) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.auto_resize_tree_on_focus = !ui.auto_resize_tree_on_focus;
         self.apply_and_persist_ui_settings(ui);
     }
@@ -1904,7 +2055,7 @@ impl App {
     /// Adjusts the tree panel's base width by `delta` columns, clamped to
     /// `[MIN_TREE_WIDTH, MAX_TREE_WIDTH]` -- the Appearance tab's second row.
     pub fn settings_adjust_tree_width(&mut self, delta: i32) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         let clamped = (i32::from(ui.tree_width) + delta).clamp(
             i32::from(crate::layout::MIN_TREE_WIDTH),
             i32::from(crate::layout::MAX_TREE_WIDTH),
@@ -1917,7 +2068,7 @@ impl App {
     /// tab's third row. Just the two for now; see `ColorScheme`'s doc
     /// comment on why a free-form theme picker is out of scope.
     pub fn settings_toggle_color_scheme(&mut self) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.color_scheme = match ui.color_scheme {
             ColorScheme::Dark => ColorScheme::Light,
             ColorScheme::Light => ColorScheme::Dark,
@@ -1925,10 +2076,19 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles the optional single-cell glyph set for row-action overlays.
+    /// Normal Unicode icons remain the default because they are the primary
+    /// visual language of the sidebar.
+    pub fn settings_toggle_stable_glyphs(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.use_stable_glyphs = !ui.use_stable_glyphs;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.tree_order = tree_order;
         self.apply_and_persist_ui_settings(ui);
     }
@@ -1941,28 +2101,28 @@ impl App {
     /// Cycles among full names, single letters, chosen icons, and no agent
     /// identifier. The activity column remains visible in every mode.
     pub fn settings_adjust_agent_identifier_mode(&mut self, direction: i32) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.agent_identifiers.mode = ui.agent_identifiers.mode.stepped(direction);
         self.apply_and_persist_ui_settings(ui);
     }
 
     /// Selects which curated Claude glyph the tree uses in icon mode.
     pub fn settings_adjust_claude_agent_icon(&mut self, direction: i32) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.agent_identifiers.claude_icon = ui.agent_identifiers.claude_icon.stepped(direction);
         self.apply_and_persist_ui_settings(ui);
     }
 
     /// Selects which curated Codex glyph the tree uses in icon mode.
     pub fn settings_adjust_codex_agent_icon(&mut self, direction: i32) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.agent_identifiers.codex_icon = ui.agent_identifiers.codex_icon.stepped(direction);
         self.apply_and_persist_ui_settings(ui);
     }
 
     /// Selects which curated Antigravity glyph the tree uses in icon mode.
     pub fn settings_adjust_antigravity_agent_icon(&mut self, direction: i32) {
-        let mut ui = self.ui_settings;
+        let mut ui = self.ui_settings.clone();
         ui.agent_identifiers.antigravity_icon =
             ui.agent_identifiers.antigravity_icon.stepped(direction);
         self.apply_and_persist_ui_settings(ui);
@@ -1989,15 +2149,16 @@ impl App {
             }
             AppearanceRow::ColorScheme => self.settings_toggle_color_scheme(),
             AppearanceRow::MotionLevel => {
-                let mut ui = self.ui_settings;
+                let mut ui = self.ui_settings.clone();
                 ui.motion_level = ui.motion_level.stepped(direction);
                 self.apply_and_persist_ui_settings(ui);
             }
             AppearanceRow::SidebarDensity => {
-                let mut ui = self.ui_settings;
+                let mut ui = self.ui_settings.clone();
                 ui.sidebar_density = ui.sidebar_density.stepped(direction);
                 self.apply_and_persist_ui_settings(ui);
             }
+            AppearanceRow::UseStableGlyphs => self.settings_toggle_stable_glyphs(),
         }
     }
 
@@ -2056,6 +2217,11 @@ impl App {
         use crossterm::event::Event;
         if let Event::Mouse(mouse) = event {
             crate::mouse::handle_mouse_event(self, mouse);
+            // Begin the transition in the same input turn. Waiting for the
+            // ordinary 50 ms maintenance tick made a click or hover feel
+            // intermittently delayed even when the event itself arrived on
+            // time.
+            self.tick_layout_animation(Instant::now());
             return;
         }
 
@@ -2075,6 +2241,10 @@ impl App {
         }
 
         crate::keys::handle_event(self, event);
+        // Key focus commands and terminal FocusGained/FocusLost events are
+        // activation edges too. Sampling now keeps their first animation
+        // frame aligned with the event that changed the state.
+        self.tick_layout_animation(Instant::now());
     }
 
     /// Advances the tree width from the two independent activation signals:
@@ -2480,6 +2650,13 @@ impl App {
         selected_target.or(visible_pane_target).unwrap_or(ROOT_ID)
     }
 
+    fn project_cwd_for_node(&self, node_id: NodeId) -> PathBuf {
+        self.tree
+            .project_path_for(node_id)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.session_cwd.clone())
+    }
+
     /// Human-readable description of what closing `target` would lose,
     /// or `None` when it can be closed without confirmation (an empty
     /// group, a plain shell, or a clean/unsaved-nothing editor).
@@ -2699,11 +2876,19 @@ impl App {
         self.queue_request(ClientRequest::NewFolder { parent_group, path });
     }
 
+    pub fn request_new_project(&mut self, path: PathBuf) {
+        self.queue_request(ClientRequest::NewProject { path });
+    }
+
+    pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) {
+        self.queue_request(ClientRequest::ChangeProjectFolder { project_id, path });
+    }
+
     /// Adds a board pane backed by an existing Markdown file. The file is
     /// not modified while creating the pane; the board adapter reads the
     /// existing headings/bullets on the next tree snapshot.
     pub fn request_new_markdown_board(&mut self, parent_group: NodeId, path: PathBuf) {
-        let path = self.resolve_board_path(path);
+        let path = self.resolve_board_path_in_project(parent_group, path);
         if let Some(existing_pane) = self.board_pane_for_path(&path) {
             self.focus_pane(existing_pane);
             self.status_message = Some("That board file is already open".to_string());
@@ -2781,7 +2966,11 @@ impl App {
     }
 
     pub fn open_create_board_dialog(&mut self) {
-        let board_directory = self.session_cwd.join(".ilium").join("boards");
+        let parent_group = self.group_for_new_node();
+        let board_directory = self
+            .project_cwd_for_node(parent_group)
+            .join(".ilium")
+            .join("boards");
         let mut suffix = 1_u32;
         let default_path = loop {
             let filename = if suffix == 1 {
@@ -2796,6 +2985,7 @@ impl App {
             suffix = suffix.saturating_add(1);
         };
         self.mode = Mode::CreateBoard(CreateBoardState {
+            parent_group,
             name: TextPromptState::new("Board"),
             path: TextPromptState::new(default_path.display().to_string()),
             storage_kind: BoardStorageKind::MarkdownFile,
@@ -2811,7 +3001,7 @@ impl App {
             self.mode = Mode::CreateBoard(state.clone());
             return;
         }
-        let path = self.resolve_board_path(entered_path);
+        let path = self.resolve_board_path_in_project(state.parent_group, entered_path);
         let storage = match state.storage_kind {
             BoardStorageKind::Folder => BoardStorage::Folder { path },
             BoardStorageKind::MarkdownFile => BoardStorage::MarkdownFile { path },
@@ -2837,9 +3027,8 @@ impl App {
         } else {
             state.name.buf.trim().to_string()
         };
-        let parent_group = self.group_for_new_node();
         self.queue_request(ClientRequest::NewBoard {
-            parent_group,
+            parent_group: state.parent_group,
             name,
             storage,
         });
@@ -2849,11 +3038,11 @@ impl App {
     /// Resolves user-entered relative board storage against the canonical
     /// project directory and normalizes lexical `.`/`..` components. Existing
     /// paths additionally use the filesystem's canonical identity.
-    fn resolve_board_path(&self, path: PathBuf) -> PathBuf {
+    fn resolve_board_path_in_project(&self, project_node: NodeId, path: PathBuf) -> PathBuf {
         let absolute_path = if path.is_absolute() {
             path
         } else {
-            self.session_cwd.join(path)
+            self.project_cwd_for_node(project_node).join(path)
         };
         absolute_path
             .canonicalize()
@@ -2864,7 +3053,7 @@ impl App {
     /// is single-owner inside a session because each pane otherwise carries an
     /// independent client-local document copy capable of stale overwrites.
     fn board_pane_for_path(&self, path: &Path) -> Option<NodeId> {
-        let candidate = self.resolve_board_path(path.to_path_buf());
+        let candidate = normalize_board_path(path.to_path_buf());
         self.tree.panes().find_map(|node| {
             let NodeKind::Pane {
                 board_storage: Some(storage),
@@ -2873,14 +3062,15 @@ impl App {
             else {
                 return None;
             };
-            (self.resolve_board_path(storage.path().to_path_buf()) == candidate).then_some(node.id)
+            (normalize_board_path(storage.path().to_path_buf()) == candidate).then_some(node.id)
         })
     }
 
     pub fn open_board_path_picker(&mut self, state: CreateBoardState) {
+        let picker_root = self.project_cwd_for_node(state.parent_group);
         let picker = match state.storage_kind {
-            BoardStorageKind::Folder => ExplorerOverlay::open_folder_at(&self.session_cwd),
-            BoardStorageKind::MarkdownFile => ExplorerOverlay::open_at(&self.session_cwd),
+            BoardStorageKind::Folder => ExplorerOverlay::open_folder_at(&picker_root),
+            BoardStorageKind::MarkdownFile => ExplorerOverlay::open_at(&picker_root),
         };
         match picker {
             Ok(picker) => self.mode = Mode::BoardPathPicker(Box::new(picker), state),
@@ -3014,7 +3204,9 @@ impl App {
                 return None;
             }
             match self.tree.get(id).map(|node| &node.kind) {
-                Some(NodeKind::Container(container)) if container.is_group() => Some(id),
+                Some(NodeKind::Container(container)) if container.accepts_normal_children() => {
+                    Some(id)
+                }
                 Some(NodeKind::Container(_)) => self.tree.parent_of(id),
                 Some(NodeKind::Pane { .. }) => self.tree.parent_of(id),
                 Some(NodeKind::Folder { .. }) => self.tree.parent_of(id),
@@ -3032,7 +3224,7 @@ impl App {
             return ROOT_ID;
         }
         match self.tree.get(target).map(|node| &node.kind) {
-            Some(NodeKind::Container(container)) if container.is_group() => target,
+            Some(NodeKind::Container(container)) if container.accepts_normal_children() => target,
             Some(NodeKind::Container(_)) => self.tree.parent_of(target).unwrap_or(ROOT_ID),
             Some(NodeKind::Pane { .. }) => self.tree.parent_of(target).unwrap_or(ROOT_ID),
             Some(NodeKind::Folder { .. }) => self.tree.parent_of(target).unwrap_or(ROOT_ID),
@@ -3058,11 +3250,15 @@ impl App {
 
     fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
         let node = self.tree.get(node_id)?;
-        if node.is_group() {
+        if node.accepts_normal_children() {
             return Some(node_id);
         }
         let parent = node.parent?;
-        if self.tree.get(parent).is_some_and(Node::is_group) {
+        if self
+            .tree
+            .get(parent)
+            .is_some_and(Node::accepts_normal_children)
+        {
             return Some(parent);
         }
         self.tree.parent_of(parent)
@@ -3080,7 +3276,7 @@ impl App {
                     children
                         .iter()
                         .copied()
-                        .find(|node_id| self.tree.get(*node_id).is_some_and(Node::is_group))
+                        .find(|node_id| self.tree.get(*node_id).is_some_and(Node::is_project))
                 })
             })
             .unwrap_or(ROOT_ID)
@@ -3367,6 +3563,10 @@ impl App {
                 });
                 actions.insert(0, ContextMenuAction::ShowSplitView);
             }
+            Some(node) if node.is_project() => {
+                actions.insert(0, ContextMenuAction::ChangeProjectFolder);
+                actions.insert(0, ContextMenuAction::ToggleGroup);
+            }
             Some(node) if node.is_group() => actions.insert(0, ContextMenuAction::ToggleGroup),
             Some(Node {
                 kind:
@@ -3451,6 +3651,7 @@ impl App {
             }
             ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
             ContextMenuAction::NewFolder => self.action_new_folder(),
+            ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
                 self.request_move(target, ilium_core::TreeMoveDirection::Up)
@@ -3511,7 +3712,8 @@ impl App {
     /// why there is no placeholder tree node anymore.
     pub fn action_new_editor(&mut self) {
         let parent = self.group_for_new_node();
-        match ExplorerOverlay::open_at(&self.session_cwd) {
+        let picker_root = self.project_cwd_for_node(parent);
+        match ExplorerOverlay::open_at(&picker_root) {
             Ok(overlay) => self.mode = Mode::Explorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open file picker: {err}")),
         }
@@ -3520,9 +3722,43 @@ impl App {
     /// Adds a sidebar folder root selected from a directory-only picker.
     pub fn action_new_folder(&mut self) {
         let parent = self.split_parent_group();
-        match ExplorerOverlay::open_folder_at(&self.session_cwd) {
+        let picker_root = self.project_cwd_for_node(parent);
+        match ExplorerOverlay::open_folder_at(&picker_root) {
             Ok(overlay) => self.mode = Mode::FolderExplorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open folder picker: {err}")),
+        }
+    }
+
+    pub fn action_new_project(&mut self) {
+        match ExplorerOverlay::open_folder_at(&self.session_cwd) {
+            Ok(overlay) => {
+                self.mode = Mode::ProjectFolderExplorer(
+                    Box::new(overlay),
+                    ProjectFolderSelection::NewProject,
+                )
+            }
+            Err(err) => self.status_message = Some(format!("Could not open project picker: {err}")),
+        }
+    }
+
+    pub fn action_change_project_folder(&mut self, project_id: NodeId) {
+        let Some(path) = self
+            .tree
+            .get(project_id)
+            .and_then(Node::project_path)
+            .map(Path::to_path_buf)
+        else {
+            self.status_message = Some("That entry is not a project".to_string());
+            return;
+        };
+        match ExplorerOverlay::open_folder_at(&path) {
+            Ok(overlay) => {
+                self.mode = Mode::ProjectFolderExplorer(
+                    Box::new(overlay),
+                    ProjectFolderSelection::ChangeProject(project_id),
+                )
+            }
+            Err(err) => self.status_message = Some(format!("Could not open project picker: {err}")),
         }
     }
 
@@ -3696,6 +3932,42 @@ impl App {
             }
         }
         wrote_any
+    }
+
+    /// Computes when non-input maintenance can next affect visible state.
+    /// Input, server events, and worker completions wake the select loop
+    /// immediately, so an idle client does not need a 20 Hz polling loop.
+    /// Exact search/autosave deadlines retain their existing debounce
+    /// responsiveness; active animations retain their frame cadence.
+    pub fn next_maintenance_delay(&self, now: Instant) -> Duration {
+        const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(1);
+
+        if self.is_spatial_animation_active() {
+            return crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL;
+        }
+        if self.has_active_animation() {
+            return Duration::from_millis(50);
+        }
+
+        let autosave_deadline = self
+            .panes
+            .values()
+            .filter_map(|runtime| match runtime {
+                PaneRuntime::Editor(editor) => editor.autosave_deadline(),
+                PaneRuntime::Terminal(_) | PaneRuntime::Board(_) => None,
+            })
+            .min();
+        let next_deadline = autosave_deadline
+            .into_iter()
+            .chain(match &self.mode {
+                Mode::Search(search) => search.next_due_search_at(),
+                _ => None,
+            })
+            .min();
+
+        next_deadline
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .unwrap_or(IDLE_MAINTENANCE_INTERVAL)
     }
 
     /// Records the tree node currently being drag-held by the left mouse
@@ -4138,48 +4410,183 @@ impl App {
         }
     }
 
-    /// Gathers every pane/folder's current context synchronously (the only
-    /// place with `&Tree`/`&PaneRuntime`) and queues it for
-    /// `crate::run::dispatch_input_event` to spawn the background
-    /// restructure worker for -- mirrors `action_request_retitle`'s
-    /// "propose here, spawn there" split. A no-op while a previous call is
-    /// still in flight, or when there is nothing to restructure yet.
+    /// Starts one independent restructure request for every top-level
+    /// project. Empty projects are reported as skipped and never spend an
+    /// LLM call.
     pub fn action_request_restructure(&mut self) {
-        if self.structure_loading {
-            self.status_message = Some("Restructure already in progress".to_string());
+        self.project_restructure_jobs.clear();
+        self.pending_restructure_requests.clear();
+        let project_ids = self.tree.project_ids();
+        if project_ids.is_empty() {
+            self.status_message = Some("No projects to restructure yet".to_string());
             return;
         }
-        let contexts = crate::restructure::gather_leaf_contexts(
+        for project_id in project_ids {
+            self.action_request_project_restructure(project_id);
+        }
+        self.refresh_structure_loading();
+    }
+
+    /// Starts one LLM restructure call scoped to `project_id`. A second
+    /// click while that project is running does not duplicate its worker.
+    pub fn action_request_project_restructure(&mut self, project_id: NodeId) {
+        if self
+            .project_restructure_jobs
+            .get(&project_id)
+            .is_some_and(|job| {
+                matches!(
+                    job.state,
+                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                )
+            })
+        {
+            self.status_message = Some("That project is already restructuring".to_string());
+            return;
+        }
+        let Some(project) = self.tree.get(project_id) else {
+            self.status_message = Some("Project no longer exists".to_string());
+            return;
+        };
+        let Some(project_cwd) = project.project_path().map(Path::to_path_buf) else {
+            self.status_message = Some("That entry is not a project".to_string());
+            return;
+        };
+        let project_name = project.name.clone();
+        let contexts = crate::restructure::gather_project_leaf_contexts(
             &self.tree,
             &self.panes,
             &self.agent_session_ids,
+            project_id,
         );
+        let current_structure =
+            match crate::restructure::render_project_structure(&self.tree, project_id) {
+                Ok(current_structure) => current_structure,
+                Err(error) => {
+                    self.status_message =
+                        Some(format!("Could not read project structure: {error}"));
+                    return;
+                }
+            };
         if contexts.is_empty() {
-            self.status_message = Some("Nothing to restructure yet".to_string());
+            self.project_restructure_jobs.insert(
+                project_id,
+                ProjectRestructureJob {
+                    project_name,
+                    state: ProjectRestructureState::Skipped,
+                },
+            );
+            self.refresh_structure_loading();
             return;
         }
-        self.structure_loading = true;
-        self.pending_restructure_request = Some(PendingRestructureRequest { contexts });
+        self.project_restructure_jobs.insert(
+            project_id,
+            ProjectRestructureJob {
+                project_name: project_name.clone(),
+                state: ProjectRestructureState::Queued,
+            },
+        );
+        self.pending_restructure_requests
+            .push(PendingRestructureRequest {
+                project_id,
+                project_name,
+                project_cwd,
+                contexts,
+                current_structure,
+            });
+        self.refresh_structure_loading();
     }
 
-    /// Drains the pending restructure request, if any, for
-    /// `crate::run::dispatch_input_event` to spawn a worker for.
-    pub fn take_pending_restructure_request(&mut self) -> Option<PendingRestructureRequest> {
-        self.pending_restructure_request.take()
+    /// Drains every queued project request for worker startup.
+    pub fn take_pending_restructure_requests(&mut self) -> Vec<PendingRestructureRequest> {
+        for request in &self.pending_restructure_requests {
+            if let Some(job) = self.project_restructure_jobs.get_mut(&request.project_id) {
+                job.state = ProjectRestructureState::Running;
+            }
+        }
+        std::mem::take(&mut self.pending_restructure_requests)
     }
 
-    /// Queues the applied plan for the server's atomic
-    /// `Tree::apply_restructure`. The server keeps a one-slot undo buffer
-    /// from immediately before this, restorable via
-    /// `request_revert_last_restructure`.
+    pub fn finish_project_restructure(
+        &mut self,
+        project_id: NodeId,
+        result: anyhow::Result<ilium_core::RestructurePlan>,
+    ) {
+        let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
+            return;
+        };
+        match result {
+            Ok(plan) => {
+                job.state = ProjectRestructureState::Complete;
+                self.request_apply_project_restructure_plan(project_id, plan);
+            }
+            Err(error) => job.state = ProjectRestructureState::Failed(error.to_string()),
+        }
+        self.refresh_structure_loading();
+    }
+
+    pub fn is_project_restructure_loading(&self, project_id: NodeId) -> bool {
+        self.project_restructure_jobs
+            .get(&project_id)
+            .is_some_and(|job| {
+                matches!(
+                    job.state,
+                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                )
+            })
+    }
+
+    pub fn restructure_status_text(&self) -> Option<String> {
+        (!self.project_restructure_jobs.is_empty()).then(|| {
+            let mut entries: Vec<String> = self
+                .project_restructure_jobs
+                .values()
+                .map(|job| {
+                    let state = match &job.state {
+                        ProjectRestructureState::Queued => "queued".to_string(),
+                        ProjectRestructureState::Running => "thinking".to_string(),
+                        ProjectRestructureState::Complete => "complete".to_string(),
+                        ProjectRestructureState::Failed(error) => format!("failed: {error}"),
+                        ProjectRestructureState::Skipped => "empty — skipped".to_string(),
+                    };
+                    format!("{}: {state}", job.project_name)
+                })
+                .collect();
+            entries.sort();
+            format!("♻ Restructuring projects — {}", entries.join(" · "))
+        })
+    }
+
+    fn refresh_structure_loading(&mut self) {
+        self.structure_loading = self.project_restructure_jobs.values().any(|job| {
+            matches!(
+                job.state,
+                ProjectRestructureState::Queued | ProjectRestructureState::Running
+            )
+        });
+    }
+
+    /// Compatibility path for the old one-project request. Multi-project
+    /// restructure callers use `request_apply_project_restructure_plan`.
     pub fn request_apply_restructure_plan(&mut self, plan: ilium_core::RestructurePlan) {
         self.queue_request(ClientRequest::ApplyRestructurePlan(plan));
     }
 
-    /// Queues a request to restore the tree exactly as it was immediately
-    /// before the most recently applied restructure plan.
+    pub fn request_apply_project_restructure_plan(
+        &mut self,
+        project_id: NodeId,
+        plan: ilium_core::RestructurePlan,
+    ) {
+        self.queue_request(ClientRequest::ApplyProjectRestructurePlan { project_id, plan });
+    }
+
+    /// Compatibility path for the old one-project undo request.
     pub fn request_revert_last_restructure(&mut self) {
         self.queue_request(ClientRequest::RevertLastRestructure);
+    }
+
+    /// Restores only one project's latest restructure snapshot.
+    pub fn request_revert_project_restructure(&mut self, project_id: NodeId) {
+        self.queue_request(ClientRequest::RevertProjectRestructure { project_id });
     }
 
     /// Exact content rectangle for editor `id`, after its toolbar and
@@ -4844,6 +5251,37 @@ mod tests {
     }
 
     #[test]
+    fn global_restructure_queues_one_worker_per_nonempty_project_and_skips_empty_projects() {
+        let mut app = app();
+        let active_project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/active-project"))
+            .unwrap();
+        let empty_project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/empty-project"))
+            .unwrap();
+        let group = app.tree.add_group(active_project, "work").unwrap();
+        app.tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        app.action_request_restructure();
+        let pending = app.take_pending_restructure_requests();
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].project_id, active_project);
+        assert!(matches!(
+            app.project_restructure_jobs[&empty_project].state,
+            ProjectRestructureState::Skipped
+        ));
+        assert!(app.restructure_status_text().is_some_and(|status| {
+            status.contains("active-project: thinking")
+                && status.contains("empty-project: empty — skipped")
+        }));
+    }
+
+    #[test]
     fn waiting_background_keeps_wall_clock_animation_redraws_active() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
@@ -4860,6 +5298,41 @@ mod tests {
             .unwrap();
 
         assert!(app.has_active_animation());
+    }
+
+    #[test]
+    fn tree_hover_starts_its_width_transition_in_the_mouse_event_turn() {
+        use crossterm::event::{Event, KeyModifiers, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let tree_position = Position::new(1, 1);
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: tree_position.x,
+            row: tree_position.y,
+            modifiers: KeyModifiers::NONE,
+        }));
+
+        assert!(app.is_layout_animating());
+    }
+
+    #[test]
+    fn focus_tree_starts_its_width_transition_in_the_key_event_turn() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.focus = FocusTarget::Tree;
+
+        app.handle_event(Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Null,
+            KeyModifiers::NONE,
+            KeyEventKind::Press,
+        )));
+
+        assert!(app.is_layout_animating());
     }
 
     #[test]
@@ -5254,6 +5727,7 @@ mod tests {
         std::fs::create_dir_all(&project_path).unwrap();
         let mut app = App::new("test".to_string(), project_path.clone());
         let state = CreateBoardState {
+            parent_group: ROOT_ID,
             name: TextPromptState::new("Sprint"),
             path: TextPromptState::new("plans/sprint.md"),
             storage_kind: BoardStorageKind::MarkdownFile,
@@ -5289,6 +5763,7 @@ mod tests {
         std::fs::create_dir_all(&directory_path).unwrap();
         let mut app = App::new("test".to_string(), project_path.clone());
         let state = CreateBoardState {
+            parent_group: ROOT_ID,
             name: TextPromptState::new("Broken"),
             path: TextPromptState::new(directory_path.display().to_string()),
             storage_kind: BoardStorageKind::MarkdownFile,
@@ -5498,6 +5973,31 @@ mod tests {
     }
 
     #[test]
+    fn idle_maintenance_sleeps_instead_of_polling_twenty_times_per_second() {
+        let app = app();
+        let delay = app.next_maintenance_delay(Instant::now());
+
+        assert_eq!(delay, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn workspace_search_debounce_wakes_at_its_exact_deadline() {
+        let mut app = app();
+        let edited_at = Instant::now();
+        app.action_open_search();
+        let Mode::Search(state) = &mut app.mode else {
+            panic!("opening workspace search must enter search mode");
+        };
+        state.query = TextPromptState::new("needle");
+        state.note_query_changed(edited_at);
+
+        assert_eq!(
+            app.next_maintenance_delay(edited_at),
+            crate::search_ui::SEARCH_DEBOUNCE
+        );
+    }
+
+    #[test]
     fn setting_layout_resizes_the_visible_terminal_pane() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -5630,16 +6130,23 @@ mod tests {
         // -- see `restore_expanded_groups`'s doc comment on why matching
         // by id alone isn't enough.
         let mut app = app();
-        let outer = app.tree.add_group(ROOT_ID, "outer").unwrap();
+        let project = app.tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        let outer = app.tree.add_group(project, "outer").unwrap();
         let inner = app.tree.add_group(outer, "inner").unwrap();
         app.restore_expanded_groups();
-        assert!(app.tree_state.opened().contains(&vec![outer, inner]));
+        assert!(app
+            .tree_state
+            .opened()
+            .contains(&vec![project, outer, inner]));
 
-        app.tree.move_node(inner, ROOT_ID, None).unwrap();
+        app.tree.move_node(inner, project, None).unwrap();
         app.restore_expanded_groups();
 
-        assert!(!app.tree_state.opened().contains(&vec![outer, inner]));
-        assert!(app.tree_state.opened().contains(&vec![inner]));
+        assert!(!app
+            .tree_state
+            .opened()
+            .contains(&vec![project, outer, inner]));
+        assert!(app.tree_state.opened().contains(&vec![project, inner]));
     }
 
     #[test]
@@ -6058,7 +6565,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Icons.next(), SettingsTab::Keyboard);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
@@ -6068,6 +6576,23 @@ mod tests {
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
+    }
+
+    #[test]
+    fn stable_glyph_setting_is_an_explicit_opt_in() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        assert!(!app.ui_settings.use_stable_glyphs);
+        app.settings_adjust_row(AppearanceRow::UseStableGlyphs, 1);
+        assert!(app.ui_settings.use_stable_glyphs);
+        assert!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .use_stable_glyphs
+        );
     }
 
     #[test]

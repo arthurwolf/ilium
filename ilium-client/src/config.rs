@@ -20,6 +20,7 @@ use ratatui::style::Color;
 use serde::Deserialize;
 
 use crate::error::ClientError;
+use crate::icon_settings::{IconSettings, IconTarget};
 use crate::keymap::{self, KeyBinding, ShortcutBase, LEADER_BINDINGS};
 use crate::layout::{DEFAULT_TREE_WIDTH, MAX_TREE_WIDTH, MIN_TREE_WIDTH};
 use crate::theme::{ColorScheme, Theme};
@@ -487,7 +488,7 @@ fn stepped_value<T: Copy + PartialEq>(values: &[T], current: T, direction: i32) 
 /// `crate::app`'s `SettingsState` doc comment before adding a fourth entry
 /// here: every new setting needs a `Raw` field, a validated field here, a
 /// default, a settings-screen row, and a `[ui]` table key -- in that order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiSettings {
     /// Whether the tree panel widens while it has mouse/keyboard focus (see
     /// `crate::layout::TreeWidthAnimation`). Some users find the motion
@@ -507,6 +508,12 @@ pub struct UiSettings {
     pub tree_order: TreeOrder,
     pub motion_level: MotionLevel,
     pub sidebar_density: SidebarDensity,
+    /// Uses single-cell text symbols in the row-action hover overlay. This
+    /// is an accessibility/terminal-compatibility preference only; rich
+    /// Unicode icons remain the normal, default presentation.
+    pub use_stable_glyphs: bool,
+    /// Global glyph assignments for every icon role rendered in the tree.
+    pub icons: IconSettings,
 }
 
 impl Default for UiSettings {
@@ -519,6 +526,8 @@ impl Default for UiSettings {
             tree_order: TreeOrder::Manual,
             motion_level: MotionLevel::Full,
             sidebar_density: SidebarDensity::Standard,
+            use_stable_glyphs: false,
+            icons: IconSettings::default(),
         }
     }
 }
@@ -585,6 +594,9 @@ struct RawUiConfig {
     tree_order: Option<String>,
     motion_level: Option<String>,
     sidebar_density: Option<String>,
+    use_stable_glyphs: Option<bool>,
+    #[serde(default)]
+    icons: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -850,6 +862,13 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         .map(parse_sidebar_density)
         .transpose()?
         .unwrap_or_default();
+    let icons = IconSettings::from_target(|target| {
+        raw.icons
+            .get(target.key())
+            .filter(|glyph| !glyph.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| target.default_glyph().to_string())
+    });
     Ok(UiSettings {
         auto_resize_tree_on_focus: raw
             .auto_resize_tree_on_focus
@@ -865,6 +884,8 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         tree_order,
         motion_level,
         sidebar_density,
+        use_stable_glyphs: raw.use_stable_glyphs.unwrap_or(defaults.use_stable_glyphs),
+        icons,
     })
 }
 
@@ -1434,6 +1455,20 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
             .to_string(),
         ),
     );
+    table.insert(
+        "use_stable_glyphs".to_string(),
+        toml::Value::Boolean(ui.use_stable_glyphs),
+    );
+    let icons = IconTarget::ALL
+        .into_iter()
+        .map(|target| {
+            (
+                target.key().to_string(),
+                toml::Value::String(ui.icons.glyph(target).to_string()),
+            )
+        })
+        .collect();
+    table.insert("icons".to_string(), toml::Value::Table(icons));
     toml::Value::Table(table)
 }
 
@@ -1944,11 +1979,33 @@ mod tests {
             tree_order: TreeOrder::NameDescending,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
+            use_stable_glyphs: true,
+            icons: IconSettings::default(),
         };
         save_ui_settings(&dir, &ui).expect("save should succeed");
 
         let config = load(&dir).expect("saved config should load back");
         assert_eq!(config.ui, ui);
+    }
+
+    #[test]
+    fn stable_glyphs_are_opt_in_and_default_to_normal_icons() {
+        let dir = scratch_dir();
+        assert!(
+            !load(&dir)
+                .expect("missing config should use defaults")
+                .ui
+                .use_stable_glyphs
+        );
+
+        std::fs::write(dir.join("config.toml"), "[ui]\nuse_stable_glyphs = true\n")
+            .expect("write UI preference");
+        assert!(
+            load(&dir)
+                .expect("stable glyph preference should load")
+                .ui
+                .use_stable_glyphs
+        );
     }
 
     #[test]

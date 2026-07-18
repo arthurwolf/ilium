@@ -13,6 +13,7 @@ arboard = "3.6.1"
 crossterm = "0.29.0"
 cosmic-text = "0.14"
 directories = "6.0.0"
+emoji = "0.2.1"
 handlebars = "6.3.2"
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
@@ -37,6 +38,7 @@ vt100 = "0.16.2"
 two-face = "0.5.1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-onig", "parsing", "dump-load"] }
 unicode-width = "0.2.2"
+unicode-segmentation = "1.12"
 
 [dev-dependencies]
 tempfile = "3.27.0"

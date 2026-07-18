@@ -55,7 +55,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // connected `┬`/`┴` joint instead of losing to the pane's plain corner.
     draw_pane(frame, layout.pane_area, app);
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
-    let editor_paths = editor_pane_paths(&app.panes);
     tree_ui::render(
         frame,
         layout.tree_area,
@@ -78,14 +77,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             recently_created: &app.recently_created,
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
+            icons: &app.ui_settings.icons,
             tree_order: app.ui_settings.tree_order,
             sidebar_density: app.ui_settings.sidebar_density,
+            use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
             },
-            editor_paths: &editor_paths,
+            panes: &app.panes,
         },
     );
 
@@ -94,6 +95,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Overlays render last, on top of the layout above.
     if let Mode::Explorer(overlay, _)
     | Mode::FolderExplorer(overlay, _)
+    | Mode::ProjectFolderExplorer(overlay, _)
     | Mode::BoardPathPicker(overlay, _) = &app.mode
     {
         explorer_overlay::render(frame, area, overlay, std::time::SystemTime::now());
@@ -722,22 +724,6 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
     );
 }
 
-/// Every currently-open editor pane's backing file path, keyed by pane id --
-/// the tree panel's only view into `EditorPane.path`, which otherwise lives
-/// entirely in client-runtime state rather than the (server-mirrored) tree.
-/// See `tree_ui::TreeRenderOptions::editor_paths`.
-fn editor_pane_paths(
-    panes: &std::collections::HashMap<NodeId, PaneRuntime>,
-) -> std::collections::HashMap<NodeId, std::path::PathBuf> {
-    panes
-        .iter()
-        .filter_map(|(pane_id, runtime)| match runtime {
-            PaneRuntime::Editor(editor) => editor.path.clone().map(|path| (*pane_id, path)),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Draws the focused pane's live content (terminal screen or editor
 /// buffer), or a placeholder when nothing is focused.
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
@@ -863,12 +849,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 
     if let Some(minimap_area) = chrome.minimap_area {
         let lines = editor.textarea.lines();
-        let borrowed: Vec<&str> = lines.iter().map(String::as_str).collect();
         let highlight_line = minimap_highlight_line(editor, lines.len(), chrome.content_area.width);
         minimap::render(
             frame,
             minimap_area,
-            &borrowed,
+            lines,
             highlight_line,
             chrome.content_area.width,
         );
@@ -987,6 +972,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Explorer(..) => "FILE PICKER",
         Mode::ExplorerFileMenu(_) => "FILE ACTIONS",
         Mode::FolderExplorer(..) => "FOLDER PICKER",
+        Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
@@ -1023,9 +1009,13 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         let spinner = tree_ui::SPINNER_FRAMES[frame_index];
         spans.push(Span::raw("  —  "));
         spans.push(Span::styled(
-            format!("{spinner} Restructuring workspace with AI…"),
+            app.restructure_status_text()
+                .unwrap_or_else(|| format!("{spinner} Restructuring projects with AI…")),
             bar_style.add_modifier(Modifier::BOLD),
         ));
+    } else if let Some(status) = app.restructure_status_text() {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::raw(status));
     }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));

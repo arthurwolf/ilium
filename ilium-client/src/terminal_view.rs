@@ -48,13 +48,37 @@ fn osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
     })
 }
 
-/// How many rows of scrolled-off history `vt100` retains per pane. Applies
-/// per terminal pane, client-side only -- see the module docs for why the
+/// Fixed row cap for the *rendered* `vt100::Parser` scrollback, applied per
+/// terminal pane, client-side only -- see the module docs for why the
 /// server's own parser keeps none at all.
-/// The detached server retains this same upper bound per pane. Keeping the
-/// raw stream locally lets search cover retained history that is older than
-/// the render parser's 10,000-line viewport without giving the client a PTY.
-const MAX_SEARCHABLE_HISTORY_BYTES: usize = 32 * 1024 * 1024;
+///
+/// This is intentionally a constant, not derived from the user-facing MiB
+/// budget below. A vt100 scrollback row is a full-width `Vec<vt100::Cell>`
+/// (`vendor/vt100/src/cell.rs` statically asserts `size_of::<Cell>() == 32`,
+/// and `vendor/vt100/src/row.rs` allocates every row at the pane's current
+/// column count), so its true cost is `cols * 32` bytes -- not a fixed
+/// per-line estimate, and not something that can be kept honest across a
+/// pane resize (`vt100::Grid` has no setter for its row cap once
+/// constructed, so re-deriving it from `cols` would require reparsing the
+/// pane's retained history on every column-count change). Pinning this cap
+/// keeps rendered-scrollback memory small and predictable (worst case
+/// `10_000 * cols * 32` bytes) regardless of pane width or the configured
+/// budget.
+const RENDER_SCROLLBACK_ROWS: usize = 10_000;
+
+/// Computes the raw-history retention cap in bytes for a given MiB budget.
+/// Unlike the render parser's row cap above, this figure is exact -- the
+/// journal it governs (`TerminalView::history_bytes`) stores raw output
+/// bytes directly, with no per-cell/per-row estimation involved, so "N MiB"
+/// here means exactly N MiB retained. Floored at 1 MiB so a pathological
+/// caller-supplied `budget_mib` of `0` doesn't collapse search history to
+/// nothing; `TerminalSettings::MIN_SCROLLBACK_BUDGET_MIB` (4) already keeps
+/// the settings UI well above that floor.
+fn history_budget_bytes(budget_mib: u16) -> usize {
+    usize::from(budget_mib)
+        .saturating_mul(1024 * 1024)
+        .max(1024 * 1024)
+}
 
 pub struct TerminalView {
     parser: vt100::Parser,
@@ -73,13 +97,21 @@ pub struct TerminalView {
     /// Raw retained output used by the workspace search. This deliberately
     /// mirrors server replay bytes rather than attempting to reverse a
     /// rendered `vt100::Screen`, which only keeps a bounded visual window.
+    /// Capped at `history_budget_bytes`, which is exactly the byte figure
+    /// the settings UI's "Scrollback budget (MiB)" knob promises -- unlike
+    /// the render parser's fixed `RENDER_SCROLLBACK_ROWS` cap, this journal
+    /// is raw bytes with no per-row estimation, so the cap is exact.
     history_bytes: Arc<Vec<u8>>,
+    /// Current raw-history retention cap in bytes, derived from the
+    /// configured MiB budget via `history_budget_bytes`. Stored so
+    /// `set_scrollback_budget_mib` can re-trim `history_bytes` in place
+    /// without touching the (budget-independent) render parser.
+    history_budget_bytes: usize,
     /// A search result can temporarily rebuild the visual parser at an old
     /// point in history. Fresh output is retained but does not silently move
     /// that evidence out from under the user; `scroll_to_bottom` restores the
     /// live parser from `history_bytes`.
     is_history_anchor: bool,
-    scrollback_lines: usize,
     /// Recent OSC-8 label/target pairs observed in the byte stream. vt100
     /// renders the label but deliberately discards the metadata, so the
     /// client retains this narrow side-channel for click activation.
@@ -98,27 +130,26 @@ impl TerminalView {
     }
 
     pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
-        let scrollback_lines = usize::from(budget_mib).saturating_mul(1024 * 1024) / 160;
         Self {
-            parser: vt100::Parser::new(rows, cols, scrollback_lines.max(1_000)),
+            parser: vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS),
             scrollback_total: 0,
             last_output_sequence: 0,
             history_bytes: Arc::new(Vec::new()),
+            history_budget_bytes: history_budget_bytes(budget_mib),
             is_history_anchor: false,
-            scrollback_lines: scrollback_lines.max(1_000),
             osc8_links: Vec::new(),
             osc8_stream: Vec::new(),
         }
     }
 
-    /// Rebuilds the render cache from retained raw output under a new budget.
+    /// Re-caps the raw-history journal under a new MiB budget and
+    /// immediately trims `history_bytes` down to it if the budget shrank.
+    /// The render parser is untouched -- its `RENDER_SCROLLBACK_ROWS` cap is
+    /// fixed and independent of this budget (see that constant's doc
+    /// comment), so there is nothing to rebuild here.
     pub fn set_scrollback_budget_mib(&mut self, budget_mib: u16) {
-        let (rows, cols) = self.parser.screen().size();
-        self.scrollback_lines =
-            (usize::from(budget_mib).saturating_mul(1024 * 1024) / 160).max(1_000);
-        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
-        self.parser.process(&self.history_bytes);
-        self.refresh_scrollback_total();
+        self.history_budget_bytes = history_budget_bytes(budget_mib);
+        self.trim_history_to_budget();
     }
 
     /// Feeds one chunk of raw PTY output bytes (from `ServerEvent::ScreenUpdate`)
@@ -138,7 +169,7 @@ impl TerminalView {
     /// event queued before the replay is applied can be rejected later.
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
         let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
+        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         self.scrollback_total = 0;
         Arc::make_mut(&mut self.history_bytes).clear();
         self.osc8_links.clear();
@@ -177,6 +208,14 @@ impl TerminalView {
     }
 
     fn observe_osc8_links(&mut self, bytes: &[u8]) {
+        // Ordinary shell and agent output very rarely contains an escape
+        // byte at all.  Avoid allocating/copying that common-path output
+        // into the OSC parser's scratch buffer; an incomplete sequence from
+        // an earlier chunk keeps `osc8_stream` non-empty and therefore still
+        // takes the full cross-chunk parser path below.
+        if self.osc8_stream.is_empty() && !bytes.contains(&0x1b) {
+            return;
+        }
         self.osc8_stream.extend_from_slice(bytes);
         // A well-formed OSC-8 open/label/close sequence never needs anywhere
         // near this much buffering. Without a cap, a pane emitting a
@@ -318,7 +357,7 @@ impl TerminalView {
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let end_byte = end_byte.min(self.history_bytes.len());
-        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
+        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         self.parser.process(&self.history_bytes[..end_byte]);
         self.refresh_scrollback_total();
         self.is_history_anchor = true;
@@ -351,19 +390,25 @@ impl TerminalView {
     }
 
     fn append_history(&mut self, bytes: &[u8]) {
-        let history_bytes = Arc::make_mut(&mut self.history_bytes);
-        history_bytes.extend_from_slice(bytes);
-        let excess = history_bytes
+        Arc::make_mut(&mut self.history_bytes).extend_from_slice(bytes);
+        self.trim_history_to_budget();
+    }
+
+    /// Drops the oldest retained bytes past `history_budget_bytes`. Called
+    /// after every append and whenever the budget itself shrinks.
+    fn trim_history_to_budget(&mut self) {
+        let excess = self
+            .history_bytes
             .len()
-            .saturating_sub(MAX_SEARCHABLE_HISTORY_BYTES);
+            .saturating_sub(self.history_budget_bytes);
         if excess > 0 {
-            history_bytes.drain(..excess);
+            Arc::make_mut(&mut self.history_bytes).drain(..excess);
         }
     }
 
     fn rebuild_live_parser(&mut self) {
         let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, self.scrollback_lines);
+        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         self.parser.process(&self.history_bytes);
         self.refresh_scrollback_total();
     }
@@ -390,6 +435,10 @@ mod tests {
         view.feed(b"hello");
         let text = view.with_screen(|screen| screen.contents());
         assert!(text.contains("hello"));
+        assert!(
+            view.osc8_stream.is_empty(),
+            "ordinary output must not allocate OSC parsing scratch state"
+        );
     }
 
     #[test]

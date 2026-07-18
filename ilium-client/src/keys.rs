@@ -13,8 +13,10 @@ use ilium_ipc::ClientRequest;
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
     App, AppearanceRow, BoardRenameTarget, BoardStorageKind, ClientExitReason, CreateBoardState,
-    FocusTarget, KanbanBoardRow, Mode, SettingsState, SettingsTab, SoundRow,
+    FocusTarget, KanbanBoardRow, Mode, ProjectFolderSelection, SettingsState, SettingsTab,
+    SoundRow,
 };
+use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action, ShortcutBase};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::search_ui::SearchState;
@@ -37,6 +39,9 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::ExplorerFileMenu(menu) => handle_explorer_file_menu_event(app, menu, &event),
         Mode::FolderExplorer(overlay, target) => {
             handle_folder_explorer_event(app, overlay, target, &event)
+        }
+        Mode::ProjectFolderExplorer(overlay, selection) => {
+            handle_project_folder_explorer_event(app, overlay, selection, &event)
         }
         Mode::Rename(state) => handle_rename_event(app, state, &event),
         Mode::CommandPrompt(state) => handle_command_prompt_event(app, state, &event),
@@ -623,6 +628,31 @@ fn handle_folder_explorer_event(
     }
 }
 
+fn handle_project_folder_explorer_event(
+    app: &mut App,
+    mut overlay: Box<crate::explorer_overlay::ExplorerOverlay>,
+    selection: ProjectFolderSelection,
+    event: &Event,
+) {
+    match overlay.handle(event, app.layout.screen_area) {
+        Ok(Some(path)) => {
+            match selection {
+                ProjectFolderSelection::NewProject => app.request_new_project(path),
+                ProjectFolderSelection::ChangeProject(project_id) => {
+                    app.request_change_project_folder(project_id, path)
+                }
+            }
+            app.mode = Mode::Normal;
+        }
+        Ok(None) if is_escape(event) => app.mode = Mode::Normal,
+        Ok(None) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
+        Err(err) => {
+            app.status_message = Some(format!("Project picker error: {err}"));
+            app.mode = Mode::ProjectFolderExplorer(overlay, selection);
+        }
+    }
+}
+
 /// While `Mode::Rename(state)` is active: `Enter` queues a `RenameNode`
 /// request, `Esc` cancels. Every other key is delegated to
 /// `text_prompt::handle_key`, shared with the other text-prompt modes.
@@ -695,6 +725,7 @@ fn handle_inference_setting_prompt(
                 tab: SettingsTab::Inference,
                 selected_row: 0,
                 scroll: 0,
+                ..SettingsState::default()
             });
         }
         PromptOutcome::Cancel => {
@@ -702,6 +733,7 @@ fn handle_inference_setting_prompt(
                 tab: SettingsTab::Inference,
                 selected_row: 0,
                 scroll: 0,
+                ..SettingsState::default()
             })
         }
         PromptOutcome::Continue => app.mode = Mode::InferenceSettingPrompt(field, state),
@@ -1102,6 +1134,89 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
 
+    if let Some(mut picker) = state.icon_picker.take() {
+        let entry_count = picker.search_results.entry_count;
+        let grid_columns = crate::settings_ui::icon_picker_grid_columns(
+            app.layout.screen_area,
+            picker.column_mode,
+        );
+        let mut selection_moved = false;
+        match key.code {
+            KeyCode::Esc => {
+                if picker.is_searching {
+                    picker.is_searching = false;
+                } else {
+                    app.mode = Mode::Settings(state);
+                    return;
+                }
+            }
+            KeyCode::Char('/') if !picker.is_searching => picker.is_searching = true,
+            KeyCode::Char('v') if !picker.is_searching => {
+                picker.column_mode = picker.column_mode.toggle();
+                picker.scroll_row = crate::settings_ui::icon_picker_scroll_for_entry(
+                    app.layout.screen_area,
+                    &picker,
+                );
+            }
+            KeyCode::Backspace if picker.is_searching => {
+                picker.search_query.pop();
+                picker.refresh_search_results();
+            }
+            KeyCode::Enter if picker.is_searching => picker.is_searching = false,
+            KeyCode::Char(character) if picker.is_searching => {
+                picker.search_query.push(character);
+                picker.refresh_search_results();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                picker.selected_entry = picker.selected_entry.saturating_sub(grid_columns);
+                selection_moved = true;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                picker.selected_entry =
+                    (picker.selected_entry + grid_columns).min(entry_count.saturating_sub(1));
+                selection_moved = true;
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                picker.selected_entry = picker.selected_entry.saturating_sub(1);
+                selection_moved = true;
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                picker.selected_entry =
+                    (picker.selected_entry + 1).min(entry_count.saturating_sub(1));
+                selection_moved = true;
+            }
+            KeyCode::PageUp => {
+                picker.scroll_row = picker.scroll_row.saturating_sub(usize::from(
+                    crate::settings_ui::icon_picker_layout(app.layout.screen_area)
+                        .document_area
+                        .height,
+                ));
+            }
+            KeyCode::PageDown => {
+                picker.scroll_row = picker.scroll_row.saturating_add(usize::from(
+                    crate::settings_ui::icon_picker_layout(app.layout.screen_area)
+                        .document_area
+                        .height,
+                ));
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if let Some(entry) = picker.search_results.entry(picker.selected_entry) {
+                    app.settings_set_icon(picker.target, entry.glyph.to_string());
+                }
+                app.mode = Mode::Settings(state);
+                return;
+            }
+            _ => {}
+        }
+        if selection_moved {
+            picker.scroll_row =
+                crate::settings_ui::icon_picker_scroll_for_entry(app.layout.screen_area, &picker);
+        }
+        state.icon_picker = Some(picker);
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.mode = Mode::Normal;
@@ -1116,6 +1231,31 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.tab = state.tab.previous();
             state.selected_row = 0;
             state.scroll = 0;
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Icons => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Icons => {
+            state.selected_row =
+                (state.selected_row + 1).min(IconTarget::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Icons => {
+            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+                app.settings_cycle_icon(target, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') if state.tab == SettingsTab::Icons => {
+            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+                app.settings_cycle_icon(target, 1);
+            }
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Icons => {
+            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+                state.icon_picker = Some(crate::app::IconPickerState::new(target));
+            }
+        }
+        KeyCode::Char('r') if state.tab == SettingsTab::Icons => {
+            state.icons_preview_real = !state.icons_preview_real
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Inference => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -1335,6 +1475,90 @@ mod indent_outdent_tests {
         assert!(state.is_waiting_for_debounce());
     }
 
+    #[test]
+    fn icon_picker_search_filters_the_chapter_document_and_selects_its_result() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Icons,
+            icon_picker: Some(crate::app::IconPickerState::new(IconTarget::Group)),
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)),
+        );
+        for character in "rocket".chars() {
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE)),
+            );
+        }
+
+        let Mode::Settings(state) = &app.mode else {
+            panic!("icon picker should remain open while searching");
+        };
+        let picker = state.icon_picker.as_ref().expect("the picker remains open");
+        assert_eq!(picker.search_query, "rocket");
+        assert!(crate::icon_settings::picker_entry_count(&picker.search_query) > 0);
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(app.ui_settings.icons.group, "🚀");
+    }
+
+    #[test]
+    fn icon_picker_v_switches_between_dense_and_single_column_modes() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Icons,
+            icon_picker: Some(crate::app::IconPickerState::new(IconTarget::Group)),
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)),
+        );
+        let Mode::Settings(state) = &app.mode else {
+            panic!("view switching must keep the picker open");
+        };
+        assert_eq!(
+            state
+                .icon_picker
+                .as_ref()
+                .expect("picker state")
+                .column_mode,
+            crate::app::IconPickerColumnMode::SingleColumn
+        );
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)),
+        );
+        let Mode::Settings(state) = &app.mode else {
+            panic!("view switching must keep the picker open");
+        };
+        assert_eq!(
+            state
+                .icon_picker
+                .as_ref()
+                .expect("picker state")
+                .column_mode,
+            crate::app::IconPickerColumnMode::MultiColumn
+        );
+    }
+
     /// `top` (group) containing `sibling_group` (group, empty) and `pane`
     /// (pane), in that order, plus a second top-level group `other`.
     fn sample_tree() -> (Tree, NodeId, NodeId, NodeId, NodeId) {
@@ -1369,6 +1593,7 @@ mod indent_outdent_tests {
     fn board_dialog_types_plain_p_and_reserves_control_p_for_browse() {
         let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
         app.mode = Mode::CreateBoard(CreateBoardState {
+            parent_group: ilium_core::ROOT_ID,
             name: crate::text_prompt::TextPromptState::new(""),
             path: crate::text_prompt::TextPromptState::new("/tmp/board.md"),
             storage_kind: BoardStorageKind::MarkdownFile,

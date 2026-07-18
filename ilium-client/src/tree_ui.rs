@@ -7,14 +7,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 use ilium_core::{
-    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, Node, NodeId, NodeKind,
-    PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
+    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, ContainerKind, Node, NodeId,
+    NodeKind, PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
 };
-use ratatui::buffer::{Buffer, CellDiffOption};
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -24,6 +23,7 @@ use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
+use crate::icon_settings::{IconSettings, IconTarget};
 use crate::theme;
 use crate::tree_ordering;
 use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
@@ -61,6 +61,7 @@ pub(crate) const RECENTLY_CREATED_PULSE_MS: u128 = 1400;
 const RECENTLY_CREATED_PULSE_PHASE_MS: u128 = 175;
 
 /// Fallback identifier for agent classes without their own configurable icon.
+#[cfg(test)]
 const AGENT_ICON: &str = "\u{1F916}";
 /// Plain terminal panes and the matching creation action share this glyph.
 const TERMINAL_ICON: &str = "📟";
@@ -105,15 +106,14 @@ const WIDE_TITLE_MIN_COLUMNS: u16 = 40;
 /// pointer is actually over (blank otherwise, so it never nags).
 const TOOLBAR_HEIGHT: u16 = 2;
 const TOOLBAR_BUTTON_WIDTH: u16 = 4;
-/// Two display cells hold the original emoji and the third is its spacer.
-/// Each complete slot is emitted as one forced-width terminal run -- see
-/// `TreeRowActionStrip::draw` -- so a later purple spacer write cannot clip
-/// an emoji's painted edge in terminals such as VS Code's xterm.js.
+/// Two display cells hold an action glyph and the third is its spacer.
+/// Every slot is explicitly cleared before its glyph is painted, so hovered
+/// controls cannot reveal the title that previously occupied the same cells.
 pub(crate) const ROW_ACTION_WIDTH: u16 = 3;
 const ROW_ACTION_TOTAL_WIDTH: u16 = ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
 /// Edit, up, down, close, then retitle -- reserved as the trailing cells of
 /// a hovered row (see `row_action_at`/`draw_row_actions`).
-pub(crate) const ROW_ACTION_COUNT: u16 = 5;
+pub(crate) const ROW_ACTION_COUNT: u16 = 6;
 
 /// Actions available from the tree toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,10 +126,11 @@ pub enum TreeToolbarAction {
     Editor,
     Board,
     Group,
+    Project,
     Split,
     Folder,
-    /// Triggers `App::action_request_restructure` -- a whole-tree LLM
-    /// regroup-and-retitle call, manual-only for now (see
+    /// Triggers `App::action_request_restructure` -- one independent LLM
+    /// regroup-and-retitle call per non-empty project (see
     /// `crate::restructure`'s module docs). Anchored next to `Settings`
     /// rather than joining `LEFT_ALIGNED`: it acts on the whole session, not
     /// on one new pane, the same reason `Settings` is anchored separately.
@@ -140,8 +141,11 @@ pub enum TreeToolbarAction {
 impl TreeToolbarAction {
     /// Ordered left-aligned creation actions. Settings is intentionally not
     /// part of this list because its geometry is anchored independently.
-    const LEFT_ALIGNED: [Self; 10] = [
+    const LEFT_ALIGNED: [Self; 11] = [
         Self::Search,
+        // Projects are a first-class top-level concept, so keep their
+        // creation control within the narrow-panel visible prefix.
+        Self::Project,
         Self::Shell,
         Self::Agent(BuiltinAgentProvider::Claude),
         Self::Agent(BuiltinAgentProvider::Codex),
@@ -166,12 +170,13 @@ impl TreeToolbarAction {
             Self::Editor => TEXT_EDITOR_ICON,
             Self::Board => "▦",
             Self::Group => "\u{1F4C1}",
+            Self::Project => "🗂️",
             Self::Split => "▥",
             Self::Folder => "\u{1F5C0}",
             // Reuses the same recycle glyph as the per-row `TreeRowAction::Retitle`
             // -- one visual language for "ask the LLM to redo a title" whether
             // it's scoped to one row or the whole tree.
-            Self::Restructure => TreeRowAction::Retitle.glyph(),
+            Self::Restructure => TreeRowAction::Retitle.normal_glyph(),
             Self::Settings => SETTINGS_ICON,
         }
     }
@@ -190,6 +195,7 @@ impl TreeToolbarAction {
             Self::Editor => Color::Magenta,
             Self::Board => Color::Cyan,
             Self::Group => Color::Rgb(0x7a, 0xa2, 0xf7),
+            Self::Project => Color::Cyan,
             Self::Split => Color::Rgb(0xbb, 0x9a, 0xf7),
             Self::Folder => Color::Cyan,
             Self::Restructure => Color::Yellow,
@@ -207,6 +213,7 @@ impl TreeToolbarAction {
             Self::Editor => "new editor",
             Self::Board => "new board",
             Self::Group => "new group",
+            Self::Project => "new project",
             Self::Split => "new split view",
             Self::Folder => "open folder",
             Self::Restructure => "restructure with AI",
@@ -230,25 +237,53 @@ pub enum TreeRowAction {
     /// anything else (a group, an editor pane); see
     /// `App::action_request_retitle`'s own doc comment.
     Retitle,
+    /// Restructures exactly one project with a separate AI call.
+    ProjectRestructure,
 }
 
 impl TreeRowAction {
     /// Ordered set used for both rendering and hit testing -- left to right.
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self::Rename,
         Self::MoveUp,
         Self::MoveDown,
         Self::Close,
         Self::Retitle,
+        Self::ProjectRestructure,
     ];
 
-    const fn glyph(self) -> &'static str {
+    /// The default, expressive UTF-8 icon for this action. These remain the
+    /// standard sidebar controls; `stable_glyph` is only an explicit user
+    /// preference for terminals that cannot render the emoji correctly.
+    const fn normal_glyph(self) -> &'static str {
         match self {
             Self::Rename => theme::PEN_ICON,
             Self::MoveUp => "🔼",
             Self::MoveDown => "🔽",
             Self::Close => "🚫",
-            Self::Retitle => "♻️",
+            Self::Retitle | Self::ProjectRestructure => "♻️",
+        }
+    }
+
+    /// A deliberately plain, one-cell alternative for terminals where a
+    /// user has opted out of rich emoji. Never use this as a rendering
+    /// fallback: normal icons must be fixed at the rendering layer instead.
+    const fn stable_glyph(self) -> &'static str {
+        match self {
+            Self::Rename => "✎",
+            Self::MoveUp => "↑",
+            Self::MoveDown => "↓",
+            Self::Close => "×",
+            Self::Retitle => "↻",
+            Self::ProjectRestructure => "⟳",
+        }
+    }
+
+    const fn glyph(self, use_stable_glyphs: bool) -> &'static str {
+        if use_stable_glyphs {
+            self.stable_glyph()
+        } else {
+            self.normal_glyph()
         }
     }
 }
@@ -301,41 +336,45 @@ impl TreeRowActionStrip {
         TreeRowAction::ALL.get(index).copied()
     }
 
-    /// Paints every slot as one atomic terminal run: emoji and trailing
-    /// spacer share one `Cell` and one `Print`, with the remaining covered
-    /// cells skipped by Ratatui's diff iterator. This is stronger than widget
-    /// call ordering, which disappears once Ratatui reduces a frame to cells.
-    fn draw(self, buffer: &mut Buffer, row: u16, actions: &[TreeRowAction], style: Style) {
-        let Some(forced_width) = NonZeroU16::new(ROW_ACTION_WIDTH) else {
-            return;
-        };
-
+    /// Paints each action and its cleanup spaces as one natural-width run.
+    /// A wide emoji that replaces title text must carry the trailing blanks
+    /// in the same terminal print operation: Ratatui otherwise treats its
+    /// continuation cell as covered and can skip its separate cleanup diff.
+    fn draw(
+        self,
+        buffer: &mut Buffer,
+        row: u16,
+        actions: &[TreeRowAction],
+        style: Style,
+        use_stable_glyphs: bool,
+    ) {
         for (index, action) in TreeRowAction::ALL.iter().enumerate() {
             let Ok(index) = u16::try_from(index) else {
                 continue;
             };
             let slot = self.slot(index, row);
 
-            // Reset and style every covered cell so the in-memory frame stays
-            // truthful even though only the slot's first cell reaches the
-            // terminal backend while the forced-width run is visible.
+            // Clear every physical cell first. The title normally occupies
+            // this region, so merely writing an emoji at the slot origin
+            // would leave its old second/third characters visible.
             for column in slot.x..slot.right() {
                 buffer[(column, row)].reset();
                 buffer[(column, row)].set_symbol(" ").set_style(style);
             }
 
-            let glyph = if actions.contains(action) {
-                action.glyph()
-            } else {
-                ""
-            };
-            let padding_width =
-                usize::from(ROW_ACTION_WIDTH).saturating_sub(UnicodeWidthStr::width(glyph));
-            let terminal_run = format!("{glyph}{}", " ".repeat(padding_width));
-            buffer[(slot.x, row)]
-                .set_symbol(&terminal_run)
-                .set_style(style)
-                .set_diff_option(CellDiffOption::ForcedWidth(forced_width));
+            if actions.contains(action) {
+                let glyph = action.glyph(use_stable_glyphs);
+                let padding =
+                    usize::from(ROW_ACTION_WIDTH).saturating_sub(UnicodeWidthStr::width(glyph));
+                // This is intentionally one `Cell` holding one full terminal
+                // run. Its natural measured width is exactly the slot width,
+                // so the emitted emoji and blanks replace every old title
+                // character without synthetic forced-width behavior.
+                let terminal_run = format!("{glyph}{}", " ".repeat(padding));
+                buffer[(slot.x, row)]
+                    .set_symbol(&terminal_run)
+                    .set_style(style);
+            }
         }
     }
 }
@@ -380,16 +419,25 @@ pub struct TreeRenderOptions<'a> {
     pub transitions: &'a TreeTransitions,
     /// Resolved user-global presentation settings for detected agent types.
     pub agent_identifiers: &'a AgentIdentifierSettings,
+    pub icons: &'a IconSettings,
     pub tree_order: TreeOrder,
     pub sidebar_density: SidebarDensity,
+    /// An explicit opt-in for text-only row-action symbols. The default is
+    /// false so normal UTF-8 icons are always the primary experience.
+    pub use_stable_glyphs: bool,
     pub hover: TreeHoverState,
-    /// File paths backing currently-open editor panes (see
-    /// `App::PaneRuntime::Editor`), keyed by pane id. A restructure's title
-    /// is now a genuinely descriptive title distinct from an editor's
-    /// filename (unlike a plain rename/automatic titler, which historically
-    /// left an editor's `Node::name` equal to its filename) -- see
-    /// `pane_label`'s Editor arms for how the two are composed.
-    pub editor_paths: &'a HashMap<NodeId, PathBuf>,
+    /// Live pane runtimes (see `App::panes`), keyed by pane id. Used only to
+    /// look up each open editor pane's backing file path on demand while
+    /// building tree rows -- borrowed directly rather than pre-copied into a
+    /// `NodeId -> PathBuf` map, since that map would need rebuilding from
+    /// scratch every single redraw for no reason (the pane-id -> path
+    /// mapping only actually changes on editor open/close/Save-As). A
+    /// restructure's title is now a genuinely descriptive title distinct
+    /// from an editor's filename (unlike a plain rename/automatic titler,
+    /// which historically left an editor's `Node::name` equal to its
+    /// filename) -- see `pane_label`'s Editor arms for how the two are
+    /// composed.
+    pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
 }
 
 /// Shared immutable inputs for one recursive item-tree build. Keeping these
@@ -401,6 +449,7 @@ struct TreeItemBuildContext<'a> {
     titles_loading: &'a HashSet<NodeId>,
     recently_created: &'a HashMap<NodeId, u128>,
     agent_identifiers: &'a AgentIdentifierSettings,
+    icons: &'a IconSettings,
     tree_order: TreeOrder,
     sidebar_density: SidebarDensity,
     panel_width: u16,
@@ -408,7 +457,7 @@ struct TreeItemBuildContext<'a> {
     /// are materialized only along these paths, so a large unopened subtree
     /// never becomes render work merely because another row animates.
     opened_paths: &'a HashSet<Vec<NodeId>>,
-    editor_paths: &'a HashMap<NodeId, PathBuf>,
+    panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
 }
 
 /// Builds the full recursive `TreeItem` tree from the root group's
@@ -442,11 +491,12 @@ pub(crate) fn visible_tree_node_ids(
             titles_loading: &HashSet::new(),
             recently_created: &HashMap::new(),
             agent_identifiers: &AgentIdentifierSettings::default(),
+            icons: &IconSettings::default(),
             tree_order,
             sidebar_density: SidebarDensity::default(),
             panel_width: 0,
             opened_paths: &opened_paths,
-            editor_paths: &HashMap::new(),
+            panes: &HashMap::new(),
         },
     );
 
@@ -488,12 +538,21 @@ fn build_item(
     match &node.kind {
         NodeKind::Container(container) => {
             let children = build_children(tree, node.id, context, identifier_path);
-            let icon = match container.split_orientation() {
-                Some(ilium_core::SplitOrientation::Vertical) => "▥",
-                Some(ilium_core::SplitOrientation::Horizontal) => "▤",
-                None => "\u{1F4C1}",
+            let icon = match &container.kind {
+                ContainerKind::Project { .. } => "🗂️",
+                ContainerKind::Group => context.icons.glyph(IconTarget::Group),
+                ContainerKind::SplitView {
+                    orientation: ilium_core::SplitOrientation::Vertical,
+                } => context.icons.glyph(IconTarget::SplitVertical),
+                ContainerKind::SplitView {
+                    orientation: ilium_core::SplitOrientation::Horizontal,
+                } => context.icons.glyph(IconTarget::SplitHorizontal),
             };
-            let label = node_label(Span::raw(icon), None, Span::raw(node.name.clone()));
+            let label = node_label(
+                Span::raw(icon.to_string()),
+                None,
+                Span::raw(node.name.clone()),
+            );
             let label = apply_recent_pulse(label, flash_on);
             // `NodeId`s are unique across the whole `Tree` (its own
             // invariant), so they can't collide among siblings here --
@@ -511,18 +570,23 @@ fn build_item(
             ..
         } => {
             let editor_filename = context
-                .editor_paths
+                .panes
                 .get(&node.id)
+                .and_then(|runtime| match runtime {
+                    crate::app::PaneRuntime::Editor(editor) => editor.path.as_deref(),
+                    _ => None,
+                })
                 .and_then(|path| path.file_name())
                 .map(|name| name.to_string_lossy().into_owned());
             let label = scheduled_input.as_ref().map_or_else(
                 || {
-                    pane_label(
+                    pane_label_with_icons(
                         status,
                         display_title(node, context.panel_width),
                         context.elapsed_ms,
                         context.titles_loading.contains(&node.id),
                         context.agent_identifiers,
+                        context.icons,
                         editor_filename.as_deref(),
                     )
                 },
@@ -547,7 +611,11 @@ fn build_item(
             )
         }
         NodeKind::Folder { path } => {
-            let label = node_label(Span::raw("\u{1F5C0}"), None, Span::raw(node.name.clone()));
+            let label = node_label(
+                Span::raw(context.icons.glyph(IconTarget::Folder).to_string()),
+                None,
+                Span::raw(node.name.clone()),
+            );
             // The root itself is a normal tree row. Once opened, its direct
             // children are listed; each child directory recurses only after
             // *that* exact virtual path has been expanded.
@@ -783,12 +851,13 @@ fn apply_recent_pulse(line: Line<'static>, flash_on: bool) -> Line<'static> {
 /// current `PaneStatus`. `elapsed_ms` selects the current animation frame
 /// for `Working` (spinning braille dots), `WaitingBackground` (a slower
 /// half-hour clock sweep), and `Done` (pulsing bell).
-fn pane_label(
+fn pane_label_with_icons(
     status: &PaneStatus,
     name: &str,
     elapsed_ms: u128,
     is_title_loading: bool,
     agent_identifiers: &AgentIdentifierSettings,
+    icons: &IconSettings,
     editor_filename: Option<&str>,
 ) -> Line<'static> {
     // While `session_naming::infer_pane_title` is still awaiting a result
@@ -819,7 +888,10 @@ fn pane_label(
     };
     match status {
         PaneStatus::PlainShell => node_label(
-            Span::styled(TERMINAL_ICON, Style::new().fg(Color::Gray)),
+            Span::styled(
+                icons.glyph(IconTarget::Terminal).to_string(),
+                Style::new().fg(Color::Gray),
+            ),
             None,
             Span::raw(title()),
         ),
@@ -830,6 +902,7 @@ fn pane_label(
             title(),
             elapsed_ms,
             agent_identifiers,
+            icons,
         ),
         PaneStatus::AgentWithGoal(class, activity) => agent_pane_label(
             class,
@@ -838,9 +911,13 @@ fn pane_label(
             title(),
             elapsed_ms,
             agent_identifiers,
+            icons,
         ),
         PaneStatus::Editor { dirty: true } => node_label(
-            Span::styled(TEXT_EDITOR_ICON, Style::new().fg(Color::Magenta)),
+            Span::styled(
+                icons.glyph(IconTarget::Editor).to_string(),
+                Style::new().fg(Color::Magenta),
+            ),
             None,
             Span::styled(
                 format!("{}*", editor_text(title())),
@@ -848,16 +925,55 @@ fn pane_label(
             ),
         ),
         PaneStatus::Editor { dirty: false } => node_label(
-            Span::raw(TEXT_EDITOR_ICON),
+            Span::raw(icons.glyph(IconTarget::Editor).to_string()),
             None,
             Span::raw(editor_text(title())),
         ),
         PaneStatus::Board => node_label(
-            Span::styled("▦", Style::new().fg(Color::Cyan)),
+            Span::styled(
+                icons.glyph(IconTarget::Board).to_string(),
+                Style::new().fg(Color::Cyan),
+            ),
             None,
             Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
         ),
     }
+}
+
+/// Default-icon wrapper retained for focused unit tests and callers that do
+/// not own the global settings object. Production tree rendering always uses
+/// `pane_label_with_icons` with the live persisted icon map.
+#[cfg(test)]
+fn pane_label(
+    status: &PaneStatus,
+    name: &str,
+    elapsed_ms: u128,
+    is_title_loading: bool,
+    agent_identifiers: &AgentIdentifierSettings,
+    editor_filename: Option<&str>,
+) -> Line<'static> {
+    let mut icons = IconSettings::default();
+    icons.set(
+        IconTarget::Claude,
+        agent_identifiers.claude_icon.glyph().to_string(),
+    );
+    icons.set(
+        IconTarget::Codex,
+        agent_identifiers.codex_icon.glyph().to_string(),
+    );
+    icons.set(
+        IconTarget::Antigravity,
+        agent_identifiers.antigravity_icon.glyph().to_string(),
+    );
+    pane_label_with_icons(
+        status,
+        name,
+        elapsed_ms,
+        is_title_loading,
+        agent_identifiers,
+        &icons,
+        editor_filename,
+    )
 }
 
 /// Builds the agent portion of a tree row from independent activity and goal
@@ -869,14 +985,21 @@ fn agent_pane_label(
     title: String,
     elapsed_ms: u128,
     agent_identifiers: &AgentIdentifierSettings,
+    icons: &IconSettings,
 ) -> Line<'static> {
-    let node_icon = Span::raw(agent_node_icon(class, agent_identifiers));
+    let node_icon = Span::raw(agent_node_icon(class, agent_identifiers, icons).to_string());
     match activity {
         AgentActivity::Working => {
             let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             agent_node_label(
                 node_icon,
-                Some(Span::raw(SPINNER_FRAMES[frame_index].to_string())),
+                Some(Span::raw(
+                    if icons.glyph(IconTarget::Working) == IconTarget::Working.default_glyph() {
+                        SPINNER_FRAMES[frame_index].to_string()
+                    } else {
+                        icons.glyph(IconTarget::Working).to_string()
+                    },
+                )),
                 has_goal,
                 Span::raw(agent_title(class, &title, agent_identifiers.mode)),
             )
@@ -886,7 +1009,15 @@ fn agent_pane_label(
                 (elapsed_ms / BACKGROUND_FRAME_MS) as usize % BACKGROUND_CLOCK_FRAMES.len();
             agent_node_label(
                 node_icon,
-                Some(Span::raw(BACKGROUND_CLOCK_FRAMES[frame_index].to_string())),
+                Some(Span::raw(
+                    if icons.glyph(IconTarget::WaitingBackground)
+                        == IconTarget::WaitingBackground.default_glyph()
+                    {
+                        BACKGROUND_CLOCK_FRAMES[frame_index].to_string()
+                    } else {
+                        icons.glyph(IconTarget::WaitingBackground).to_string()
+                    },
+                )),
                 has_goal,
                 Span::raw(agent_title(class, &title, agent_identifiers.mode)),
             )
@@ -899,7 +1030,10 @@ fn agent_pane_label(
             };
             agent_node_label(
                 node_icon,
-                Some(Span::styled("\u{1F514}", style)),
+                Some(Span::styled(
+                    icons.glyph(IconTarget::Done).to_string(),
+                    style,
+                )),
                 has_goal,
                 Span::styled(
                     format!(
@@ -914,14 +1048,17 @@ fn agent_pane_label(
             let style = Style::new().add_modifier(Modifier::BOLD);
             agent_node_label(
                 node_icon,
-                Some(Span::styled("?", style)),
+                Some(Span::styled(
+                    icons.glyph(IconTarget::WaitingApproval).to_string(),
+                    style,
+                )),
                 has_goal,
                 Span::styled(agent_title(class, &title, agent_identifiers.mode), style),
             )
         }
         AgentActivity::Idle => agent_node_label(
             node_icon,
-            Some(Span::raw("\u{25cf}")),
+            Some(Span::raw(icons.glyph(IconTarget::Idle).to_string())),
             has_goal,
             Span::raw(agent_title(class, &title, agent_identifiers.mode)),
         ),
@@ -954,6 +1091,7 @@ fn scheduled_pane_label(
         agent_identifiers,
         editor_filename,
     } = label_context;
+    let icons = IconSettings::default();
     let remaining_millis = scheduled_input
         .execute_at_unix_millis
         .saturating_sub(current_unix_millis);
@@ -971,12 +1109,15 @@ fn scheduled_pane_label(
     let countdown = human_readable_countdown(remaining_millis);
     match status {
         PaneStatus::PlainShell => node_label(
-            Span::styled(TERMINAL_ICON, Style::new().fg(Color::Gray)),
+            Span::styled(
+                icons.glyph(IconTarget::Terminal).to_string(),
+                Style::new().fg(Color::Gray),
+            ),
             Some(Span::raw(clock.to_string())),
             Span::raw(format!("{countdown} {title}")),
         ),
         PaneStatus::Agent(class, _) => agent_node_label(
-            Span::raw(agent_node_icon(class, agent_identifiers)),
+            Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
             Some(Span::raw(clock.to_string())),
             false,
             Span::raw(format!(
@@ -985,7 +1126,7 @@ fn scheduled_pane_label(
             )),
         ),
         PaneStatus::AgentWithGoal(class, _) => agent_node_label(
-            Span::raw(agent_node_icon(class, agent_identifiers)),
+            Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
             Some(Span::raw(clock.to_string())),
             true,
             Span::raw(format!(
@@ -995,12 +1136,13 @@ fn scheduled_pane_label(
         ),
         // The domain rejects scheduled input for non-terminal panes. Falling
         // back keeps a malformed old snapshot renderable instead of panicking.
-        PaneStatus::Editor { .. } | PaneStatus::Board => pane_label(
+        PaneStatus::Editor { .. } | PaneStatus::Board => pane_label_with_icons(
             status,
             name,
             elapsed_ms,
             is_title_loading,
             agent_identifiers,
+            &icons,
             editor_filename,
         ),
     }
@@ -1091,15 +1233,19 @@ fn agent_class_label(class: &AgentClass) -> String {
 /// Chooses the first fixed-width column's glyph. Name/letter/hidden modes
 /// deliberately leave it blank; their representation lives in the text
 /// prefix, while the activity column remains independent and visible.
-fn agent_node_icon(class: &AgentClass, settings: &AgentIdentifierSettings) -> &'static str {
+fn agent_node_icon<'a>(
+    class: &AgentClass,
+    settings: &AgentIdentifierSettings,
+    icons: &'a IconSettings,
+) -> &'a str {
     if settings.mode != AgentIdentifierMode::Icon {
         return "";
     }
     match class {
-        AgentClass::Claude => settings.claude_icon.glyph(),
-        AgentClass::Codex => settings.codex_icon.glyph(),
-        AgentClass::Antigravity => settings.antigravity_icon.glyph(),
-        AgentClass::Other(_) => AGENT_ICON,
+        AgentClass::Claude => icons.glyph(IconTarget::Claude),
+        AgentClass::Codex => icons.glyph(IconTarget::Codex),
+        AgentClass::Antigravity => icons.glyph(IconTarget::Antigravity),
+        AgentClass::Other(_) => icons.glyph(IconTarget::OtherAgent),
     }
 }
 
@@ -1221,10 +1367,32 @@ fn row_supports_retitle(tree: &Tree, id: NodeId) -> bool {
 /// same left-to-right order as `TreeRowAction::ALL` -- see
 /// `row_supports_retitle` for why `Retitle` is sometimes excluded.
 fn applicable_row_actions(tree: &Tree, id: NodeId) -> &'static [TreeRowAction] {
-    if row_supports_retitle(tree, id) {
-        &TreeRowAction::ALL
+    const BASIC: [TreeRowAction; 4] = [
+        TreeRowAction::Rename,
+        TreeRowAction::MoveUp,
+        TreeRowAction::MoveDown,
+        TreeRowAction::Close,
+    ];
+    const RETITLE: [TreeRowAction; 5] = [
+        TreeRowAction::Rename,
+        TreeRowAction::MoveUp,
+        TreeRowAction::MoveDown,
+        TreeRowAction::Close,
+        TreeRowAction::Retitle,
+    ];
+    const PROJECT: [TreeRowAction; 5] = [
+        TreeRowAction::Rename,
+        TreeRowAction::MoveUp,
+        TreeRowAction::MoveDown,
+        TreeRowAction::Close,
+        TreeRowAction::ProjectRestructure,
+    ];
+    if tree.get(id).is_some_and(Node::is_project) {
+        &PROJECT
+    } else if row_supports_retitle(tree, id) {
+        &RETITLE
     } else {
-        &TreeRowAction::ALL[..TreeRowAction::ALL.len() - 1]
+        &BASIC
     }
 }
 
@@ -1316,11 +1484,12 @@ impl TreeItemCache {
                     titles_loading: &HashSet::new(),
                     recently_created: &HashMap::new(),
                     agent_identifiers: &AgentIdentifierSettings::default(),
+                    icons: &IconSettings::default(),
                     tree_order,
                     sidebar_density: SidebarDensity::default(),
                     panel_width: 0,
                     opened_paths,
-                    editor_paths: &HashMap::new(),
+                    panes: &HashMap::new(),
                 },
             );
             self.version = Some(version);
@@ -1363,11 +1532,12 @@ pub fn render(
             titles_loading: options.titles_loading,
             recently_created: options.recently_created,
             agent_identifiers: options.agent_identifiers,
+            icons: options.icons,
             tree_order: options.tree_order,
             sidebar_density: options.sidebar_density,
             panel_width: area.width,
             opened_paths: state.opened(),
-            editor_paths: options.editor_paths,
+            panes: options.panes,
         },
     );
     let block = theme::block(options.focused).title(theme::chrome_title(&sidebar_title(
@@ -1395,11 +1565,12 @@ pub fn render(
                 titles_loading: options.titles_loading,
                 recently_created: options.recently_created,
                 agent_identifiers: options.agent_identifiers,
+                icons: options.icons,
                 tree_order: options.tree_order,
                 sidebar_density: options.sidebar_density,
                 panel_width: area.width,
                 opened_paths: state.opened(),
-                editor_paths: options.editor_paths,
+                panes: options.panes,
             },
         );
         let mut presentation_state = copy_tree_state_for_presentation(state);
@@ -1435,7 +1606,13 @@ pub fn render(
             .row_motion(hit.id, options.elapsed_ms)
             .is_none()
         {
-            draw_row_actions(frame, area, hit.row, applicable_row_actions(tree, hit.id));
+            draw_row_actions(
+                frame,
+                area,
+                hit.row,
+                applicable_row_actions(tree, hit.id),
+                options.use_stable_glyphs,
+            );
         }
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
@@ -1591,12 +1768,18 @@ fn draw_scrollbar(
 /// row's trailing cells, left to right -- only those present in `actions`
 /// (see `applicable_row_actions`), so e.g. a group or editor row never
 /// shows the retitle glyph it has no title-inference worker to back.
-fn draw_row_actions(frame: &mut Frame, area: Rect, row: u16, actions: &[TreeRowAction]) {
+fn draw_row_actions(
+    frame: &mut Frame,
+    area: Rect,
+    row: u16,
+    actions: &[TreeRowAction],
+    use_stable_glyphs: bool,
+) {
     let Some(action_strip) = TreeRowActionStrip::from_tree_area(area) else {
         return;
     };
     let style = theme::selected_style().add_modifier(Modifier::BOLD);
-    action_strip.draw(frame.buffer_mut(), row, actions, style);
+    action_strip.draw(frame.buffer_mut(), row, actions, style, use_stable_glyphs);
 }
 
 /// Draws the five creation buttons plus a caption row naming whichever one
@@ -1703,10 +1886,12 @@ mod tests {
                         recently_created,
                         transitions,
                         agent_identifiers: &agent_identifiers,
+                        icons: &IconSettings::default(),
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
+                        use_stable_glyphs: false,
                         hover: TreeHoverState::default(),
-                        editor_paths: &HashMap::new(),
+                        panes: &HashMap::new(),
                     },
                 );
             })
@@ -1952,22 +2137,22 @@ mod tests {
     }
 
     #[test]
-    fn row_actions_preserve_the_original_emoji_and_fit_their_fixed_slots() {
+    fn row_actions_default_to_normal_icons_and_offer_opt_in_stable_glyphs() {
         assert_eq!(theme::PEN_ICON, "✏️");
         assert_eq!(TreeToolbarAction::Shell.glyph(), TERMINAL_ICON);
         assert_eq!(TreeToolbarAction::Editor.glyph(), TEXT_EDITOR_ICON);
         assert_eq!(TreeToolbarAction::Settings.glyph(), SETTINGS_ICON);
-        assert_eq!(TreeRowAction::Rename.glyph(), "✏️");
-        assert_eq!(TreeRowAction::MoveUp.glyph(), "🔼");
-        assert_eq!(TreeRowAction::MoveDown.glyph(), "🔽");
-        assert_eq!(TreeRowAction::Close.glyph(), "🚫");
-        assert_eq!(TreeRowAction::Retitle.glyph(), "♻️");
+        assert_eq!(TreeRowAction::Rename.glyph(false), theme::PEN_ICON);
+        assert_eq!(TreeRowAction::MoveUp.glyph(false), "🔼");
+        assert_eq!(TreeRowAction::MoveDown.glyph(false), "🔽");
+        assert_eq!(TreeRowAction::Close.glyph(false), "🚫");
+        assert_eq!(TreeRowAction::Retitle.glyph(false), "♻️");
         for action in TreeRowAction::ALL {
-            let glyph = action.glyph();
+            let glyph = action.glyph(true);
             assert_eq!(
                 UnicodeWidthStr::width(glyph),
-                2,
-                "{action:?} must occupy the two emoji cells in its slot"
+                1,
+                "{action:?} stable glyph must remain one terminal cell wide"
             );
         }
         assert!(UnicodeWidthStr::width(TERMINAL_ICON) < usize::from(TOOLBAR_BUTTON_WIDTH));
@@ -2076,10 +2261,12 @@ mod tests {
                         recently_created: &recently_created,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        icons: &IconSettings::default(),
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
+                        use_stable_glyphs: false,
                         hover: TreeHoverState::default(),
-                        editor_paths: &HashMap::new(),
+                        panes: &HashMap::new(),
                     },
                 );
             })
@@ -2111,8 +2298,10 @@ mod tests {
                         recently_created: &recently_created,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        icons: &IconSettings::default(),
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
+                        use_stable_glyphs: false,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
                                 id: first_group,
@@ -2120,7 +2309,7 @@ mod tests {
                             }),
                             ..TreeHoverState::default()
                         },
-                        editor_paths: &HashMap::new(),
+                        panes: &HashMap::new(),
                     },
                 );
             })
@@ -2128,8 +2317,16 @@ mod tests {
 
         let buffer = terminal.backend().buffer();
         assert_eq!(
-            buffer[(action_strip.x, list.y)].symbol(),
-            format!("{} ", TreeRowAction::Rename.glyph())
+            buffer[(action_strip.x, list.y)].symbol().trim_end(),
+            TreeRowAction::Rename.glyph(false)
+        );
+        // `TestBackend` deliberately stores one multi-cell terminal print
+        // in its origin cell rather than emulating the terminal cursor. The
+        // origin run is the authoritative assertion; the direct buffer-diff
+        // test below proves it includes every required cleanup space.
+        assert_eq!(
+            UnicodeWidthStr::width(buffer[(action_strip.x, list.y)].symbol()),
+            usize::from(ROW_ACTION_WIDTH)
         );
         for x in action_strip.x..action_strip.right() {
             assert_eq!(
@@ -2156,10 +2353,12 @@ mod tests {
                         recently_created: &recently_created,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        icons: &IconSettings::default(),
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
+                        use_stable_glyphs: false,
                         hover: TreeHoverState::default(),
-                        editor_paths: &HashMap::new(),
+                        panes: &HashMap::new(),
                     },
                 );
             })
@@ -2176,7 +2375,7 @@ mod tests {
     }
 
     #[test]
-    fn row_action_strip_emits_each_emoji_and_spacer_as_one_atomic_diff() {
+    fn row_action_strip_clears_every_slot_without_forcing_emoji_widths() {
         let area = Rect::new(0, 0, 33, 6);
         let row = 2;
         let mut previous = Buffer::empty(area);
@@ -2193,32 +2392,41 @@ mod tests {
             row,
             &TreeRowAction::ALL,
             theme::selected_style().add_modifier(Modifier::BOLD),
+            false,
         );
 
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
         assert_eq!(next[(controls_start - 1, row)].symbol(), "x");
 
-        // `ForcedWidth` makes Ratatui skip each emoji's two covered cells.
-        // Crossterm therefore receives exactly one update per complete slot,
-        // never a later adjacent purple-space update that can clip the icon.
+        // Every wide glyph and its cleanup spaces must be emitted as one
+        // natural-width print. A terminal advances its cursor through the
+        // whole run, so stale title characters cannot survive in its second
+        // or third cell.
         let updates = previous.diff(&next);
-        assert_eq!(updates.len(), TreeRowAction::ALL.len());
+        assert!(updates
+            .iter()
+            .all(|(_, _, cell)| cell.diff_option == Default::default()));
 
         for (action_index, action) in TreeRowAction::ALL.into_iter().enumerate() {
             let action_x = controls_start + action_index as u16 * ROW_ACTION_WIDTH;
-            let (update_x, update_y, update_cell) = updates[action_index];
-            assert_eq!((update_x, update_y), (action_x, row));
             assert_eq!(
-                update_cell.symbol(),
-                format!("{} ", action.glyph()),
-                "slot {action_index} was not emitted as one emoji-plus-space run"
+                next[(action_x, row)].symbol().trim_end(),
+                action.glyph(false),
+                "slot {action_index} did not retain its normal emoji glyph"
             );
             assert_eq!(
-                update_cell.diff_option,
-                CellDiffOption::ForcedWidth(NonZeroU16::new(ROW_ACTION_WIDTH).unwrap()),
+                UnicodeWidthStr::width(next[(action_x, row)].symbol()),
+                usize::from(ROW_ACTION_WIDTH),
+                "slot {action_index} did not include its cleanup spaces"
             );
-            assert_eq!(UnicodeWidthStr::width(update_cell.symbol()), 3);
-            assert_eq!(update_cell.bg, theme::accent_bg());
+            assert!(updates
+                .iter()
+                .any(|(update_x, update_y, _)| { *update_x == action_x && *update_y == row }));
+            assert!(updates.iter().any(|(update_x, update_y, cell)| {
+                *update_x == action_x
+                    && *update_y == row
+                    && UnicodeWidthStr::width(cell.symbol()) == usize::from(ROW_ACTION_WIDTH)
+            }));
 
             for covered_offset in 1..ROW_ACTION_WIDTH {
                 let covered_cell = &next[(action_x + covered_offset, row)];
@@ -2226,6 +2434,55 @@ mod tests {
                 assert_eq!(covered_cell.bg, theme::accent_bg());
             }
         }
+        assert!(updates.iter().all(|(_, _, cell)| cell.symbol() != "x"));
+    }
+
+    #[test]
+    fn selected_row_uses_ratatui_native_width_aware_icon_diffing() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "wide icon selection").unwrap();
+        let transitions = TreeTransitions::default();
+        let recently_created = HashMap::new();
+        let mut unselected_state = TreeState::default();
+        let unselected = render_tree_buffer(
+            &tree,
+            &mut unselected_state,
+            &transitions,
+            &recently_created,
+            0,
+        );
+
+        let mut selected_state = TreeState::default();
+        selected_state.select(vec![group]);
+        let selected = render_tree_buffer(
+            &tree,
+            &mut selected_state,
+            &transitions,
+            &recently_created,
+            0,
+        );
+        let list = list_area(Rect::new(0, 0, 40, 8));
+        let selected_row = list.y;
+        let wide_icon_column = (list.x..list.right())
+            .find(|&column| UnicodeWidthStr::width(selected[(column, selected_row)].symbol()) > 1)
+            .expect("the group icon is a multi-cell glyph");
+
+        assert_eq!(
+            selected[(wide_icon_column, selected_row)].diff_option,
+            Default::default()
+        );
+        assert_eq!(
+            selected[(wide_icon_column, selected_row)].bg,
+            theme::accent_bg(),
+        );
+
+        let updates = unselected.diff(&selected);
+        assert!(updates
+            .iter()
+            .any(|(column, row, _)| { *column == wide_icon_column && *row == selected_row }));
+        assert!(updates
+            .iter()
+            .all(|(_, _, cell)| cell.diff_option == Default::default()));
     }
 
     #[test]
@@ -2284,11 +2541,12 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
-                editor_paths: &HashMap::new(),
+                panes: &HashMap::new(),
             },
         );
         assert!(root_items[0].children()[0].children().is_empty());
@@ -2302,11 +2560,12 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
-                editor_paths: &HashMap::new(),
+                panes: &HashMap::new(),
             },
         );
         let first_item = &first_level_items[0].children()[0].children()[0];
@@ -2323,11 +2582,12 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
-                editor_paths: &HashMap::new(),
+                panes: &HashMap::new(),
             },
         );
         let deep_file = &deep_items[0].children()[0].children()[0].children()[0].children()[0];
@@ -2593,11 +2853,12 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &recently_created,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
-                editor_paths: &HashMap::new(),
+                panes: &HashMap::new(),
             },
         );
         assert_eq!(items[0].children().len(), 2);
@@ -2632,7 +2893,8 @@ mod tests {
     #[test]
     fn toolbar_keeps_settings_right_aligned_without_overlapping_left_actions() {
         // `layout::MIN_TREE_WIDTH` (16) with a 1-cell border each side
-        // leaves a 14-column-wide toolbar -- room for two left actions plus
+        // leaves a 14-column-wide toolbar -- room for two left actions (the
+        // search button is clipped first, then the project launcher) plus
         // the right-anchored Restructure and Settings buttons.
         let area = Rect::new(0, 0, 16, 12);
         let toolbar = toolbar_area(area);
@@ -2640,7 +2902,7 @@ mod tests {
 
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 4, toolbar.y)),
-            Some(TreeToolbarAction::Shell)
+            Some(TreeToolbarAction::Project)
         );
         assert_eq!(
             toolbar_action_at(area, Position::new(toolbar.x + 8, toolbar.y)),
@@ -2688,7 +2950,11 @@ mod tests {
             .unwrap();
 
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
-        for (index, expected_action) in TreeRowAction::ALL.into_iter().enumerate() {
+        for (index, expected_action) in applicable_row_actions(&tree, shell)
+            .iter()
+            .copied()
+            .enumerate()
+        {
             for slot_offset in 0..ROW_ACTION_WIDTH {
                 assert_eq!(
                     row_action_at(
@@ -2782,11 +3048,12 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
-                editor_paths: &HashMap::new(),
+                panes: &HashMap::new(),
             },
         );
 

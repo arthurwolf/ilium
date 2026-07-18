@@ -197,6 +197,11 @@ pub enum ClientRequest {
     /// Persist a filesystem root in the tree. Directory reads remain a
     /// client-local concern; the server owns only this structural reference.
     NewFolder { parent_group: NodeId, path: PathBuf },
+    /// Adds one canonical directory-backed top-level project.
+    NewProject { path: PathBuf },
+    /// Changes the working directory inherited by entries subsequently
+    /// created under this project. Existing processes keep their cwd.
+    ChangeProjectFolder { project_id: NodeId, path: PathBuf },
     /// Create a persisted, file-backed kanban board under `parent_group`.
     NewBoard {
         parent_group: NodeId,
@@ -259,6 +264,14 @@ pub enum ClientRequest {
     /// `ServerEvent::Error`) if the buffer is empty or has already been
     /// consumed by an earlier revert.
     RevertLastRestructure,
+    /// Replaces only one top-level project's descendants. The plan must
+    /// mention exactly that project's existing panes/folder roots.
+    ApplyProjectRestructurePlan {
+        project_id: NodeId,
+        plan: RestructurePlan,
+    },
+    /// Restores only `project_id` from its own latest restructure undo point.
+    RevertProjectRestructure { project_id: NodeId },
     /// Resolves an attach-time crash-recovery prompt for this session.
     ResolveSessionRecovery { restore: bool },
 }
@@ -275,8 +288,10 @@ pub enum ServerEvent {
     /// drift from the server by missing one incremental update -- the
     /// simplicity is worth more here than the bytes saved by diffing.
     TreeSnapshot(Tree),
-    /// A chunk of raw PTY output bytes for `pane_id`, in the order they
-    /// were produced. Sent as raw bytes rather than a `vt100::Screen`
+    /// One or more consecutive raw PTY output chunks for `pane_id`, in the
+    /// order they were produced. `sequence` is the newest source chunk
+    /// included in `bytes`, allowing the server to combine an already-ready
+    /// burst without changing replay de-duplication. Sent as raw bytes rather than a `vt100::Screen`
     /// cell-diff: `vt100::Screen` doesn't implement `Serialize`, and the
     /// client already needs its own `vt100::Parser` per pane to drive
     /// `tui-term` rendering, so feeding it the same byte stream the

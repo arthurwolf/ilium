@@ -129,10 +129,18 @@ fn kind_color(kind: LineKind) -> Color {
 /// cursor row in Source mode, or the scroll-proportional line in
 /// Rendered mode) gets a full-width background wash as a "you are here"
 /// viewport marker, independent of how far its own bar reaches.
-pub fn render(
+///
+/// Generic over `S: AsRef<str>` so callers can pass a buffer's native line
+/// storage directly -- e.g. `TextArea::lines()`'s `&[String]` -- without
+/// first collecting an intermediate `Vec<&str>` just to satisfy this
+/// function's parameter type. That conversion used to run on every redraw
+/// frame while the minimap was visible, reallocating a full-buffer-sized
+/// `Vec` purely to adapt the type, which for a large file is real allocator
+/// pressure for zero informational gain.
+pub fn render<S: AsRef<str>>(
     frame: &mut Frame,
     area: Rect,
-    lines: &[&str],
+    lines: &[S],
     highlight_line: usize,
     content_width: u16,
 ) {
@@ -170,15 +178,15 @@ pub fn render(
 /// indent-then-glyph bar reflecting the bucket's longest line, tinted by
 /// its dominant `LineKind`, optionally washed with a full-width "you are
 /// here" background.
-fn render_bucket_row<'a>(
-    bucket: &[&str],
+fn render_bucket_row<'a, S: AsRef<str>>(
+    bucket: &[S],
     content_width: u16,
     area_width: usize,
     is_highlighted: bool,
 ) -> Line<'a> {
     let dominant = bucket
         .iter()
-        .map(|line| classify_line(line))
+        .map(|line| classify_line(line.as_ref()))
         .max()
         .unwrap_or(LineKind::Blank);
 
@@ -209,7 +217,7 @@ fn render_bucket_row<'a>(
     // guarantees at least one non-blank line exists.
     let content_lines: Vec<&str> = bucket
         .iter()
-        .copied()
+        .map(S::as_ref)
         .filter(|line| classify_line(line) != LineKind::Blank)
         .collect();
 

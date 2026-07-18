@@ -375,7 +375,16 @@ async fn run_due_panes(
     // misattribution, independent of which tier finds the answer.
     let mut discovered_session_ids: std::collections::HashMap<NodeId, String> =
         std::collections::HashMap::new();
-    let transcript_locator = TranscriptLocator::new(&state.home_dir, &state.session_cwd);
+    let pane_project_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
+        let tree = state.tree.read().await;
+        classifications
+            .iter()
+            .filter_map(|pane| {
+                tree.project_path_for(pane.pane_id)
+                    .map(|path| (pane.pane_id, path.to_path_buf()))
+            })
+            .collect()
+    };
     for pane in &classifications {
         let Some(identity) = pane.identity.as_ref() else {
             continue;
@@ -385,6 +394,10 @@ async fn run_due_panes(
             .filter(|(_, owner)| **owner != pane.pane_id)
             .map(|(session_id, _)| session_id.clone())
             .collect();
+        let project_cwd = pane_project_cwds
+            .get(&pane.pane_id)
+            .unwrap_or(&state.session_cwd);
+        let transcript_locator = TranscriptLocator::new(&state.home_dir, project_cwd);
         excluded_session_ids.extend(ambiguous_session_ids.iter().cloned());
         // `/resume` can leave the old transcript descriptor open until the
         // CLI finishes switching. For the same process, that old ID is known
@@ -419,7 +432,7 @@ async fn run_due_panes(
                 Pid::from_u32(identity.pid),
                 &identity.class,
                 &transcript_locator,
-                &state.session_cwd,
+                project_cwd,
                 pane.is_session_identity_invalidated
                     && pane
                         .session_process_id
@@ -768,7 +781,10 @@ fn classify_pane(
     ) {
         Some(identity) => {
             let activity = ilium_detect::classify_activity_for_agent(&identity.class, screen_text);
-            let status = if ilium_detect::has_visible_goal(screen_text) {
+            // Goal detection is independent from activity. A provider can
+            // be working while its persistent goal remains active, so
+            // preserve both signals in the status sent to the sidebar.
+            let status = if ilium_detect::has_visible_goal_for_agent(&identity.class, screen_text) {
                 PaneStatus::AgentWithGoal(identity.class.clone(), activity)
             } else {
                 PaneStatus::Agent(identity.class.clone(), activity)

@@ -71,12 +71,10 @@ pub struct ServerState {
     /// Most recently selected terminal launch directory in this session.
     pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
     pub pending_session_recovery: Mutex<Option<SessionSnapshot>>,
-    /// The tree exactly as it was immediately before the most recently
-    /// applied `ApplyRestructurePlan`, if any -- a one-slot undo buffer, not
-    /// a history stack. Consumed (taken, not just read) by
-    /// `RevertLastRestructure`, so reverting twice in a row is a no-op
-    /// surfaced as an error rather than bouncing between two states.
-    pub restructure_undo: Mutex<Option<Tree>>,
+    /// One pre-restructure snapshot per project. A project-scoped revert
+    /// restores only that project's subtree, leaving concurrent work in
+    /// every other project intact.
+    pub restructure_undo: Mutex<HashMap<NodeId, Tree>>,
     pub snapshot_write_lock: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
     /// check and PTY write. Lock ordering is this mutex, then `tree`, then
@@ -121,6 +119,12 @@ pub struct ServerState {
 impl ServerState {
     pub fn new(options: ServerStateOptions) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        let mut tree = Tree::new();
+        // A brand-new session always starts with the launch directory as its
+        // first top-level project; the server's `session_cwd` remains the
+        // host for session-wide socket/log/snapshot state.
+        tree.ensure_launch_project(options.session_cwd.clone())
+            .expect("a new tree always accepts its launch project");
         Self {
             session_name: options.session_name,
             session_cwd: options.session_cwd,
@@ -131,11 +135,11 @@ impl ServerState {
             sound_settings: RwLock::new(options.sound_settings),
             sound_requests: options.sound_requests,
             custom_signatures: options.custom_signatures,
-            tree: RwLock::new(Tree::new()),
+            tree: RwLock::new(tree),
             panes: RwLock::new(HashMap::new()),
             last_terminal_working_directory: Mutex::new(None),
             pending_session_recovery: Mutex::new(None),
-            restructure_undo: Mutex::new(None),
+            restructure_undo: Mutex::new(HashMap::new()),
             snapshot_write_lock: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             snapshot_dirty: AtomicBool::new(false),

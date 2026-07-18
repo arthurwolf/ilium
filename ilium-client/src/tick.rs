@@ -140,13 +140,9 @@ pub fn apply_naming_worker_event(
                 result.map_err(|error| error.to_string()),
             );
         }
-        NamingWorkerEvent::Restructure(result) => {
-            workers.restructure_worker_finished();
-            app.structure_loading = false;
-            match result {
-                Ok(plan) => app.request_apply_restructure_plan(plan),
-                Err(error) => app.status_message = Some(format!("Could not restructure: {error}")),
-            }
+        NamingWorkerEvent::Restructure(project_id, result) => {
+            workers.restructure_worker_finished(project_id);
+            app.finish_project_restructure(project_id, result);
         }
     }
 }

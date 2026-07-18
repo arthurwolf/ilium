@@ -142,12 +142,18 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
     if matches!(
         app.mode,
-        Mode::Explorer(..) | Mode::FolderExplorer(..) | Mode::BoardPathPicker(..)
+        Mode::Explorer(..)
+            | Mode::FolderExplorer(..)
+            | Mode::ProjectFolderExplorer(..)
+            | Mode::BoardPathPicker(..)
     ) {
         match std::mem::replace(&mut app.mode, Mode::Normal) {
             Mode::Explorer(overlay, target) => handle_explorer_mouse(app, overlay, target, mouse),
             Mode::FolderExplorer(overlay, target) => {
                 handle_folder_explorer_mouse(app, overlay, target, mouse)
+            }
+            Mode::ProjectFolderExplorer(overlay, selection) => {
+                handle_project_folder_explorer_mouse(app, overlay, selection, mouse)
             }
             Mode::BoardPathPicker(mut overlay, mut state) => {
                 match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
@@ -427,6 +433,7 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
         TreeRowAction::MoveDown => app.request_move(id, ilium_core::TreeMoveDirection::Down),
         TreeRowAction::Close => app.action_close_selected(),
         TreeRowAction::Retitle => app.action_request_retitle(id),
+        TreeRowAction::ProjectRestructure => app.action_request_project_restructure(id),
     }
 }
 
@@ -501,7 +508,15 @@ fn compute_drop_target(
         }
     };
 
-    if new_parent == ROOT_ID && dragged_is_pane {
+    if new_parent == ROOT_ID && !tree.get(dragged_id).is_some_and(|node| node.is_project()) {
+        return None;
+    }
+    let dragged_project = tree.project_ancestor(dragged_id);
+    let destination_project = tree.project_ancestor(new_parent);
+    if dragged_project.is_some()
+        && destination_project.is_some()
+        && dragged_project != destination_project
+    {
         return None;
     }
     Some((new_parent, index))
@@ -520,6 +535,10 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
         TreeToolbarAction::Group => {
             let preselected = app.create_group_preselect_target();
             app.open_create_group_dialog(preselected);
+            return;
+        }
+        TreeToolbarAction::Project => {
+            app.action_new_project();
             return;
         }
         TreeToolbarAction::Split => {
@@ -808,6 +827,77 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let position = Position::new(mouse.column, mouse.row);
     let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
 
+    if let Some(picker) = state.icon_picker.take() {
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+        ) {
+            let next_scroll = if matches!(mouse.kind, MouseEventKind::ScrollDown) {
+                picker.scroll_row.saturating_add(3)
+            } else {
+                picker.scroll_row.saturating_sub(3)
+            };
+            let columns = crate::settings_ui::icon_picker_grid_columns(
+                app.layout.screen_area,
+                picker.column_mode,
+            );
+            let visible_rows = usize::from(
+                crate::settings_ui::icon_picker_layout(app.layout.screen_area)
+                    .document_area
+                    .height,
+            )
+            .max(1);
+            let total_rows =
+                crate::settings_ui::icon_picker_document_row_count(&picker.search_results, columns);
+            state.icon_picker = Some(crate::app::IconPickerState {
+                scroll_row: next_scroll.min(total_rows.saturating_sub(visible_rows)),
+                ..picker
+            });
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        let next_picker = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            match crate::settings_ui::icon_picker_hit(app.layout.screen_area, &picker, position) {
+                Some(crate::settings_ui::IconPickerHit::Close) => None,
+                Some(crate::settings_ui::IconPickerHit::ToggleColumnMode) => {
+                    let mut next_picker = picker;
+                    next_picker.column_mode = next_picker.column_mode.toggle();
+                    next_picker.scroll_row = crate::settings_ui::icon_picker_scroll_for_entry(
+                        app.layout.screen_area,
+                        &next_picker,
+                    );
+                    Some(next_picker)
+                }
+                Some(crate::settings_ui::IconPickerHit::ActivateSearch) => {
+                    Some(crate::app::IconPickerState {
+                        is_searching: true,
+                        ..picker
+                    })
+                }
+                Some(crate::settings_ui::IconPickerHit::ScrollTo(scroll_row)) => {
+                    Some(crate::app::IconPickerState {
+                        scroll_row,
+                        ..picker
+                    })
+                }
+                Some(crate::settings_ui::IconPickerHit::Entry(entry_index)) => {
+                    if let Some(entry) = picker.search_results.entry(entry_index) {
+                        app.settings_set_icon(picker.target, entry.glyph.to_string());
+                        None
+                    } else {
+                        Some(picker)
+                    }
+                }
+                None => Some(picker),
+            }
+        } else {
+            Some(picker)
+        };
+        state.icon_picker = next_picker;
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if crate::settings_ui::close_button_hit(layout.header_area, position) {
@@ -848,6 +938,27 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             return;
                         }
                         crate::app::InferenceRow::Test => app.request_inference_test(),
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Icons {
+                if let Some(real_tree) =
+                    crate::settings_ui::icons_preview_mode_hit(layout.content_area, position)
+                {
+                    state.icons_preview_real = real_tree;
+                } else if let Some(hit) =
+                    crate::settings_ui::icons_table_hit(layout.content_area, state.scroll, position)
+                {
+                    state.selected_row = crate::icon_settings::IconTarget::ALL
+                        .iter()
+                        .position(|candidate| *candidate == hit.target)
+                        .unwrap_or(0);
+                    match hit.action {
+                        crate::settings_ui::IconTableAction::OpenCatalogue => {
+                            state.icon_picker = Some(crate::app::IconPickerState::new(hit.target));
+                        }
+                        crate::settings_ui::IconTableAction::CycleSuggestion => {
+                            app.settings_cycle_icon(hit.target, 1);
+                        }
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Appearance {
@@ -1038,6 +1149,30 @@ fn handle_folder_explorer_mouse(
     }
 }
 
+fn handle_project_folder_explorer_mouse(
+    app: &mut App,
+    mut overlay: Box<crate::explorer_overlay::ExplorerOverlay>,
+    selection: crate::app::ProjectFolderSelection,
+    mouse: MouseEvent,
+) {
+    match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
+        Ok(Some(path)) => {
+            match selection {
+                crate::app::ProjectFolderSelection::NewProject => app.request_new_project(path),
+                crate::app::ProjectFolderSelection::ChangeProject(project_id) => {
+                    app.request_change_project_folder(project_id, path)
+                }
+            }
+            app.mode = Mode::Normal;
+        }
+        Ok(None) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
+        Err(err) => {
+            app.status_message = Some(format!("Project picker error: {err}"));
+            app.mode = Mode::ProjectFolderExplorer(overlay, selection);
+        }
+    }
+}
+
 #[cfg(test)]
 mod drop_target_tests {
     use super::*;
@@ -1076,10 +1211,13 @@ mod drop_target_tests {
     }
 
     #[test]
-    fn dropping_in_empty_space_appends_at_the_top_level() {
-        let (tree, group_a, _pane_b, _group_c, _pane_d) = sample_tree();
+    fn dropping_a_project_in_empty_space_appends_at_the_top_level() {
+        let (mut tree, _group_a, _pane_b, _group_c, _pane_d) = sample_tree();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/tmp/project"))
+            .unwrap();
         assert_eq!(
-            compute_drop_target(&tree, group_a, None),
+            compute_drop_target(&tree, project, None),
             Some((ROOT_ID, None))
         );
     }
@@ -1370,8 +1508,8 @@ mod row_action_click_tests {
     use std::path::PathBuf;
 
     /// Locates `id`'s on-screen row (via the same hit-test path rendering
-    /// uses) and clicks the row-action strip's `Retitle` slot (index 4,
-    /// the rightmost) on it, through the real `handle_mouse_event` mouse
+    /// uses) and clicks the row-action strip's `Retitle` slot on it, through
+    /// the real `handle_mouse_event` mouse
     /// pipeline -- a `Moved` event to set hover, then a `Down` click,
     /// mirroring what crossterm actually delivers.
     fn click_retitle_slot(app: &mut App, id: ilium_core::NodeId) {
@@ -1385,7 +1523,10 @@ mod row_action_click_tests {
 
         let list = tree_ui::list_area(area);
         let controls_start = list.right() - tree_ui::ROW_ACTION_WIDTH * tree_ui::ROW_ACTION_COUNT;
-        let retitle_index = TreeRowAction::ALL.len() as u16 - 1;
+        let retitle_index = TreeRowAction::ALL
+            .iter()
+            .position(|action| *action == TreeRowAction::Retitle)
+            .expect("retitle action is registered") as u16;
         let click_pos = ratatui::layout::Position::new(
             controls_start + retitle_index * tree_ui::ROW_ACTION_WIDTH,
             row,

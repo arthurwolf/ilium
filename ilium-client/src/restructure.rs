@@ -1,8 +1,7 @@
-//! Whole-tree restructure: one manual LLM call given every pane/folder's
-//! current title and a content extract, asked to return a brand-new tree
-//! shape -- fresh titles for everything (including new groups it invents)
-//! and a regrouping of related panes -- rather than a diff. See
-//! `ilium_core::RestructurePlan`/`Tree::apply_restructure` for the
+//! Project-scoped restructure: one independent LLM call receives one
+//! project's pane/folder titles and extracts, then returns a replacement
+//! shape for that project only. See
+//! `ilium_core::RestructurePlan`/`Tree::apply_project_restructure` for the
 //! atomic-apply half of this feature; this module owns only gathering
 //! context and turning the LLM's JSON reply into that plan.
 //!
@@ -30,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::PaneRuntime;
 
-/// Output budget for a whole-tree reply (every existing pane/folder
+/// Output budget for a project-scoped reply (every existing pane/folder
 /// retitled, plus any new groups/split-views) -- much larger than the
 /// single-title pipeline's 1536 (`ilium_inference::InferenceRequest::json_only`),
 /// which is sized for a 2-7 word title, not a full nested JSON tree.
@@ -56,6 +55,10 @@ Each entry in "children" (and in any nested "children") is exactly one of:
 
 "title" is a full descriptive title (5 to 7 words); "short_title" is a short form (2 to 3 words). Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
 </instructions>
+<current-structure>
+The following is the project's current hierarchy. Use it as context and preserve useful continuity where it still matches the items' current work. Entries marked "manual" reflect deliberate user organization and deserve particular weight; entries marked "LLM restructure" came from a previous AI reorganization and may be retained when still useful. This is inspiration, not a constraint: do not reproduce it mechanically, and reorganize it whenever the current item content supports a clearer structure.
+{{{current_structure}}}
+</current-structure>
 <items>
 {{#each items}}
 <item id="{{id}}" kind="{{kind_label}}">
@@ -180,6 +183,81 @@ pub fn gather_leaf_contexts(
     contexts
 }
 
+/// Gathers only the panes and persisted folder roots owned by one project.
+/// Project identity remains a tree concern; the LLM never sees entries from
+/// another project in this scoped call.
+pub fn gather_project_leaf_contexts(
+    tree: &Tree,
+    panes: &HashMap<NodeId, PaneRuntime>,
+    agent_session_ids: &HashMap<NodeId, String>,
+    project_id: NodeId,
+) -> Vec<LeafContext> {
+    gather_leaf_contexts(tree, panes, agent_session_ids)
+        .into_iter()
+        .filter(|context| tree.project_ancestor(context.id) == Some(project_id))
+        .collect()
+}
+
+/// Renders one project's exact current hierarchy for the restructure prompt.
+/// It deliberately follows the tree's stored child order instead of deriving
+/// a second, flattened representation, so the model can preserve meaningful
+/// manual organization without being forced to copy it.
+pub fn render_project_structure(tree: &Tree, project_id: NodeId) -> anyhow::Result<String> {
+    let project = tree
+        .get(project_id)
+        .filter(|node| node.is_project())
+        .ok_or_else(|| anyhow::anyhow!("project {project_id:?} no longer exists"))?;
+    let mut lines = vec![format!(
+        "project id=\"{}\" title=\"{}\" source=\"{}\"",
+        project_id.0,
+        project.name,
+        project.structure_source.prompt_label(),
+    )];
+    render_structure_children(tree, project_id, 1, &mut lines)?;
+    Ok(lines.join("\n"))
+}
+
+fn render_structure_children(
+    tree: &Tree,
+    parent_id: NodeId,
+    depth: usize,
+    lines: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    for child_id in tree.children_of(parent_id)? {
+        let child = tree
+            .get(*child_id)
+            .ok_or_else(|| anyhow::anyhow!("tree child {child_id:?} no longer exists"))?;
+        let kind = match &child.kind {
+            NodeKind::Container(container) if container.is_group() => "group".to_string(),
+            NodeKind::Container(container) if container.is_split_view() => {
+                let orientation = match tree
+                    .split_orientation(*child_id)
+                    .expect("split views always have an orientation")
+                {
+                    SplitOrientation::Vertical => "vertical",
+                    SplitOrientation::Horizontal => "horizontal",
+                };
+                format!("split_view({orientation})")
+            }
+            NodeKind::Pane { .. } => "pane".to_string(),
+            NodeKind::Folder { .. } => "folder".to_string(),
+            NodeKind::Container(_) => "container".to_string(),
+        };
+        lines.push(format!(
+            "{}{} id=\"{}\" title=\"{}\" source=\"{}\"",
+            "  ".repeat(depth),
+            kind,
+            child.id.0,
+            child.name,
+            child.structure_source.prompt_label(),
+        ));
+        if child.is_container() {
+            render_structure_children(tree, *child_id, depth + 1, lines)?;
+        }
+    }
+    Ok(())
+}
+
 /// Resolves every `agent_lookup` left by `gather_leaf_contexts` into a real
 /// content extract by reading that agent's transcript -- disk I/O, so this
 /// is meant to run on the background worker thread, not the main loop.
@@ -260,6 +338,7 @@ fn extract_json_object(response: &str) -> &str {
 #[derive(Serialize)]
 struct RestructurePromptContext<'a> {
     items: &'a [LeafContext],
+    current_structure: &'a str,
 }
 
 /// LLM-facing mirror of `ilium_core::RestructureNode`, tagged for a clean
@@ -329,6 +408,17 @@ pub fn infer_restructure_plan<G: RestructureCompletionClient>(
     generator: &G,
     contexts: &[LeafContext],
 ) -> anyhow::Result<RestructurePlan> {
+    infer_restructure_plan_with_structure(generator, contexts, "(no prior structure available)")
+}
+
+/// Infers a plan from the live item extracts plus the project's current
+/// hierarchy. The separate structure argument keeps this pure and allows
+/// callers/tests to make the exact LLM request observable.
+pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
+    generator: &G,
+    contexts: &[LeafContext],
+    current_structure: &str,
+) -> anyhow::Result<RestructurePlan> {
     if contexts.is_empty() {
         anyhow::bail!("no panes or folders to restructure");
     }
@@ -339,7 +429,13 @@ pub fn infer_restructure_plan<G: RestructureCompletionClient>(
     // shell/code content with HTML entities.
     handlebars.register_escape_fn(handlebars::no_escape);
     handlebars.register_template_string("restructure", RESTRUCTURE_TEMPLATE)?;
-    let prompt = handlebars.render("restructure", &RestructurePromptContext { items: contexts })?;
+    let prompt = handlebars.render(
+        "restructure",
+        &RestructurePromptContext {
+            items: contexts,
+            current_structure,
+        },
+    )?;
 
     let call_id = debug_call_id();
     maybe_debug_log(call_id, "prompt", &prompt);
@@ -600,6 +696,7 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
+    use std::path::PathBuf;
 
     struct FakeGenerator {
         calls: Cell<u8>,
@@ -870,6 +967,77 @@ mod tests {
         assert!(prompt.contains("shell-a"));
         assert!(prompt.contains("$ cargo build"));
         assert!(prompt.contains("<output-example>"));
+    }
+
+    #[test]
+    fn prompt_includes_current_hierarchy_and_manual_or_llm_structure_sources() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/continuity-project"))
+            .unwrap();
+        let initial_group = tree.add_group(project, "Initial manual work").unwrap();
+        let existing_pane = tree
+            .add_pane(
+                initial_group,
+                "shell-a",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        tree.apply_project_restructure(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "AI organized work".to_string(),
+                    short_title: None,
+                    children: vec![RestructureNode::Pane {
+                        id: existing_pane,
+                        title: "AI organized shell".to_string(),
+                        short_title: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+        let llm_group = tree.children_of(project).unwrap()[0];
+        let manual_pane = tree
+            .add_pane(
+                llm_group,
+                "new manual shell",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+
+        let structure = render_project_structure(&tree, project).unwrap();
+        assert!(structure.contains(&format!("project id=\"{}\"", project.0)));
+        assert!(structure.contains(&format!(
+            "group id=\"{}\" title=\"AI organized work\" source=\"LLM restructure\"",
+            llm_group.0
+        )));
+        assert!(structure.contains(&format!(
+            "pane id=\"{}\" title=\"AI organized shell\" source=\"LLM restructure\"",
+            existing_pane.0
+        )));
+        assert!(structure.contains(&format!(
+            "pane id=\"{}\" title=\"new manual shell\" source=\"manual\"",
+            manual_pane.0
+        )));
+
+        let generator = FakeGenerator::new(format!(
+            r#"{{"children":[{{"kind":"group","title":"AI organized work","short_title":null,"children":[{{"kind":"pane","id":{},"title":"AI organized shell","short_title":null}},{{"kind":"pane","id":{},"title":"new manual shell","short_title":null}}]}}]}}"#,
+            existing_pane.0, manual_pane.0
+        ));
+        let contexts = vec![
+            leaf(existing_pane.0, "shell-a"),
+            leaf(manual_pane.0, "shell-b"),
+        ];
+
+        infer_restructure_plan_with_structure(&generator, &contexts, &structure).unwrap();
+
+        let prompt = generator.last_prompt.borrow().clone().unwrap();
+        assert!(prompt.contains("Use it as context and preserve useful continuity"));
+        assert!(prompt.contains("do not reproduce it mechanically"));
+        assert!(prompt.contains("source=\"manual\""));
+        assert!(prompt.contains("source=\"LLM restructure\""));
     }
 
     #[test]

@@ -141,6 +141,13 @@ mod tests {
                 parent_group: NodeId(1),
                 path: PathBuf::from("/tmp/project"),
             },
+            ClientRequest::NewProject {
+                path: PathBuf::from("/tmp/second-project"),
+            },
+            ClientRequest::ChangeProjectFolder {
+                project_id: NodeId(1),
+                path: PathBuf::from("/tmp/relocated-project"),
+            },
             ClientRequest::NewBoard {
                 parent_group: NodeId(1),
                 name: "Work".to_string(),
@@ -214,6 +221,19 @@ mod tests {
                 ],
             }),
             ClientRequest::RevertLastRestructure,
+            ClientRequest::ApplyProjectRestructurePlan {
+                project_id: NodeId(1),
+                plan: ilium_core::RestructurePlan {
+                    children: vec![ilium_core::RestructureNode::Pane {
+                        id: NodeId(2),
+                        title: "Scoped shell".to_string(),
+                        short_title: None,
+                    }],
+                },
+            },
+            ClientRequest::RevertProjectRestructure {
+                project_id: NodeId(1),
+            },
         ]
     }
 

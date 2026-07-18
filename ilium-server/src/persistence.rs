@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_agent_session::TranscriptLocator;
-use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, Tree, ROOT_ID};
+use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, Tree};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
@@ -129,7 +129,13 @@ pub async fn load_snapshot_or_migrate(
     home: &Path,
 ) -> Result<Option<SessionSnapshot>, ServerError> {
     if let Some(mut snapshot) = load_snapshot(snapshot_path).await? {
-        if normalize_agent_resumes(&mut snapshot, home, session_cwd) {
+        let original_tree = snapshot.tree.clone();
+        snapshot
+            .tree
+            .ensure_launch_project(session_cwd.to_path_buf())?;
+        if snapshot.tree != original_tree
+            || normalize_agent_resumes(&mut snapshot, home, session_cwd)
+        {
             write_snapshot_to(snapshot_path, &snapshot).await?;
         }
         return Ok(Some(snapshot));
@@ -157,7 +163,7 @@ pub async fn load_snapshot_or_migrate(
             path: legacy_path.clone(),
             message: error.to_string(),
         })?;
-    let mut snapshot = legacy_workspace.into_snapshot()?;
+    let mut snapshot = legacy_workspace.into_snapshot(session_cwd)?;
     // Legacy `sessions.yml` files could already carry the same agent
     // session id on several titled panes; collapse those duplicates before
     // ever writing/spawning from this migrated snapshot, the same way a
@@ -178,7 +184,6 @@ fn normalize_agent_resumes(
     home: &Path,
     session_cwd: &Path,
 ) -> bool {
-    let locator = TranscriptLocator::new(home, session_cwd);
     let mut seen_resumes = HashSet::new();
     let mut invalid_automatic_titles = Vec::new();
     let mut changed = false;
@@ -189,6 +194,11 @@ fn normalize_agent_resumes(
         let Some(binding) = persisted_resume_binding(command) else {
             continue;
         };
+        let project_cwd = snapshot
+            .tree
+            .project_path_for(pane.node_id)
+            .unwrap_or(session_cwd);
+        let locator = TranscriptLocator::new(home, project_cwd);
         let is_project_verified = locator
             .transcript_for_session(&binding.provider.class(), &binding.session_id)
             .is_some();
@@ -231,19 +241,20 @@ fn persisted_resume_binding(command: &str) -> Option<PersistedResumeBinding> {
 impl LegacyWorkspace {
     /// Converts the old YAML tree into the server's native persistence
     /// contract, retaining the exact commands needed to resume known agents.
-    fn into_snapshot(self) -> Result<SessionSnapshot, ServerError> {
+    fn into_snapshot(self, session_cwd: &Path) -> Result<SessionSnapshot, ServerError> {
         let mut tree = Tree::new();
+        let project = tree.ensure_launch_project(session_cwd.to_path_buf())?;
         let mut panes = Vec::new();
         let fallback_group = self
             .root
             .iter()
             .any(|node| !matches!(node, LegacyNode::Group { .. }))
-            .then(|| tree.add_group(ROOT_ID, "default"))
+            .then(|| tree.add_group(project, "default"))
             .transpose()?;
 
         for node in self.root {
             let parent = if matches!(&node, LegacyNode::Group { .. }) {
-                ROOT_ID
+                project
             } else {
                 fallback_group.ok_or_else(|| ServerError::LegacyWorkspace {
                     path: PathBuf::from(".ilium/sessions.yml"),

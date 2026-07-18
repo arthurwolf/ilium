@@ -392,6 +392,29 @@ impl PaneTitleSource {
     }
 }
 
+/// Identifies who last established a node's current place and label in the
+/// workspace tree. For groups and split views this is also their creation
+/// source; panes and folders already exist before an AI restructure, so the
+/// value instead records who last arranged or retitled that existing item.
+///
+/// This stays on the domain node rather than in the client prompt code so it
+/// survives snapshots, undo, and every attached client seeing the same tree.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StructureSource {
+    #[default]
+    Manual,
+    LlmRestructure,
+}
+
+impl StructureSource {
+    pub const fn prompt_label(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::LlmRestructure => "LLM restructure",
+        }
+    }
+}
+
 /// One durable, server-owned input scheduled for a terminal pane. The tree
 /// carries the absolute deadline so every attached client renders the same
 /// countdown and a detached server can still execute it after the UI exits.
@@ -418,10 +441,17 @@ pub enum SplitOrientation {
     Horizontal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContainerKind {
+    /// A persisted, top-level workspace boundary. Projects own the working
+    /// directory inherited by every entry created beneath them.
+    Project {
+        path: PathBuf,
+    },
     Group,
-    SplitView { orientation: SplitOrientation },
+    SplitView {
+        orientation: SplitOrientation,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -432,6 +462,14 @@ pub struct ContainerNode {
 }
 
 impl ContainerNode {
+    pub fn project(path: PathBuf) -> Self {
+        Self {
+            kind: ContainerKind::Project { path },
+            children: Vec::new(),
+            expanded: true,
+        }
+    }
+
     pub fn group() -> Self {
         Self {
             kind: ContainerKind::Group,
@@ -452,13 +490,24 @@ impl ContainerNode {
         matches!(self.kind, ContainerKind::Group)
     }
 
+    pub const fn is_project(&self) -> bool {
+        matches!(self.kind, ContainerKind::Project { .. })
+    }
+
+    pub const fn accepts_normal_children(&self) -> bool {
+        matches!(
+            self.kind,
+            ContainerKind::Project { .. } | ContainerKind::Group
+        )
+    }
+
     pub const fn is_split_view(&self) -> bool {
         matches!(self.kind, ContainerKind::SplitView { .. })
     }
 
     pub const fn split_orientation(&self) -> Option<SplitOrientation> {
         match self.kind {
-            ContainerKind::Group => None,
+            ContainerKind::Project { .. } | ContainerKind::Group => None,
             ContainerKind::SplitView { orientation } => Some(orientation),
         }
     }
@@ -527,12 +576,36 @@ pub struct Node {
     /// distinct short form, so they leave this `None` and every width
     /// renders `name`.
     pub short_name: Option<String>,
+    /// Kept separately from pane title provenance because a manual move can
+    /// change the meaning of a structure even when no pane title changed.
+    /// Missing fields in older JSON crash snapshots are manual by default.
+    #[serde(default)]
+    pub structure_source: StructureSource,
     pub kind: NodeKind,
 }
 
 impl Node {
     pub fn is_group(&self) -> bool {
         matches!(&self.kind, NodeKind::Container(container) if container.is_group())
+    }
+
+    pub fn is_project(&self) -> bool {
+        matches!(&self.kind, NodeKind::Container(container) if container.is_project())
+    }
+
+    /// Whether this node can directly own ordinary project entries.
+    pub fn accepts_normal_children(&self) -> bool {
+        matches!(&self.kind, NodeKind::Container(container) if container.accepts_normal_children())
+    }
+
+    pub fn project_path(&self) -> Option<&std::path::Path> {
+        match &self.kind {
+            NodeKind::Container(ContainerNode {
+                kind: ContainerKind::Project { path },
+                ..
+            }) => Some(path),
+            _ => None,
+        }
     }
 
     pub fn is_container(&self) -> bool {
@@ -558,6 +631,8 @@ pub enum TreeError {
     NodeNotFound(NodeId),
     #[error("node {0:?} is not a group")]
     NotAGroup(NodeId),
+    #[error("node {0:?} is not a project")]
+    NotAProject(NodeId),
     #[error("node {0:?} is not a container")]
     NotAContainer(NodeId),
     #[error("node {0:?} is not a pane")]
@@ -574,6 +649,16 @@ pub enum TreeError {
     CannotMoveIntoDescendant(NodeId, NodeId),
     #[error("panes cannot be direct children of the session root; put them in a group")]
     PanesRequireGroup,
+    #[error("only projects can be direct children of the session root")]
+    RootRequiresProject,
+    #[error("projects must remain direct children of the session root")]
+    ProjectMustRemainTopLevel,
+    #[error("cannot move node {node:?} from project {from_project:?} into project {to_project:?}")]
+    CrossProjectMove {
+        node: NodeId,
+        from_project: NodeId,
+        to_project: NodeId,
+    },
     #[error("split views must be direct children of a normal group")]
     SplitViewRequiresGroup,
     #[error("split views can contain panes only")]
@@ -590,6 +675,8 @@ pub enum TreeError {
     NotAFolder(NodeId),
     #[error("node {0:?} was referenced more than once in a restructure plan")]
     RestructureDuplicateLeaf(NodeId),
+    #[error("restructure plan referenced node {node:?} outside project {project:?}")]
+    RestructureLeafOutsideProject { node: NodeId, project: NodeId },
     #[error(
         "restructure plan referenced {actual} existing pane/folder(s), expected exactly {expected}"
     )]
@@ -677,6 +764,7 @@ impl Tree {
                 parent: None,
                 name: "session".to_string(),
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
         );
@@ -709,6 +797,35 @@ impl Tree {
             return None;
         };
         container.split_orientation()
+    }
+
+    /// Returns the enclosing project for `id`, including `id` itself when it
+    /// is a project. Every non-root runtime entry must have exactly one.
+    pub fn project_ancestor(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let node = self.get(node_id)?;
+            if node.is_project() {
+                return Some(node_id);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    pub fn project_path_for(&self, id: NodeId) -> Option<&std::path::Path> {
+        self.project_ancestor(id)
+            .and_then(|project_id| self.get(project_id))
+            .and_then(Node::project_path)
+    }
+
+    pub fn project_ids(&self) -> Vec<NodeId> {
+        self.children_of(ROOT_ID)
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .filter(|id| self.get(*id).is_some_and(Node::is_project))
+            .collect()
     }
 
     pub fn parent_of(&self, id: NodeId) -> Option<NodeId> {
@@ -768,13 +885,82 @@ impl Tree {
         }
     }
 
+    /// Adds a top-level project. Only projects may be direct root children.
+    pub fn add_project(&mut self, path: PathBuf) -> Result<NodeId, TreeError> {
+        let name = project_display_name(&path);
+        let id = self.alloc_id();
+        self.push_child(ROOT_ID, id)?;
+        self.nodes.insert(
+            id,
+            Node {
+                id,
+                parent: Some(ROOT_ID),
+                name,
+                short_name: None,
+                structure_source: StructureSource::Manual,
+                kind: NodeKind::Container(ContainerNode::project(path)),
+            },
+        );
+        Ok(id)
+    }
+
+    /// Ensures a project exists for `path`, and upgrades older snapshots
+    /// whose root directly contained ordinary groups/folders into that one
+    /// launch project without changing the identity of their descendants.
+    pub fn ensure_launch_project(&mut self, path: PathBuf) -> Result<NodeId, TreeError> {
+        if let Some(existing) = self.project_ids().into_iter().find(|project_id| {
+            self.get(*project_id)
+                .and_then(Node::project_path)
+                .is_some_and(|existing_path| existing_path == path)
+        }) {
+            return Ok(existing);
+        }
+
+        // A persisted project tree is already in the modern shape. Its
+        // launch project may legitimately have been pointed at a different
+        // directory since the server originally started, so never add a new
+        // wrapper merely because `session_cwd` no longer matches a project
+        // path. Wrapping is only the legacy-root migration below.
+        if let Some(existing_project) = self.project_ids().into_iter().next() {
+            return Ok(existing_project);
+        }
+
+        let legacy_children = self.children_of(ROOT_ID)?.to_vec();
+        let project_id = self.add_project(path)?;
+        for child_id in legacy_children {
+            if child_id == project_id {
+                continue;
+            }
+            self.move_node(child_id, project_id, None)?;
+        }
+        Ok(project_id)
+    }
+
+    pub fn change_project_folder(
+        &mut self,
+        project_id: NodeId,
+        path: PathBuf,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(project_id)?;
+        let NodeKind::Container(ContainerNode {
+            kind: ContainerKind::Project { path: project_path },
+            ..
+        }) = &mut node.kind
+        else {
+            return Err(TreeError::NotAProject(project_id));
+        };
+        *project_path = path;
+        Ok(())
+    }
+
     pub fn add_group(
         &mut self,
         parent: NodeId,
         name: impl Into<String>,
     ) -> Result<NodeId, TreeError> {
         let parent_node = self.get(parent).ok_or(TreeError::NodeNotFound(parent))?;
-        if !parent_node.is_group() {
+        if !matches!(&parent_node.kind, NodeKind::Container(container) if container.accepts_normal_children())
+        {
             return Err(TreeError::NotAGroup(parent));
         }
         let id = self.alloc_id();
@@ -786,6 +972,7 @@ impl Tree {
                 parent: Some(parent),
                 name: name.into(),
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
         );
@@ -816,6 +1003,7 @@ impl Tree {
                 parent: Some(parent),
                 name: name.into(),
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content,
                     status,
@@ -870,6 +1058,7 @@ impl Tree {
                 parent: Some(parent),
                 name,
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content: PaneContentKind::Board,
                     status: PaneStatus::Board,
@@ -885,10 +1074,10 @@ impl Tree {
     /// Adds a filesystem root beneath a group. Only this stable reference is
     /// persisted; files under it remain local filesystem data.
     pub fn add_folder(&mut self, parent: NodeId, path: PathBuf) -> Result<NodeId, TreeError> {
-        if !self
-            .get(parent)
-            .ok_or(TreeError::NodeNotFound(parent))?
-            .is_group()
+        if parent == ROOT_ID {
+            return Err(TreeError::RootRequiresProject);
+        }
+        if !matches!(self.get(parent).map(|node| &node.kind), Some(NodeKind::Container(container)) if container.accepts_normal_children())
         {
             return Err(TreeError::NotAGroup(parent));
         }
@@ -906,6 +1095,7 @@ impl Tree {
                 parent: Some(parent),
                 name,
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Folder { path },
             },
         );
@@ -919,13 +1109,13 @@ impl Tree {
         orientation: SplitOrientation,
         pane_ids: &[NodeId],
     ) -> Result<NodeId, TreeError> {
+        if parent_group == ROOT_ID {
+            return Err(TreeError::RootRequiresProject);
+        }
         if pane_ids.len() > MAXIMUM_SPLIT_VIEW_PANES {
             return Err(TreeError::SplitViewCapacityReached);
         }
-        if !self
-            .get(parent_group)
-            .ok_or(TreeError::NodeNotFound(parent_group))?
-            .is_group()
+        if !matches!(self.get(parent_group).map(|node| &node.kind), Some(NodeKind::Container(container)) if container.accepts_normal_children())
         {
             return Err(TreeError::SplitViewRequiresGroup);
         }
@@ -959,6 +1149,7 @@ impl Tree {
                 parent: Some(parent_group),
                 name: name.into(),
                 short_name: None,
+                structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::split_view(orientation)),
             },
         );
@@ -981,9 +1172,19 @@ impl Tree {
     /// PTY, editor buffer, or board storage a runtime layer keeps keyed by
     /// that id -- and only has its parent and title updated.
     pub fn apply_restructure(&mut self, plan: RestructurePlan) -> Result<(), TreeError> {
+        let projects = self.project_ids();
+        if projects.is_empty() {
+            return self.apply_legacy_restructure(plan);
+        }
+        if projects.len() != 1 {
+            return Err(TreeError::RootRequiresProject);
+        }
+        self.apply_project_restructure(projects[0], plan)
+    }
+
+    fn apply_legacy_restructure(&mut self, plan: RestructurePlan) -> Result<(), TreeError> {
         let mut referenced = std::collections::HashSet::new();
         self.validate_restructure_children(&plan.children, false, &mut referenced)?;
-
         let existing_leaf_count = self
             .nodes
             .values()
@@ -995,7 +1196,6 @@ impl Tree {
                 actual: referenced.len(),
             });
         }
-
         let mut updated = self.clone();
         if let NodeKind::Container(container) = &mut updated.get_mut(ROOT_ID)?.kind {
             container.children.clear();
@@ -1009,10 +1209,112 @@ impl Tree {
         for id in old_container_ids {
             updated.nodes.remove(&id);
         }
-
         Self::rebuild_restructure_children(&mut updated, ROOT_ID, &plan.children)?;
-
         *self = updated;
+        Ok(())
+    }
+
+    /// Replaces only `project_id`'s descendants with an LLM-authored plan.
+    /// The project node, its directory, and every other project's structure
+    /// survive unchanged; referenced leaves must be exactly this project's
+    /// current panes/folder roots.
+    pub fn apply_project_restructure(
+        &mut self,
+        project_id: NodeId,
+        plan: RestructurePlan,
+    ) -> Result<(), TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+
+        let mut referenced = std::collections::HashSet::new();
+        self.validate_restructure_children(&plan.children, false, &mut referenced)?;
+        for leaf_id in &referenced {
+            if self.project_ancestor(*leaf_id) != Some(project_id) {
+                return Err(TreeError::RestructureLeafOutsideProject {
+                    node: *leaf_id,
+                    project: project_id,
+                });
+            }
+        }
+
+        let existing_leaf_count = self
+            .nodes
+            .values()
+            .filter(|node| {
+                (node.is_pane() || node.is_folder())
+                    && self.project_ancestor(node.id) == Some(project_id)
+            })
+            .count();
+        if referenced.len() != existing_leaf_count {
+            return Err(TreeError::RestructureLeafSetMismatch {
+                expected: existing_leaf_count,
+                actual: referenced.len(),
+            });
+        }
+
+        let mut updated = self.clone();
+        if let NodeKind::Container(container) = &mut updated.get_mut(project_id)?.kind {
+            container.children.clear();
+        }
+        let old_container_ids: Vec<NodeId> = updated
+            .nodes
+            .values()
+            .filter(|node| {
+                node.id != project_id
+                    && node.is_container()
+                    && updated.is_ancestor_of(project_id, node.id)
+            })
+            .map(|node| node.id)
+            .collect();
+        for id in old_container_ids {
+            updated.nodes.remove(&id);
+        }
+
+        Self::rebuild_restructure_children(&mut updated, project_id, &plan.children)?;
+        *self = updated;
+        Ok(())
+    }
+
+    /// Restores only one project subtree from a tree captured immediately
+    /// before that project's restructure. Other projects and later edits to
+    /// them remain untouched.
+    pub fn restore_project_from(
+        &mut self,
+        project_id: NodeId,
+        previous: &Tree,
+    ) -> Result<(), TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project)
+            || !previous.get(project_id).is_some_and(Node::is_project)
+        {
+            return Err(TreeError::NotAProject(project_id));
+        }
+
+        let current_descendants: Vec<NodeId> = self
+            .nodes
+            .keys()
+            .copied()
+            .filter(|node_id| *node_id != project_id && self.is_ancestor_of(project_id, *node_id))
+            .collect();
+        for node_id in current_descendants {
+            self.nodes.remove(&node_id);
+        }
+
+        let previous_descendants: Vec<Node> = previous
+            .nodes
+            .values()
+            .filter(|node| node.id != project_id && previous.is_ancestor_of(project_id, node.id))
+            .cloned()
+            .collect();
+        for node in previous_descendants {
+            self.nodes.insert(node.id, node);
+        }
+
+        let previous_children = previous.children_of(project_id)?.to_vec();
+        let NodeKind::Container(container) = &mut self.get_mut(project_id)?.kind else {
+            return Err(TreeError::NotAProject(project_id));
+        };
+        container.children = previous_children;
         Ok(())
     }
 
@@ -1089,6 +1391,7 @@ impl Tree {
                     existing.parent = Some(parent);
                     existing.name = title.clone();
                     existing.short_name = short_title.clone();
+                    existing.structure_source = StructureSource::LlmRestructure;
                     // A restructure-authored title is curated, not a
                     // per-turn automatic guess: freeze it the same way a
                     // plain user rename does, so the background per-pane
@@ -1107,6 +1410,7 @@ impl Tree {
                     existing.parent = Some(parent);
                     existing.name = title.clone();
                     existing.short_name = short_title.clone();
+                    existing.structure_source = StructureSource::LlmRestructure;
                     *id
                 }
                 RestructureNode::Group {
@@ -1122,6 +1426,7 @@ impl Tree {
                             parent: Some(parent),
                             name: title.clone(),
                             short_name: short_title.clone(),
+                            structure_source: StructureSource::LlmRestructure,
                             kind: NodeKind::Container(ContainerNode::group()),
                         },
                     );
@@ -1142,6 +1447,7 @@ impl Tree {
                             parent: Some(parent),
                             name: title.clone(),
                             short_name: short_title.clone(),
+                            structure_source: StructureSource::LlmRestructure,
                             kind: NodeKind::Container(ContainerNode::split_view(*orientation)),
                         },
                     );
@@ -1200,6 +1506,7 @@ impl Tree {
         let node = self.get_mut(id)?;
         node.name = name.into();
         node.short_name = short_name;
+        node.structure_source = StructureSource::Manual;
         if let NodeKind::Pane { title_source, .. } = &mut node.kind {
             *title_source = PaneTitleSource::UserSpecified;
         }
@@ -1357,11 +1664,30 @@ impl Tree {
         let NodeKind::Container(destination_container) = &destination.kind else {
             return Err(TreeError::NotAContainer(new_parent));
         };
+        if moving_node.is_project() && new_parent != ROOT_ID {
+            return Err(TreeError::ProjectMustRemainTopLevel);
+        }
         if new_parent == ROOT_ID && moving_node.is_pane() {
             return Err(TreeError::PanesRequireGroup);
         }
-        if moving_node.is_split_view() && !destination.is_group() {
+        if new_parent == ROOT_ID && !moving_node.is_project() {
+            return Err(TreeError::RootRequiresProject);
+        }
+        if moving_node.is_split_view()
+            && !matches!(&destination.kind, NodeKind::Container(container) if container.accepts_normal_children())
+        {
             return Err(TreeError::SplitViewRequiresGroup);
+        }
+        if let (Some(from_project), Some(to_project)) =
+            (self.project_ancestor(id), self.project_ancestor(new_parent))
+        {
+            if from_project != to_project {
+                return Err(TreeError::CrossProjectMove {
+                    node: id,
+                    from_project,
+                    to_project,
+                });
+            }
         }
         destination_container
             .validate_child(moving_node, moving_node.parent == Some(new_parent))?;
@@ -1401,7 +1727,9 @@ impl Tree {
             }
             NodeKind::Pane { .. } | NodeKind::Folder { .. } => unreachable!("checked above"),
         }
-        self.get_mut(id)?.parent = Some(new_parent);
+        let moving_node = self.get_mut(id)?;
+        moving_node.parent = Some(new_parent);
+        moving_node.structure_source = StructureSource::Manual;
         Ok(())
     }
 
@@ -1426,6 +1754,28 @@ impl Tree {
         }
     }
 
+    /// Returns a project's first ordinary group, creating `name` directly
+    /// inside that project when needed. Terminal creation uses this default
+    /// grouping while the project remains the only top-level owner.
+    pub fn ensure_project_default_group(
+        &mut self,
+        project_id: NodeId,
+        name: impl Into<String>,
+    ) -> Result<NodeId, TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+        if let Some(group_id) = self
+            .children_of(project_id)?
+            .iter()
+            .copied()
+            .find(|child| self.get(*child).is_some_and(Node::is_group))
+        {
+            return Ok(group_id);
+        }
+        self.add_group(project_id, name)
+    }
+
     /// Every group in the tree (Panes excluded), pre-order, in the exact
     /// order they render in the tree panel, prefixed with a `ROOT_ID` entry
     /// standing for "the top level" itself. Used by the "create group"
@@ -1445,10 +1795,7 @@ impl Tree {
             return;
         };
         for &child in children {
-            if matches!(
-                self.get(child).map(|node| &node.kind),
-                Some(NodeKind::Container(container)) if container.is_group()
-            ) {
+            if self.get(child).is_some_and(Node::accepts_normal_children) {
                 out.push(GroupListing { id: child, depth });
                 self.collect_group_listings(child, depth + 1, out);
             }
@@ -1546,7 +1893,7 @@ impl Tree {
         direction: TreeMoveDirection,
     ) -> Option<(NodeId, usize)> {
         let parent_group = self.parent_of(container)?;
-        if parent_group == ROOT_ID || !self.get(parent_group)?.is_group() {
+        if parent_group == ROOT_ID || !self.get(parent_group)?.accepts_normal_children() {
             return None;
         }
         let container_position = self
@@ -1575,10 +1922,10 @@ impl Tree {
             match direction {
                 TreeMoveDirection::Up => {
                     for candidate in siblings[..position].iter().rev() {
-                        if matches!(
-                            self.get(*candidate).map(|node| &node.kind),
-                            Some(NodeKind::Container(container)) if container.is_group()
-                        ) {
+                        if self
+                            .get(*candidate)
+                            .is_some_and(Node::accepts_normal_children)
+                        {
                             found = Some(*candidate);
                             break;
                         }
@@ -1586,10 +1933,10 @@ impl Tree {
                 }
                 TreeMoveDirection::Down => {
                     for candidate in siblings[position + 1..].iter() {
-                        if matches!(
-                            self.get(*candidate).map(|node| &node.kind),
-                            Some(NodeKind::Container(container)) if container.is_group()
-                        ) {
+                        if self
+                            .get(*candidate)
+                            .is_some_and(Node::accepts_normal_children)
+                        {
                             found = Some(*candidate);
                             break;
                         }
@@ -1605,6 +1952,13 @@ impl Tree {
             current_group = parent;
         }
     }
+}
+
+fn project_display_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 #[cfg(test)]
@@ -1660,6 +2014,109 @@ mod tests {
                 depth: 0
             }]
         );
+    }
+
+    #[test]
+    fn projects_are_top_level_and_keep_entries_with_their_own_directory() {
+        let mut tree = Tree::new();
+        let first_project = tree.add_project(PathBuf::from("/tmp/first")).unwrap();
+        let second_project = tree.add_project(PathBuf::from("/tmp/second")).unwrap();
+        let first_group = tree.add_group(first_project, "work").unwrap();
+        let pane = tree
+            .add_pane(first_group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        assert_eq!(
+            tree.project_path_for(pane),
+            Some(std::path::Path::new("/tmp/first"))
+        );
+        assert!(matches!(
+            tree.move_node(pane, second_project, None),
+            Err(TreeError::CrossProjectMove { .. })
+        ));
+        assert!(matches!(
+            tree.move_node(first_group, ROOT_ID, None),
+            Err(TreeError::RootRequiresProject)
+        ));
+        tree.change_project_folder(first_project, PathBuf::from("/tmp/renamed"))
+            .unwrap();
+        assert_eq!(
+            tree.project_path_for(pane),
+            Some(std::path::Path::new("/tmp/renamed"))
+        );
+    }
+
+    #[test]
+    fn ensuring_the_launch_project_preserves_a_changed_project_folder() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/launch")).unwrap();
+        tree.change_project_folder(project, PathBuf::from("/tmp/relocated"))
+            .unwrap();
+
+        assert_eq!(
+            tree.ensure_launch_project(PathBuf::from("/tmp/launch"))
+                .unwrap(),
+            project
+        );
+        assert_eq!(tree.project_ids(), vec![project]);
+        assert_eq!(
+            tree.project_path_for(project),
+            Some(std::path::Path::new("/tmp/relocated"))
+        );
+    }
+
+    #[test]
+    fn project_default_group_is_created_once_inside_its_project() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        let group = tree
+            .ensure_project_default_group(project, "default")
+            .unwrap();
+
+        assert_eq!(tree.parent_of(group), Some(project));
+        assert_eq!(
+            tree.ensure_project_default_group(project, "ignored")
+                .unwrap(),
+            group
+        );
+    }
+
+    #[test]
+    fn project_restructure_changes_only_its_own_subtree_and_can_be_restored() {
+        let mut tree = Tree::new();
+        let first_project = tree.add_project(PathBuf::from("/tmp/first")).unwrap();
+        let second_project = tree.add_project(PathBuf::from("/tmp/second")).unwrap();
+        let first_group = tree.add_group(first_project, "first").unwrap();
+        let second_group = tree.add_group(second_project, "second").unwrap();
+        let first_pane = tree
+            .add_pane(first_group, "one", PaneContentKind::Terminal)
+            .unwrap();
+        let second_pane = tree
+            .add_pane(second_group, "two", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+
+        tree.apply_project_restructure(
+            first_project,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "Reorganized".to_string(),
+                    short_title: None,
+                    children: vec![RestructureNode::Pane {
+                        id: first_pane,
+                        title: "renamed one".to_string(),
+                        short_title: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(tree.project_ancestor(second_pane), Some(second_project));
+        assert_eq!(tree.get(second_pane).unwrap().name, "two");
+        tree.restore_project_from(first_project, &before).unwrap();
+        assert_eq!(tree.get(first_pane).unwrap().name, "one");
+        assert_eq!(tree.get(second_pane).unwrap().name, "two");
     }
 
     #[test]
@@ -2347,13 +2804,28 @@ mod tests {
         assert!(tree.get(flat_group).is_none(), "old group id is discarded");
         let new_group = tree.children_of(ROOT_ID).unwrap()[0];
         assert_eq!(tree.get(new_group).unwrap().name, "Auth refactor");
+        assert_eq!(
+            tree.get(new_group).unwrap().structure_source,
+            StructureSource::LlmRestructure
+        );
         assert_eq!(tree.children_of(new_group).unwrap(), &[pane_a, pane_b]);
         assert_eq!(tree.get(pane_a).unwrap().name, "Backend agent");
         assert_eq!(tree.parent_of(pane_a), Some(new_group));
+        assert_eq!(
+            tree.get(pane_a).unwrap().structure_source,
+            StructureSource::LlmRestructure
+        );
         let NodeKind::Pane { title_source, .. } = &tree.get(pane_a).unwrap().kind else {
             panic!("expected a pane");
         };
         assert_eq!(*title_source, PaneTitleSource::UserSpecified);
+
+        tree.rename_node(pane_a, "User refined backend task", None)
+            .unwrap();
+        assert_eq!(
+            tree.get(pane_a).unwrap().structure_source,
+            StructureSource::Manual
+        );
     }
 
     #[test]

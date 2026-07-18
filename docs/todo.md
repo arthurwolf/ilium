@@ -18,7 +18,6 @@
 - [ ] During first-run setup, test whether the terminal renders the toolbar’s rounded-corner glyphs; if not, offer to install a compatible font and configure supported terminals such as VS Code and GNOME Terminal.
 
 ## Settings, appearance, and input
-
 - [ ] Add accessible status palettes: color-blind-safe alternatives and a monochrome-with-glyph mode.
 - [ ] Add vi-style keyboard shortcuts.
 - [x] Let users choose Ctrl+A, Ctrl+B, or another supported shortcut prefix, while explaining conflicts and recommended choices.
@@ -31,6 +30,7 @@
 
 ## Agent lifecycle, providers, and intelligence
 - [x] Detect when an agent is sleeping or waiting for an external event and show a dedicated animation.
+- [ ] Add a durable per-session terminal-host carrier: each terminal or agent runs behind an independent process that owns its PTY, child process group, screen state, and output journal; it must outlive an ilium-server crash/restart and expose Unix-socket IPC so a replacement server can discover and reattach to live terminals without respawning or interrupting agents.
 - [ ] Define a clean provider abstraction for agent detection, resume behavior, session metadata, and other provider-specific capabilities beyond Claude and Codex.
 - [ ] Add provider implementations for Gemini, OpenCode, and other agent types.
 - [ ] Let users fork an agent into a new session from its context menu when the provider supports session forking, starting with Claude Code.
@@ -50,6 +50,7 @@
 - [ ] Add an LLM-assisted tool that converts a TODO file into a Kanban board using project context.
 - [x] Save and restore terminal buffers and scrollback history.
 - [x] Add a left-panel folder node, distinct from a group, for navigating files and opening them quickly.
+- [ ] Sort "done" (checked) cards to the bottom. And button to move cards that are done to their own column?
 
 ## Git and worktree workflows
 - [ ] Optionally show the current Git branch in tabs: always, never, or only when it differs from configured defaults such as `main` and `master`.
@@ -68,6 +69,7 @@
 - [ ] Add a machine-control panel or tree entry where visual agents can inspect screenshots and interact with useful on-screen controls.
 - [ ] Let groups define exclusive resources, such as a GPU or compiler slot, through shared semaphores. Waiting agents should sleep, coordinate priority through group chat, and escalate decisions to the user through a structured question format.
 - [ ] Give worktree-associated groups and folders a distinct icon and context-menu actions such as LLM-assisted commit and push.
+- [x] Give AI-based re-structuring the "current" structure and manual-versus-LLM provenance, so the new one can preserve useful continuity without mechanically copying the old hierarchy.
 
 ## Agent collaboration and reusable workflows
 - [ ] Add specification/plan creation and execution workflows.
@@ -86,3 +88,5 @@
 
 ## Demos
 - [ ] Create a restart-recovery demo framed as a machine crash: show BIOS and boot animations, then have an agent diagnose overheating and jokingly connect it to the earlier question about mayonnaise as CPU thermal paste.
+
+## Kanban boards

@@ -226,13 +226,19 @@ fn prepare_socket_path(socket_path: &Path) -> Result<(), ServerError> {
 /// `AskBeforeRestore`, the server serves requests -- including `NewPane` --
 /// against an empty tree for as long as the restore decision is pending,
 /// so by the time this runs `state.tree`/`state.panes` may already hold
-/// live panes the snapshot knows nothing about). Any such pre-existing pane
-/// whose node id does not survive into `snapshot.tree` is torn down here
-/// before the tree is overwritten, exactly like the analogous tree-overwrite
-/// in `ipc::handlers::handle_revert_last_restructure` -- otherwise its
-/// `PaneResource` (PTY child process, reader thread, output journal,
-/// forwarder task) would stay registered in `state.panes` forever, keyed by
-/// a node id no longer reachable from any tree.
+/// live panes the snapshot knows nothing about). Because `state.tree` is
+/// about to be replaced wholesale by `snapshot.tree` -- a tree built by an
+/// unrelated `Tree::new()` node-id counter in a previous process, so its
+/// ids collide with the live tree's ids by coincidence, not by identity --
+/// every `PaneResource` already registered in `state.panes` at this instant
+/// is stale regardless of whether its node id happens to also appear in
+/// `snapshot.tree`. All of them are torn down here before the tree is
+/// overwritten, exactly like the unconditional `panes.drain()` in
+/// `ipc::handlers::handle_kill_session` -- otherwise a `PaneResource` (PTY
+/// child process, reader thread, output journal, forwarder task) could stay
+/// registered in `state.panes` forever, keyed by a node id that either no
+/// longer resolves to a pane in the new tree or, worse, now resolves to an
+/// unrelated node the snapshot introduced.
 ///
 /// A pane that fails to respawn (most commonly: its command's binary no
 /// longer exists) is logged and dropped from the restored tree rather than
@@ -252,33 +258,26 @@ pub(crate) async fn restore_snapshot(
     let pane_count = snapshot.panes.len();
     {
         let mut tree = state.tree.write().await;
-        // Computed before the overwrite below, against the tree as it
-        // stood the instant before this snapshot replaces it -- see this
-        // function's doc comment for why that tree can already contain
-        // live panes the snapshot predates.
-        let orphaned_pane_ids: Vec<ilium_core::NodeId> =
-            ipc::handlers::collect_pane_descendants(&tree, ilium_core::ROOT_ID)
-                .into_iter()
-                .filter(|pane_id| snapshot.tree.get(*pane_id).is_none())
-                .collect();
         *tree = snapshot.tree;
-        // Keep the write guard held across the pane-registry sweep below --
-        // see `ipc::handlers::spawn_and_register_pane_in_directory`'s doc
-        // comment for why this tree-overwrite-then-sweep pair must stay
+        // Keep the write guard held across the unconditional pane-registry
+        // drain below -- see `ipc::handlers::spawn_and_register_pane_in_directory`'s
+        // doc comment for why this tree-overwrite-then-sweep pair must stay
         // atomic with respect to that function's own tree-check-then-
         // panes-insert pair, under the "tree before panes" ordering
         // `state.rs` documents. Only dropped once this whole block ends,
         // which is also before the per-pane respawn loop below takes its
         // own `tree` lock per iteration.
-        if !orphaned_pane_ids.is_empty() {
-            let mut panes = state.panes.write().await;
-            for pane_id in orphaned_pane_ids {
-                if let Some(resource) = panes.remove(&pane_id) {
-                    ipc::handlers::teardown_pane_resource(pane_id, resource);
-                }
-            }
-            drop(panes);
+        //
+        // Every entry in `state.panes` at this point predates the snapshot
+        // (see this function's doc comment for why matching node ids across
+        // the two trees would be coincidental, not meaningful), so this
+        // drains the whole registry rather than filtering it -- mirroring
+        // `ipc::handlers::handle_kill_session`.
+        let mut panes = state.panes.write().await;
+        for (pane_id, resource) in panes.drain() {
+            ipc::handlers::teardown_pane_resource(pane_id, resource);
         }
+        drop(panes);
     }
 
     let mut failed_pane_ids = Vec::new();
@@ -416,7 +415,10 @@ mod restore_tests {
         // written to it come back out, exactly like
         // `ilium-pty/tests/pty_integration.rs`'s own `cat` tests.
         let mut tree = Tree::new();
-        let group = tree.add_group(ROOT_ID, "restored").unwrap();
+        let project = tree
+            .ensure_launch_project(dir.path().to_path_buf())
+            .expect("snapshot fixture accepts its launch project");
+        let group = tree.add_group(project, "restored").unwrap();
         let terminal_pane_id = tree
             .add_pane(group, "cat", PaneContentKind::Terminal)
             .unwrap();
@@ -588,6 +590,108 @@ mod restore_tests {
         assert!(
             state.tree.read().await.get(orphan_pane_id).is_none(),
             "the orphaned pane's node must not survive in the overwritten tree either"
+        );
+    }
+
+    /// Reproduces the id-collision variant of the same `AskBeforeRestore`
+    /// leak: the orphaned live pane and the incoming snapshot's tree both
+    /// allocate node ids from their own independent `Tree::new()` counter
+    /// (this process's live tree vs. the previous process's persisted
+    /// tree), so it is pure coincidence whenever a node id in one also
+    /// appears in the other. Before the fix this test guards, `restore_snapshot`
+    /// mistook that coincidence for identity: it only tore down a
+    /// pre-existing live pane whose id was entirely absent from
+    /// `snapshot.tree`, so an orphaned pane whose id happened to collide
+    /// with an unrelated *group* node in the snapshot was skipped by the
+    /// sweep and left registered in `state.panes` forever -- unreachable by
+    /// any later close, since `collect_pane_descendants` only ever returns
+    /// pane nodes, never the group itself. Asserts the orphaned pane's
+    /// registry entry does not survive the overwrite even though its id
+    /// resolves to a live (group) node in the post-overwrite tree.
+    #[tokio::test]
+    async fn restore_snapshot_tears_down_an_orphaned_pane_whose_id_collides_with_a_snapshot_group()
+    {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "collision-test".to_string(),
+            session_cwd: dir.path().to_path_buf(),
+            home_dir: dir.path().to_path_buf(),
+            snapshot_path: dir.path().join("collision-test.snapshot.json"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+        }));
+
+        // Same shape as the plain orphan-teardown test above: one launch
+        // project, one group, then one pane. The pane lands at `NodeId(3)`.
+        let orphan_pane_id = {
+            let mut tree = state.tree.write().await;
+            let project = tree
+                .project_ids()
+                .into_iter()
+                .next()
+                .expect("fresh state has one launch project");
+            let group = tree
+                .add_group(project, "leftover-group")
+                .expect("add the soon-to-be-orphaned pane's parent group");
+            tree.add_pane(group, "leftover", PaneContentKind::Terminal)
+                .expect("add the soon-to-be-orphaned pane's tree node")
+        };
+        crate::ipc::handlers::spawn_and_register_pane(
+            &state,
+            orphan_pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+        )
+        .await
+        .expect("spawn the soon-to-be-orphaned pane's live pty");
+        assert!(
+            state.panes.read().await.contains_key(&orphan_pane_id),
+            "test setup: the pane must be live before the overwrite it's meant to survive"
+        );
+
+        // Independently allocates a project and two groups from its own
+        // `Tree::new()` counter, so the second group lands on the exact same `NodeId` as
+        // `orphan_pane_id` above -- by coincidence, not by any shared
+        // history with the live tree.
+        let mut snapshot_tree = Tree::new();
+        let snapshot_project = snapshot_tree
+            .ensure_launch_project(PathBuf::from("/tmp/snapshot-project"))
+            .expect("snapshot tree accepts its project");
+        let _first_group = snapshot_tree
+            .add_group(snapshot_project, "a")
+            .expect("add the snapshot's first group");
+        let colliding_group = snapshot_tree
+            .add_group(snapshot_project, "b")
+            .expect("add the snapshot's second group, colliding with orphan_pane_id");
+        assert_eq!(
+            colliding_group, orphan_pane_id,
+            "test setup: the snapshot group must land on the same id as the orphaned pane"
+        );
+
+        let snapshot = SessionSnapshot {
+            version: 1,
+            tree: snapshot_tree,
+            panes: Vec::new(),
+        };
+        restore_snapshot(&state, snapshot).await;
+
+        assert!(
+            !state.panes.read().await.contains_key(&orphan_pane_id),
+            "restore_snapshot must tear down an orphaned pane even when its id collides with an \
+             unrelated node in the snapshot tree, not leak it"
+        );
+        assert!(
+            state
+                .tree
+                .read()
+                .await
+                .get(orphan_pane_id)
+                .is_some_and(|node| node.is_group()),
+            "test setup: the colliding id must resolve to the snapshot's group node after the \
+             overwrite, proving the teardown above did not merely happen because the id was gone"
         );
     }
 

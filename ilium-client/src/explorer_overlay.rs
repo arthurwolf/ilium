@@ -45,6 +45,9 @@ pub struct ExplorerOverlay {
     offset: usize,
     show_hidden: bool,
     selection: ExplorerSelection,
+    /// An explicit path entry field. Keeping it inside the same overlay
+    /// preserves the directory listing while a user pastes/types a path.
+    manual_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +74,7 @@ impl ExplorerOverlay {
             offset: 0,
             show_hidden: false,
             selection,
+            manual_path: None,
         };
         overlay.reload()?;
         Ok(overlay)
@@ -239,8 +243,43 @@ impl ExplorerOverlay {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return Ok(None);
         }
+        if let Some(manual_path) = self.manual_path.as_mut() {
+            match key.code {
+                KeyCode::Esc => self.manual_path = None,
+                KeyCode::Enter => {
+                    let entered = PathBuf::from(manual_path.trim());
+                    let candidate = if entered.is_absolute() {
+                        entered
+                    } else {
+                        self.current_dir.join(entered)
+                    };
+                    let canonical = candidate.canonicalize()?;
+                    if !canonical.is_dir() {
+                        anyhow::bail!("entered path is not a directory");
+                    }
+                    return Ok(Some(canonical));
+                }
+                KeyCode::Backspace => {
+                    manual_path.pop();
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    manual_path.clear();
+                }
+                KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    manual_path.push(character);
+                }
+                _ => {}
+            }
+            return Ok(None);
+        }
         let viewport_rows = usize::from(layout_for(screen_area).rows_area.height);
         match key.code {
+            KeyCode::Char('l')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.selection == ExplorerSelection::Folder =>
+            {
+                self.manual_path = Some(self.current_dir.display().to_string());
+            }
             KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_hidden()?;
             }
@@ -490,13 +529,16 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
         .with_selected((!overlay.entries.is_empty()).then_some(overlay.selected));
     frame.render_stateful_widget(table, layout.table_area, &mut table_state);
 
-    let hint = if overlay.entries.is_empty() {
-        "(empty directory) · ←/⌫ up · Ctrl+H hidden files · Esc cancel"
+    let hint = if let Some(manual_path) = &overlay.manual_path {
+        format!("Path: {manual_path}_ · Enter select folder · Esc return to browser")
+    } else if overlay.entries.is_empty() {
+        "(empty directory) · ←/⌫ up · Ctrl+L enter path · Ctrl+H hidden files · Esc cancel"
+            .to_string()
     } else {
         if overlay.selection == ExplorerSelection::Folder {
-            "↑↓/j/k move · Enter select folder · →/l descend · ←/⌫/h up · Ctrl+H hidden files · Esc cancel"
+            "↑↓/j/k move · Enter select folder · →/l descend · Ctrl+L enter path · ←/⌫/h up · Ctrl+H hidden files · Esc cancel".to_string()
         } else {
-            "↑↓/j/k move · →/Enter/l open · right-click .md board · ←/⌫/h up · Ctrl+H hidden files · Esc cancel"
+            "↑↓/j/k move · →/Enter/l open · right-click .md board · ←/⌫/h up · Ctrl+H hidden files · Esc cancel".to_string()
         }
     };
     frame.render_widget(
@@ -708,6 +750,40 @@ mod tests {
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("enter should select folder");
         assert_eq!(selected, Some(dir.join("sub")));
+    }
+
+    #[test]
+    fn folder_mode_accepts_a_manually_entered_directory_path() {
+        let dir = scratch_dir("manual-path");
+        let selected_directory = dir.join("nested");
+        std::fs::create_dir(&selected_directory).expect("mkdir");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+
+        overlay
+            .handle(
+                &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
+                SCREEN,
+            )
+            .expect("open manual path entry");
+        overlay
+            .handle(
+                &key_event(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                SCREEN,
+            )
+            .expect("clear manual path entry");
+        for character in selected_directory.display().to_string().chars() {
+            overlay
+                .handle(
+                    &key_event(KeyCode::Char(character), KeyModifiers::NONE),
+                    SCREEN,
+                )
+                .expect("type manual path");
+        }
+
+        let selected = overlay
+            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .expect("manual path should select its directory");
+        assert_eq!(selected, Some(selected_directory));
     }
 
     #[test]

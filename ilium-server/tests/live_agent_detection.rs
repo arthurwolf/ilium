@@ -49,7 +49,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ilium_core::{PaneStatus, ROOT_ID};
+use ilium_core::{NodeId, PaneStatus, ROOT_ID};
 use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 use ilium_server::config::DetectionConfig;
 use ilium_server::SoundPlayer;
@@ -82,10 +82,10 @@ impl SoundPlayer for RecordingSoundPlayer {
     }
 }
 
-/// Writes an executable POSIX shell script named exactly `claude` into
+/// Writes an executable POSIX shell script named exactly `codex` into
 /// `bin_dir` and returns its absolute path -- never the real system
-/// `PATH`, never a real Anthropic binary (see this file's module docs on
-/// why this is spawned by absolute path rather than added to `PATH`).
+/// `PATH`, never a real Codex binary (see this file's module docs on why
+/// this is spawned by absolute path rather than added to `PATH`).
 ///
 /// The script prints a line containing the literal
 /// `ilium_detect::classify_activity` "working" marker
@@ -95,36 +95,57 @@ impl SoundPlayer for RecordingSoundPlayer {
 /// `Idle` reclassification, not merely stop *adding* new instances of
 /// it, since `vt100::Screen::contents()` reflects the current visible
 /// screen, not an ever-growing scrollback.
-fn write_fake_claude_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = bin_dir.join("claude");
+fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = bin_dir.join("codex");
     let script = format!(
         "#!/bin/sh\n\
          i=0\n\
          while [ \"$i\" -lt {WORKING_PHASE_SECONDS} ]; do\n\
-         \x20\x20printf 'Goal: prove goal detection end to end\\n'\n\
+         \x20\x20printf 'Pursuing goal (5m)\\n'\n\
          \x20\x20printf 'Cogitating (esc to interrupt)\\n'\n\
          \x20\x20i=$((i + 1))\n\
          \x20\x20sleep 1\n\
          done\n\
          printf '\\033[2J\\033[H'\n\
-         printf 'Goal: prove goal detection end to end\\n'\n\
+         printf 'Pursuing goal (5m)\\n'\n\
          printf 'Done. Ready for the next instruction.\\n'\n\
          sleep 60\n"
     );
-    let mut file = std::fs::File::create(&script_path).expect("create fake claude script");
+    let mut file = std::fs::File::create(&script_path).expect("create fake codex script");
     file.write_all(script.as_bytes())
-        .expect("write fake claude script");
+        .expect("write fake codex script");
     // Executable for the owner is enough -- this script is only ever run
     // by this same test process's own spawned children.
     file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake claude script executable");
+        .expect("chmod fake codex script executable");
     script_path
 }
 
+/// Resolves the first pane created through the root shortcut. The server
+/// deliberately translates that legacy shortcut into `project -> default ->
+/// pane`, so these end-to-end assertions must follow the user-visible tree
+/// rather than assuming a group may live directly under the root.
+fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
+    let project_id = tree
+        .project_ids()
+        .into_iter()
+        .next()
+        .expect("a launch project should exist for the pane");
+    let default_group = tree
+        .children_of(project_id)
+        .expect("project is a container")
+        .first()
+        .copied()
+        .expect("a default group should have been created for the pane");
+    tree.children_of(default_group)
+        .expect("default group is a container")[0]
+}
+
 #[tokio::test]
-async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_pipeline() {
-    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
-    let fake_claude_path = write_fake_claude_binary(fake_bin_dir.path());
+async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_the_whole_pipeline()
+{
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake codex binary");
+    let fake_codex_path = write_fake_codex_binary(fake_bin_dir.path());
 
     // Short poll intervals so a real `Working -> Idle` transition shows up
     // within this test's timeout instead of the real default's 5s/45s
@@ -176,13 +197,13 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     // script's absolute path as the whole command line means the real
     // process that ends up running is *exactly* this fake script --
     // named, and therefore reported by `sysinfo`/`identify_agent`,
-    // exactly `claude` (see this file's module docs on why an absolute
+    // exactly `codex` (see this file's module docs on why an absolute
     // path is used here instead of relying on `PATH`).
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            kind: NewPaneKind::Command(fake_claude_path.to_string_lossy().to_string()),
+            kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
@@ -195,21 +216,16 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    let default_group = tree
-        .children_of(ROOT_ID)
-        .expect("root is a group")
-        .first()
-        .copied()
-        .expect("a default group should have been created for the pane");
-    let pane_id = tree.children_of(default_group).expect("group has children")[0];
+    let pane_id = first_launch_project_pane(&tree);
 
     // Structural assertion #1: the real detection loop, walking the real
     // `sysinfo` process tree, must identify the spawned process as a
-    // Claude Code agent (by real process name, via
+    // Codex agent (by real process name, via
     // `ilium_detect::AGENT_SIGNATURES`) and classify it `Working` (by
     // real `vt100` screen-text scrape, via `ilium_detect::classify_activity`
     // matching the literal `"esc to interrupt"` marker this fake script
-    // prints), and preserve its visible `Goal:` row as `AgentWithGoal` --
+    // prints), and preserve its visible `Pursuing goal (5m)` status as
+    // `AgentWithGoal` --
     // broadcast as a real `PaneStatusChanged` event to this
     // real connected IPC client.
     let working_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
@@ -230,9 +246,9 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     assert!(
         matches!(
             status,
-            PaneStatus::AgentWithGoal(ilium_core::AgentClass::Claude, _)
+            PaneStatus::AgentWithGoal(ilium_core::AgentClass::Codex, _)
         ),
-        "expected the real process tree walk to identify this pane as Claude, got {status:?}"
+        "expected the real process tree walk to identify this pane as Codex, got {status:?}"
     );
     assert!(
         sound_calls.lock().unwrap().is_empty(),
@@ -257,7 +273,7 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
                     && matches!(
                         status,
                         PaneStatus::AgentWithGoal(
-                            ilium_core::AgentClass::Claude,
+                            ilium_core::AgentClass::Codex,
                             ilium_core::AgentActivity::Idle | ilium_core::AgentActivity::Done
                         )
                     )
@@ -270,7 +286,7 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
     assert_eq!(
         status,
         PaneStatus::AgentWithGoal(
-            ilium_core::AgentClass::Claude,
+            ilium_core::AgentClass::Codex,
             ilium_core::AgentActivity::Done
         ),
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
@@ -297,11 +313,11 @@ async fn a_real_process_named_claude_preserves_a_visible_goal_through_the_whole_
 }
 
 /// Writes an executable POSIX shell script named exactly `name` (same
-/// absolute-path-spawn rationale as [`write_fake_claude_binary`]) that just
+/// absolute-path-spawn rationale as [`write_fake_codex_binary`]) that just
 /// idles -- the argument-based session-ID-discovery tests below only care about
 /// `crate::session_id::discover`'s first admissible source (an explicit resume argument on
 /// the command line), not activity classification, so unlike
-/// [`write_fake_claude_binary`] neither ever needs to print the "esc to
+/// [`write_fake_codex_binary`] neither ever needs to print the "esc to
 /// interrupt" working marker.
 fn write_idle_fake_agent_binary(bin_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     let script_path = bin_dir.join(name);
@@ -459,13 +475,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    let default_group = tree
-        .children_of(ROOT_ID)
-        .expect("root is a group")
-        .first()
-        .copied()
-        .expect("a default group should have been created for the pane");
-    let pane_id = tree.children_of(default_group).expect("group has children")[0];
+    let pane_id = first_launch_project_pane(&tree);
 
     let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
@@ -717,13 +727,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    let default_group = tree
-        .children_of(ROOT_ID)
-        .expect("root is a group")
-        .first()
-        .copied()
-        .expect("a default group should have been created for the pane");
-    let pane_id = tree.children_of(default_group).expect("group has children")[0];
+    let pane_id = first_launch_project_pane(&tree);
 
     let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
@@ -801,8 +805,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    let default_group = tree.children_of(ROOT_ID).unwrap()[0];
-    let pane_id = tree.children_of(default_group).unwrap()[0];
+    let pane_id = first_launch_project_pane(&tree);
 
     let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
