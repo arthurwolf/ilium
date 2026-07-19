@@ -396,7 +396,10 @@ async fn run_inner(
                     }
                     None if voice_service.is_some() => {
                         voice_service = None;
-                        if app.voice_settings.enabled {
+                        if should_report_unexpected_voice_stop(
+                            app.voice_settings.enabled,
+                            &app.voice_connection_state,
+                        ) {
                             app.update_voice_connection_state(
                                 ilium_voice::VoiceConnectionState::Failed(
                                     "voice service stopped unexpectedly".to_owned(),
@@ -498,6 +501,16 @@ async fn next_voice_event(
         Some(service) => service.next_event().await,
         None => std::future::pending().await,
     }
+}
+
+/// A provider failure is delivered immediately before its event channel
+/// closes. Preserve that actionable error instead of replacing it with the
+/// less useful generic channel-closure message on the next event-loop turn.
+fn should_report_unexpected_voice_stop(
+    is_voice_enabled: bool,
+    state: &ilium_voice::VoiceConnectionState,
+) -> bool {
+    is_voice_enabled && !matches!(state, ilium_voice::VoiceConnectionState::Failed(_))
 }
 
 async fn handle_voice_event(
@@ -931,6 +944,26 @@ mod responsiveness_tests {
             false,
             last_draw_at + OUTPUT_FRAME_INTERVAL,
             last_draw_at,
+        ));
+    }
+
+    #[test]
+    fn provider_failure_survives_the_following_voice_channel_close() {
+        let provider_failure = ilium_voice::VoiceConnectionState::Failed(
+            "OpenAI rejected one production tool schema".to_owned(),
+        );
+
+        assert!(!should_report_unexpected_voice_stop(
+            true,
+            &provider_failure
+        ));
+        assert!(should_report_unexpected_voice_stop(
+            true,
+            &ilium_voice::VoiceConnectionState::Listening
+        ));
+        assert!(!should_report_unexpected_voice_stop(
+            false,
+            &ilium_voice::VoiceConnectionState::Listening
         ));
     }
 }
