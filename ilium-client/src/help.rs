@@ -1,7 +1,6 @@
-//! Renders the leader-key reference (`keymap::effective_bindings`, the
-//! possibly user-remapped table) as a centered popup overlay, so the
-//! bindings shown here can never drift out of sync with what `app.rs`
-//! actually dispatches (`keymap::action_for` searches the same table).
+//! Renders the live App-owned leader map as a centered popup overlay. The
+//! same slice is dispatched by `keys`, so applying a setting immediately
+//! changes both input and this reference.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -13,78 +12,65 @@ use crate::keymap;
 use crate::layout::centered_rect;
 use crate::theme;
 
-/// Draws the help popup, centered within `area` at roughly 60% width /
-/// 70% height.
-pub fn render(frame: &mut Frame, area: Rect, shortcut_base: keymap::ShortcutBase) {
-    let popup_area = centered_rect(60, 70, area);
+/// Draws the complete live key reference in two compact columns. Keeping the
+/// action table under one terminal page means a newly added action never
+/// disappears below a non-scrollable modal's fold.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    shortcut_base: keymap::ShortcutBase,
+    bindings: &[keymap::KeyBinding],
+) {
+    let popup_area = centered_rect(94, 94, area);
 
     // Clear the popup's own footprint first so it reads as an opaque
     // panel rather than a see-through overlay on whatever was drawn
     // underneath it this frame.
     frame.render_widget(Clear, popup_area);
 
-    let bindings = keymap::effective_bindings();
-    let mut lines = Vec::with_capacity(bindings.len() + 4);
+    let mut lines = Vec::with_capacity(bindings.len().div_ceil(2) + 6);
     lines.push(Line::from(Span::styled(
         "ilium — keyboard reference",
         Style::new().add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
-    for binding in bindings {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} then {}", shortcut_base.label(), binding.letter),
+    for pair in bindings.chunks(2) {
+        let mut spans = Vec::new();
+        for (index, binding) in pair.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::raw("   "));
+            }
+            spans.push(Span::styled(
+                format!(
+                    "{} {}",
+                    shortcut_base.label(),
+                    keymap::key_label(binding.letter)
+                ),
                 Style::new().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  —  "),
-            Span::raw(binding.description),
-        ]));
+            ));
+            // A 22-cell description keeps two complete action columns inside
+            // the 80-column terminal baseline, while the Keyboard settings
+            // table exposes the full action name for remapping.
+            let summary = binding.description.chars().take(22).collect::<String>();
+            spans.push(Span::raw(format!(" — {summary:<22}")));
+        }
+        lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Mouse",
-        Style::new().add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(
-        "left-click a pane to focus it; click a group to expand/collapse",
-    ));
-    lines.push(Line::from(
-        "drag a tree entry onto a group or after a pane to move it",
-    ));
-    lines.push(Line::from(
-        "right-click a tree entry for rename, move, create, and close actions",
-    ));
-    lines.push(Line::from(
-        "use the right-aligned tree-footer gear for Settings (appearance and keyboard)",
-    ));
-    lines.push(Line::from(
-        "focus or hover the tree panel to reveal its footer actions",
-    ));
     lines.push(Line::from(format!(
-        "hover a tree row for {}/↑/↓ controls; {} renames, pane arrows cross into adjacent groups at boundaries",
-        theme::PEN_ICON,
+        "Mouse: pane focus · tree expand/reorder · context menus · tree footer Settings · {} rename",
         theme::PEN_ICON,
     )));
-    lines.push(Line::from(
-        "click the terminal to focus it; mouse-aware terminal apps receive their mouse input",
-    ));
-    lines.push(Line::from(
-        "scroll the wheel over a terminal pane to browse its scrollback (Shift+PageUp/PageDown also works); typing returns to the live view",
-    ));
-    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Prompts",
-        Style::new().add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(
-        "rename and run-command open a centered input popup, not the status bar",
-    ));
-    lines.push(Line::from(
-        "closing a group with items, or an editor with unsaved changes, asks y/n first",
-    ));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("press {} ? again, or Esc, to close", shortcut_base.label()),
+        format!(
+            "press {} {} again, or Esc, to close",
+            shortcut_base.label(),
+            bindings
+                .iter()
+                .find(|binding| binding.action == keymap::Action::Help)
+                .map(|binding| binding.letter)
+                .unwrap_or('?'),
+        ),
         Style::new().add_modifier(Modifier::ITALIC),
     )));
 
@@ -104,7 +90,14 @@ mod tests {
         let backend = TestBackend::new(140, 60);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render(frame, frame.area(), keymap::ShortcutBase::B))
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    keymap::ShortcutBase::B,
+                    keymap::LEADER_BINDINGS,
+                )
+            })
             .unwrap();
         let buffer = terminal.backend().buffer();
         let rendered = buffer
@@ -112,9 +105,31 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(rendered.contains("Ctrl+B then ?"));
+        assert!(rendered.contains("Ctrl+B ?"));
         assert!(rendered.contains("press Ctrl+B ? again"));
         assert!(rendered.contains(theme::PEN_ICON));
         assert!(!rendered.contains("Ctrl+A then ?"));
+    }
+
+    #[test]
+    fn help_renders_a_live_remapped_action_table() {
+        let mut bindings = keymap::LEADER_BINDINGS.to_vec();
+        keymap::assign_key(&mut bindings, keymap::Action::NewGroup, 'z')
+            .expect("z is free in the default map");
+        let backend = TestBackend::new(140, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), keymap::ShortcutBase::A, &bindings))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Ctrl+A z — New group"));
+        assert!(!rendered.contains("Ctrl+A g — New group"));
     }
 }

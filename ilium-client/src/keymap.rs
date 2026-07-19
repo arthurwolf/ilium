@@ -142,9 +142,19 @@ pub enum Action {
     ToggleMove,
     FocusTree,
     FocusPane,
+    FocusNextPane,
+    FocusPreviousPane,
+    FocusPaneLeft,
+    FocusPaneRight,
+    FocusPaneUp,
+    FocusPaneDown,
+    ScrollbackUp,
+    ScrollbackDown,
     Save,
     RunCommand,
+    Search,
     Help,
+    Detach,
     Quit,
     ToggleEditorViewMode,
     ToggleLineNumbers,
@@ -158,11 +168,71 @@ pub enum Action {
 
 /// A single letter -> action mapping, plus the human-readable description
 /// shown on the help screen.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyBinding {
     pub letter: char,
     pub action: Action,
     pub description: &'static str,
+}
+
+/// One memorable word a user can associate with a possible key for an
+/// action. The word deliberately begins with its key, so the Keyboard
+/// settings table can explain a remap without inventing a second shortcut
+/// language. Punctuation has no useful word mnemonic and is therefore not
+/// represented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionMnemonic {
+    pub key: char,
+    pub word: &'static str,
+}
+
+/// Every printable key that can safely be used as the second key in an
+/// ilium leader sequence. Keeping this finite, explicit catalogue shared by
+/// the settings table and the visual picker means a binding cannot be saved
+/// for a key that the dispatcher could never receive.
+pub const BINDABLE_KEYS: &[char] = &[
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B',
+    'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
+    'V', 'W', 'X', 'Y', 'Z', '`', '-', '=', '[', ']', '\\', ';', '\'', ',', '.', '/', '!', '@',
+    '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '{', '}', '|', ':', '\"', '<', '>', '?', '~',
+    ' ',
+];
+
+/// Human-readable cap label for a printable leader key. Space is printable
+/// but invisible in a table, so it must never be rendered as an empty box.
+pub fn key_label(key: char) -> String {
+    match key {
+        ' ' => "Space".to_string(),
+        _ => key.to_string(),
+    }
+}
+
+/// A complete preset, not merely a prefix. The Screen and tmux presets use
+/// their documented defaults where ilium has an equivalent action, while
+/// retaining ilium-only editor/tree actions on free keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeymapPreset {
+    Screen,
+    Tmux,
+}
+
+impl KeymapPreset {
+    pub const ALL: [Self; 2] = [Self::Screen, Self::Tmux];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Screen => "GNU Screen",
+            Self::Tmux => "tmux",
+        }
+    }
+
+    pub const fn shortcut_base(self) -> ShortcutBase {
+        match self {
+            Self::Screen => ShortcutBase::A,
+            Self::Tmux => ShortcutBase::B,
+        }
+    }
 }
 
 /// All leader-key bindings, in display order. `action_for` and the help
@@ -225,6 +295,46 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Focus the active pane",
     },
     KeyBinding {
+        letter: 'o',
+        action: Action::FocusNextPane,
+        description: "Focus the next visible pane",
+    },
+    KeyBinding {
+        letter: ';',
+        action: Action::FocusPreviousPane,
+        description: "Focus the previous visible pane",
+    },
+    KeyBinding {
+        letter: 'h',
+        action: Action::FocusPaneLeft,
+        description: "Focus the visible pane to the left",
+    },
+    KeyBinding {
+        letter: 'l',
+        action: Action::FocusPaneRight,
+        description: "Focus the visible pane to the right",
+    },
+    KeyBinding {
+        letter: 'k',
+        action: Action::FocusPaneUp,
+        description: "Focus the visible pane above",
+    },
+    KeyBinding {
+        letter: 'j',
+        action: Action::FocusPaneDown,
+        description: "Focus the visible pane below",
+    },
+    KeyBinding {
+        letter: '[',
+        action: Action::ScrollbackUp,
+        description: "Scroll the focused terminal one page up",
+    },
+    KeyBinding {
+        letter: ']',
+        action: Action::ScrollbackDown,
+        description: "Scroll the focused terminal one page down",
+    },
+    KeyBinding {
         letter: 's',
         action: Action::Save,
         description: "Save the focused editor pane",
@@ -233,6 +343,11 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         letter: '!',
         action: Action::RunCommand,
         description: "Prompt for a command, run it in a new terminal pane in the selected group",
+    },
+    KeyBinding {
+        letter: '/',
+        action: Action::Search,
+        description: "Search terminal history and open editor buffers",
     },
     KeyBinding {
         letter: 'v',
@@ -265,9 +380,14 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Show or hide this help screen",
     },
     KeyBinding {
-        letter: 'q',
+        letter: 'd',
+        action: Action::Detach,
+        description: "Detach this client and leave the session running",
+    },
+    KeyBinding {
+        letter: 'Q',
         action: Action::Quit,
-        description: "Quit ilium",
+        description: "Kill this project session and disconnect every client",
     },
 ];
 
@@ -289,9 +409,19 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleMove => "toggle_move",
         Action::FocusTree => "focus_tree",
         Action::FocusPane => "focus_pane",
+        Action::FocusNextPane => "focus_next_pane",
+        Action::FocusPreviousPane => "focus_previous_pane",
+        Action::FocusPaneLeft => "focus_pane_left",
+        Action::FocusPaneRight => "focus_pane_right",
+        Action::FocusPaneUp => "focus_pane_up",
+        Action::FocusPaneDown => "focus_pane_down",
+        Action::ScrollbackUp => "scrollback_up",
+        Action::ScrollbackDown => "scrollback_down",
         Action::Save => "save",
         Action::RunCommand => "run_command",
+        Action::Search => "search",
         Action::Help => "help",
+        Action::Detach => "detach",
         Action::Quit => "quit",
         Action::ToggleEditorViewMode => "toggle_editor_view_mode",
         Action::ToggleLineNumbers => "toggle_line_numbers",
@@ -299,6 +429,526 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleAutosave => "toggle_autosave",
         Action::Settings => "settings",
     }
+}
+
+/// Compact table label for the Keyboard settings view. The detailed
+/// `KeyBinding::description` remains the Help text; this label keeps the
+/// three-column editor usable in an 80-column terminal.
+pub const fn action_label(action: Action) -> &'static str {
+    match action {
+        Action::NewTerminal => "New terminal",
+        Action::NewEditor => "New editor",
+        Action::NewBoard => "New board",
+        Action::ClosePane => "Close selection",
+        Action::NewGroup => "New group",
+        Action::NewSplitView => "New split view",
+        Action::NewFolder => "Open folder",
+        Action::Rename => "Rename selection",
+        Action::ToggleMove => "Move mode",
+        Action::FocusTree => "Focus tree",
+        Action::FocusPane => "Focus active pane",
+        Action::FocusNextPane => "Focus next pane",
+        Action::FocusPreviousPane => "Focus previous pane",
+        Action::FocusPaneLeft => "Focus pane left",
+        Action::FocusPaneRight => "Focus pane right",
+        Action::FocusPaneUp => "Focus pane above",
+        Action::FocusPaneDown => "Focus pane below",
+        Action::ScrollbackUp => "Scrollback up",
+        Action::ScrollbackDown => "Scrollback down",
+        Action::Save => "Save editor",
+        Action::RunCommand => "Run command",
+        Action::Search => "Workspace search",
+        Action::Help => "Help",
+        Action::Detach => "Detach client",
+        Action::Quit => "Kill session",
+        Action::ToggleEditorViewMode => "Toggle editor view",
+        Action::ToggleLineNumbers => "Toggle line numbers",
+        Action::ToggleMinimap => "Toggle minimap",
+        Action::ToggleAutosave => "Toggle autosave",
+        Action::Settings => "Open settings",
+    }
+}
+
+/// Returns the action-owned mnemonic candidates for every letter where a
+/// useful association exists. They are intentionally a data registry rather
+/// than UI text: the Settings table, future key pickers, and presets can all
+/// consult the same vocabulary after a remap.
+pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
+    use ActionMnemonic as Mnemonic;
+
+    match action {
+        Action::NewTerminal => &[
+            Mnemonic {
+                key: 'c',
+                word: "create",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "new",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "open",
+            },
+            Mnemonic {
+                key: 't',
+                word: "terminal",
+            },
+        ],
+        Action::NewEditor => &[
+            Mnemonic {
+                key: 'c',
+                word: "compose",
+            },
+            Mnemonic {
+                key: 'e',
+                word: "edit",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "new",
+            },
+            Mnemonic {
+                key: 'w',
+                word: "write",
+            },
+        ],
+        Action::NewBoard => &[
+            Mnemonic {
+                key: 'b',
+                word: "board",
+            },
+            Mnemonic {
+                key: 'c',
+                word: "canvas",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "new",
+            },
+        ],
+        Action::ClosePane => &[
+            Mnemonic {
+                key: 'c',
+                word: "close",
+            },
+            Mnemonic {
+                key: 'd',
+                word: "dismiss",
+            },
+            Mnemonic {
+                key: 'k',
+                word: "kill",
+            },
+            Mnemonic {
+                key: 'x',
+                word: "xout",
+            },
+        ],
+        Action::NewGroup => &[
+            Mnemonic {
+                key: 'b',
+                word: "bundle",
+            },
+            Mnemonic {
+                key: 'c',
+                word: "cluster",
+            },
+            Mnemonic {
+                key: 'g',
+                word: "group",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "new",
+            },
+        ],
+        Action::NewSplitView => &[
+            Mnemonic {
+                key: 'd',
+                word: "divide",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "partition",
+            },
+            Mnemonic {
+                key: 's',
+                word: "split",
+            },
+            Mnemonic {
+                key: 'w',
+                word: "window",
+            },
+        ],
+        Action::NewFolder => &[
+            Mnemonic {
+                key: 'b',
+                word: "browse",
+            },
+            Mnemonic {
+                key: 'd',
+                word: "directory",
+            },
+            Mnemonic {
+                key: 'f',
+                word: "folder",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "open",
+            },
+        ],
+        Action::Rename => &[
+            Mnemonic {
+                key: 'a',
+                word: "alter",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "label",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "name",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "rename",
+            },
+        ],
+        Action::ToggleMove => &[
+            Mnemonic {
+                key: 'm',
+                word: "move",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "organize",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "reorder",
+            },
+            Mnemonic {
+                key: 's',
+                word: "shift",
+            },
+        ],
+        Action::FocusTree => &[
+            Mnemonic {
+                key: 'b',
+                word: "branches",
+            },
+            Mnemonic {
+                key: 'f',
+                word: "focus",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "navigation",
+            },
+            Mnemonic {
+                key: 't',
+                word: "tree",
+            },
+        ],
+        Action::FocusPane => &[
+            Mnemonic {
+                key: 'a',
+                word: "active",
+            },
+            Mnemonic {
+                key: 'f',
+                word: "focus",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "pane",
+            },
+        ],
+        Action::FocusNextPane => &[
+            Mnemonic {
+                key: 'c',
+                word: "cycle",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "next",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "onward",
+            },
+        ],
+        Action::FocusPreviousPane => &[
+            Mnemonic {
+                key: 'b',
+                word: "back",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "previous",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "reverse",
+            },
+        ],
+        Action::FocusPaneLeft => &[
+            Mnemonic {
+                key: 'h',
+                word: "hither",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "left",
+            },
+            Mnemonic {
+                key: 'w',
+                word: "west",
+            },
+        ],
+        Action::FocusPaneRight => &[
+            Mnemonic {
+                key: 'e',
+                word: "east",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "lateral",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "right",
+            },
+        ],
+        Action::FocusPaneUp => &[
+            Mnemonic {
+                key: 'a',
+                word: "above",
+            },
+            Mnemonic {
+                key: 'u',
+                word: "up",
+            },
+        ],
+        Action::FocusPaneDown => &[
+            Mnemonic {
+                key: 'd',
+                word: "down",
+            },
+            Mnemonic {
+                key: 'j',
+                word: "jump",
+            },
+            Mnemonic {
+                key: 's',
+                word: "south",
+            },
+        ],
+        Action::ScrollbackUp => &[
+            Mnemonic {
+                key: 'b',
+                word: "back",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "previous",
+            },
+            Mnemonic {
+                key: 'u',
+                word: "up",
+            },
+        ],
+        Action::ScrollbackDown => &[
+            Mnemonic {
+                key: 'd',
+                word: "down",
+            },
+            Mnemonic {
+                key: 'f',
+                word: "forward",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "next",
+            },
+        ],
+        Action::Save => &[
+            Mnemonic {
+                key: 'c',
+                word: "commit",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "persist",
+            },
+            Mnemonic {
+                key: 's',
+                word: "save",
+            },
+            Mnemonic {
+                key: 'w',
+                word: "write",
+            },
+        ],
+        Action::RunCommand => &[
+            Mnemonic {
+                key: 'c',
+                word: "command",
+            },
+            Mnemonic {
+                key: 'e',
+                word: "execute",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "run",
+            },
+        ],
+        Action::Search => &[
+            Mnemonic {
+                key: 'f',
+                word: "find",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "look",
+            },
+            Mnemonic {
+                key: 'q',
+                word: "query",
+            },
+            Mnemonic {
+                key: 's',
+                word: "search",
+            },
+        ],
+        Action::Help => &[
+            Mnemonic {
+                key: 'a',
+                word: "aid",
+            },
+            Mnemonic {
+                key: 'g',
+                word: "guide",
+            },
+            Mnemonic {
+                key: 'h',
+                word: "help",
+            },
+        ],
+        Action::Detach => &[
+            Mnemonic {
+                key: 'd',
+                word: "detach",
+            },
+            Mnemonic {
+                key: 'l',
+                word: "leave",
+            },
+            Mnemonic {
+                key: 'u',
+                word: "unplug",
+            },
+        ],
+        Action::Quit => &[
+            Mnemonic {
+                key: 'e',
+                word: "end",
+            },
+            Mnemonic {
+                key: 'q',
+                word: "quit",
+            },
+            Mnemonic {
+                key: 's',
+                word: "stop",
+            },
+        ],
+        Action::ToggleEditorViewMode => &[
+            Mnemonic {
+                key: 'm',
+                word: "mode",
+            },
+            Mnemonic {
+                key: 'r',
+                word: "render",
+            },
+            Mnemonic {
+                key: 'v',
+                word: "view",
+            },
+        ],
+        Action::ToggleLineNumbers => &[
+            Mnemonic {
+                key: 'l',
+                word: "lines",
+            },
+            Mnemonic {
+                key: 'n',
+                word: "numbers",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "ordinal",
+            },
+        ],
+        Action::ToggleMinimap => &[
+            Mnemonic {
+                key: 'b',
+                word: "birdseye",
+            },
+            Mnemonic {
+                key: 'm',
+                word: "minimap",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "overview",
+            },
+        ],
+        Action::ToggleAutosave => &[
+            Mnemonic {
+                key: 'a',
+                word: "automatic",
+            },
+            Mnemonic {
+                key: 'p',
+                word: "persist",
+            },
+            Mnemonic {
+                key: 's',
+                word: "save",
+            },
+        ],
+        Action::Settings => &[
+            Mnemonic {
+                key: 'c',
+                word: "configure",
+            },
+            Mnemonic {
+                key: 'o',
+                word: "options",
+            },
+            Mnemonic {
+                key: 's',
+                word: "settings",
+            },
+        ],
+    }
+}
+
+/// Looks up the mnemonic for an action's currently assigned key. Uppercase
+/// bindings share their lowercase word, while punctuation intentionally
+/// returns `None` because it has no letter-led word equivalent.
+pub fn mnemonic_for(action: Action, key: char) -> Option<&'static str> {
+    let letter = key.to_ascii_lowercase();
+    action_mnemonics(action)
+        .iter()
+        .find(|mnemonic| mnemonic.key == letter)
+        .map(|mnemonic| mnemonic.word)
 }
 
 /// The inverse of [`action_name`]: looks up the `Action` a config-file
@@ -371,6 +1021,120 @@ pub fn action_for_table(bindings: &[KeyBinding], letter: char) -> Option<Action>
         .iter()
         .find(|binding| binding.letter == letter)
         .map(|binding| binding.action)
+}
+
+/// Replaces one action's binding only when `key` is currently free. This is
+/// the single collision gate used by both the visual picker and preset load;
+/// callers can report a refusal without ever transiently installing an
+/// ambiguous map.
+pub fn assign_key(bindings: &mut [KeyBinding], action: Action, key: char) -> Result<(), Action> {
+    if !BINDABLE_KEYS.contains(&key) {
+        return Err(action);
+    }
+    if let Some(existing) = bindings.iter().find(|binding| binding.letter == key) {
+        if existing.action != action {
+            return Err(existing.action);
+        }
+        return Ok(());
+    }
+    if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
+        binding.letter = key;
+    }
+    Ok(())
+}
+
+/// Returns the free keys in physical-keyboard order for the settings table
+/// and picker. A row's own current key is deliberately excluded: selecting a
+/// key is a reassignment, never an accidental no-op.
+pub fn available_keys(bindings: &[KeyBinding]) -> Vec<char> {
+    BINDABLE_KEYS
+        .iter()
+        .copied()
+        .filter(|key| !bindings.iter().any(|binding| binding.letter == *key))
+        .collect()
+}
+
+/// Builds the full documented default map for one established multiplexer.
+/// ilium has no flat windows or paste buffer, so the closest tree/pane action
+/// is used only where the interaction is genuinely equivalent.
+pub fn preset_bindings(preset: KeymapPreset) -> Vec<KeyBinding> {
+    let mut bindings = LEADER_BINDINGS.to_vec();
+    let assignments: &[(Action, char)] = match preset {
+        KeymapPreset::Screen => &[
+            (Action::NewTerminal, 'c'),
+            (Action::ClosePane, 'k'),
+            (Action::Rename, 'A'),
+            (Action::NewSplitView, 'S'),
+            (Action::FocusPane, 'P'),
+            (Action::FocusNextPane, 'n'),
+            (Action::FocusPreviousPane, 'p'),
+            (Action::FocusPaneLeft, 'H'),
+            (Action::FocusPaneRight, 'L'),
+            (Action::FocusPaneUp, 'K'),
+            (Action::FocusPaneDown, 'J'),
+            (Action::ScrollbackUp, '['),
+            (Action::ScrollbackDown, ']'),
+            (Action::Help, '?'),
+            (Action::Detach, 'd'),
+            (Action::Quit, '\\'),
+            (Action::Settings, 'o'),
+            (Action::NewGroup, 'g'),
+            (Action::NewEditor, 'e'),
+            (Action::NewBoard, 'B'),
+            (Action::NewFolder, 'F'),
+            (Action::ToggleMove, 'm'),
+            (Action::FocusTree, 't'),
+            (Action::Save, 's'),
+            (Action::RunCommand, ':'),
+            (Action::Search, '/'),
+            (Action::ToggleEditorViewMode, 'v'),
+            (Action::ToggleLineNumbers, 'N'),
+            (Action::ToggleMinimap, 'b'),
+            (Action::ToggleAutosave, 'a'),
+        ],
+        KeymapPreset::Tmux => &[
+            (Action::NewTerminal, 'c'),
+            (Action::ClosePane, 'x'),
+            (Action::Rename, ','),
+            (Action::NewSplitView, '"'),
+            (Action::FocusPane, 'P'),
+            (Action::FocusNextPane, 'o'),
+            (Action::FocusPreviousPane, ';'),
+            (Action::FocusPaneLeft, 'h'),
+            (Action::FocusPaneRight, 'l'),
+            (Action::FocusPaneUp, 'k'),
+            (Action::FocusPaneDown, 'j'),
+            (Action::ScrollbackUp, '['),
+            (Action::ScrollbackDown, ']'),
+            (Action::Help, '?'),
+            (Action::Detach, 'd'),
+            (Action::Quit, '&'),
+            (Action::Settings, ':'),
+            (Action::NewGroup, 'g'),
+            (Action::NewEditor, 'e'),
+            (Action::NewBoard, 'B'),
+            (Action::NewFolder, 'F'),
+            (Action::ToggleMove, 'm'),
+            (Action::FocusTree, 't'),
+            (Action::Save, 's'),
+            (Action::RunCommand, '!'),
+            (Action::Search, 'f'),
+            (Action::ToggleEditorViewMode, 'v'),
+            (Action::ToggleLineNumbers, 'n'),
+            (Action::ToggleMinimap, 'b'),
+            (Action::ToggleAutosave, 'a'),
+        ],
+    };
+    for (action, key) in assignments {
+        // Preset literals are maintained alongside the bindable catalogue and
+        // every map starts one-action-per-row, so this cannot conflict.
+        let binding = bindings
+            .iter_mut()
+            .find(|binding| binding.action == *action)
+            .expect("every preset action is registered in LEADER_BINDINGS");
+        binding.letter = *key;
+    }
+    bindings
 }
 
 #[cfg(test)]
@@ -449,7 +1213,7 @@ mod tests {
 
     #[test]
     fn action_for_known_letter() {
-        assert_eq!(action_for('q'), Some(Action::Quit));
+        assert_eq!(action_for('d'), Some(Action::Detach));
         assert_eq!(action_for('c'), Some(Action::NewTerminal));
         assert_eq!(action_for('!'), Some(Action::RunCommand));
     }
@@ -475,6 +1239,52 @@ mod tests {
         assert_eq!(action_from_name("not_a_real_action"), None);
     }
 
+    #[test]
+    fn mnemonic_words_start_with_their_registered_letters() {
+        for binding in LEADER_BINDINGS {
+            for mnemonic in action_mnemonics(binding.action) {
+                assert_eq!(
+                    mnemonic
+                        .word
+                        .chars()
+                        .next()
+                        .map(|letter| letter.to_ascii_lowercase()),
+                    Some(mnemonic.key),
+                    "{} mnemonic {:?} must start with {:?}",
+                    action_name(binding.action),
+                    mnemonic.word,
+                    mnemonic.key,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn documented_preset_letters_have_mnemonics_except_explicitly_unmnemonicable_keys() {
+        let maps = [
+            LEADER_BINDINGS.to_vec(),
+            preset_bindings(KeymapPreset::Screen),
+            preset_bindings(KeymapPreset::Tmux),
+        ];
+        for bindings in maps {
+            for binding in bindings {
+                let has_no_honest_word = matches!(
+                    (binding.action, binding.letter.to_ascii_lowercase()),
+                    (Action::FocusPaneUp, 'k')
+                );
+                if binding.letter.is_ascii_alphabetic() && !has_no_honest_word {
+                    assert!(
+                        mnemonic_for(binding.action, binding.letter).is_some(),
+                        "{} on {:?} needs a mnemonic",
+                        action_name(binding.action),
+                        binding.letter,
+                    );
+                }
+            }
+        }
+        assert_eq!(mnemonic_for(Action::Search, '/'), None);
+    }
+
     /// `effective_bindings` falls back to `LEADER_BINDINGS` unchanged in
     /// this test binary, since nothing here ever calls
     /// `init_effective_bindings` (a deliberately untested global -- see
@@ -484,5 +1294,33 @@ mod tests {
     #[test]
     fn effective_bindings_defaults_to_leader_bindings() {
         assert_eq!(effective_bindings().len(), LEADER_BINDINGS.len());
+    }
+
+    #[test]
+    fn assignment_refuses_a_key_already_owned_by_another_action() {
+        let mut bindings = LEADER_BINDINGS.to_vec();
+        assert_eq!(
+            assign_key(&mut bindings, Action::Quit, 'c'),
+            Err(Action::NewTerminal)
+        );
+        assert_eq!(action_for_table(&bindings, 'Q'), Some(Action::Quit));
+    }
+
+    #[test]
+    fn presets_have_their_documented_prefixes_and_no_collisions() {
+        for preset in KeymapPreset::ALL {
+            let bindings = preset_bindings(preset);
+            let unique = bindings
+                .iter()
+                .map(|binding| binding.letter)
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(unique.len(), bindings.len());
+        }
+        assert_eq!(KeymapPreset::Screen.shortcut_base(), ShortcutBase::A);
+        assert_eq!(KeymapPreset::Tmux.shortcut_base(), ShortcutBase::B);
+        assert_eq!(
+            action_for_table(&preset_bindings(KeymapPreset::Tmux), 'x'),
+            Some(Action::ClosePane)
+        );
     }
 }

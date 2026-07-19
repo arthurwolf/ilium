@@ -423,6 +423,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
+    // The focused sidebar widens over 180 ms. Resolve the physical toolbar
+    // cell only after that transition settles so its coordinate cannot move
+    // between screen capture and the synthetic mouse press under CPU load.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
     // Exercise the complete physical click. The release itself is harmless;
     // the historical close happened on the next periodic maintenance tick,
     // when the workspace-search poll replaced every non-search mode with
@@ -560,7 +565,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let help_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("keyboard reference") && screen.contains("Ctrl+B then ?")
+            screen.contains("keyboard reference") && screen.contains("Ctrl+B ?")
         },
         WAIT_TIMEOUT,
     )
@@ -572,8 +577,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 
     // Exercise the real full-screen settings path too: configure the tree's
-    // agent identifier and both per-agent icons, then switch to Keyboard,
-    // select a custom warned letter, and restore the tmux preset. These
+    // agent identifier, exercise the dedicated icon editor, then switch to
+    // Keyboard and reapply the tmux preset. These
     // assertions cover actual rendered controls and persisted config rather
     // than only config/keymap units.
     tui.write(b"\x1b").expect("closing Help with Esc");
@@ -604,57 +609,33 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("Age down (oldest first)")
                 && screen.contains("Agent identifier")
                 && screen.contains("Full name")
-                && screen.contains("Claude icon")
-                && screen.contains("🧠 Brain")
-                && screen.contains("Codex icon")
-                && screen.contains("⚙️")
-                && screen.contains("Gear")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         agent_controls_shown,
-        "expected all agent identifier controls in User Appearance, got: {:?}",
+        "expected agent identifier controls in User Appearance, got: {:?}",
         tui.screen_text()
     );
     // Use the settings view's `j`/`l` aliases rather than escape-prefixed
     // arrows: a real PTY can deliver an isolated escape before the rest of
     // a CSI sequence, which would legitimately close this full-screen view.
-    tui.write(b"jjjlljljl")
-        .expect("selecting icon mode, Claude magic wand, and Codex tools");
+    tui.write(b"jjjll")
+        .expect("selecting icon mode for agent identifiers");
     let agent_controls_persisted = wait_until(
         || {
             let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .unwrap_or_default();
             config.contains("agent_identifier_mode = \"icon\"")
-                && config.contains("claude_agent_icon = \"magic_wand\"")
-                && config.contains("codex_agent_icon = \"tools\"")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         agent_controls_persisted,
-        "expected agent identifier choices to persist, config={:?}",
+        "expected the agent identifier choice to persist, config={:?}",
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
-    );
-    let selected_icons_shown = wait_until(
-        || {
-            let screen = tui.screen_text();
-            screen.contains("Selected icon")
-                && screen.contains("🪄")
-                && screen.contains("Magic wand")
-                && screen.contains("🛠️")
-                && screen.contains("Tools")
-        },
-        WAIT_TIMEOUT,
-    )
-    .await;
-    assert!(
-        selected_icons_shown,
-        "expected selected agent icon controls to update live, got: {:?}",
-        tui.screen_text()
     );
     // Icons follows Appearance. Exercise the live table, demo/real toolbar,
     // and full-screen catalogue before continuing to Keyboard.
@@ -747,21 +728,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    tui.write(b"C")
-        .expect("selecting custom shortcut base Ctrl+C");
-    let custom_warning_shown = wait_until(
-        || {
-            let screen = tui.screen_text();
-            screen.contains("Warning: Ctrl+C") && screen.contains("interrupt/SIGINT")
-        },
-        WAIT_TIMEOUT,
-    )
-    .await;
-    assert!(
-        custom_warning_shown,
-        "expected the specific Ctrl+C warning, got: {:?}",
-        tui.screen_text()
-    );
     tui.write(b"2").expect("restoring the Ctrl+B preset");
     let preset_restored = wait_until(
         || tui.screen_text().contains("Recommended: Ctrl+B"),
@@ -1532,7 +1498,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("writing Ctrl+A then x (ClosePane)");
     let removal_motion_observed = wait_until(
         || {
-            tui.screen_text().matches("shell").count() == 2
+            tui.screen_text().matches("shell").count() >= 3
                 && tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 1)
         },
         Duration::from_millis(500),
@@ -1882,7 +1848,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     // expose a horizontal scrollbar and follow keyboard selection to columns
     // outside the first page without narrowing the visible columns.
     assert!(
-        tui.screen_text().contains('▶'),
+        wait_until(|| tui.screen_text().contains('▶'), WAIT_TIMEOUT).await,
         "expected horizontal board scrollbar, got: {:?}",
         tui.screen_text()
     );
@@ -2242,7 +2208,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 
     // Detach this client and attach a fresh one to the same detached server.
     // The new client must hydrate the board from the final Markdown state.
-    tui.write(b"\x01q").expect("detach first board client");
+    tui.write(b"\x01d").expect("detach first board client");
     assert!(
         wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await,
         "first board client should exit after detach"

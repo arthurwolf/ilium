@@ -35,9 +35,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, AppearanceRow, IconPickerColumnMode, InferenceRow, InferenceSettingField,
-    InferenceTestState, KanbanBoardRow, OllamaModelDiscoveryState, SettingsState, SettingsTab,
-    SoundRow,
+    App, AppearanceRow, IconPickerColumnMode, IconPickerSearchStatus, InferenceRow,
+    InferenceSettingField, InferenceTestState, KanbanBoardRow, OllamaModelDiscoveryState,
+    SettingsState, SettingsTab, SoundRow,
 };
 use crate::config::{
     EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
@@ -47,7 +47,8 @@ use crate::icon_settings::{
     catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
     IconPickerChapter, IconPickerSearchResults, IconTarget,
 };
-use crate::keymap::{self, ShortcutBase, SHORTCUT_BASE_PRESETS};
+use crate::keymap::{self, Action, KeyBinding, KeymapPreset, ShortcutBase, SHORTCUT_BASE_PRESETS};
+use crate::layout::centered_rect;
 use crate::theme::{self, ColorScheme};
 
 /// Fixed header height: a title line (with the close button right-aligned
@@ -90,18 +91,21 @@ const ICON_TABLE_CHOICE_WIDTH: usize = 4;
 const ICON_TABLE_CHOICE_COUNT: usize = 4;
 const ICON_TABLE_PICKER_LABEL: &str = "[+]";
 const ICON_TABLE_LEFT_INSET: usize = 1;
+const ICON_TABLE_COMPACT_GAP: usize = 1;
+const ICON_TABLE_COMFORTABLE_GAP: usize = 2;
 const ICON_TABLE_PICKER_COLUMN: usize = ICON_TABLE_LEFT_INSET
     + ICON_TABLE_LABEL_WIDTH
-    + 1
+    + ICON_TABLE_COMPACT_GAP
     + ICON_TABLE_CURRENT_WIDTH
-    + 1
+    + ICON_TABLE_COMPACT_GAP
     + (ICON_TABLE_CHOICE_WIDTH * ICON_TABLE_CHOICE_COUNT)
     + (ICON_TABLE_CHOICE_COUNT - 1)
-    + 1;
+    + ICON_TABLE_COMPACT_GAP;
 /// Outer width needed to show the fixed-width table row, including its two
 /// border cells. At this width the `[+]` button is visible and clickable.
 const ICON_TABLE_MIN_OUTER_WIDTH: u16 =
     (ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.len() + 2) as u16;
+const ICON_TABLE_COMFORTABLE_OUTER_WIDTH: u16 = ICON_TABLE_MIN_OUTER_WIDTH + 3;
 
 /// Result of a click on one visible row in the icon assignment table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +183,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         render_icon_picker(frame, area, picker);
         return;
     }
+    if let Some(action) = state.keyboard_picker {
+        render_keyboard_picker(frame, area, app, action);
+        return;
+    }
 
     // The Icons assignment table follows a picker full of wide emoji. Give
     // it its own near-black canvas so returning from either density mode
@@ -233,7 +241,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.scroll,
         ),
         SettingsTab::Keyboard => {
-            let lines = keyboard_lines(&app.keyboard_settings);
+            let lines = keyboard_lines(&app.keyboard_settings, &app.keybindings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::KanbanBoard => {
@@ -376,7 +384,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
-        SettingsTab::Keyboard => keyboard_lines(&app.keyboard_settings).len() as u16,
+        SettingsTab::Keyboard => {
+            keyboard_lines(&app.keyboard_settings, &app.keybindings).len() as u16
+        }
         SettingsTab::KanbanBoard => {
             kanban_board_lines(&app.kanban_board_settings, selected_row).len() as u16
         }
@@ -395,16 +405,17 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
 fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let (left, right) = icon_tab_columns(area);
     let table_height = left.height.saturating_sub(2) as usize;
+    let column_gap = icon_table_column_gap(left.width);
     let start = usize::from(state.scroll).min(IconTarget::ALL.len());
     let mut lines = vec![Line::from(Span::styled(
-        " Type                Now     Choices",
+        format_icon_table_header(column_gap),
         Style::new().add_modifier(Modifier::BOLD),
     ))];
     for (index, target) in IconTarget::ALL
         .into_iter()
         .enumerate()
         .skip(start)
-        .take(table_height.saturating_sub(1))
+        .take(table_height.saturating_sub(1) / 2)
     {
         let selected = index == state.selected_row;
         let style = if selected {
@@ -423,9 +434,11 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 target.label(),
                 app.ui_settings.icons.glyph(target),
                 &suggestions,
+                column_gap,
             ),
             style,
         )));
+        lines.push(Line::from(""));
     }
     let table = Paragraph::new(lines).block(
         Block::default()
@@ -577,14 +590,52 @@ fn icon_choice_slot(glyph: &str, is_selected: bool) -> String {
 
 /// Builds a row with stable display-cell columns for label, current glyph,
 /// suggestions, and the catalogue action.
-fn format_icon_assignment_row(label: &str, current_glyph: &str, suggestions: &str) -> String {
+fn format_icon_table_header(column_gap: usize) -> String {
+    let gap = " ".repeat(column_gap);
     format!(
-        " {} {} {} {}",
+        " {}{}{}{gap}Choices",
+        pad_icon_text("Type", ICON_TABLE_LABEL_WIDTH),
+        gap,
+        pad_icon_text("Now", ICON_TABLE_CURRENT_WIDTH),
+    )
+}
+
+fn format_icon_assignment_row(
+    label: &str,
+    current_glyph: &str,
+    suggestions: &str,
+    column_gap: usize,
+) -> String {
+    let gap = " ".repeat(column_gap);
+    format!(
+        " {}{}{}{}{}{}{}",
         pad_icon_text(label, ICON_TABLE_LABEL_WIDTH),
+        gap,
         pad_icon_text(current_glyph, ICON_TABLE_CURRENT_WIDTH),
+        gap,
         suggestions,
+        gap,
         ICON_TABLE_PICKER_LABEL,
     )
+}
+
+fn icon_table_column_gap(table_outer_width: u16) -> usize {
+    if table_outer_width >= ICON_TABLE_COMFORTABLE_OUTER_WIDTH {
+        ICON_TABLE_COMFORTABLE_GAP
+    } else {
+        ICON_TABLE_COMPACT_GAP
+    }
+}
+
+fn icon_table_picker_column(column_gap: usize) -> usize {
+    ICON_TABLE_LEFT_INSET
+        + ICON_TABLE_LABEL_WIDTH
+        + column_gap
+        + ICON_TABLE_CURRENT_WIDTH
+        + column_gap
+        + (ICON_TABLE_CHOICE_WIDTH * ICON_TABLE_CHOICE_COUNT)
+        + (ICON_TABLE_CHOICE_COUNT - 1)
+        + column_gap
 }
 
 /// The scalable catalogue overlay geometry. The body is a single scrollable
@@ -811,19 +862,25 @@ fn render_icon_picker(frame: &mut Frame, area: Rect, picker: &crate::app::IconPi
                 Style::new().add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
-                "Official UTF-8 chapters first · Nerd Font chapters afterwards · / searches every name",
+                "Official UTF-8 chapters first · Nerd Font chapters afterwards · / runs local CPU semantic search",
                 Style::new().add_modifier(Modifier::DIM),
             )),
             Line::from(if picker.is_searching {
                 format!("Search: {}_", picker.search_query)
             } else if picker.search_query.is_empty() {
-                "Search: / to find by icon name or category".to_string()
+                "Search: / to find by meaning with local CPU embeddings".to_string()
             } else {
                 format!("Search: {}", picker.search_query)
             }),
             Line::from(Span::styled(
                 format!(
-                    "{} chapter{} · {} icon{} · arrows move · V switches view · Enter chooses · Esc closes",
+                    "{} · {} chapter{} · {} icon{} · arrows move · V switches view · Enter chooses · Esc closes",
+                    match &picker.search_status {
+                        IconPickerSearchStatus::Browse if picker.search_query.is_empty() => "Browse catalogue".to_string(),
+                        IconPickerSearchStatus::Browse => "CPU semantic results".to_string(),
+                        IconPickerSearchStatus::Searching => "Loading CPU model and vector index…".to_string(),
+                        IconPickerSearchStatus::Failed(message) => format!("Semantic search unavailable: {message}"),
+                    },
                     picker.search_results.chapters.len(),
                     if picker.search_results.chapters.len() == 1 { "" } else { "s" },
                     entry_count,
@@ -988,11 +1045,15 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
         return None;
     }
 
-    let target_index = usize::from(position.y - table_inner.y - 1) + usize::from(scroll);
+    let row_offset = usize::from(position.y - table_inner.y - 1);
+    if row_offset % 2 != 0 {
+        return None;
+    }
+    let target_index = row_offset / 2 + usize::from(scroll);
     let target = IconTarget::ALL.get(target_index).copied()?;
     let picker_start = table_inner
         .x
-        .saturating_add(ICON_TABLE_PICKER_COLUMN as u16);
+        .saturating_add(icon_table_picker_column(icon_table_column_gap(table.width)) as u16);
     let picker_end = picker_start.saturating_add(ICON_TABLE_PICKER_LABEL.width() as u16);
     let action = if position.x >= picker_start && position.x < picker_end {
         IconTableAction::OpenCatalogue
@@ -1753,9 +1814,15 @@ pub fn sound_content_hit(
     (sound_index < discovery.sounds.len()).then_some(SoundContentHit::File(sound_index))
 }
 
+const KEYBOARD_ACTION_COLUMN_WIDTH: usize = 16;
+const KEYBOARD_KEY_CAP_WIDTH: usize = 5;
+const KEYBOARD_MNEMONIC_COLUMN_WIDTH: usize = 10;
+const KEYBOARD_SUGGESTION_START_OFFSET: u16 = 37;
+const KEYBOARD_PICKER_START_OFFSET: u16 = KEYBOARD_SUGGESTION_START_OFFSET + 12;
+
 /// Keyboard-tab content: one live selector, explicit A/B presets, and the
 /// specific recommendation or warning for the currently selected letter.
-fn keyboard_lines(keyboard: &KeyboardSettings) -> Vec<Line<'static>> {
+fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<Line<'static>> {
     let shortcut_base = keyboard.shortcut_base;
     let advice = keymap::shortcut_base_advice(shortcut_base);
     let advice_heading = if advice.is_recommended {
@@ -1792,20 +1859,24 @@ fn keyboard_lines(keyboard: &KeyboardSettings) -> Vec<Line<'static>> {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "Recommended presets",
+            "Complete presets",
             Style::new().add_modifier(Modifier::BOLD),
         )),
     ];
-    for (index, preset) in SHORTCUT_BASE_PRESETS.into_iter().enumerate() {
+    for preset in SHORTCUT_BASE_PRESETS {
         let standard = if preset == ShortcutBase::A {
             "GNU Screen standard"
         } else {
             "tmux standard"
         };
         lines.push(Line::from(format!(
-            "  [{}] {:<7}  {standard}",
-            index + 1,
-            preset.label()
+            "  [{} preset] {:<7}  {standard} complete key map",
+            if preset == ShortcutBase::A {
+                "GNU Screen"
+            } else {
+                "tmux"
+            },
+            preset.label(),
         )));
     }
     lines.extend([
@@ -1817,11 +1888,177 @@ fn keyboard_lines(keyboard: &KeyboardSettings) -> Vec<Line<'static>> {
         Line::from(format!("  {}", advice.explanation)),
         Line::from(""),
         Line::from(Span::styled(
-            "The new base applies immediately to input and every shortcut label, including Help.",
+            "Each action is remapped live. Duplicate keys are refused; Help mirrors this table immediately.",
             Style::new().add_modifier(Modifier::DIM),
         )),
     ]);
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Action             Key     Mnemonic   Available",
+        Style::new().add_modifier(Modifier::BOLD),
+    )));
+    let available = keymap::available_keys(bindings);
+    for binding in bindings {
+        let choices = available
+            .iter()
+            .take(3)
+            .map(|key| format!("[{key}]"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mnemonic = keymap::mnemonic_for(binding.action, binding.letter).unwrap_or("—");
+        lines.push(Line::from(format!(
+            " {:<KEYBOARD_ACTION_COLUMN_WIDTH$.KEYBOARD_ACTION_COLUMN_WIDTH$} [{:^KEYBOARD_KEY_CAP_WIDTH$}] {:<KEYBOARD_MNEMONIC_COLUMN_WIDTH$.KEYBOARD_MNEMONIC_COLUMN_WIDTH$} {} [+]",
+            keymap::action_label(binding.action),
+            keymap::key_label(binding.letter),
+            mnemonic,
+            choices,
+        )));
+    }
     lines
+}
+
+/// A table click either applies one of the visible free-key suggestions or
+/// opens the physical keyboard picker for the row's action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardTableAction {
+    Assign(char),
+    OpenPicker(Action),
+}
+
+pub const KEYBOARD_TABLE_FIRST_ROW: u16 = 14;
+
+pub fn keyboard_table_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    bindings: &[KeyBinding],
+) -> Option<KeyboardTableAction> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    let row_index = usize::from(line.checked_sub(KEYBOARD_TABLE_FIRST_ROW)?);
+    let binding = *bindings.get(row_index)?;
+    let available = keymap::available_keys(bindings);
+    // Every rendered suggestion consumes four cells: `[x] `. Keep these
+    // offsets tied to the fixed-width action, key-cap, and mnemonic columns
+    // in `keyboard_lines`, so the visual addition cannot shift mouse hits.
+    let suggestion_start = content_area
+        .x
+        .saturating_add(KEYBOARD_SUGGESTION_START_OFFSET);
+    let picker_start = content_area.x.saturating_add(KEYBOARD_PICKER_START_OFFSET);
+    if position.x >= picker_start {
+        return Some(KeyboardTableAction::OpenPicker(binding.action));
+    }
+    if position.x >= suggestion_start {
+        let index = usize::from(position.x.saturating_sub(suggestion_start) / 4);
+        return available
+            .get(index)
+            .copied()
+            .map(KeyboardTableAction::Assign);
+    }
+    None
+}
+
+/// Returns the complete keymap preset row whose rendered line was clicked.
+pub fn keyboard_keymap_preset_at(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+) -> Option<KeymapPreset> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    let preset_index = usize::from(line.checked_sub(5)?);
+    KeymapPreset::ALL.get(preset_index).copied()
+}
+
+const KEYBOARD_PICKER_ROWS: &[&str] = &[
+    "`1234567890-=",
+    "qwertyuiop[]\\",
+    "asdfghjkl;'",
+    "zxcvbnm,./",
+    "~!@#$%^&*()_+",
+    "QWERTYUIOP{}|",
+    "ASDFGHJKL:\"",
+    "ZXCVBNM<>?",
+];
+
+fn render_keyboard_picker(frame: &mut Frame, area: Rect, app: &App, action: Action) {
+    let popup = centered_rect(78, 58, area);
+    frame.render_widget(Clear, popup);
+    let available = keymap::available_keys(&app.keybindings);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "Choose key for {}",
+                keymap::action_name(action).replace('_', " ")
+            ),
+            Style::new().add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Only unassigned keys are active. Esc closes without changing anything."),
+        Line::from(""),
+    ];
+    for (row_index, row) in KEYBOARD_PICKER_ROWS.iter().enumerate() {
+        let indent = " ".repeat(row_index * 2 + 2);
+        let mut spans = vec![Span::raw(indent)];
+        for key in row.chars() {
+            let style = if available.contains(&key) {
+                theme::selected_style().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().add_modifier(Modifier::DIM)
+            };
+            spans.push(Span::styled(format!("[{key}] "), style));
+        }
+        lines.push(Line::from(spans));
+    }
+    let space_style = if available.contains(&' ') {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    lines.push(Line::from(vec![
+        Span::raw("                  "),
+        Span::styled("[            Space            ]", space_style),
+    ]));
+    frame.render_widget(
+        Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title("Keyboard"))),
+        popup,
+    );
+}
+
+/// Decodes a click on an *available* keycap in the staggered picker. Occupied
+/// keys deliberately behave like inert keyboard plastic: they cannot close
+/// the dialog or reach the assignment layer at all.
+pub fn keyboard_picker_key_at(area: Rect, position: Position, available: &[char]) -> Option<char> {
+    let popup = centered_rect(78, 58, area);
+    for (row_index, row) in KEYBOARD_PICKER_ROWS.iter().enumerate() {
+        let y = popup.y.saturating_add(4 + row_index as u16);
+        if position.y != y {
+            continue;
+        }
+        let start_x = popup.x.saturating_add(2 + (row_index * 2) as u16);
+        let index = usize::from(position.x.saturating_sub(start_x) / 4);
+        return row.chars().nth(index).filter(|key| available.contains(key));
+    }
+    let space_y = popup
+        .y
+        .saturating_add(4 + KEYBOARD_PICKER_ROWS.len() as u16);
+    if position.y == space_y
+        && position.x >= popup.x.saturating_add(18)
+        && position.x < popup.x.saturating_add(49)
+        && available.contains(&' ')
+    {
+        return Some(' ');
+    }
+    None
 }
 
 /// Returns the decrement/increment direction for the Keyboard tab's one
@@ -1877,9 +2114,6 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeWidth => "Tree panel width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
-        AppearanceRow::ClaudeAgentIcon => "Claude icon",
-        AppearanceRow::CodexAgentIcon => "Codex icon",
-        AppearanceRow::AntigravityAgentIcon => "Antigravity icon",
         AppearanceRow::ColorScheme => "Color theme",
         AppearanceRow::MotionLevel => "Motion level",
         AppearanceRow::SidebarDensity => "Sidebar density",
@@ -1898,15 +2132,6 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::AgentIdentifierMode => {
             "Show each agent type as its full name, one letter, a chosen icon, or nothing."
-        }
-        AppearanceRow::ClaudeAgentIcon => {
-            "Icon used for Claude panes when Agent identifier is Selected icon."
-        }
-        AppearanceRow::CodexAgentIcon => {
-            "Icon used for Codex panes when Agent identifier is Selected icon."
-        }
-        AppearanceRow::AntigravityAgentIcon => {
-            "Icon used for Antigravity panes when Agent identifier is Selected icon."
         }
         AppearanceRow::ColorScheme => "ilium's built-in color presets.",
         AppearanceRow::MotionLevel => {
@@ -1931,11 +2156,6 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         AppearanceRow::TreeWidth => ui.tree_width.to_string(),
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
         AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
-        AppearanceRow::ClaudeAgentIcon => ui.agent_identifiers.claude_icon.label().to_string(),
-        AppearanceRow::CodexAgentIcon => ui.agent_identifiers.codex_icon.label().to_string(),
-        AppearanceRow::AntigravityAgentIcon => {
-            ui.agent_identifiers.antigravity_icon.label().to_string()
-        }
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
             ColorScheme::Light => "Light".to_string(),
@@ -2293,7 +2513,16 @@ mod tests {
             tab: SettingsTab::Icons,
             icon_picker: Some(crate::app::IconPickerState {
                 search_query: "rocket".to_string(),
-                search_results: crate::icon_settings::picker_search_results("rocket"),
+                search_results: crate::icon_settings::semantic_picker_search_results(vec![
+                    crate::icon_settings::IconSemanticSearchHit {
+                        category_label: "Travel · Air",
+                        family: IconCatalogFamily::OfficialUtf8,
+                        entry: IconCatalogEntry {
+                            glyph: "🚀",
+                            name: "rocket",
+                        },
+                    },
+                ]),
                 ..crate::app::IconPickerState::new(IconTarget::Terminal)
             }),
             ..SettingsState::default()
@@ -2367,8 +2596,13 @@ mod tests {
         );
         assert_eq!(
             icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 2)),
+            None,
+            "the spacer below an assignment is deliberately not interactive"
+        );
+        assert_eq!(
+            icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 3)),
             Some(IconTableHit {
-                target: IconTarget::SplitVertical,
+                target: IconTarget::TopLevel,
                 action: IconTableAction::CycleSuggestion,
             })
         );
@@ -2376,7 +2610,10 @@ mod tests {
             icons_table_hit(
                 area,
                 0,
-                Position::new(inner.x + ICON_TABLE_PICKER_COLUMN as u16, inner.y + 1),
+                Position::new(
+                    inner.x + icon_table_picker_column(icon_table_column_gap(table.width)) as u16,
+                    inner.y + 1,
+                ),
             ),
             Some(IconTableHit {
                 target: IconTarget::Group,
@@ -2412,10 +2649,22 @@ mod tests {
             .map(|glyph| icon_choice_slot(glyph, *glyph == "🗂️"))
             .collect::<Vec<_>>()
             .join(" ");
-        let row = format_icon_assignment_row("Folder", "🗂️", &choices);
+        let row = format_icon_assignment_row("Folder", "🗂️", &choices, ICON_TABLE_COMPACT_GAP);
         assert_eq!(
             UnicodeWidthStr::width(row.as_str()),
             ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.width()
+        );
+    }
+
+    #[test]
+    fn icon_table_uses_comfortable_column_gaps_only_when_the_table_is_wide_enough() {
+        assert_eq!(
+            icon_table_column_gap(ICON_TABLE_MIN_OUTER_WIDTH),
+            ICON_TABLE_COMPACT_GAP
+        );
+        assert_eq!(
+            icon_table_column_gap(ICON_TABLE_COMFORTABLE_OUTER_WIDTH),
+            ICON_TABLE_COMFORTABLE_GAP
         );
     }
 
@@ -2604,7 +2853,7 @@ mod tests {
     }
 
     #[test]
-    fn appearance_lines_expose_agent_mode_icon_selectors_and_stable_glyph_opt_in() {
+    fn appearance_lines_expose_agent_mode_and_stable_glyph_opt_in() {
         let ui = UiSettings {
             tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
@@ -2625,10 +2874,9 @@ mod tests {
         assert!(rendered.contains("Age up (newest first)"));
         assert!(rendered.contains("Agent identifier"));
         assert!(rendered.contains("Selected icon"));
-        assert!(rendered.contains("Claude icon"));
-        assert!(rendered.contains("🪄 Magic wand"));
-        assert!(rendered.contains("Codex icon"));
-        assert!(rendered.contains("🛠️ Tools"));
+        assert!(!rendered.contains("Claude icon"));
+        assert!(!rendered.contains("Codex icon"));
+        assert!(!rendered.contains("Antigravity icon"));
         assert!(rendered.contains("Use stable glyphs"));
         assert!(rendered.contains("Off (normal icons)"));
     }
@@ -2701,23 +2949,123 @@ mod tests {
     #[test]
     fn keyboard_lines_show_presets_and_specific_current_advice() {
         let mut keyboard = KeyboardSettings::default();
-        let recommended = keyboard_lines(&keyboard)
+        let recommended = keyboard_lines(&keyboard, keymap::LEADER_BINDINGS)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(recommended.contains("[1] Ctrl+A"));
-        assert!(recommended.contains("[2] Ctrl+B"));
+        assert!(recommended.contains("[GNU Screen preset] Ctrl+A"));
+        assert!(recommended.contains("[tmux preset] Ctrl+B"));
         assert!(recommended.contains("Recommended: Ctrl+A"));
 
         keyboard.shortcut_base = ShortcutBase::parse("c").unwrap();
-        let warned = keyboard_lines(&keyboard)
+        let warned = keyboard_lines(&keyboard, keymap::LEADER_BINDINGS)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
         assert!(warned.contains("Warning: Ctrl+C"));
         assert!(warned.contains("interrupt/SIGINT"));
+    }
+
+    #[test]
+    fn keyboard_table_exposes_free_keys_and_its_picker_target() {
+        let area = Rect::new(0, 0, 100, 40);
+        let bindings = keymap::LEADER_BINDINGS.to_vec();
+        let lines = keyboard_lines(&KeyboardSettings::default(), &bindings)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(lines.contains("Mnemonic"));
+        assert!(lines.contains("[  c  ] create"));
+        assert!(lines.contains("Available"));
+        assert!(lines.contains("[+]"));
+        assert_eq!(
+            keyboard_table_hit(
+                area,
+                0,
+                Position::new(37, KEYBOARD_TABLE_FIRST_ROW),
+                &bindings,
+            ),
+            Some(KeyboardTableAction::Assign('i'))
+        );
+        assert_eq!(
+            keyboard_table_hit(
+                area,
+                0,
+                Position::new(70, KEYBOARD_TABLE_FIRST_ROW),
+                &bindings,
+            ),
+            Some(KeyboardTableAction::OpenPicker(Action::NewTerminal))
+        );
+    }
+
+    #[test]
+    fn keyboard_table_renders_every_action_from_the_live_remapped_table() {
+        let mut bindings = keymap::LEADER_BINDINGS.to_vec();
+        keymap::assign_key(&mut bindings, Action::NewGroup, 'z')
+            .expect("z is free in the default map");
+        let rendered = keyboard_lines(&KeyboardSettings::default(), &bindings)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(
+            rendered.matches("New group").count(),
+            1,
+            "the table must have one row for every action"
+        );
+        assert!(rendered.contains("New group        [  z  ] —"));
+    }
+
+    #[test]
+    fn staggered_keyboard_maps_clicks_to_the_rendered_keycaps() {
+        let area = Rect::new(0, 0, 120, 50);
+        let popup = centered_rect(78, 58, area);
+        let available = vec!['1', 'q', ' '];
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(popup.x + 6, popup.y + 4), &available),
+            Some('1')
+        );
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(popup.x + 4, popup.y + 5), &available),
+            Some('q')
+        );
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(popup.x + 8, popup.y + 5), &available),
+            None
+        );
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(popup.x + 18, popup.y + 12), &available),
+            Some(' ')
+        );
+    }
+
+    #[test]
+    fn staggered_keyboard_represents_every_non_space_bindable_key_once() {
+        let picker_keys = KEYBOARD_PICKER_ROWS
+            .iter()
+            .flat_map(|row| row.chars())
+            .collect::<Vec<_>>();
+        let expected_keys = keymap::BINDABLE_KEYS
+            .iter()
+            .copied()
+            .filter(|key| *key != ' ')
+            .collect::<Vec<_>>();
+
+        assert_eq!(picker_keys.len(), expected_keys.len());
+        for key in expected_keys {
+            assert_eq!(
+                picker_keys
+                    .iter()
+                    .filter(|candidate| **candidate == key)
+                    .count(),
+                1,
+                "{key:?} must have one visual keycap"
+            );
+        }
     }
 
     #[test]

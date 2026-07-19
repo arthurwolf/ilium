@@ -14,6 +14,7 @@ use ratatui::layout::{Position, Rect};
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{App, ContextMenu, CreateGroupState, Mode};
 use crate::explorer_overlay::ExplorerOverlay;
+use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
 
@@ -86,6 +87,13 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::SchedulePaneInput above");
         };
         handle_scheduled_input_mouse(app, state, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::QueuePrompt(_)) {
+        let Mode::QueuePrompt(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::QueuePrompt above");
+        };
+        handle_prompt_queue_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::EditorLineContextMenu(_)) {
@@ -750,6 +758,36 @@ fn handle_scheduled_input_mouse(
     app.mode = Mode::SchedulePaneInput(state);
 }
 
+fn handle_prompt_queue_mouse(
+    app: &mut App,
+    mut state: Box<PromptQueueDialogState>,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::QueuePrompt(state);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let layout = crate::prompt_queue::dialog_layout(app.layout.screen_area);
+    if !layout.popup.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if layout.text.contains(position) {
+        state.focus = PromptQueueFocus::Text;
+    } else if layout.delivery.contains(position) {
+        state.focus = PromptQueueFocus::Delivery;
+        state.cycle_delivery(1);
+    } else if layout.times.contains(position) {
+        state.focus = PromptQueueFocus::Times;
+    } else if layout.enqueue_button.contains(position) {
+        state.focus = PromptQueueFocus::EnqueueButton;
+        app.commit_queued_prompt(state);
+        return;
+    }
+    app.mode = Mode::QueuePrompt(state);
+}
+
 fn place_prompt_cursor(
     prompt: &mut crate::text_prompt::TextPromptState,
     field_area: Rect,
@@ -826,6 +864,26 @@ const SETTINGS_WHEEL_SCROLL_LINES: u16 = 3;
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+
+    if let Some(action) = state.keyboard_picker.take() {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            let available = crate::keymap::available_keys(&app.keybindings);
+            if let Some(key) = crate::settings_ui::keyboard_picker_key_at(
+                app.layout.screen_area,
+                position,
+                &available,
+            ) {
+                app.settings_assign_key(action, key);
+                state.keyboard_picker = None;
+            } else {
+                state.keyboard_picker = Some(action);
+            }
+        } else {
+            state.keyboard_picker = Some(action);
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
 
     if let Some(picker) = state.icon_picker.take() {
         if matches!(
@@ -1012,18 +1070,41 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Keyboard {
-                if let Some(shortcut_base) = crate::settings_ui::keyboard_preset_at(
+                if let Some(preset) = crate::settings_ui::keyboard_keymap_preset_at(
                     layout.content_area,
                     state.scroll,
                     position,
                 ) {
-                    app.settings_set_shortcut_base(shortcut_base);
+                    app.settings_apply_keymap_preset(preset);
                 } else if let Some(direction) = crate::settings_ui::keyboard_content_hit(
                     layout.content_area,
                     state.scroll,
                     position,
                 ) {
                     app.settings_adjust_shortcut_base(direction);
+                } else if let Some(action) = crate::settings_ui::keyboard_table_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    &app.keybindings,
+                ) {
+                    match action {
+                        crate::settings_ui::KeyboardTableAction::Assign(key) => {
+                            let row = position
+                                .y
+                                .saturating_sub(layout.content_area.y)
+                                .saturating_add(state.scroll);
+                            let index = usize::from(
+                                row.saturating_sub(crate::settings_ui::KEYBOARD_TABLE_FIRST_ROW),
+                            );
+                            if let Some(binding) = app.keybindings.get(index) {
+                                app.settings_assign_key(binding.action, key);
+                            }
+                        }
+                        crate::settings_ui::KeyboardTableAction::OpenPicker(action) => {
+                            state.keyboard_picker = Some(action);
+                        }
+                    }
                 }
             } else if state.tab == crate::app::SettingsTab::KanbanBoard {
                 if let Some((row, direction)) = crate::settings_ui::kanban_board_content_hit(

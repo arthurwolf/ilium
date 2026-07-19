@@ -512,7 +512,7 @@ pub struct UiSettings {
     /// is an accessibility/terminal-compatibility preference only; rich
     /// Unicode icons remain the normal, default presentation.
     pub use_stable_glyphs: bool,
-    /// Global glyph assignments for every icon role rendered in the tree.
+    /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
 
@@ -1127,6 +1127,12 @@ fn merge_keybindings(
             action: action_name.clone(),
             value: letter_value.clone(),
         })?;
+        if !keymap::BINDABLE_KEYS.contains(&letter) {
+            return Err(ConfigLoadError::InvalidLetter {
+                action: action_name.clone(),
+                value: letter_value.clone(),
+            });
+        }
 
         // `LEADER_BINDINGS` has exactly one entry per `Action` (enforced by
         // `action_for`/`action_name` both being total functions over every
@@ -1291,6 +1297,34 @@ pub fn save_keyboard_settings(
         .as_table_mut()
         .expect("a TOML document's root is always a table");
     table.insert("keyboard".to_string(), keyboard_settings_to_toml(keyboard));
+    write_toml_document(&path, &document)
+}
+
+/// Persists the complete live keyboard model together so a prefix and its
+/// leader map cannot diverge after a preset is selected from Settings.
+pub fn save_keymap_settings(
+    config_dir: &Path,
+    keyboard: &KeyboardSettings,
+    bindings: &[KeyBinding],
+) -> Result<(), ClientError> {
+    reject_duplicate_letters(bindings).map_err(|source| ClientError::ConfigLoad {
+        path: config_dir.join("config.toml"),
+        source,
+    })?;
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    table.insert("keyboard".to_string(), keyboard_settings_to_toml(keyboard));
+    let mut keybindings = toml::value::Table::new();
+    for binding in bindings {
+        keybindings.insert(
+            keymap::action_name(binding.action).to_string(),
+            toml::Value::String(binding.letter.to_string()),
+        );
+    }
+    table.insert("keybindings".to_string(), toml::Value::Table(keybindings));
     write_toml_document(&path, &document)
 }
 
@@ -2093,6 +2127,21 @@ mod tests {
             keymap::action_for_table(&config.keybindings, 'z'),
             Some(keymap::Action::Quit)
         );
+    }
+
+    #[test]
+    fn save_keymap_settings_round_trips_prefix_and_every_action_binding() {
+        let dir = scratch_dir();
+        let keyboard = KeyboardSettings {
+            shortcut_base: ShortcutBase::B,
+        };
+        let bindings = keymap::preset_bindings(keymap::KeymapPreset::Tmux);
+
+        save_keymap_settings(&dir, &keyboard, &bindings).expect("keymap save should succeed");
+
+        let config = load(&dir).expect("saved keymap should load back");
+        assert_eq!(config.keyboard, keyboard);
+        assert_eq!(config.keybindings, bindings);
     }
 
     #[test]
