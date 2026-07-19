@@ -17,7 +17,8 @@ use crate::app::{
     SoundRow,
 };
 use crate::icon_settings::IconTarget;
-use crate::keymap::{self, Action, ShortcutBase};
+use crate::keymap::{self, Action};
+use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::search_ui::SearchState;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
@@ -33,6 +34,22 @@ fn is_escape(event: &Event) -> bool {
 /// Top-level per-mode dispatch, called for every non-mouse `Event` (key
 /// presses, resizes are handled by the caller before reaching here).
 pub fn handle_event(app: &mut App, event: Event) {
+    // Enabling bracketed paste changes one clipboard operation from a stream
+    // of ordinary key events into `Event::Paste`. The two multiline dialogs
+    // already consume that event directly; every other non-terminal mode is
+    // replayed through its existing key contract so enabling the host mode
+    // cannot silently disable paste in names, paths, searches, or editors.
+    if let Event::Paste(pasted) = &event {
+        let has_native_paste_handler = matches!(
+            &app.mode,
+            Mode::Normal | Mode::LeaderPending | Mode::SchedulePaneInput(_) | Mode::QueuePrompt(_)
+        );
+        if !has_native_paste_handler {
+            replay_pasted_text_as_keys(app, pasted);
+            return;
+        }
+    }
+
     match std::mem::replace(&mut app.mode, Mode::Normal) {
         Mode::Help => handle_help_event(app, &event),
         Mode::Explorer(overlay, target) => handle_explorer_event(app, overlay, target, &event),
@@ -51,6 +68,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
+        Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
         }
@@ -98,6 +116,27 @@ pub fn handle_event(app: &mut App, event: Event) {
             app.mode = Mode::LeaderPending;
             handle_normal_or_leader(app, event);
         }
+    }
+}
+
+/// Replays pasted text through modes that still own character-oriented input.
+/// CRLF is one Enter, while bare CR/LF and Tab retain the same key semantics
+/// they had before the host terminal started reporting atomic paste events.
+fn replay_pasted_text_as_keys(app: &mut App, pasted: &str) {
+    let mut characters = pasted.chars().peekable();
+    while let Some(character) = characters.next() {
+        let code = match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                KeyCode::Enter
+            }
+            '\n' => KeyCode::Enter,
+            '\t' => KeyCode::Tab,
+            character => KeyCode::Char(character),
+        };
+        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     }
 }
 
@@ -283,6 +322,24 @@ fn handle_board_delete_confirm(
 /// and letter lookup, falling through to ordinary tree-navigation or
 /// pane-input handling otherwise.
 fn handle_normal_or_leader(app: &mut App, event: Event) {
+    if let Event::Paste(pasted) = event {
+        // A leader prefix followed by a clipboard operation is not a valid
+        // command. Cancel it rather than interpreting the pasted text as a
+        // sequence of ilium shortcuts.
+        if matches!(app.mode, Mode::LeaderPending) {
+            app.mode = Mode::Normal;
+            return;
+        }
+
+        // Terminal panes preserve the paste as one semantic operation. Other
+        // pane kinds and tree focus retain their existing per-key behavior.
+        if app.focus == FocusTarget::Pane && app.handle_terminal_paste(&pasted) {
+            return;
+        }
+        replay_pasted_text_as_keys(app, &pasted);
+        return;
+    }
+
     let Event::Key(key) = event else {
         return;
     };
@@ -306,14 +363,9 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         }
     }
 
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('f') {
-        app.action_open_search();
-        return;
-    }
-
     if matches!(app.mode, Mode::LeaderPending) {
         if let KeyCode::Char(c) = key.code {
-            if let Some(action) = keymap::action_for(c) {
+            if let Some(action) = keymap::action_for_table(&app.keybindings, c) {
                 execute_action(app, action);
             }
         }
@@ -424,13 +476,23 @@ fn execute_action(app: &mut App, action: Action) {
                 app.focus = FocusTarget::Pane;
             }
         }
+        Action::FocusNextPane => app.focus_visible_pane(1),
+        Action::FocusPreviousPane => app.focus_visible_pane(-1),
+        Action::FocusPaneLeft => app.focus_visible_pane_in_direction(-1, 0),
+        Action::FocusPaneRight => app.focus_visible_pane_in_direction(1, 0),
+        Action::FocusPaneUp => app.focus_visible_pane_in_direction(0, -1),
+        Action::FocusPaneDown => app.focus_visible_pane_in_direction(0, 1),
+        Action::ScrollbackUp => app.scroll_focused_terminal(-1),
+        Action::ScrollbackDown => app.scroll_focused_terminal(1),
         Action::Save => app.action_save_focused_editor(),
         Action::RunCommand => app.mode = Mode::CommandPrompt(TextPromptState::new("")),
+        Action::Search => app.action_open_search(),
         // Only reachable when Help *wasn't* already open (see
         // `handle_help_event`, which intercepts everything while it is),
         // so this always means "open it".
         Action::Help => app.mode = Mode::Help,
-        Action::Quit => app.request_client_exit(ClientExitReason::Quit),
+        Action::Detach => app.request_client_exit(ClientExitReason::Quit),
+        Action::Quit => app.request_session_kill(),
         Action::ToggleEditorViewMode => app.action_toggle_editor_view_mode(),
         Action::ToggleLineNumbers => app.action_toggle_editor_line_numbers(),
         Action::ToggleMinimap => app.action_toggle_editor_minimap(),
@@ -529,7 +591,7 @@ fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usi
 }
 
 /// While `Mode::Help` is active: only `Esc`, or the configured shortcut base
-/// followed by `?`,
+/// followed by the currently configured Help key,
 /// closes it -- every other key (including other leader letters) is
 /// swallowed and Help stays open.
 fn handle_help_event(app: &mut App, event: &Event) {
@@ -543,7 +605,8 @@ fn handle_help_event(app: &mut App, event: &Event) {
 
     if app.help_leader_pending() {
         app.set_help_leader_pending(false);
-        if key.code == KeyCode::Char('?') {
+        if matches!(key.code, KeyCode::Char(character) if crate::keymap::action_for_table(&app.keybindings, character) == Some(Action::Help))
+        {
             app.mode = Mode::Normal;
         }
         return;
@@ -1112,6 +1175,52 @@ fn handle_scheduled_input_event(
     app.mode = Mode::SchedulePaneInput(state);
 }
 
+fn handle_prompt_queue_event(app: &mut App, mut state: Box<PromptQueueDialogState>, event: &Event) {
+    use crossterm::event::KeyModifiers;
+
+    if let Event::Paste(pasted) = event {
+        if state.focus == PromptQueueFocus::Text {
+            for character in pasted.chars() {
+                state.handle_text_key(KeyCode::Char(character));
+            }
+        }
+        app.mode = Mode::QueuePrompt(state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::QueuePrompt(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::QueuePrompt(state);
+        return;
+    }
+    if key.code == KeyCode::Esc {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.commit_queued_prompt(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Tab => state.focus = state.focus.next(),
+        KeyCode::BackTab => state.focus = state.focus.previous(),
+        KeyCode::Left if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(-1),
+        KeyCode::Right if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(1),
+        KeyCode::Char(' ') if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(1),
+        KeyCode::Enter if state.focus == PromptQueueFocus::EnqueueButton => {
+            app.commit_queued_prompt(state);
+            return;
+        }
+        KeyCode::Enter if state.focus != PromptQueueFocus::Text => state.focus = state.focus.next(),
+        code if state.focus == PromptQueueFocus::Text => state.handle_text_key(code),
+        code if state.focus == PromptQueueFocus::Times => state.handle_times_key(code),
+        _ => {}
+    }
+    app.mode = Mode::QueuePrompt(state);
+}
+
 /// How many lines `PageUp`/`PageDown` scroll the settings screen's content
 /// panel per press -- a fixed step rather than a full page, since a page
 /// height varies wildly with terminal size and the content itself is short.
@@ -1160,12 +1269,16 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
             KeyCode::Backspace if picker.is_searching => {
                 picker.search_query.pop();
-                picker.refresh_search_results();
+                if let Some(request) = picker.begin_semantic_search() {
+                    app.queue_icon_semantic_search(request);
+                }
             }
             KeyCode::Enter if picker.is_searching => picker.is_searching = false,
             KeyCode::Char(character) if picker.is_searching => {
                 picker.search_query.push(character);
-                picker.refresh_search_results();
+                if let Some(request) = picker.begin_semantic_search() {
+                    app.queue_icon_semantic_search(request);
+                }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 picker.selected_entry = picker.selected_entry.saturating_sub(grid_columns);
@@ -1213,6 +1326,22 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 crate::settings_ui::icon_picker_scroll_for_entry(app.layout.screen_area, &picker);
         }
         state.icon_picker = Some(picker);
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
+    if let Some(action) = state.keyboard_picker.take() {
+        match key.code {
+            KeyCode::Esc => {}
+            KeyCode::Char(key) => {
+                if crate::keymap::available_keys(&app.keybindings).contains(&key) {
+                    app.settings_assign_key(action, key);
+                } else {
+                    state.keyboard_picker = Some(action);
+                }
+            }
+            _ => state.keyboard_picker = Some(action),
+        }
         app.mode = Mode::Settings(state);
         return;
     }
@@ -1380,26 +1509,43 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_adjust_session_row(row, 1);
             }
         }
-        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Keyboard => {
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Keyboard => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Keyboard => {
+            state.selected_row = (state.selected_row + 1).min(
+                usize::from(crate::settings_ui::KEYBOARD_TABLE_FIRST_ROW)
+                    .saturating_add(app.keybindings.len())
+                    .saturating_sub(1),
+            );
+        }
+        KeyCode::Left | KeyCode::Char('h')
+            if state.tab == SettingsTab::Keyboard && state.selected_row == 0 =>
+        {
             app.settings_adjust_shortcut_base(-1);
         }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
-            if state.tab == SettingsTab::Keyboard =>
+            if state.tab == SettingsTab::Keyboard && state.selected_row == 0 =>
         {
             app.settings_adjust_shortcut_base(1);
         }
+        KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Keyboard
+                && state.selected_row
+                    >= usize::from(crate::settings_ui::KEYBOARD_TABLE_FIRST_ROW) =>
+        {
+            if let Some(binding) = app
+                .keybindings
+                .get(state.selected_row - usize::from(crate::settings_ui::KEYBOARD_TABLE_FIRST_ROW))
+            {
+                state.keyboard_picker = Some(binding.action);
+            }
+        }
         KeyCode::Char('1') if state.tab == SettingsTab::Keyboard => {
-            app.settings_set_shortcut_base(ShortcutBase::A);
+            app.settings_apply_keymap_preset(crate::keymap::KeymapPreset::Screen);
         }
         KeyCode::Char('2') if state.tab == SettingsTab::Keyboard => {
-            app.settings_set_shortcut_base(ShortcutBase::B);
-        }
-        KeyCode::Char(letter)
-            if state.tab == SettingsTab::Keyboard && letter.is_ascii_uppercase() =>
-        {
-            if let Some(shortcut_base) = ShortcutBase::parse(&letter.to_string()) {
-                app.settings_set_shortcut_base(shortcut_base);
-            }
+            app.settings_apply_keymap_preset(crate::keymap::KeymapPreset::Tmux);
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::KanbanBoard => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -1476,7 +1622,7 @@ mod indent_outdent_tests {
     }
 
     #[test]
-    fn icon_picker_search_filters_the_chapter_document_and_selects_its_result() {
+    fn icon_picker_queues_cpu_semantic_search_and_selects_its_result() {
         let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
         app.mode = Mode::Settings(SettingsState {
@@ -1501,7 +1647,29 @@ mod indent_outdent_tests {
         };
         let picker = state.icon_picker.as_ref().expect("the picker remains open");
         assert_eq!(picker.search_query, "rocket");
-        assert!(crate::icon_settings::picker_entry_count(&picker.search_query) > 0);
+        assert!(matches!(
+            picker.search_status,
+            crate::app::IconPickerSearchStatus::Searching
+        ));
+        let request = app
+            .take_pending_icon_semantic_search()
+            .expect("typing should queue the latest semantic query");
+        assert_eq!(request.query, "rocket");
+        app.apply_icon_semantic_search_event(
+            crate::icon_search_workers::IconSemanticSearchEvent::Results {
+                revision: request.revision,
+                results: crate::icon_settings::semantic_picker_search_results(vec![
+                    crate::icon_settings::IconSemanticSearchHit {
+                        category_label: "Travel · Air",
+                        family: crate::icon_settings::IconCatalogFamily::OfficialUtf8,
+                        entry: crate::icon_settings::IconCatalogEntry {
+                            glyph: "🚀",
+                            name: "rocket",
+                        },
+                    },
+                ]),
+            },
+        );
 
         handle_event(
             &mut app,
@@ -1582,7 +1750,7 @@ mod indent_outdent_tests {
         assert!(matches!(app.mode, Mode::LeaderPending));
         app.mode = Mode::Normal;
 
-        app.settings_set_shortcut_base(ShortcutBase::B);
+        app.settings_set_shortcut_base(crate::keymap::ShortcutBase::B);
         handle_event(&mut app, ctrl_a);
         assert!(matches!(app.mode, Mode::Normal));
         handle_event(&mut app, ctrl_b);
@@ -1699,6 +1867,19 @@ mod indent_outdent_tests {
             }]
         );
         assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn atomic_paste_reuses_existing_character_input_for_text_prompt_modes() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.mode = Mode::Rename(TextPromptState::new("before-"));
+
+        handle_event(&mut app, Event::Paste("café 世界".to_string()));
+
+        let Mode::Rename(state) = &app.mode else {
+            panic!("pasting text should keep the rename prompt open");
+        };
+        assert_eq!(state.buf, "before-café 世界");
     }
 
     #[test]

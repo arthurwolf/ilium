@@ -34,8 +34,11 @@ use crate::config::{
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
+use crate::icon_search_workers::{IconSearchRequest, IconSemanticSearchEvent};
+use crate::keymap::{self, Action, KeyBinding, KeymapPreset};
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
+use crate::prompt_queue::PromptQueueDialogState;
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
 use crate::search_ui::{
@@ -162,6 +165,8 @@ pub enum Mode {
     ContextMenu(ContextMenu),
     /// Form for one server-owned terminal input countdown.
     SchedulePaneInput(Box<ScheduledInputDialogState>),
+    /// Multiline prompt collected for the server-owned completion queue.
+    QueuePrompt(Box<PromptQueueDialogState>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -376,9 +381,6 @@ pub enum AppearanceRow {
     TreeWidth,
     TreeOrder,
     AgentIdentifierMode,
-    ClaudeAgentIcon,
-    CodexAgentIcon,
-    AntigravityAgentIcon,
     ColorScheme,
     MotionLevel,
     SidebarDensity,
@@ -386,14 +388,11 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 11] = [
+    pub const ALL: [AppearanceRow; 8] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
         Self::AgentIdentifierMode,
-        Self::ClaudeAgentIcon,
-        Self::CodexAgentIcon,
-        Self::AntigravityAgentIcon,
         Self::ColorScheme,
         Self::MotionLevel,
         Self::SidebarDensity,
@@ -518,6 +517,10 @@ pub struct SettingsState {
     pub icons_preview_real: bool,
     /// Full-screen catalogue picker layered over the Icons tab.
     pub icon_picker: Option<IconPickerState>,
+    /// The action whose key is being chosen in the collision-safe visual
+    /// keyboard. It is separate from `selected_row`: a picker may be opened
+    /// from a scrolled table row without changing table navigation.
+    pub keyboard_picker: Option<Action>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -528,16 +531,29 @@ pub struct IconPickerState {
     /// First visible row in the chapter document. It is independent from the
     /// selection so wheel/trackpad scrolling works like a normal text view.
     pub scroll_row: usize,
-    /// Live case-insensitive search over CLDR names and category labels.
+    /// Text submitted to the local embedding model for semantic retrieval.
     pub search_query: String,
-    /// Pre-filtered chapter document, rebuilt only after a query edit.
+    /// The current semantic result document. An empty query deliberately
+    /// shows the entire catalogue without invoking a search.
     pub search_results: crate::icon_settings::IconPickerSearchResults,
+    /// Monotonic query identity. A background result is accepted only when
+    /// it belongs to the text still displayed in this picker.
+    pub search_revision: u64,
+    /// Visible lifecycle of CPU model loading/indexing/querying or a failure.
+    pub search_status: IconPickerSearchStatus,
     /// Whether typed characters are currently editing `search_query`.
     pub is_searching: bool,
     /// The temporary catalogue density choice. It belongs to this picker
     /// interaction only: it is a reading preference, not an application-wide
     /// icon setting that should be persisted with assignments.
     pub column_mode: IconPickerColumnMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IconPickerSearchStatus {
+    Browse,
+    Searching,
+    Failed(String),
 }
 
 /// Catalogue density options. Multi-column is the normal, information-dense
@@ -572,16 +588,29 @@ impl IconPickerState {
             selected_entry: 0,
             scroll_row: 0,
             search_query: String::new(),
-            search_results: crate::icon_settings::picker_search_results(""),
+            search_results: crate::icon_settings::all_picker_search_results(),
+            search_revision: 0,
+            search_status: IconPickerSearchStatus::Browse,
             is_searching: false,
             column_mode: IconPickerColumnMode::MultiColumn,
         }
     }
 
-    pub fn refresh_search_results(&mut self) {
-        self.search_results = crate::icon_settings::picker_search_results(&self.search_query);
+    pub fn begin_semantic_search(&mut self) -> Option<IconSearchRequest> {
         self.selected_entry = 0;
         self.scroll_row = 0;
+        self.search_revision = self.search_revision.wrapping_add(1);
+        if self.search_query.trim().is_empty() {
+            self.search_results = crate::icon_settings::all_picker_search_results();
+            self.search_status = IconPickerSearchStatus::Browse;
+            return None;
+        }
+        self.search_results = crate::icon_settings::IconPickerSearchResults::default();
+        self.search_status = IconPickerSearchStatus::Searching;
+        Some(IconSearchRequest {
+            revision: self.search_revision,
+            query: self.search_query.clone(),
+        })
     }
 }
 
@@ -593,6 +622,7 @@ impl SettingsState {
             scroll: 0,
             icons_preview_real: false,
             icon_picker: None,
+            keyboard_picker: None,
         }
     }
 }
@@ -629,6 +659,8 @@ pub enum ContextMenuAction {
     FocusPane,
     CreateBoardFromMarkdown,
     SchedulePaneInput,
+    QueuePrompt,
+    ClearPromptQueue,
     ShowSplitView,
     ToggleGroup,
     NewTerminal,
@@ -664,6 +696,8 @@ impl ContextMenuAction {
             Self::FocusPane => "Focus pane".to_string(),
             Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
             Self::SchedulePaneInput => "Hit key(s) X time from now".to_string(),
+            Self::QueuePrompt => "Queue prompt…".to_string(),
+            Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
@@ -889,6 +923,10 @@ pub struct App {
     /// This session's live shortcut-base setting. Input dispatch and every
     /// displayed shortcut label read this same value.
     pub keyboard_settings: KeyboardSettings,
+    /// The session's live leader-action map. This belongs to `App`, rather
+    /// than keymap's startup-only global, so Settings can apply a remap at the
+    /// exact moment it is selected and Help always renders the same map.
+    pub keybindings: Vec<KeyBinding>,
     /// Live card-preview settings shared by every board pane in this client.
     pub kanban_board_settings: KanbanBoardSettings,
     /// Live user-global sound choices and the system catalog discovered once
@@ -902,6 +940,9 @@ pub struct App {
     pub session_settings: SessionSettings,
     pending_inference_test: bool,
     pending_ollama_model_refresh: bool,
+    /// Semantic icon searches are decided by the picker state but spawned by
+    /// `crate::run`, which is the only layer that owns background workers.
+    pending_icon_semantic_search: Option<IconSearchRequest>,
     pub ollama_models: Vec<String>,
     /// Visible lifecycle and outcome of the latest explicit model-discovery
     /// request. Unlike `status_message`, this remains visible in Settings.
@@ -1040,6 +1081,17 @@ pub(crate) struct PendingEditorOpen {
     pub(crate) column: Option<u32>,
 }
 
+/// Returns the first millisecond at which integer frame selection based on
+/// `remaining_millis / frame_millis` can change.
+fn scheduled_input_frame_delay(remaining_millis: u64, frame_millis: u64) -> Duration {
+    let delay_millis = if remaining_millis == 0 {
+        1
+    } else {
+        remaining_millis % frame_millis + 1
+    };
+    Duration::from_millis(delay_millis.min(frame_millis))
+}
+
 impl App {
     /// Starts a client session with an empty render-cache tree -- the real
     /// tree arrives moments later as the first `ServerEvent::TreeSnapshot`
@@ -1068,6 +1120,7 @@ impl App {
             ),
             ui_settings: UiSettings::default(),
             keyboard_settings: KeyboardSettings::default(),
+            keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
@@ -1077,6 +1130,7 @@ impl App {
             session_settings: SessionSettings::default(),
             pending_inference_test: false,
             pending_ollama_model_refresh: false,
+            pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
             ollama_model_discovery: OllamaModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
@@ -1115,6 +1169,37 @@ impl App {
             pending_restructure_requests: Vec::new(),
             tree_version: 0,
             tree_hit_test_cache: tree_ui::TreeItemCache::default(),
+        }
+    }
+
+    pub fn queue_icon_semantic_search(&mut self, request: IconSearchRequest) {
+        self.pending_icon_semantic_search = Some(request);
+    }
+
+    pub fn take_pending_icon_semantic_search(&mut self) -> Option<IconSearchRequest> {
+        self.pending_icon_semantic_search.take()
+    }
+
+    pub fn apply_icon_semantic_search_event(&mut self, event: IconSemanticSearchEvent) {
+        let Mode::Settings(settings) = &mut self.mode else {
+            return;
+        };
+        let Some(picker) = settings.icon_picker.as_mut() else {
+            return;
+        };
+        match event {
+            IconSemanticSearchEvent::Results { revision, results }
+                if revision == picker.search_revision =>
+            {
+                picker.search_results = results;
+                picker.search_status = IconPickerSearchStatus::Browse;
+            }
+            IconSemanticSearchEvent::Failed { revision, message }
+                if revision == picker.search_revision =>
+            {
+                picker.search_status = IconPickerSearchStatus::Failed(message);
+            }
+            IconSemanticSearchEvent::Results { .. } | IconSemanticSearchEvent::Failed { .. } => {}
         }
     }
 
@@ -1186,6 +1271,15 @@ impl App {
         self.exit_reason = Some(reason);
     }
 
+    /// Terminates the project-scoped server session. This is intentionally a
+    /// separate leader action from [`request_client_exit`]: tmux/screen's
+    /// detach leaves PTYs alive, while an explicit quit must not silently
+    /// pretend to do the same thing.
+    pub fn request_session_kill(&mut self) {
+        self.queue_request(ClientRequest::KillSession);
+        self.exit_reason = Some(ClientExitReason::Quit);
+    }
+
     /// Drains every `PendingRetitleRequest` queued since the last drain,
     /// for `crate::run::dispatch_input_event` to actually spawn a worker
     /// for -- see that type's doc comment.
@@ -1216,6 +1310,84 @@ impl App {
                         .collect()
                 })
                 .unwrap_or_default(),
+        }
+    }
+
+    /// Moves focus around the panes currently visible in the right panel.
+    /// This intentionally uses `displayed_pane_ids` rather than tree order:
+    /// a leader action should navigate the active split, not jump into a
+    /// hidden group elsewhere in the project tree.
+    pub fn focus_visible_pane(&mut self, direction: i32) {
+        let visible_panes = self.displayed_pane_ids();
+        if visible_panes.is_empty() {
+            return;
+        }
+        let current = self
+            .active_pane_id()
+            .and_then(|pane_id| visible_panes.iter().position(|id| *id == pane_id))
+            .unwrap_or(0);
+        let next =
+            (current as i32 + direction.signum()).rem_euclid(visible_panes.len() as i32) as usize;
+        self.focus_pane(visible_panes[next]);
+    }
+
+    /// Focuses the nearest visible split member in a cardinal direction.
+    /// The decision uses the shared viewport allocator, so rendering, mouse
+    /// hit testing, and keyboard travel agree even for the four-pane grid.
+    pub fn focus_visible_pane_in_direction(&mut self, horizontal: i32, vertical: i32) {
+        let Some(active_pane_id) = self.active_pane_id() else {
+            return;
+        };
+        let viewports = self.pane_viewports();
+        let Some(active) = viewports
+            .iter()
+            .find(|viewport| viewport.pane_id == active_pane_id)
+            .copied()
+        else {
+            return;
+        };
+        let active_x = i32::from(active.outer_area.x) + i32::from(active.outer_area.width) / 2;
+        let active_y = i32::from(active.outer_area.y) + i32::from(active.outer_area.height) / 2;
+        let target = viewports
+            .into_iter()
+            .filter(|viewport| viewport.pane_id != active_pane_id)
+            .filter_map(|viewport| {
+                let x = i32::from(viewport.outer_area.x) + i32::from(viewport.outer_area.width) / 2;
+                let y =
+                    i32::from(viewport.outer_area.y) + i32::from(viewport.outer_area.height) / 2;
+                let delta_x = x - active_x;
+                let delta_y = y - active_y;
+                let is_in_direction = match (horizontal, vertical) {
+                    (-1, 0) => delta_x < 0,
+                    (1, 0) => delta_x > 0,
+                    (0, -1) => delta_y < 0,
+                    (0, 1) => delta_y > 0,
+                    _ => false,
+                };
+                is_in_direction.then_some((viewport.pane_id, delta_x.abs() + delta_y.abs()))
+            })
+            .min_by_key(|(_, distance)| *distance)
+            .map(|(pane_id, _)| pane_id);
+        if let Some(pane_id) = target {
+            self.focus_pane(pane_id);
+        }
+    }
+
+    /// Applies one full viewport of local scrollback motion to the focused
+    /// terminal. Editor panes are deliberately ignored: their native editor
+    /// navigation retains ownership of its own scroll position.
+    pub fn scroll_focused_terminal(&mut self, direction: i32) {
+        let Some(pane_id) = self.active_pane_id() else {
+            return;
+        };
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let page_lines = self.last_known_pane_size.0.max(1);
+        if direction < 0 {
+            view.scroll_up(page_lines);
+        } else {
+            view.scroll_down(page_lines);
         }
     }
 
@@ -1459,6 +1631,42 @@ impl App {
             if let Err(error) =
                 crate::config::save_keyboard_settings(&config_dir, &self.keyboard_settings)
             {
+                self.status_message = Some(format!("Could not save keyboard settings: {error}"));
+            }
+        }
+    }
+
+    /// Replaces the complete binding map after a validated preset choice and
+    /// persists it atomically as the `[keybindings]` table.
+    pub fn settings_apply_keymap_preset(&mut self, preset: KeymapPreset) {
+        self.keyboard_settings.shortcut_base = preset.shortcut_base();
+        self.keybindings = keymap::preset_bindings(preset);
+        self.persist_keymap();
+    }
+
+    /// Attempts one live remap. Duplicate keys are refused before mutation,
+    /// leaving both dispatch and the persisted configuration unchanged.
+    pub fn settings_assign_key(&mut self, action: Action, key: char) {
+        match keymap::assign_key(&mut self.keybindings, action, key) {
+            Ok(()) => self.persist_keymap(),
+            Err(conflict) if conflict != action => {
+                self.status_message = Some(format!(
+                    "{} is already assigned to {}",
+                    key,
+                    keymap::action_name(conflict).replace('_', " ")
+                ));
+            }
+            Err(_) => self.status_message = Some(format!("{key} cannot be used as a shortcut")),
+        }
+    }
+
+    fn persist_keymap(&mut self) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) = crate::config::save_keymap_settings(
+                &config_dir,
+                &self.keyboard_settings,
+                &self.keybindings,
+            ) {
                 self.status_message = Some(format!("Could not save keyboard settings: {error}"));
             }
         }
@@ -2142,11 +2350,6 @@ impl App {
             AppearanceRow::AgentIdentifierMode => {
                 self.settings_adjust_agent_identifier_mode(direction)
             }
-            AppearanceRow::ClaudeAgentIcon => self.settings_adjust_claude_agent_icon(direction),
-            AppearanceRow::CodexAgentIcon => self.settings_adjust_codex_agent_icon(direction),
-            AppearanceRow::AntigravityAgentIcon => {
-                self.settings_adjust_antigravity_agent_icon(direction)
-            }
             AppearanceRow::ColorScheme => self.settings_toggle_color_scheme(),
             AppearanceRow::MotionLevel => {
                 let mut ui = self.ui_settings.clone();
@@ -2296,6 +2499,22 @@ impl App {
     /// `ServerEvent`, a finished naming worker) already marks the frame dirty
     /// on its own.
     pub fn has_active_animation(&self) -> bool {
+        self.has_fast_animation()
+            || self.tree.panes().any(|node| {
+                matches!(
+                    node.kind,
+                    NodeKind::Pane {
+                        scheduled_input: Some(_),
+                        ..
+                    }
+                )
+            })
+    }
+
+    /// Animations that genuinely need the generic 50 ms semantic cadence.
+    /// Scheduled-input clocks have their own 220 ms boundary calculation in
+    /// `next_scheduled_input_frame_delay` and are deliberately excluded.
+    fn has_fast_animation(&self) -> bool {
         if self.is_layout_animating() {
             return true;
         }
@@ -2331,14 +2550,29 @@ impl App {
                     ),
                     ..
                 }
-            ) || matches!(
-                node.kind,
-                NodeKind::Pane {
-                    scheduled_input: Some(_),
-                    ..
-                }
             )
         })
+    }
+
+    /// Wait until the next reverse-clock frame boundary of any scheduled
+    /// pane input. The renderer indexes frames from remaining milliseconds,
+    /// so the modulo is the exact point its visible clock can next change.
+    fn next_scheduled_input_frame_delay(&self) -> Option<Duration> {
+        const FRAME_MILLIS: u64 = 220;
+        let now = crate::scheduled_input::unix_millis_now();
+        self.tree
+            .panes()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Pane {
+                    scheduled_input: Some(scheduled_input),
+                    ..
+                } => {
+                    let remaining = scheduled_input.execute_at_unix_millis.saturating_sub(now);
+                    Some(scheduled_input_frame_delay(remaining, FRAME_MILLIS))
+                }
+                _ => None,
+            })
+            .min()
     }
 
     /// Resizes only the terminal panes currently visible in the right panel,
@@ -3578,6 +3812,10 @@ impl App {
             }) => {
                 actions.insert(0, ContextMenuAction::FocusPane);
                 actions.insert(1, ContextMenuAction::SchedulePaneInput);
+                actions.insert(2, ContextMenuAction::QueuePrompt);
+                if self.tree.prompt_queue_len(target).unwrap_or(0) > 0 {
+                    actions.insert(3, ContextMenuAction::ClearPromptQueue);
+                }
             }
             Some(Node {
                 kind:
@@ -3636,6 +3874,13 @@ impl App {
                 self.mode =
                     Mode::SchedulePaneInput(Box::new(ScheduledInputDialogState::new(target)));
             }
+            ContextMenuAction::QueuePrompt => {
+                self.mode = Mode::QueuePrompt(Box::new(PromptQueueDialogState::new(target)));
+            }
+            ContextMenuAction::ClearPromptQueue => {
+                self.queue_request(ClientRequest::ClearPromptQueue { pane_id: target });
+                self.status_message = Some("Prompt queue cleared".to_string());
+            }
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
@@ -3689,6 +3934,24 @@ impl App {
             send_enter,
         });
         self.status_message = Some("Scheduled pane input".to_string());
+        self.mode = Mode::Normal;
+    }
+
+    pub fn commit_queued_prompt(&mut self, state: Box<PromptQueueDialogState>) {
+        let (text, delivery) = match state.validated_request() {
+            Ok(request) => request,
+            Err(message) => {
+                self.status_message = Some(message);
+                self.mode = Mode::QueuePrompt(state);
+                return;
+            }
+        };
+        self.queue_request(ClientRequest::EnqueuePrompt {
+            pane_id: state.pane_id,
+            text,
+            delivery,
+        });
+        self.status_message = Some("Prompt queued for the next agent completion".to_string());
         self.mode = Mode::Normal;
     }
 
@@ -3945,7 +4208,7 @@ impl App {
         if self.is_spatial_animation_active() {
             return crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL;
         }
-        if self.has_active_animation() {
+        if self.has_fast_animation() {
             return Duration::from_millis(50);
         }
 
@@ -3965,9 +4228,12 @@ impl App {
             })
             .min();
 
-        next_deadline
+        let ordinary_delay = next_deadline
             .map(|deadline| deadline.saturating_duration_since(now))
-            .unwrap_or(IDLE_MAINTENANCE_INTERVAL)
+            .unwrap_or(IDLE_MAINTENANCE_INTERVAL);
+        self.next_scheduled_input_frame_delay()
+            .map(|scheduled_delay| ordinary_delay.min(scheduled_delay))
+            .unwrap_or(ordinary_delay)
     }
 
     /// Records the tree node currently being drag-held by the left mouse
@@ -4300,6 +4566,33 @@ impl App {
         if is_enter_press {
             self.maybe_trigger_terminal_retitle(id);
         }
+    }
+
+    /// Forwards one host clipboard operation to the active terminal as one
+    /// IPC request. The child application's negotiated terminal mode decides
+    /// whether the bulk UTF-8 payload receives bracketed-paste delimiters;
+    /// this keeps Codex's semantic paste intact without exposing shell prompts
+    /// that never requested mode 2004 to literal control sequences.
+    pub fn handle_terminal_paste(&mut self, pasted: &str) -> bool {
+        let Some(pane_id) = self.active_pane_id() else {
+            return false;
+        };
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return false;
+        };
+
+        // A search-history anchor may represent an older screen whose modes
+        // differ from the live foreground application. Restore the live parser
+        // before reading mode 2004 and forwarding fresh input.
+        view.scroll_to_bottom();
+        let bytes = if view.wants_bracketed_paste() {
+            encode_bracketed_paste(pasted)
+        } else {
+            pasted.as_bytes().to_vec()
+        };
+
+        self.queue_request(ClientRequest::KeyInput { pane_id, bytes });
+        true
     }
 
     /// Bumps `id`'s Enter-press counter and, once it reaches
@@ -5234,6 +5527,20 @@ fn encode_key_for_terminal(key: &crossterm::event::KeyEvent) -> Option<Vec<u8>> 
     }
 }
 
+/// Encodes one crossterm paste for a child application that negotiated xterm
+/// bracketed-paste mode. Keeping both delimiters and the complete UTF-8 body
+/// in one vector ensures IPC and the PTY observe one indivisible paste event.
+fn encode_bracketed_paste(pasted: &str) -> Vec<u8> {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+
+    let mut bytes = Vec::with_capacity(PASTE_START.len() + pasted.len() + PASTE_END.len());
+    bytes.extend_from_slice(PASTE_START);
+    bytes.extend_from_slice(pasted.as_bytes());
+    bytes.extend_from_slice(PASTE_END);
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5644,6 +5951,44 @@ mod tests {
     }
 
     #[test]
+    fn queue_prompt_dialog_commits_multiline_repeating_request_and_exposes_clear() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.execute_context_action(ContextMenuAction::QueuePrompt, terminal);
+        let Mode::QueuePrompt(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("queue action should open its dialog");
+        };
+        state.text = TextPromptState::new("first line\nsecond line");
+        state.delivery_choice = ilium_core::PromptQueueDelivery::Times { remaining_runs: 2 };
+        state.times = TextPromptState::new("3");
+        app.commit_queued_prompt(state);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::EnqueuePrompt {
+                pane_id: terminal,
+                text: "first line\nsecond line".to_string(),
+                delivery: ilium_core::PromptQueueDelivery::Times { remaining_runs: 3 },
+            }]
+        );
+        app.tree
+            .enqueue_prompt(
+                terminal,
+                ilium_core::QueuedPrompt {
+                    text: "pending".to_string(),
+                    delivery: ilium_core::PromptQueueDelivery::Once,
+                },
+            )
+            .unwrap();
+        assert!(app
+            .context_actions_for(terminal)
+            .contains(&ContextMenuAction::ClearPromptQueue));
+    }
+
+    #[test]
     fn pending_scheduled_input_keeps_countdown_redraws_active() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -5663,6 +6008,29 @@ mod tests {
             .unwrap();
 
         assert!(app.has_active_animation());
+        let delay = app.next_maintenance_delay(Instant::now());
+        assert!(delay > Duration::ZERO);
+        assert!(delay <= Duration::from_millis(220));
+    }
+
+    #[test]
+    fn scheduled_input_redraw_uses_the_exact_reverse_clock_boundary() {
+        assert_eq!(
+            scheduled_input_frame_delay(440, 220),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            scheduled_input_frame_delay(441, 220),
+            Duration::from_millis(2)
+        );
+        assert_eq!(
+            scheduled_input_frame_delay(659, 220),
+            Duration::from_millis(220)
+        );
+        assert_eq!(
+            scheduled_input_frame_delay(0, 220),
+            Duration::from_millis(1)
+        );
     }
 
     #[test]
@@ -5931,6 +6299,72 @@ mod tests {
         assert_eq!(app.status_message, None);
         assert!(app.titles_loading.contains(&pane_id));
         assert_eq!(app.take_pending_retitle_requests().len(), 1);
+    }
+
+    #[test]
+    fn bracketed_terminal_paste_queues_one_atomic_key_input_request() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(24, 80);
+        view.feed(b"\x1b[?2004h");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.take_outbound_requests();
+
+        let pasted = "first line\nUnicode: café 世界\n".repeat(512);
+        app.handle_event(crossterm::event::Event::Paste(pasted.clone()));
+
+        let key_inputs = app
+            .take_outbound_requests()
+            .into_iter()
+            .filter(|request| matches!(request, ClientRequest::KeyInput { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            key_inputs,
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: encode_bracketed_paste(&pasted),
+            }]
+        );
+    }
+
+    #[test]
+    fn non_bracketed_terminal_paste_is_one_raw_bulk_request() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.take_outbound_requests();
+
+        let pasted = "printf 'café'\n";
+        app.handle_event(crossterm::event::Event::Paste(pasted.to_string()));
+
+        let key_inputs = app
+            .take_outbound_requests()
+            .into_iter()
+            .filter(|request| matches!(request, ClientRequest::KeyInput { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            key_inputs,
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: pasted.as_bytes().to_vec(),
+            }]
+        );
     }
 
     #[test]

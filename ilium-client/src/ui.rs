@@ -22,6 +22,7 @@ use crate::app::{
     PaneRuntime, RightPanelTarget,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
+use crate::icon_settings::IconTarget;
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
     editor_chrome, editor_highlight, editor_toolbar, explorer_overlay, help, markdown, minimap,
@@ -33,7 +34,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let layout = app.layout;
 
     if let Mode::Search(state) = &app.mode {
-        search_ui::render(frame, area, state);
+        search_ui::render(frame, area, state, &app.ui_settings.icons);
         return;
     }
 
@@ -121,13 +122,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         );
     }
     if matches!(app.mode, Mode::Help) {
-        help::render(frame, area, app.keyboard_settings.shortcut_base);
+        help::render(
+            frame,
+            area,
+            app.keyboard_settings.shortcut_base,
+            &app.keybindings,
+        );
     }
     if let Mode::ContextMenu(menu) = &app.mode {
         draw_context_menu(frame, menu, app.ui_settings.tree_order);
     }
     if let Mode::SchedulePaneInput(state) = &app.mode {
         draw_scheduled_input_dialog(frame, area, app, state);
+    }
+    if let Mode::QueuePrompt(state) = &app.mode {
+        draw_prompt_queue_dialog(frame, area, app, state);
     }
     if let Mode::EditorLineContextMenu(menu) = &app.mode {
         draw_editor_line_context_menu(frame, menu);
@@ -139,7 +148,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_create_group(frame, app, state);
     }
     if let Mode::CreateSplitOrientation(state) = &app.mode {
-        draw_create_split_orientation(frame, area, state);
+        draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
     }
     if let Mode::CreateSplitMembers(state) = &app.mode {
         draw_create_split_members(frame, area, state);
@@ -222,6 +231,7 @@ fn draw_create_split_orientation(
     frame: &mut Frame,
     area: Rect,
     state: &CreateSplitOrientationState,
+    icons: &crate::icon_settings::IconSettings,
 ) {
     let popup = modal::create_split_orientation_dialog_area(area);
     frame.render_widget(Clear, popup);
@@ -242,8 +252,14 @@ fn draw_create_split_orientation(
         Paragraph::new(vec![
             Line::from("Choose how two or three panes are arranged:"),
             Line::from(""),
-            Line::from(format!("{vertical_marker} ▥  Vertical — side by side")),
-            Line::from(format!("{horizontal_marker} ▤  Horizontal — stacked")),
+            Line::from(format!(
+                "{vertical_marker} {}  Vertical — side by side",
+                icons.glyph(IconTarget::SplitVertical)
+            )),
+            Line::from(format!(
+                "{horizontal_marker} {}  Horizontal — stacked",
+                icons.glyph(IconTarget::SplitHorizontal)
+            )),
             Line::from(""),
             Line::from(Span::styled(
                 "E  Create empty with this orientation",
@@ -469,6 +485,128 @@ fn draw_scheduled_input_dialog(
     );
 }
 
+fn draw_prompt_queue_dialog(
+    frame: &mut Frame,
+    screen_area: Rect,
+    app: &App,
+    state: &crate::prompt_queue::PromptQueueDialogState,
+) {
+    use crate::prompt_queue::PromptQueueFocus;
+    use ilium_core::PromptQueueDelivery;
+
+    let layout = crate::prompt_queue::dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title("Queue prompt after agent finishes")),
+        layout.popup,
+    );
+    let pane_name = app
+        .tree
+        .get(state.pane_id)
+        .map_or("terminal", |node| node.name.as_str());
+    frame.render_widget(
+        Paragraph::new(format!(
+            "The next detected bell for {pane_name} sends this prompt and Enter."
+        ))
+        .style(Style::new().add_modifier(Modifier::DIM)),
+        layout.subtitle,
+    );
+    frame.render_widget(
+        Paragraph::new("PROMPT").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        layout.prompt_label,
+    );
+    let text_style = if state.focus == PromptQueueFocus::Text {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    frame.render_widget(
+        Paragraph::new(state.text.buf.clone())
+            .block(
+                theme::block(state.focus == PromptQueueFocus::Text)
+                    .title(theme::chrome_title("Multiline prompt")),
+            )
+            .style(text_style)
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        layout.text,
+    );
+    frame.render_widget(
+        Paragraph::new("DELIVERY").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        layout.delivery_label,
+    );
+    let delivery_text = match state.delivery_choice {
+        PromptQueueDelivery::Once => "[x] Once    [ ] Run X times    [ ] Enqueue forever (DANGER)",
+        PromptQueueDelivery::Times { .. } => {
+            "[ ] Once    [x] Run X times    [ ] Enqueue forever (DANGER)"
+        }
+        PromptQueueDelivery::Forever => {
+            "[ ] Once    [ ] Run X times    [x] Enqueue forever (DANGER)"
+        }
+    };
+    let delivery_style = if state.focus == PromptQueueFocus::Delivery {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    frame.render_widget(
+        Paragraph::new(delivery_text).style(delivery_style),
+        layout.delivery,
+    );
+    let times_value = match state.delivery_choice {
+        PromptQueueDelivery::Times { .. } => state.times.buf.as_str(),
+        _ => "(only for Run X times)",
+    };
+    let times_style = if state.focus == PromptQueueFocus::Times {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    frame.render_widget(
+        Paragraph::new(format!("Runs: {times_value}"))
+            .block(
+                theme::block(state.focus == PromptQueueFocus::Times)
+                    .title(theme::chrome_title("Repeat count")),
+            )
+            .style(times_style),
+        layout.times,
+    );
+    let warning = match state.delivery_choice {
+        PromptQueueDelivery::Forever => "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.",
+        PromptQueueDelivery::Times { .. } => "The same prompt is sent once per future finish, until the selected count is exhausted.",
+        PromptQueueDelivery::Once => "The prompt remains queued until the agent next finishes, then is sent once.",
+    };
+    frame.render_widget(
+        Paragraph::new(warning).style(Style::new().fg(
+            if matches!(state.delivery_choice, PromptQueueDelivery::Forever) {
+                Color::Red
+            } else {
+                Color::Yellow
+            },
+        )),
+        layout.warning,
+    );
+    let button_style = if state.focus == PromptQueueFocus::EnqueueButton {
+        Style::new()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    };
+    frame.render_widget(
+        Paragraph::new("[ Enqueue ]")
+            .style(button_style)
+            .alignment(Alignment::Center),
+        layout.enqueue_button,
+    );
+    frame.render_widget(
+        Paragraph::new("Tab fields · ←/→ select delivery · Ctrl+Enter enqueue · Esc cancel")
+            .style(Style::new().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        layout.hint,
+    );
+}
+
 fn draw_scheduled_input_field(
     frame: &mut Frame,
     area: Rect,
@@ -607,14 +745,6 @@ fn app_menu_title(_menu: &ContextMenu) -> &'static str {
     "Tree actions"
 }
 
-/// Group icon reused from `tree_ui`'s own folder glyph, so the picker's
-/// destination list reads as literally the same visual language as the
-/// tree panel it mirrors.
-const GROUP_ICON: &str = "\u{1F4C1}";
-/// Distinct icon for the "top level" entry -- it isn't a real group node in
-/// the rendered tree, so it earns a glyph of its own rather than borrowing
-/// the folder icon for something that isn't quite a folder.
-const TOP_LEVEL_ICON: &str = "\u{2302}";
 const GROUP_ACCENT: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
 
 /// Draws the "New group" destination picker: an always-editable name field
@@ -681,9 +811,9 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
             let is_top_level = destination.id == ROOT_ID;
             let indent = "  ".repeat(destination.depth.saturating_sub(1));
             let icon = if is_top_level {
-                TOP_LEVEL_ICON
+                app.ui_settings.icons.glyph(IconTarget::TopLevel)
             } else {
-                GROUP_ICON
+                app.ui_settings.icons.glyph(IconTarget::Group)
             };
             // Build name via format! to avoid cloning node.name — format! reads
             // the source and produces a new owned String only once needed.
@@ -975,6 +1105,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
+        Mode::QueuePrompt(..) => "QUEUE PROMPT",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateGroup(_) => "NEW GROUP",

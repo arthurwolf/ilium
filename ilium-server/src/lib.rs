@@ -23,6 +23,7 @@ mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
+mod prompt_queue;
 mod scheduled_input;
 mod session_id;
 mod shell_title;

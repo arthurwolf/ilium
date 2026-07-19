@@ -433,6 +433,35 @@ impl ScheduledPaneInput {
     }
 }
 
+/// How often one queued prompt is delivered after successive agent-finished
+/// transitions. The default is deliberately one delivery: repeated delivery
+/// is explicit because an unattended agent can otherwise loop indefinitely.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PromptQueueDelivery {
+    Once,
+    Times { remaining_runs: u32 },
+    Forever,
+}
+
+impl PromptQueueDelivery {
+    pub fn is_valid(&self) -> bool {
+        !matches!(self, Self::Times { remaining_runs: 0 })
+    }
+}
+
+/// One durable FIFO prompt waiting for an agent-finished transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueuedPrompt {
+    pub text: String,
+    pub delivery: PromptQueueDelivery,
+}
+
+impl QueuedPrompt {
+    pub fn is_valid(&self) -> bool {
+        !self.text.trim().is_empty() && self.delivery.is_valid()
+    }
+}
+
 pub const MAXIMUM_SPLIT_VIEW_PANES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -555,6 +584,10 @@ pub enum NodeKind {
         /// before scheduled input existed.
         #[serde(default)]
         scheduled_input: Option<ScheduledPaneInput>,
+        /// FIFO prompts sent only after a detected agent-finished transition.
+        /// `serde(default)` keeps existing recovery snapshots compatible.
+        #[serde(default)]
+        prompt_queue: Vec<QueuedPrompt>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -641,6 +674,8 @@ pub enum TreeError {
     NotATerminal(NodeId),
     #[error("scheduled input must contain text, Enter, or both")]
     EmptyScheduledInput,
+    #[error("queued prompt must contain text and a positive delivery count")]
+    EmptyQueuedPrompt,
     #[error("cannot remove the root group")]
     CannotRemoveRoot,
     #[error("cannot move the root group")]
@@ -1010,6 +1045,7 @@ impl Tree {
                     title_source: PaneTitleSource::Automatic,
                     board_storage: None,
                     scheduled_input: None,
+                    prompt_queue: Vec::new(),
                 },
             },
         );
@@ -1065,6 +1101,7 @@ impl Tree {
                     title_source: PaneTitleSource::Automatic,
                     board_storage: Some(storage),
                     scheduled_input: None,
+                    prompt_queue: Vec::new(),
                 },
             },
         );
@@ -1622,6 +1659,105 @@ impl Tree {
             };
             Some((*id, scheduled_input))
         })
+    }
+
+    /// Adds one prompt to a terminal pane's durable FIFO queue.
+    pub fn enqueue_prompt(&mut self, id: NodeId, prompt: QueuedPrompt) -> Result<(), TreeError> {
+        if !prompt.is_valid() {
+            return Err(TreeError::EmptyQueuedPrompt);
+        }
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            prompt_queue,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        prompt_queue.push(prompt);
+        Ok(())
+    }
+
+    /// Removes every pending prompt for one terminal pane.
+    pub fn clear_prompt_queue(&mut self, id: NodeId) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            prompt_queue,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        prompt_queue.clear();
+        Ok(())
+    }
+
+    /// Returns the FIFO head without consuming it. The server writes it to
+    /// the PTY before acknowledging delivery, so a failed write leaves it
+    /// queued for the next genuine completion.
+    pub fn next_queued_prompt(&self, id: NodeId) -> Result<Option<&QueuedPrompt>, TreeError> {
+        let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
+        let NodeKind::Pane {
+            content,
+            prompt_queue,
+            ..
+        } = &node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        Ok(prompt_queue.first())
+    }
+
+    /// Acknowledges delivery only when the current FIFO head is still the
+    /// entry the server read. This compare-and-advance prevents a concurrent
+    /// clear or enqueue mutation from consuming the wrong prompt.
+    pub fn acknowledge_queued_prompt(
+        &mut self,
+        id: NodeId,
+        expected: &QueuedPrompt,
+    ) -> Result<bool, TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane { prompt_queue, .. } = &mut node.kind else {
+            return Err(TreeError::NotAPane(id));
+        };
+        let Some(head) = prompt_queue.first_mut() else {
+            return Ok(false);
+        };
+        if head != expected {
+            return Ok(false);
+        }
+        match &mut head.delivery {
+            PromptQueueDelivery::Once => {
+                prompt_queue.remove(0);
+            }
+            PromptQueueDelivery::Times { remaining_runs } if *remaining_runs > 1 => {
+                *remaining_runs -= 1;
+            }
+            PromptQueueDelivery::Times { .. } => {
+                prompt_queue.remove(0);
+            }
+            PromptQueueDelivery::Forever => {}
+        }
+        Ok(true)
+    }
+
+    /// Number of independently queued messages, including recurring entries.
+    pub fn prompt_queue_len(&self, id: NodeId) -> Option<usize> {
+        match &self.get(id)?.kind {
+            NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
+            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
+        }
     }
 
     /// True if `ancestor` is `node` itself or a transitive parent of `node`.
@@ -2706,6 +2842,44 @@ mod tests {
             ),
             Err(TreeError::NotATerminal(id)) if id == editor
         ));
+    }
+
+    #[test]
+    fn queued_prompts_are_fifo_and_advance_only_after_acknowledged_delivery() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let once = QueuedPrompt {
+            text: "first".to_string(),
+            delivery: PromptQueueDelivery::Once,
+        };
+        let repeat = QueuedPrompt {
+            text: "second".to_string(),
+            delivery: PromptQueueDelivery::Times { remaining_runs: 2 },
+        };
+        tree.enqueue_prompt(terminal, once.clone()).unwrap();
+        tree.enqueue_prompt(terminal, repeat.clone()).unwrap();
+        assert_eq!(tree.prompt_queue_len(terminal), Some(2));
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once));
+        assert!(!tree.acknowledge_queued_prompt(terminal, &repeat).unwrap());
+        assert!(tree.acknowledge_queued_prompt(terminal, &once).unwrap());
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&repeat));
+        assert!(tree.acknowledge_queued_prompt(terminal, &repeat).unwrap());
+        assert_eq!(tree.prompt_queue_len(terminal), Some(1));
+        assert!(matches!(
+            tree.next_queued_prompt(terminal).unwrap(),
+            Some(QueuedPrompt {
+                delivery: PromptQueueDelivery::Times { remaining_runs: 1 },
+                ..
+            })
+        ));
+        let final_repeat = tree.next_queued_prompt(terminal).unwrap().cloned().unwrap();
+        assert!(tree
+            .acknowledge_queued_prompt(terminal, &final_repeat)
+            .unwrap());
+        assert_eq!(tree.prompt_queue_len(terminal), Some(0));
     }
 
     #[test]

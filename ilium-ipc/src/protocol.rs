@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 use ilium_core::{
-    BoardStorage, NodeId, PaneStatus, PaneTitleSource, RestructurePlan, SplitOrientation, Tree,
-    TreeMoveDirection,
+    BoardStorage, NodeId, PaneStatus, PaneTitleSource, PromptQueueDelivery, RestructurePlan,
+    SplitOrientation, Tree, TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -236,6 +236,15 @@ pub enum ClientRequest {
         text: String,
         send_enter: bool,
     },
+    /// Appends one prompt to the terminal's durable FIFO. Delivery is
+    /// triggered only by the server detecting a future agent-finished state.
+    EnqueuePrompt {
+        pane_id: NodeId,
+        text: String,
+        delivery: PromptQueueDelivery,
+    },
+    /// Removes all pending prompts for a terminal pane.
+    ClearPromptQueue { pane_id: NodeId },
     /// Applies an LLM title only if `pane_id` still owns the exact session
     /// the client summarized. The server-side compare-and-set closes the
     /// race where `/resume` invalidates a session while a worker result is

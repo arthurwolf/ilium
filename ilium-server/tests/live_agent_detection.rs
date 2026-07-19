@@ -109,6 +109,8 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
          printf '\\033[2J\\033[H'\n\
          printf 'Pursuing goal (5m)\\n'\n\
          printf 'Done. Ready for the next instruction.\\n'\n\
+         IFS= read -r queued_prompt\n\
+         printf 'queued:<%s>\\n' \"$queued_prompt\"\n\
          sleep 60\n"
     );
     let mut file = std::fs::File::create(&script_path).expect("create fake codex script");
@@ -218,6 +220,22 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     };
     let pane_id = first_launch_project_pane(&tree);
 
+    write_frame(
+        &mut client,
+        &ClientRequest::EnqueuePrompt {
+            pane_id,
+            text: "queued-live-marker".to_string(),
+            delivery: ilium_core::PromptQueueDelivery::Once,
+        },
+    )
+    .await
+    .expect("enqueue prompt through live IPC");
+    let queued_tree = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.prompt_queue_len(pane_id) == Some(1))
+    })
+    .await;
+    assert!(matches!(queued_tree, ServerEvent::TreeSnapshot(_)));
+
     // Structural assertion #1: the real detection loop, walking the real
     // `sysinfo` process tree, must identify the spawned process as a
     // Codex agent (by real process name, via
@@ -291,6 +309,17 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         ),
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
+
+    let delivered_prompt = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::ScreenUpdate { pane_id: changed_id, bytes, .. }
+                if *changed_id == pane_id
+                    && String::from_utf8_lossy(bytes).contains("queued:<queued-live-marker>")
+        )
+    })
+    .await;
+    assert!(matches!(delivered_prompt, ServerEvent::ScreenUpdate { .. }));
 
     let sound_dispatched = common::wait_until(
         || sound_calls.lock().unwrap().len() == 1,
