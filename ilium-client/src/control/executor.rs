@@ -342,7 +342,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::Rename => {
             let node_id = resolve_node(app, &command.target)?;
             let name = required_nonempty(command.name, "name")?;
-            app.request_rename(node_id, name, None);
+            app.request_rename(node_id, name, None, None);
             Ok(ExecutionReceipt::queued("Renaming the tree item"))
         }
         TreeAction::MoveUp | TreeAction::MoveDown => {

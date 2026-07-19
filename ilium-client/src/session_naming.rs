@@ -27,7 +27,7 @@ const SESSION_TITLE_LONG_MIN_WORDS: usize = 5;
 const SESSION_TITLE_LONG_MAX_WORDS: usize = 7;
 
 const SESSION_TITLE_TEMPLATE: &str = r#"<instructions>
-Infer two titles describing the task or work in progress in this coding-agent session: a short title of 2 to 3 words, and a long title of 5 to 7 words. Prefer the shortest accurate wording for each over a longer one. The prompts below are ordered oldest to newest -- weigh the most recent prompt the most, using the earlier ones only as background context. Do not return punctuation-only text or a generic phrase such as "coding session".
+Infer two titles and one UTF-8 icon/emoticon describing the task or work in progress in this coding-agent session: a short title of 2 to 3 words, and a long title of 5 to 7 words. Choose one compact visual icon that helps recognize this work. Prefer the shortest accurate wording for each over a longer one. The prompts below are ordered oldest to newest -- weigh the most recent prompt the most, using the earlier ones only as background context. Do not return punctuation-only text or a generic phrase such as "coding session".
 </instructions>
 <agent-session>
     <agent>{{agent_label}}</agent>
@@ -39,7 +39,7 @@ Infer two titles describing the task or work in progress in this coding-agent se
     {{/each}}
     </prompts>
 </agent-session>
-<output-example>{"session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}</output-example>
+<output-example>{"icon":"🔐","session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
 /// Locates `session_id`'s transcript under `home`, extracts its most recent
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn empty_prompts_never_call_the_gateway() {
         let generator = FakeGenerator::new(
-            r#"{"session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}"#,
+            r#"{"icon":"🔐","session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}"#,
         );
         let result = infer_session_title(&generator, "Claude Code", vec![]);
         assert!(result.is_err());
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn successful_response_returns_the_normalized_title_pair() {
         let generator = FakeGenerator::new(
-            r#"{"session_title_short":"  Auth   Bug  ","session_title_long":"Fix Auth Bug In Login Flow"}"#,
+            r#"{"icon":"🔐","session_title_short":"  Auth   Bug  ","session_title_long":"Fix Auth Bug In Login Flow"}"#,
         );
         let result = infer_session_title(
             &generator,
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn prompt_is_xml_shaped_recency_ordered_and_includes_the_json_output_example() {
         let generator = FakeGenerator::new(
-            r#"{"session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}"#,
+            r#"{"icon":"🔐","session_title_short":"Auth Bug","session_title_long":"Fix Auth Bug In Login Flow"}"#,
         );
         infer_session_title(
             &generator,
@@ -201,7 +201,7 @@ mod tests {
         assert!(prompt.contains("newest prompt"));
         assert!(prompt.find("oldest prompt").unwrap() < prompt.find("newest prompt").unwrap());
         assert!(prompt.contains(
-            "<output-example>{\"session_title_short\":\"Auth Bug\",\"session_title_long\":\"Fix Auth Bug In Login Flow\"}</output-example>"
+            "<output-example>{\"icon\":\"🔐\",\"session_title_short\":\"Auth Bug\",\"session_title_long\":\"Fix Auth Bug In Login Flow\"}</output-example>"
         ));
     }
 
@@ -244,7 +244,7 @@ mod tests {
         .unwrap();
 
         let generator = FakeGenerator::new(
-            r#"{"session_title_short":"Login Bug","session_title_long":"Fix Login Bug In Auth Flow"}"#,
+            r#"{"icon":"🔐","session_title_short":"Login Bug","session_title_long":"Fix Login Bug In Auth Flow"}"#,
         );
         let title =
             infer_pane_title(&generator, &home, cwd, &AgentClass::Claude, session_id).unwrap();

@@ -85,7 +85,7 @@ mod tests {
     fn a_user_renamed_pane_is_never_eligible() {
         let (mut app, pane_id) = app_with_terminal_pane(PaneStatus::PlainShell);
         app.tree
-            .rename_node(pane_id, "my custom name", None)
+            .rename_node(pane_id, "my custom name", None, None)
             .unwrap();
         assert!(!terminal_ready_for_retitle(&app, pane_id));
     }

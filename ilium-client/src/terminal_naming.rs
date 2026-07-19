@@ -30,12 +30,12 @@ const TERMINAL_SCREEN_CLIP_CHARS: usize = 4000;
 // (redirections, pipes, quoting) that would otherwise turn into `&lt;`/
 // `&amp;` noise and degrade the model's read of what's actually on screen.
 const TERMINAL_TITLE_TEMPLATE: &str = r#"<instructions>
-Infer two titles describing what this terminal is currently being used for, based on the commands and output visible on its screen below: a short title of 2 to 3 words, and a long title of 5 to 7 words. Prefer the shortest accurate wording for each over a longer one. Do not return punctuation-only text or a generic phrase such as "terminal session".
+Infer two titles and one UTF-8 icon/emoticon describing what this terminal is currently being used for, based on the commands and output visible on its screen below: a short title of 2 to 3 words, and a long title of 5 to 7 words. Choose one compact visual icon that helps recognize this work. Prefer the shortest accurate wording for each over a longer one. Do not return punctuation-only text or a generic phrase such as "terminal session".
 </instructions>
 <terminal-screen>
 {{{screen_text}}}
 </terminal-screen>
-<output-example>{"terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}</output-example>
+<output-example>{"icon":"🦀","terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
 /// Clips `screen_text` and asks the selected provider for a short/long title pair.
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn empty_screen_never_calls_the_gateway() {
         let generator = FakeGenerator::new(
-            r#"{"terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}"#,
+            r#"{"icon":"🦀","terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}"#,
         );
         let result = infer_terminal_title(&generator, "   \n  \n");
         assert!(result.is_err());
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn successful_response_returns_the_normalized_title_pair() {
         let generator = FakeGenerator::new(
-            r#"{"terminal_title_short":"  Rust   Build  ","terminal_title_long":"Build Rust Project With Cargo"}"#,
+            r#"{"icon":"🦀","terminal_title_short":"  Rust   Build  ","terminal_title_long":"Build Rust Project With Cargo"}"#,
         );
         let result = infer_terminal_title(&generator, "$ cargo build\n   Compiling ilium").unwrap();
         assert_eq!(result.short, "Rust Build");
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn prompt_includes_the_screen_text_unescaped_and_the_json_output_example() {
         let generator = FakeGenerator::new(
-            r#"{"terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}"#,
+            r#"{"icon":"🦀","terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}"#,
         );
         infer_terminal_title(&generator, "$ echo <hello> && echo done").unwrap();
 
@@ -161,7 +161,7 @@ mod tests {
         assert!(prompt.contains("$ echo <hello> && echo done"));
         assert!(!prompt.contains("&lt;"));
         assert!(prompt.contains(
-            "<output-example>{\"terminal_title_short\":\"Rust Build\",\"terminal_title_long\":\"Build Rust Project With Cargo\"}</output-example>"
+            "<output-example>{\"icon\":\"🦀\",\"terminal_title_short\":\"Rust Build\",\"terminal_title_long\":\"Build Rust Project With Cargo\"}</output-example>"
         ));
     }
 

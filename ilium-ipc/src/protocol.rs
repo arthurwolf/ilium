@@ -114,6 +114,7 @@ pub enum ClientRequest {
         node_id: NodeId,
         title: String,
         short_title: Option<String>,
+        inferred_icon: Option<String>,
     },
     /// Notify the server that a pane's terminal viewport was resized (the
     /// client resizes its own rendering unconditionally; this tells the
@@ -177,6 +178,7 @@ pub enum ClientRequest {
         pane_id: NodeId,
         title: String,
         short_title: Option<String>,
+        inferred_icon: Option<String>,
     },
     /// The client's active pane view changed: `pane_id` just became (or
     /// stopped being) the pane the user is currently looking at --
@@ -259,6 +261,7 @@ pub enum ClientRequest {
         expected_title_generation: u64,
         title: String,
         short_title: Option<String>,
+        inferred_icon: Option<String>,
         title_source: PaneTitleSource,
     },
     /// Replaces everything under the session root with `plan`'s shape --

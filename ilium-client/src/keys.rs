@@ -87,9 +87,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         }
         Mode::CreateSplitMembers(state) => handle_create_split_members_event(app, state, &event),
         Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
-        Mode::BoardPathPicker(overlay, state) => {
-            handle_board_path_picker_event(app, overlay, state, &event)
-        }
+        Mode::BoardPathPicker(overlay) => handle_board_path_picker_event(app, overlay, &event),
         Mode::BoardCardPrompt(pane_id, state) => {
             handle_board_card_prompt(app, pane_id, state, &event)
         }
@@ -268,20 +266,15 @@ fn handle_create_board_event(app: &mut App, mut state: CreateBoardState, event: 
 fn handle_board_path_picker_event(
     app: &mut App,
     mut overlay: Box<crate::explorer_overlay::ExplorerOverlay>,
-    mut state: CreateBoardState,
     event: &Event,
 ) {
     match overlay.handle(event, app.layout.screen_area) {
-        Ok(Some(path)) => {
-            state.path = TextPromptState::new(path.display().to_string());
-            state.editing_path = true;
-            app.mode = Mode::CreateBoard(state);
-        }
-        Ok(None) if is_escape(event) => app.mode = Mode::CreateBoard(state),
-        Ok(None) => app.mode = Mode::BoardPathPicker(overlay, state),
+        Ok(Some(path)) => app.return_to_create_board(Some(path)),
+        Ok(None) if is_escape(event) => app.return_to_create_board(None),
+        Ok(None) => app.mode = Mode::BoardPathPicker(overlay),
         Err(error) => {
             app.status_message = Some(format!("Board path picker error: {error}"));
-            app.mode = Mode::BoardPathPicker(overlay, state);
+            app.mode = Mode::BoardPathPicker(overlay);
         }
     }
 }
@@ -705,9 +698,9 @@ fn handle_explorer_file_menu_event(
     match key.code {
         KeyCode::Enter => {
             app.request_new_markdown_board(menu.target_group, menu.file_path);
-            app.mode = Mode::Normal;
+            app.close_modal_flow();
         }
-        KeyCode::Esc => app.mode = Mode::Explorer(menu.overlay, menu.target_group),
+        KeyCode::Esc => app.pop_modal(),
         _ => app.mode = Mode::ExplorerFileMenu(menu),
     }
 }
@@ -773,7 +766,7 @@ fn handle_rename_event(app: &mut App, mut state: TextPromptState, event: &Event)
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
             if let Some(id) = app.selected_node_id() {
-                app.request_rename(id, state.buf, None);
+                app.request_rename(id, state.buf, None, None);
             }
             app.mode = Mode::Normal;
         }
@@ -825,31 +818,10 @@ fn handle_inference_setting_prompt(
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
             app.settings_commit_inference_field(field, state.buf);
-            app.mode = Mode::Settings(crate::app::SettingsState {
-                tab: SettingsTab::Inference,
-                selected_row: 0,
-                scroll: 0,
-                ..SettingsState::default()
-            });
+            app.pop_modal();
         }
-        PromptOutcome::Cancel => {
-            app.mode = Mode::Settings(crate::app::SettingsState {
-                tab: SettingsTab::Inference,
-                selected_row: 0,
-                scroll: 0,
-                ..SettingsState::default()
-            })
-        }
+        PromptOutcome::Cancel => app.pop_modal(),
         PromptOutcome::Continue => app.mode = Mode::InferenceSettingPrompt(field, state),
-    }
-}
-
-fn voice_settings_return_state() -> crate::app::SettingsState {
-    crate::app::SettingsState {
-        tab: SettingsTab::VoiceControl,
-        selected_row: 0,
-        scroll: 0,
-        ..SettingsState::default()
     }
 }
 
@@ -870,9 +842,9 @@ fn handle_voice_setting_prompt(
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
             app.settings_commit_voice_field(field, state.buf);
-            app.mode = Mode::Settings(voice_settings_return_state());
+            app.pop_modal();
         }
-        PromptOutcome::Cancel => app.mode = Mode::Settings(voice_settings_return_state()),
+        PromptOutcome::Cancel => app.pop_modal(),
         PromptOutcome::Continue => app.mode = Mode::VoiceSettingPrompt(field, state),
     }
 }
@@ -891,10 +863,10 @@ fn handle_voice_prompt_editor(
         return;
     }
     match (key.code, key.modifiers) {
-        (KeyCode::Esc, _) => app.mode = Mode::Settings(voice_settings_return_state()),
+        (KeyCode::Esc, _) => app.pop_modal(),
         (KeyCode::Char('s'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
             app.settings_commit_voice_prompt(state.text());
-            app.mode = Mode::Settings(voice_settings_return_state());
+            app.pop_modal();
         }
         _ => {
             state.textarea.input(*key);
@@ -1528,6 +1500,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     app.settings_adjust_ollama_model(1)
                 }
                 Some(crate::app::InferenceRow::Field(field)) => {
+                    app.mode = Mode::Settings(state);
                     app.settings_open_inference_field(field);
                     return;
                 }
@@ -1547,10 +1520,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
+                app.mode = Mode::Settings(state);
                 app.settings_adjust_voice_row(row, -1);
-                if !matches!(app.mode, Mode::Normal) {
-                    return;
-                }
+                return;
             }
         }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
@@ -1560,10 +1532,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
+                app.mode = Mode::Settings(state);
                 app.settings_adjust_voice_row(row, 1);
-                if !matches!(app.mode, Mode::Normal) {
-                    return;
-                }
+                return;
             }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Appearance => {
@@ -1956,7 +1927,146 @@ mod indent_outdent_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
         );
-        assert!(matches!(app.mode, Mode::BoardPathPicker(_, _)));
+        assert!(matches!(app.mode, Mode::BoardPathPicker(_)));
+        assert!(
+            matches!(app.modal_stack.as_slice(), [Mode::CreateBoard(state)] if state.name.buf == "p")
+        );
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(&app.mode, Mode::CreateBoard(state) if state.name.buf == "p"));
+        assert!(app.modal_stack.is_empty());
+    }
+
+    #[test]
+    fn voice_api_key_prompt_preserves_exact_settings_parent_until_commit() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::VoiceControl,
+            selected_row: 1,
+            scroll: 7,
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::VoiceSettingPrompt(_, _)));
+        assert!(matches!(
+            app.modal_stack.as_slice(),
+            [Mode::Settings(state)]
+                if state.tab == SettingsTab::VoiceControl
+                    && state.selected_row == 1
+                    && state.scroll == 7
+        ));
+
+        for character in "sk-live-test".chars() {
+            handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE)),
+            );
+        }
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        assert_eq!(app.voice_settings.api_key, "sk-live-test");
+        assert!(matches!(
+            &app.mode,
+            Mode::Settings(state)
+                if state.tab == SettingsTab::VoiceControl
+                    && state.selected_row == 1
+                    && state.scroll == 7
+        ));
+        assert!(app.modal_stack.is_empty());
+    }
+
+    #[test]
+    fn modal_stack_restores_arbitrary_depth_in_last_opened_first_closed_order() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::VoiceControl,
+            selected_row: 1,
+            ..SettingsState::default()
+        });
+        app.push_modal(Mode::VoiceSettingPrompt(
+            crate::voice_settings::VoiceSettingField::ApiKey,
+            TextPromptState::new(""),
+        ));
+        app.push_modal(Mode::ConfirmSessionRecovery { pane_count: 2 });
+
+        assert_eq!(app.modal_stack.len(), 2);
+        app.pop_modal();
+        assert!(matches!(app.mode, Mode::VoiceSettingPrompt(_, _)));
+        app.pop_modal();
+        assert!(matches!(
+            app.mode,
+            Mode::Settings(SettingsState {
+                tab: SettingsTab::VoiceControl,
+                selected_row: 1,
+                ..
+            })
+        ));
+        assert!(app.modal_stack.is_empty());
+    }
+
+    #[test]
+    fn inference_field_and_file_action_menu_restore_their_exact_parents() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::OpenAi;
+        let selected_row = crate::settings_ui::inference_rows(&app.inference_settings)
+            .iter()
+            .position(|row| {
+                *row == crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::OpenAiApiKey,
+                )
+            })
+            .expect("OpenAI API key row");
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row,
+            scroll: 3,
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(
+            &app.mode,
+            Mode::Settings(state)
+                if state.tab == SettingsTab::Inference
+                    && state.selected_row == selected_row
+                    && state.scroll == 3
+        ));
+
+        let overlay = crate::explorer_overlay::ExplorerOverlay::open_at(&PathBuf::from("/tmp"))
+            .expect("open temporary explorer");
+        app.open_explorer_file_menu(
+            Box::new(overlay),
+            ilium_core::ROOT_ID,
+            PathBuf::from("/tmp/example.md"),
+            ratatui::layout::Position::new(2, 2),
+        );
+        assert!(matches!(app.mode, Mode::ExplorerFileMenu(_)));
+        assert!(matches!(app.modal_stack.last(), Some(Mode::Explorer(_, _))));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::Explorer(_, _)));
+        assert!(app.modal_stack.is_empty());
     }
 
     #[test]

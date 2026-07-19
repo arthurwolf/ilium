@@ -23,6 +23,12 @@ pub struct ProjectConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub project_name: Option<String>,
+    #[serde(
+        rename = "project icon",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub project_icon: Option<String>,
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -33,6 +39,7 @@ impl ProjectConfig {
     pub fn with_project_name(project_name: impl Into<String>) -> Self {
         Self {
             project_name: Some(project_name.into()),
+            project_icon: None,
             extra: BTreeMap::new(),
         }
     }
@@ -105,6 +112,7 @@ mod tests {
         let cwd = scratch_dir();
         let config = ProjectConfig {
             project_name: Some("Ilium".to_string()),
+            project_icon: None,
             extra: BTreeMap::new(),
         };
 

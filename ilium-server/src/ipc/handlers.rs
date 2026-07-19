@@ -113,9 +113,10 @@ pub async fn handle_request(
             node_id,
             title,
             short_title,
+            inferred_icon,
         } => {
             handle_tree_mutation(state, direct_tx, |tree| {
-                tree.rename_node(node_id, title, short_title)
+                tree.rename_node(node_id, title, short_title, inferred_icon)
             })
             .await;
             false
@@ -124,8 +125,9 @@ pub async fn handle_request(
             pane_id,
             title,
             short_title,
+            inferred_icon,
         } => {
-            handle_automatic_pane_title(state, pane_id, title, short_title).await;
+            handle_automatic_pane_title(state, pane_id, title, short_title, inferred_icon).await;
             false
         }
         ClientRequest::SetSessionPaneTitle {
@@ -134,16 +136,20 @@ pub async fn handle_request(
             expected_title_generation,
             title,
             short_title,
+            inferred_icon,
             title_source,
         } => {
             handle_session_pane_title(
                 state,
-                pane_id,
-                &expected_session_id,
-                expected_title_generation,
-                title,
-                short_title,
-                title_source,
+                SessionPaneTitleUpdate {
+                    pane_id,
+                    expected_session_id: &expected_session_id,
+                    expected_title_generation,
+                    title,
+                    short_title,
+                    inferred_icon,
+                    title_source,
+                },
             )
             .await;
             false
@@ -703,10 +709,11 @@ async fn handle_automatic_pane_title(
     pane_id: NodeId,
     title: String,
     short_title: Option<String>,
+    inferred_icon: Option<String>,
 ) {
     let title_changed = {
         let mut tree = state.tree.write().await;
-        match tree.set_automatic_pane_title(pane_id, title, short_title) {
+        match tree.set_automatic_pane_title(pane_id, title, short_title, inferred_icon) {
             Ok(changed) => changed,
             Err(error) => {
                 tracing::warn!("automatic title update rejected for pane {pane_id:?}: {error}");
@@ -722,43 +729,63 @@ async fn handle_automatic_pane_title(
 /// Applies an LLM title as a compare-and-set against the server's live
 /// session identity. A stale client or in-flight worker can never title the
 /// replacement session, regardless of IPC event/request ordering.
-async fn handle_session_pane_title(
-    state: &Arc<ServerState>,
+struct SessionPaneTitleUpdate<'a> {
     pane_id: NodeId,
-    expected_session_id: &str,
+    expected_session_id: &'a str,
     expected_title_generation: u64,
     title: String,
     short_title: Option<String>,
+    inferred_icon: Option<String>,
     title_source: PaneTitleSource,
-) {
+}
+
+async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPaneTitleUpdate<'_>) {
     // Lock ordering is tree before panes throughout the server. Both remain
     // held through the identity check and title write so `/resume` cannot
     // invalidate the session between those two operations.
     let mut tree = state.tree.write().await;
     let panes = state.panes.read().await;
-    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&update.pane_id) else {
         return;
     };
     if runtime.is_session_identity_invalidated
-        || runtime.session_id.as_deref() != Some(expected_session_id)
-        || runtime.title_generation != expected_title_generation
+        || runtime.session_id.as_deref() != Some(update.expected_session_id)
+        || runtime.title_generation != update.expected_title_generation
     {
         return;
     }
-    let changed = match title_source {
+    let changed = match update.title_source {
         PaneTitleSource::Automatic => tree
-            .set_automatic_pane_title(pane_id, title, short_title)
+            .set_automatic_pane_title(
+                update.pane_id,
+                update.title,
+                update.short_title,
+                update.inferred_icon,
+            )
             .unwrap_or_else(|error| {
-                tracing::warn!("session title update rejected for pane {pane_id:?}: {error}");
+                tracing::warn!(
+                    "session title update rejected for pane {:?}: {error}",
+                    update.pane_id
+                );
                 false
             }),
-        PaneTitleSource::UserSpecified => match tree.rename_node(pane_id, title, short_title) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!("session retitle rejected for pane {pane_id:?}: {error}");
-                false
+        PaneTitleSource::UserSpecified => {
+            match tree.rename_node(
+                update.pane_id,
+                update.title,
+                update.short_title,
+                update.inferred_icon,
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(
+                        "session retitle rejected for pane {:?}: {error}",
+                        update.pane_id
+                    );
+                    false
+                }
             }
-        },
+        }
     };
     drop(panes);
     drop(tree);
@@ -1451,7 +1478,7 @@ pub(crate) async fn write_key_input(
         // The typed-command echo has no distinct short form, unlike an LLM
         // inference -- `None` clears any stale short title left over from
         // an earlier automatic inference for this same pane.
-        match tree.set_automatic_pane_title(pane_id, title, None) {
+        match tree.set_automatic_pane_title(pane_id, title, None, None) {
             Ok(changed) => changed,
             Err(error) => {
                 tracing::error!("automatic title update rejected for pane {pane_id:?}: {error}");

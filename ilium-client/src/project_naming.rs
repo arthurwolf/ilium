@@ -18,7 +18,7 @@ const PROJECT_NAME_MIN_WORDS: usize = 1;
 const PROJECT_NAME_MAX_WORDS: usize = 2;
 
 const PROJECT_NAME_TEMPLATE: &str = r#"<instructions>
-Infer the shortest useful project name from the project context. Return one or two words only. Do not use a slogan, version, punctuation-only name, or explanation.
+Infer the shortest useful project name and one compact UTF-8 icon/emoticon from the project context. Return one or two words for the name only. Do not use a slogan, version, punctuation-only name, or explanation.
 </instructions>
 <project-context>
     <project-path>{{project_path}}</project-path>
@@ -32,7 +32,7 @@ Infer the shortest useful project name from the project context. Return one or t
 {{readme_md}}
     </readme-md>
 </project-context>
-<output-example>{"project_name":"Ilium"}</output-example>
+<output-example>{"project_name":"Ilium","icon":"🧭"}</output-example>
 <response-format>Return exactly one JSON object following the output example. Do not wrap it in Markdown.</response-format>"#;
 
 /// The persisted or newly inferred name returned by the boot workflow.
@@ -45,6 +45,7 @@ pub enum ProjectNameSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectNameBootstrap {
     pub project_name: String,
+    pub icon: Option<String>,
     pub source: ProjectNameSource,
 }
 
@@ -60,6 +61,15 @@ pub fn load_stored_project_name(cwd: &Path) -> anyhow::Result<Option<String>> {
         }))
 }
 
+/// Reads the optional icon stored alongside a valid project name. Older
+/// project configs deliberately remain title-only until fresh inference.
+pub fn load_stored_project_icon(cwd: &Path) -> anyhow::Result<Option<String>> {
+    Ok(project_config::load(cwd)?
+        .project_icon
+        .as_deref()
+        .and_then(naming::normalize_icon))
+}
+
 /// Loads a stored name, or calls the selected provider exactly once to infer and save it.
 pub fn bootstrap_project_name<G: PromptCompletionClient>(
     cwd: &Path,
@@ -69,6 +79,9 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
     if let Some(project_name) = load_stored_project_name(cwd)? {
         return Ok(ProjectNameBootstrap {
             project_name,
+            icon: config
+                .project_icon
+                .and_then(|icon| naming::normalize_icon(&icon)),
             source: ProjectNameSource::Stored,
         });
     }
@@ -76,12 +89,14 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
     let context = ProjectContext::collect(cwd)?;
     let response =
         naming::render_and_complete(generator, "project-name", PROJECT_NAME_TEMPLATE, &context)?;
-    let project_name = parse_project_name_response(&response)?;
+    let (project_name, icon) = parse_project_name_response(&response)?;
 
     config.project_name = Some(project_name.clone());
+    config.project_icon = Some(icon.clone());
     project_config::save(cwd, &config)?;
     Ok(ProjectNameBootstrap {
         project_name,
+        icon: Some(icon),
         source: ProjectNameSource::Inferred,
     })
 }
@@ -158,14 +173,20 @@ fn first_lines(contents: &str, maximum: usize) -> String {
         .join("\n")
 }
 
-fn parse_project_name_response(response: &str) -> anyhow::Result<String> {
-    naming::parse_bounded_word_json(
+fn parse_project_name_response(response: &str) -> anyhow::Result<(String, String)> {
+    let parsed: serde_json::Value = serde_json::from_str(response)
+        .map_err(|error| anyhow::anyhow!("project-name response was not valid JSON: {error}"))?;
+    let name = naming::parse_bounded_word_json(
         response,
         "project_name",
         PROJECT_NAME_MIN_WORDS,
         PROJECT_NAME_MAX_WORDS,
         "project-name",
-    )
+    )?;
+    Ok((
+        name,
+        naming::extract_icon_field(&parsed, "icon", "project-name")?,
+    ))
 }
 
 #[cfg(test)]
@@ -229,7 +250,7 @@ mod tests {
     fn missing_name_collects_context_then_persists_one_inference() {
         let cwd = scratch_dir();
         std::fs::write(cwd.join("README.md"), "# Stellar tools\n").unwrap();
-        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools"}"#);
+        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools","icon":"✨"}"#);
 
         let result = bootstrap_project_name(&cwd, &generator).unwrap();
 
@@ -250,14 +271,16 @@ mod tests {
             claude_md: "[not present]".to_string(),
             readme_md: "# Example".to_string(),
         };
-        let generator = FakeGenerator::new(r#"{"project_name":"Ilium"}"#);
+        let generator = FakeGenerator::new(r#"{"project_name":"Ilium","icon":"🧭"}"#);
         naming::render_and_complete(&generator, "project-name", PROJECT_NAME_TEMPLATE, &context)
             .unwrap();
         let prompt = generator.last_prompt.borrow().clone().unwrap();
 
         assert!(prompt.contains("<project-context>"));
         assert!(prompt.contains("<project-path>/work/example</project-path>"));
-        assert!(prompt.contains("<output-example>{\"project_name\":\"Ilium\"}</output-example>"));
+        assert!(prompt.contains(
+            "<output-example>{\"project_name\":\"Ilium\",\"icon\":\"🧭\"}</output-example>"
+        ));
     }
 
     #[test]

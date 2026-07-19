@@ -122,6 +122,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
             node_id: pane_id,
             title: "manual shell name".to_string(),
             short_title: None,
+            inferred_icon: None,
         },
     )
     .await

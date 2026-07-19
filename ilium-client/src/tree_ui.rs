@@ -397,6 +397,7 @@ pub struct TreeRenderOptions<'a> {
     /// Current wall-clock time used only for durable absolute countdowns.
     pub current_unix_millis: u64,
     pub project_name: Option<&'a str>,
+    pub project_icon: Option<&'a str>,
     pub is_project_name_loading: bool,
     /// Terminal panes currently awaiting `session_naming::infer_pane_title`
     /// (see `App::titles_loading`) -- their name renders as the shared
@@ -416,6 +417,8 @@ pub struct TreeRenderOptions<'a> {
     /// An explicit opt-in for text-only row-action symbols. The default is
     /// false so normal UTF-8 icons are always the primary experience.
     pub use_stable_glyphs: bool,
+    /// Whether persisted LLM-suggested title icons should be rendered.
+    pub show_inferred_title_icons: bool,
     pub hover: TreeHoverState,
     /// Live pane runtimes (see `App::panes`), keyed by pane id. Used only to
     /// look up each open editor pane's backing file path on demand while
@@ -443,6 +446,7 @@ struct TreeItemBuildContext<'a> {
     icons: &'a IconSettings,
     tree_order: TreeOrder,
     sidebar_density: SidebarDensity,
+    show_inferred_title_icons: bool,
     panel_width: u16,
     /// Full widget identifier paths that users have expanded. Folder nodes
     /// are materialized only along these paths, so a large unopened subtree
@@ -485,6 +489,7 @@ pub(crate) fn visible_tree_node_ids(
             icons: &IconSettings::default(),
             tree_order,
             sidebar_density: SidebarDensity::default(),
+            show_inferred_title_icons: false,
             panel_width: 0,
             opened_paths: &opened_paths,
             panes: &HashMap::new(),
@@ -542,7 +547,11 @@ fn build_item(
             let label = node_label(
                 Span::raw(icon.to_string()),
                 None,
-                Span::raw(node.name.clone()),
+                Span::raw(title_with_optional_icon(
+                    &node.name,
+                    node.inferred_icon.as_deref(),
+                    context.show_inferred_title_icons,
+                )),
             );
             let label = apply_recent_pulse(label, flash_on);
             // `NodeId`s are unique across the whole `Tree` (its own
@@ -579,6 +588,11 @@ fn build_item(
                     prompt_queue.len()
                 )
             };
+            let display_name = title_with_optional_icon(
+                &display_name,
+                node.inferred_icon.as_deref(),
+                context.show_inferred_title_icons,
+            );
             let label = scheduled_input.as_ref().map_or_else(
                 || {
                     pane_label_with_icons(
@@ -615,7 +629,11 @@ fn build_item(
             let label = node_label(
                 Span::raw(context.icons.glyph(IconTarget::Folder).to_string()),
                 None,
-                Span::raw(node.name.clone()),
+                Span::raw(title_with_optional_icon(
+                    &node.name,
+                    node.inferred_icon.as_deref(),
+                    context.show_inferred_title_icons,
+                )),
             );
             // The root itself is a normal tree row. Once opened, its direct
             // children are listed; each child directory recurses only after
@@ -632,6 +650,32 @@ fn build_item(
             )
             .expect("folder node ids are unique")
         }
+    }
+}
+
+/// Keeps inferred-icon rendering strictly opt-in while making the prefix
+/// identical for short and long display-title variants.
+fn title_with_optional_icon(title: &str, inferred_icon: Option<&str>, enabled: bool) -> String {
+    match (enabled, inferred_icon) {
+        (true, Some(icon)) => format!("{icon} {title}"),
+        _ => title.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod inferred_title_icon_tests {
+    use super::title_with_optional_icon;
+
+    #[test]
+    fn inferred_title_icons_are_hidden_by_default_and_prefix_when_enabled() {
+        assert_eq!(
+            title_with_optional_icon("Long Agent Title", Some("🔐"), false),
+            "Long Agent Title"
+        );
+        assert_eq!(
+            title_with_optional_icon("Short Title", Some("🔐"), true),
+            "🔐 Short Title"
+        );
     }
 }
 
@@ -1488,6 +1532,7 @@ impl TreeItemCache {
                     icons: &IconSettings::default(),
                     tree_order,
                     sidebar_density: SidebarDensity::default(),
+                    show_inferred_title_icons: false,
                     panel_width: 0,
                     opened_paths,
                     panes: &HashMap::new(),
@@ -1536,6 +1581,7 @@ pub fn render(
             icons: options.icons,
             tree_order: options.tree_order,
             sidebar_density: options.sidebar_density,
+            show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: area.width,
             opened_paths: state.opened(),
             panes: options.panes,
@@ -1543,6 +1589,8 @@ pub fn render(
     );
     let block = theme::block(options.focused).title(theme::chrome_title(&sidebar_title(
         options.project_name,
+        options.project_icon,
+        options.show_inferred_title_icons,
         options.is_project_name_loading,
         options.elapsed_ms,
     )));
@@ -1570,6 +1618,7 @@ pub fn render(
                 icons: options.icons,
                 tree_order: options.tree_order,
                 sidebar_density: options.sidebar_density,
+                show_inferred_title_icons: options.show_inferred_title_icons,
                 panel_width: area.width,
                 opened_paths: state.opened(),
                 panes: options.panes,
@@ -1728,12 +1777,17 @@ const fn is_toolbar_visible(tree_focused: bool, toolbar_hovered: bool) -> bool {
 /// mark instead of the visually redundant `Ilium: Ilium`.
 pub fn sidebar_title(
     project_name: Option<&str>,
+    project_icon: Option<&str>,
+    show_inferred_title_icons: bool,
     is_project_name_loading: bool,
     elapsed_ms: u128,
 ) -> String {
     match project_name {
         Some("Ilium") => "Ilium²".to_string(),
-        Some(project_name) => format!("Ilium: {project_name}"),
+        Some(project_name) => format!(
+            "Ilium: {}",
+            title_with_optional_icon(project_name, project_icon, show_inferred_title_icons)
+        ),
         None if is_project_name_loading => {
             let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             format!("Ilium: {}", SPINNER_FRAMES[frame_index])
@@ -1748,10 +1802,20 @@ mod project_title_tests {
 
     #[test]
     fn sidebar_title_includes_project_name_or_uses_the_self_hosting_mark() {
-        assert_eq!(sidebar_title(None, false, 0), "Ilium");
-        assert_eq!(sidebar_title(Some("Money"), false, 0), "Ilium: Money");
-        assert_eq!(sidebar_title(Some("Ilium"), false, 0), "Ilium²");
-        assert_eq!(sidebar_title(None, true, 0), "Ilium: ⠋");
+        assert_eq!(sidebar_title(None, None, false, false, 0), "Ilium");
+        assert_eq!(
+            sidebar_title(Some("Money"), None, false, false, 0),
+            "Ilium: Money"
+        );
+        assert_eq!(
+            sidebar_title(Some("Money"), Some("💸"), true, false, 0),
+            "Ilium: 💸 Money"
+        );
+        assert_eq!(
+            sidebar_title(Some("Ilium"), Some("🧪"), true, false, 0),
+            "Ilium²"
+        );
+        assert_eq!(sidebar_title(None, None, false, true, 0), "Ilium: ⠋");
     }
 }
 
@@ -1903,6 +1967,7 @@ mod tests {
                         elapsed_ms,
                         current_unix_millis: 0,
                         project_name: None,
+                        project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created,
@@ -1912,6 +1977,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
                     },
@@ -2383,6 +2449,7 @@ mod tests {
                         elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
+                        project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
@@ -2392,6 +2459,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
                     },
@@ -2420,6 +2488,7 @@ mod tests {
                         elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
+                        project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
@@ -2429,6 +2498,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        show_inferred_title_icons: false,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
                                 id: first_group,
@@ -2475,6 +2545,7 @@ mod tests {
                         elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
+                        project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
@@ -2484,6 +2555,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
                     },
@@ -2672,6 +2744,7 @@ mod tests {
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 panes: &HashMap::new(),
@@ -2691,6 +2764,7 @@ mod tests {
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 panes: &HashMap::new(),
@@ -2713,6 +2787,7 @@ mod tests {
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 panes: &HashMap::new(),
@@ -2743,6 +2818,7 @@ mod tests {
             pane,
             "Fix Auth Bug In Login Flow",
             Some("Auth Bug".to_string()),
+            Some("🔐".to_string()),
         )
         .unwrap();
         let node = tree.get(pane).unwrap();
@@ -2761,7 +2837,7 @@ mod tests {
         let pane = tree
             .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .unwrap();
-        tree.rename_node(pane, "manual name", None).unwrap();
+        tree.rename_node(pane, "manual name", None, None).unwrap();
         let node = tree.get(pane).unwrap();
 
         assert_eq!(display_title(node, 0), "manual name");
@@ -2984,6 +3060,7 @@ mod tests {
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 panes: &HashMap::new(),
@@ -3179,6 +3256,7 @@ mod tests {
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 panes: &HashMap::new(),

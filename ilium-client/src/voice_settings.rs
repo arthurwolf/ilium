@@ -27,12 +27,13 @@ pub enum VoiceRow {
     InputDevice,
     OutputDevice,
     OutputVolume,
+    ConfirmTerminalSubmissions,
     CustomPrompt,
     Reconnect,
 }
 
 impl VoiceRow {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Enabled,
         Self::ApiKey,
         Self::Model,
@@ -43,6 +44,7 @@ impl VoiceRow {
         Self::InputDevice,
         Self::OutputDevice,
         Self::OutputVolume,
+        Self::ConfirmTerminalSubmissions,
         Self::CustomPrompt,
         Self::Reconnect,
     ];

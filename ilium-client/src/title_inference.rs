@@ -162,7 +162,7 @@ mod tests {
         app.agent_session_ids
             .insert(pane_id, SESSION_ID.to_string());
         app.tree
-            .rename_node(pane_id, "my custom name", None)
+            .rename_node(pane_id, "my custom name", None, None)
             .unwrap();
 
         assert_eq!(

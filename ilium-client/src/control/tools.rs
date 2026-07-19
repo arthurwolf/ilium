@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 pub(super) const GET_STATE_TOOL_NAME: &str = "ilium_get_state";
 pub(super) const UI_TOOL_NAME: &str = "ilium_ui";
 pub(super) const TREE_TOOL_NAME: &str = "ilium_tree";
+pub(super) const SEND_TO_TERMINAL_TOOL_NAME: &str = "ilium_send_to_terminal";
 pub(super) const TERMINAL_TOOL_NAME: &str = "ilium_terminal";
 pub(super) const EDITOR_TOOL_NAME: &str = "ilium_editor";
 pub(super) const BOARD_TOOL_NAME: &str = "ilium_board";
@@ -67,12 +68,26 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
             }),
         ),
         tool(
-            TERMINAL_TOOL_NAME,
-            "Control a terminal or agent pane semantically: write text, press a supported key, scroll, schedule input, or manage the durable completion prompt queue.",
+            SEND_TO_TERMINAL_TOOL_NAME,
+            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane. Omit target for the currently active/open pane. Requests to send, tell, submit, or pass text to the current agent use send_enter=true; requests only to type or stage text use send_enter=false. Never merely say the text as a substitute for calling this tool.",
             json!({
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["write", "press_key", "scroll_up", "scroll_down", "scroll_to_bottom", "schedule_input", "queue_prompt", "clear_prompt_queue"] },
+                    "target": target_schema(),
+                    "text": { "type": "string", "description": "Exact text to type, preserving slash commands, punctuation, paths, and code." },
+                    "send_enter": { "type": "boolean", "description": "Whether to submit with Enter. Defaults to true." },
+                },
+                "required": ["text"],
+                "additionalProperties": false,
+            }),
+        ),
+        tool(
+            TERMINAL_TOOL_NAME,
+            "Control non-dictation terminal behavior: press a supported key, scroll, schedule future input, or manage the durable completion prompt queue. Use ilium_send_to_terminal for immediate dictated text.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["press_key", "scroll_up", "scroll_down", "scroll_to_bottom", "schedule_input", "queue_prompt", "clear_prompt_queue"] },
                     "target": target_schema(),
                     "text": { "type": "string" },
                     "key": { "type": "string", "enum": ["enter", "escape", "tab", "backtab", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "backspace", "delete", "space", "control_c", "control_d", "control_l", "control_z"] },
@@ -166,7 +181,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             CONFIRM_ACTION_TOOL_NAME,
-            "Confirm or cancel one pending high-impact ilium action. Only confirm after the user explicitly says yes to the exact action described in the preceding confirmation_required result.",
+            "Confirm or cancel one pending ilium action. For staged terminal text, yes presses Enter in the original terminal and no leaves the visible text unsubmitted. Only call after the user explicitly answers the preceding confirmation question.",
             json!({
                 "type": "object",
                 "properties": {
@@ -233,5 +248,27 @@ mod tests {
         for definition in definitions() {
             assert_eq!(definition.parameters["additionalProperties"], false);
         }
+    }
+
+    #[test]
+    fn focused_dictation_has_one_explicit_required_text_tool() {
+        let definitions = definitions();
+        let send_tool = definitions
+            .iter()
+            .find(|definition| definition.name == SEND_TO_TERMINAL_TOOL_NAME)
+            .expect("dedicated terminal dictation tool");
+        let terminal_tool = definitions
+            .iter()
+            .find(|definition| definition.name == TERMINAL_TOOL_NAME)
+            .expect("general terminal tool");
+
+        assert_eq!(send_tool.parameters["required"], json!(["text"]));
+        assert!(send_tool.description.contains("currently active/open pane"));
+        assert!(send_tool.description.contains("Never merely say the text"));
+        assert!(!terminal_tool.parameters["properties"]["action"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action == "write"));
     }
 }

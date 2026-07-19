@@ -7,6 +7,11 @@
 - [x] Add the bottom-right voice switch beyond the purple status bar, with a large red enabled/recording dot and black disabled dot, plus keyboard and mouse interaction.
 - [x] Cover the voice protocol, audio conversion, tool schemas, command execution, security boundaries, settings persistence, bottom control, and full UI capability surface with focused and PTY tests.
 - [x] Run workspace tests, strict Clippy, formatting, release build/install, and verify the installed TUI plus a real OpenAI Realtime voice session, including a model-issued function call and accepted tool-result follow-up.
+- [x] Make focused-pane and focused-agent dictation the explicit primary workflow, including the exact "send /clear to the currently open terminal" mapping.
+- [x] Add a live-persisted `Confirm terminal submissions` Voice setting that defaults off while leaving destructive-action confirmations independent.
+- [x] When terminal confirmation is enabled, stage dictated text visibly without Enter, ask whether to submit what is on screen without reading it aloud, and press Enter only after yes.
+- [x] Add protocol, prompt-contract, tool-schema, control-plane, and terminal-dispatch regressions for dictated `/clear` and related forwarding phrases.
+- [x] Run workspace gates, release-install, and live Realtime verification proving representative dictated forwarding requests reach the installed TUI's active pane in both immediate and staged-confirmation modes.
 
 # Performance and interaction responsiveness (20 improvements)
 

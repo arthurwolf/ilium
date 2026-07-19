@@ -95,6 +95,7 @@ pub struct VoiceSettings {
     pub input_device_name: Option<String>,
     pub output_device_name: Option<String>,
     pub output_volume_percent: u8,
+    pub confirm_terminal_submissions: bool,
     pub custom_prompt: String,
 }
 
@@ -111,8 +112,27 @@ impl Default for VoiceSettings {
             input_device_name: None,
             output_device_name: None,
             output_volume_percent: 80,
+            confirm_terminal_submissions: false,
             custom_prompt: String::new(),
         }
+    }
+}
+
+impl VoiceSettings {
+    /// Returns whether two settings values configure the same owned audio and
+    /// Realtime actor. Terminal confirmation is client-side control policy, so
+    /// toggling it must not interrupt an otherwise healthy voice connection.
+    pub fn has_same_runtime_configuration(&self, other: &Self) -> bool {
+        self.api_key == other.api_key
+            && self.model == other.model
+            && self.voice == other.voice
+            && self.reasoning_effort == other.reasoning_effort
+            && self.input_mode == other.input_mode
+            && self.vad_eagerness == other.vad_eagerness
+            && self.input_device_name == other.input_device_name
+            && self.output_device_name == other.output_device_name
+            && self.output_volume_percent == other.output_volume_percent
+            && self.custom_prompt == other.custom_prompt
     }
 }
 
@@ -553,6 +573,8 @@ pub struct UiSettings {
     /// is an accessibility/terminal-compatibility preference only; rich
     /// Unicode icons remain the normal, default presentation.
     pub use_stable_glyphs: bool,
+    /// Shows LLM-suggested per-title icons before node names in the left tree.
+    pub show_inferred_title_icons: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -568,6 +590,7 @@ impl Default for UiSettings {
             motion_level: MotionLevel::Full,
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
+            show_inferred_title_icons: false,
             icons: IconSettings::default(),
         }
     }
@@ -638,6 +661,7 @@ struct RawUiConfig {
     motion_level: Option<String>,
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
+    show_inferred_title_icons: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -937,6 +961,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         motion_level,
         sidebar_density,
         use_stable_glyphs: raw.use_stable_glyphs.unwrap_or(defaults.use_stable_glyphs),
+        show_inferred_title_icons: raw
+            .show_inferred_title_icons
+            .unwrap_or(defaults.show_inferred_title_icons),
         icons,
     })
 }
@@ -1562,6 +1589,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "use_stable_glyphs".to_string(),
         toml::Value::Boolean(ui.use_stable_glyphs),
     );
+    table.insert(
+        "show_inferred_title_icons".to_string(),
+        toml::Value::Boolean(ui.show_inferred_title_icons),
+    );
     let icons = IconTarget::ALL
         .into_iter()
         .map(|target| {
@@ -2082,6 +2113,7 @@ mod tests {
             tree_order: TreeOrder::NameDescending,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
+            show_inferred_title_icons: true,
             use_stable_glyphs: true,
             icons: IconSettings::default(),
         };
@@ -2282,6 +2314,7 @@ mod tests {
             input_device_name: Some("Studio microphone".to_owned()),
             output_device_name: Some("Desk speakers".to_owned()),
             output_volume_percent: 65,
+            confirm_terminal_submissions: true,
             custom_prompt: "Prefer terse confirmations.\nNever guess targets.".to_owned(),
         };
 
@@ -2291,6 +2324,7 @@ mod tests {
         let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(raw.contains("[notifications]"));
         assert!(raw.contains("enabled = false"));
+        assert!(raw.contains("confirm_terminal_submissions = true"));
 
         std::fs::write(
             dir.join("config.toml"),
@@ -2304,5 +2338,18 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn terminal_submission_confirmation_defaults_off_and_is_not_runtime_configuration() {
+        let base = VoiceSettings::default();
+        let mut policy_changed = base.clone();
+        policy_changed.confirm_terminal_submissions = true;
+        let mut prompt_changed = base.clone();
+        prompt_changed.custom_prompt = "Use a calm voice".to_owned();
+
+        assert!(!base.confirm_terminal_submissions);
+        assert!(base.has_same_runtime_configuration(&policy_changed));
+        assert!(!base.has_same_runtime_configuration(&prompt_changed));
     }
 }

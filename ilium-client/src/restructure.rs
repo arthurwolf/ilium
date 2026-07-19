@@ -48,12 +48,12 @@ You are reorganizing a developer's workspace of terminals, coding agents, editor
 Return one JSON object with a single "children" array describing the COMPLETE new structure. This is a full replacement, not an edit: every existing item listed below must appear exactly once somewhere in "children" (or nested inside a group/split_view within it), referenced by its exact numeric "id". Do not invent an id that isn't listed below. Do not omit any listed id. Do not reference any id more than once.
 
 Each entry in "children" (and in any nested "children") is exactly one of:
-- {"kind":"pane","id":<number>,"title":"...","short_title":"..."} -- an existing pane, referenced by id
-- {"kind":"folder","id":<number>,"title":"...","short_title":"..."} -- an existing folder, referenced by id
-- {"kind":"group","title":"...","short_title":"...","children":[...]} -- a brand-new group; never has an id
-- {"kind":"split_view","orientation":"vertical"|"horizontal","title":"...","short_title":"...","children":[...]} -- a brand-new split view; never has an id; its "children" must all be "pane" entries, at most 4 of them
+- {"kind":"pane","id":<number>,"title":"...","short_title":"...","icon":"..."} -- an existing pane, referenced by id
+- {"kind":"folder","id":<number>,"title":"...","short_title":"...","icon":"..."} -- an existing folder, referenced by id
+- {"kind":"group","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new group; never has an id
+- {"kind":"split_view","orientation":"vertical"|"horizontal","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new split view; never has an id; its "children" must all be "pane" entries, at most 4 of them
 
-"title" is a full descriptive title (5 to 7 words); "short_title" is a short form (2 to 3 words). Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
+"title" is a full descriptive title (5 to 7 words); "short_title" is a short form (2 to 3 words); "icon" is one compact UTF-8 icon/emoticon. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
 </instructions>
 <current-structure>
 The following is the project's current hierarchy. Use it as context and preserve useful continuity where it still matches the items' current work. Entries marked "manual" reflect deliberate user organization and deserve particular weight; entries marked "LLM restructure" came from a previous AI reorganization and may be retained when still useful. This is inspiration, not a constraint: do not reproduce it mechanically, and reorganize it whenever the current item content supports a clearer structure.
@@ -63,6 +63,7 @@ The following is the project's current hierarchy. Use it as context and preserve
 {{#each items}}
 <item id="{{id}}" kind="{{kind_label}}">
     <current-title>{{current_title}}</current-title>
+    <current-icon>{{current_icon}}</current-icon>
     {{#if filename}}<filename>{{filename}}</filename>{{/if}}
     <content>
 {{{content_extract}}}
@@ -70,7 +71,7 @@ The following is the project's current hierarchy. Use it as context and preserve
 </item>
 {{/each}}
 </items>
-<output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent"},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root"}]}</output-example>
+<output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧"},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}</output-example>
 <response-format>Return exactly one JSON object following the output example's shape. Do not wrap it in Markdown.</response-format>"#;
 
 /// One pane or folder's current identity and content, as sent to the LLM.
@@ -82,6 +83,7 @@ pub struct LeafContext {
     pub id: NodeId,
     pub kind_label: String,
     pub current_title: String,
+    pub current_icon: Option<String>,
     pub filename: Option<String>,
     pub content_extract: String,
     #[serde(skip)]
@@ -131,6 +133,7 @@ pub fn gather_leaf_contexts(
             id: pane_id,
             kind_label: describe_pane_status(status),
             current_title: node.name.clone(),
+            current_icon: node.inferred_icon.clone(),
             filename: None,
             content_extract: String::new(),
             agent_lookup: None,
@@ -173,6 +176,7 @@ pub fn gather_leaf_contexts(
                 id: folder_id,
                 kind_label: "Folder".to_string(),
                 current_title: node.name.clone(),
+                current_icon: node.inferred_icon.clone(),
                 filename: None,
                 content_extract: String::new(),
                 agent_lookup: None,
@@ -244,11 +248,12 @@ fn render_structure_children(
             NodeKind::Container(_) => "container".to_string(),
         };
         lines.push(format!(
-            "{}{} id=\"{}\" title=\"{}\" source=\"{}\"",
+            "{}{} id=\"{}\" title=\"{}\" icon=\"{}\" source=\"{}\"",
             "  ".repeat(depth),
             kind,
             child.id.0,
             child.name,
+            child.inferred_icon.as_deref().unwrap_or(""),
             child.structure_source.prompt_label(),
         ));
         if child.is_container() {
@@ -353,15 +358,18 @@ enum LlmRestructureNode {
         id: NodeId,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
     },
     Folder {
         id: NodeId,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
     },
     Group {
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
         #[serde(default)]
         children: Vec<LlmRestructureNode>,
     },
@@ -369,6 +377,7 @@ enum LlmRestructureNode {
         orientation: LlmSplitOrientation,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
         #[serde(default)]
         children: Vec<LlmRestructureNode>,
     },
@@ -576,7 +585,7 @@ fn parse_restructure_response(
     contexts: &[LeafContext],
 ) -> anyhow::Result<RestructurePlan> {
     let candidate = extract_json_object(response);
-    let parsed: LlmRestructurePlan = serde_json::from_str(candidate)
+    let mut parsed: LlmRestructurePlan = serde_json::from_str(candidate)
         .map_err(|error| anyhow::anyhow!("restructure response was not valid JSON: {error}"))?;
 
     let mut referenced = Vec::new();
@@ -595,11 +604,48 @@ fn parse_restructure_response(
             expected_set.len()
         );
     }
+    // A restructure may reorganize existing leaves, but it must never
+    // arbitrarily rebrand them. Keep each already-persisted icon authoritative
+    // even when a model returns a different suggestion for that same item.
+    preserve_existing_leaf_icons(&mut parsed.children, contexts);
     validate_titles(&parsed.children)?;
 
     Ok(RestructurePlan {
         children: parsed.children.into_iter().map(convert_node).collect(),
     })
+}
+
+fn preserve_existing_leaf_icons(nodes: &mut [LlmRestructureNode], contexts: &[LeafContext]) {
+    let existing_icons: HashMap<NodeId, &str> = contexts
+        .iter()
+        .filter_map(|context| {
+            context
+                .current_icon
+                .as_deref()
+                .map(|icon| (context.id, icon))
+        })
+        .collect();
+    preserve_leaf_icons_recursive(nodes, &existing_icons);
+}
+
+fn preserve_leaf_icons_recursive(
+    nodes: &mut [LlmRestructureNode],
+    existing_icons: &HashMap<NodeId, &str>,
+) {
+    for node in nodes {
+        match node {
+            LlmRestructureNode::Pane { id, icon, .. }
+            | LlmRestructureNode::Folder { id, icon, .. } => {
+                if let Some(existing_icon) = existing_icons.get(id) {
+                    *icon = Some((*existing_icon).to_string());
+                }
+            }
+            LlmRestructureNode::Group { children, .. }
+            | LlmRestructureNode::SplitView { children, .. } => {
+                preserve_leaf_icons_recursive(children, existing_icons);
+            }
+        }
+    }
 }
 
 fn collect_referenced_ids(nodes: &[LlmRestructureNode], out: &mut Vec<NodeId>) {
@@ -619,9 +665,17 @@ fn collect_referenced_ids(nodes: &[LlmRestructureNode], out: &mut Vec<NodeId>) {
 fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
     for node in nodes {
         match node {
-            LlmRestructureNode::Pane { title, .. } | LlmRestructureNode::Folder { title, .. } => {
+            LlmRestructureNode::Pane { title, icon, .. }
+            | LlmRestructureNode::Folder { title, icon, .. } => {
                 if title.trim().is_empty() {
                     anyhow::bail!("restructure response contained an empty title");
+                }
+                if icon
+                    .as_deref()
+                    .and_then(crate::naming::normalize_icon)
+                    .is_none()
+                {
+                    anyhow::bail!("restructure response contained an invalid icon");
                 }
             }
             LlmRestructureNode::Group {
@@ -632,6 +686,18 @@ fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
             } => {
                 if title.trim().is_empty() {
                     anyhow::bail!("restructure response contained an empty title");
+                }
+                let icon = match node {
+                    LlmRestructureNode::Group { icon, .. }
+                    | LlmRestructureNode::SplitView { icon, .. } => icon,
+                    _ => unreachable!(),
+                };
+                if icon
+                    .as_deref()
+                    .and_then(crate::naming::normalize_icon)
+                    .is_none()
+                {
+                    anyhow::bail!("restructure response contained an invalid icon");
                 }
                 validate_titles(children)?;
             }
@@ -646,33 +712,40 @@ fn convert_node(node: LlmRestructureNode) -> RestructureNode {
             id,
             title,
             short_title,
+            icon,
         } => RestructureNode::Pane {
             id,
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
+            icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
         },
         LlmRestructureNode::Folder {
             id,
             title,
             short_title,
+            icon,
         } => RestructureNode::Folder {
             id,
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
+            icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
         },
         LlmRestructureNode::Group {
             title,
             short_title,
+            icon,
             children,
         } => RestructureNode::Group {
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
+            icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
             children: children.into_iter().map(convert_node).collect(),
         },
         LlmRestructureNode::SplitView {
             orientation,
             title,
             short_title,
+            icon,
             children,
         } => RestructureNode::SplitView {
             orientation: match orientation {
@@ -681,6 +754,7 @@ fn convert_node(node: LlmRestructureNode) -> RestructureNode {
             },
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
+            icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
             children: children.into_iter().map(convert_node).collect(),
         },
     }
@@ -738,6 +812,7 @@ mod tests {
             id: NodeId(id),
             kind_label: "Plain shell".to_string(),
             current_title: title.to_string(),
+            current_icon: None,
             filename: None,
             content_extract: "$ cargo build".to_string(),
             agent_lookup: None,
@@ -755,7 +830,7 @@ mod tests {
     #[test]
     fn valid_response_builds_the_expected_plan() {
         let generator = FakeGenerator::new(
-            r#"{"children":[{"kind":"group","title":"Auth Refactor Work","short_title":"Auth","children":[{"kind":"pane","id":1,"title":"Backend Agent","short_title":null},{"kind":"pane","id":2,"title":"Frontend Shell","short_title":"Frontend"}]}]}"#,
+            r#"{"children":[{"kind":"group","title":"Auth Refactor Work","short_title":"Auth","icon":"🔐","children":[{"kind":"pane","id":1,"title":"Backend Agent","short_title":null,"icon":"🔧"},{"kind":"pane","id":2,"title":"Frontend Shell","short_title":"Frontend","icon":"🖥️"}]}]}"#,
         );
         let contexts = vec![leaf(1, "shell-a"), leaf(2, "shell-b")];
 
@@ -772,8 +847,24 @@ mod tests {
         assert_eq!(children.len(), 2);
         assert!(matches!(
             &children[0],
-            RestructureNode::Pane { id, title, short_title }
+            RestructureNode::Pane { id, title, short_title, .. }
                 if *id == NodeId(1) && title == "Backend Agent" && short_title.is_none()
+        ));
+    }
+
+    #[test]
+    fn restructure_preserves_an_existing_leaf_icon_over_a_model_recommendation() {
+        let generator = FakeGenerator::new(
+            r#"{"children":[{"kind":"pane","id":1,"title":"Backend Agent","short_title":"Backend","icon":"🧪"}]}"#,
+        );
+        let mut contexts = vec![leaf(1, "shell-a")];
+        contexts[0].current_icon = Some("🔧".to_string());
+
+        let plan = infer_restructure_plan(&generator, &contexts).unwrap();
+
+        assert!(matches!(
+            &plan.children[0],
+            RestructureNode::Pane { icon: Some(icon), .. } if icon == "🔧"
         ));
     }
 
@@ -822,7 +913,7 @@ mod tests {
     #[test]
     fn tolerates_a_response_wrapped_in_a_json_code_fence() {
         let generator = FakeGenerator::new(
-            "```json\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null}]}\n```",
+            "```json\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null,\"icon\":\"📌\"}]}\n```",
         );
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -834,7 +925,7 @@ mod tests {
     #[test]
     fn tolerates_a_response_wrapped_in_a_plain_code_fence() {
         let generator = FakeGenerator::new(
-            "```\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null}]}\n```",
+            "```\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null,\"icon\":\"📌\"}]}\n```",
         );
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -846,7 +937,7 @@ mod tests {
     #[test]
     fn tolerates_prose_surrounding_the_json_object() {
         let generator = FakeGenerator::new(
-            "Sure, here is the restructure plan:\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null}]}\nLet me know if you need changes!",
+            "Sure, here is the restructure plan:\n{\"children\":[{\"kind\":\"pane\",\"id\":1,\"title\":\"A\",\"short_title\":null,\"icon\":\"📌\"}]}\nLet me know if you need changes!",
         );
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -863,7 +954,8 @@ mod tests {
         // once a different backend answers.
         let generator = FakeGenerator::sequence([
             "User Safety: safe".to_string(),
-            r#"{"children":[{"kind":"pane","id":1,"title":"A","short_title":null}]}"#.to_string(),
+            r#"{"children":[{"kind":"pane","id":1,"title":"A","short_title":null,"icon":"📌"}]}"#
+                .to_string(),
         ]);
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -945,7 +1037,7 @@ mod tests {
         // `Tree::apply_restructure`'s job (see ilium-core's tests), so a
         // split view containing a nested group parses fine here.
         let generator = FakeGenerator::new(
-            r#"{"children":[{"kind":"split_view","orientation":"vertical","title":"Split","short_title":null,"children":[{"kind":"group","title":"Nested","short_title":null,"children":[{"kind":"pane","id":1,"title":"A","short_title":null}]}]}]}"#,
+            r#"{"children":[{"kind":"split_view","orientation":"vertical","title":"Split","short_title":null,"icon":"🪟","children":[{"kind":"group","title":"Nested","short_title":null,"icon":"📁","children":[{"kind":"pane","id":1,"title":"A","short_title":null,"icon":"📌"}]}]}]}"#,
         );
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -956,7 +1048,7 @@ mod tests {
     #[test]
     fn prompt_includes_every_item_and_the_json_output_example() {
         let generator = FakeGenerator::new(
-            r#"{"children":[{"kind":"pane","id":1,"title":"A","short_title":null}]}"#,
+            r#"{"children":[{"kind":"pane","id":1,"title":"A","short_title":null,"icon":"📌"}]}"#,
         );
         let contexts = vec![leaf(1, "shell-a")];
 
@@ -989,10 +1081,12 @@ mod tests {
                 children: vec![RestructureNode::Group {
                     title: "AI organized work".to_string(),
                     short_title: None,
+                    icon: None,
                     children: vec![RestructureNode::Pane {
                         id: existing_pane,
                         title: "AI organized shell".to_string(),
                         short_title: None,
+                        icon: None,
                     }],
                 }],
             },
@@ -1010,20 +1104,20 @@ mod tests {
         let structure = render_project_structure(&tree, project).unwrap();
         assert!(structure.contains(&format!("project id=\"{}\"", project.0)));
         assert!(structure.contains(&format!(
-            "group id=\"{}\" title=\"AI organized work\" source=\"LLM restructure\"",
+            "group id=\"{}\" title=\"AI organized work\" icon=\"\" source=\"LLM restructure\"",
             llm_group.0
         )));
         assert!(structure.contains(&format!(
-            "pane id=\"{}\" title=\"AI organized shell\" source=\"LLM restructure\"",
+            "pane id=\"{}\" title=\"AI organized shell\" icon=\"\" source=\"LLM restructure\"",
             existing_pane.0
         )));
         assert!(structure.contains(&format!(
-            "pane id=\"{}\" title=\"new manual shell\" source=\"manual\"",
+            "pane id=\"{}\" title=\"new manual shell\" icon=\"\" source=\"manual\"",
             manual_pane.0
         )));
 
         let generator = FakeGenerator::new(format!(
-            r#"{{"children":[{{"kind":"group","title":"AI organized work","short_title":null,"children":[{{"kind":"pane","id":{},"title":"AI organized shell","short_title":null}},{{"kind":"pane","id":{},"title":"new manual shell","short_title":null}}]}}]}}"#,
+            r#"{{"children":[{{"kind":"group","title":"AI organized work","short_title":null,"icon":"🔐","children":[{{"kind":"pane","id":{},"title":"AI organized shell","short_title":null,"icon":"🔧"}},{{"kind":"pane","id":{},"title":"new manual shell","short_title":null,"icon":"🖥️"}}]}}]}}"#,
             existing_pane.0, manual_pane.0
         ));
         let contexts = vec![
@@ -1079,6 +1173,7 @@ mod tests {
             id: NodeId(1),
             kind_label: "Claude agent (working)".to_string(),
             current_title: "shell".to_string(),
+            current_icon: None,
             filename: None,
             content_extract: String::new(),
             agent_lookup: Some((

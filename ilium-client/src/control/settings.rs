@@ -403,6 +403,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             Ok(())
         })?,
+        "voice.confirm_terminal_submissions" => update_voice(app, |settings| {
+            settings.confirm_terminal_submissions = boolean(&value)?;
+            Ok(())
+        })?,
         "voice.custom_prompt" => update_voice(app, |settings| {
             settings.custom_prompt = string(&value)?.to_owned();
             Ok(())
@@ -458,6 +462,10 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "voice.output_volume_percent" => {
             app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::OutputVolume, direction)
         }
+        "voice.confirm_terminal_submissions" => app.settings_adjust_voice_row(
+            crate::voice_settings::VoiceRow::ConfirmTerminalSubmissions,
+            direction,
+        ),
         _ => return Err(format!("Setting {path:?} is not adjustable; use set")),
     }
     Ok(())
@@ -654,6 +662,8 @@ mod tests {
 
         set_setting(&mut app, "ui.motion_level", json!("reduced")).unwrap();
         assert_eq!(app.ui_settings.motion_level, MotionLevel::Reduced);
+        set_setting(&mut app, "voice.confirm_terminal_submissions", json!(true)).unwrap();
+        assert!(app.voice_settings.confirm_terminal_submissions);
         assert!(set_setting(&mut app, "ui.made_up", json!(true)).is_err());
     }
 }

@@ -297,7 +297,11 @@ async fn run_inner(
     // (a real HTTP call) only runs in the background when nothing is
     // stored yet, so the first frame draws immediately either way.
     match crate::project_naming::load_stored_project_name(&app.session_cwd) {
-        Ok(Some(name)) => app.project_name = Some(name),
+        Ok(Some(name)) => {
+            app.project_name = Some(name);
+            app.project_icon =
+                crate::project_naming::load_stored_project_icon(&app.session_cwd).unwrap_or(None);
+        }
         Ok(None) => {
             app.is_project_name_loading = true;
             naming_workers.spawn_project_name_worker(app.session_cwd.clone());
@@ -320,6 +324,7 @@ async fn run_inner(
 
     'event_loop: while app.exit_reason.is_none() {
         let now = Instant::now();
+        let mut voice_tool_outputs = Vec::new();
         let mut tick_delay = app.next_maintenance_delay(now);
         if needs_redraw && !needs_immediate_redraw {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
@@ -387,12 +392,8 @@ async fn run_inner(
             voice_event = next_voice_event(&mut voice_service) => {
                 match voice_event {
                     Some(event) => {
-                        handle_voice_event(
-                            &mut app,
-                            &mut control_plane,
-                            voice_service.as_ref(),
-                            event,
-                        ).await;
+                        voice_tool_outputs =
+                            handle_voice_event(&mut app, &mut control_plane, event);
                     }
                     None if voice_service.is_some() => {
                         voice_service = None;
@@ -437,6 +438,12 @@ async fn run_inner(
                 break 'event_loop;
             }
         }
+
+        // A confirmation-required terminal submission queues its visible
+        // text as IPC before returning the tool result that makes the voice
+        // model ask the question. This preserves the user-facing contract:
+        // type first, then ask whether to press Enter.
+        deliver_voice_tool_outputs(&mut app, voice_service.as_ref(), voice_tool_outputs).await;
 
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         if needs_redraw && can_draw {
@@ -513,45 +520,59 @@ fn should_report_unexpected_voice_stop(
     is_voice_enabled && !matches!(state, ilium_voice::VoiceConnectionState::Failed(_))
 }
 
-async fn handle_voice_event(
+fn handle_voice_event(
     app: &mut App,
     control_plane: &mut crate::control::ControlPlane,
-    voice_service: Option<&ilium_voice::VoiceService>,
     event: ilium_voice::VoiceEvent,
-) {
+) -> Vec<ilium_voice::VoiceToolOutput> {
     match event {
         ilium_voice::VoiceEvent::StateChanged(state) => {
             app.update_voice_connection_state(state);
+            Vec::new()
         }
-        ilium_voice::VoiceEvent::ToolInvocations(invocations) => {
-            let outputs = invocations
-                .into_iter()
-                .map(|invocation| control_plane.execute_invocation(app, invocation))
-                .collect::<Vec<_>>();
-            if let Some(service) = voice_service {
-                if service
-                    .command_sender()
-                    .send(ilium_voice::VoiceCommand::SubmitToolOutputs(outputs))
-                    .await
-                    .is_err()
-                {
-                    app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
-                        "could not return the tool result to the voice model".to_owned(),
-                    ));
-                }
-            }
-        }
+        ilium_voice::VoiceEvent::ToolInvocations(invocations) => invocations
+            .into_iter()
+            .map(|invocation| control_plane.execute_invocation(app, invocation))
+            .collect::<Vec<_>>(),
         ilium_voice::VoiceEvent::UserTranscript(transcript) => {
             app.voice_last_user_transcript = Some(transcript);
+            Vec::new()
         }
         ilium_voice::VoiceEvent::AssistantTranscript(delta) => {
             app.voice_last_assistant_transcript
                 .get_or_insert_with(String::new)
                 .push_str(&delta);
+            Vec::new()
         }
         ilium_voice::VoiceEvent::ProviderError(error) => {
             app.status_message = Some(format!("Voice provider error: {error}"));
+            Vec::new()
         }
+    }
+}
+
+/// Returns completed tool calls to the model only after the event loop has
+/// dispatched every terminal/UI request produced by their execution.
+async fn deliver_voice_tool_outputs(
+    app: &mut App,
+    voice_service: Option<&ilium_voice::VoiceService>,
+    outputs: Vec<ilium_voice::VoiceToolOutput>,
+) {
+    if outputs.is_empty() {
+        return;
+    }
+    let Some(service) = voice_service else {
+        return;
+    };
+    if service
+        .command_sender()
+        .send(ilium_voice::VoiceCommand::SubmitToolOutputs(outputs))
+        .await
+        .is_err()
+    {
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "could not return the tool result to the voice model".to_owned(),
+        ));
     }
 }
 

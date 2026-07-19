@@ -530,6 +530,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             expected_title_generation: 0,
             title: "Title From The Old Session".to_string(),
             short_title: Some("Old Session".to_string()),
+            inferred_icon: Some("📜".to_string()),
             title_source: ilium_core::PaneTitleSource::Automatic,
         },
     )
@@ -591,6 +592,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             expected_title_generation: 0,
             title: "Stale Clear Result Must Not Return".to_string(),
             short_title: Some("Stale Clear".to_string()),
+            inferred_icon: Some("📜".to_string()),
             title_source: ilium_core::PaneTitleSource::Automatic,
         },
     )
@@ -670,6 +672,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             expected_title_generation: 0,
             title: "Stale Result Must Not Return".to_string(),
             short_title: Some("Stale Result".to_string()),
+            inferred_icon: Some("📜".to_string()),
             title_source: ilium_core::PaneTitleSource::Automatic,
         },
     )

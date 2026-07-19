@@ -200,7 +200,8 @@ pub enum Mode {
     /// Board creation owns its storage choice and destination before a tree
     /// node exists, so a cancelled dialog cannot leave a phantom pane.
     CreateBoard(CreateBoardState),
-    BoardPathPicker(Box<ExplorerOverlay>, CreateBoardState),
+    /// Path picker stacked over its exact `CreateBoard` parent state.
+    BoardPathPicker(Box<ExplorerOverlay>),
     BoardCardPrompt(NodeId, TextPromptState),
     BoardColumnPrompt(NodeId, TextPromptState),
     BoardRenamePrompt(NodeId, BoardRenameTarget, TextPromptState),
@@ -427,10 +428,11 @@ pub enum AppearanceRow {
     MotionLevel,
     SidebarDensity,
     UseStableGlyphs,
+    ShowInferredTitleIcons,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 8] = [
+    pub const ALL: [AppearanceRow; 9] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
@@ -439,6 +441,7 @@ impl AppearanceRow {
         Self::MotionLevel,
         Self::SidebarDensity,
         Self::UseStableGlyphs,
+        Self::ShowInferredTitleIcons,
     ];
 }
 
@@ -787,7 +790,6 @@ pub struct ContextMenu {
 }
 
 pub struct ExplorerFileMenu {
-    pub overlay: Box<ExplorerOverlay>,
     pub target_group: NodeId,
     pub file_path: PathBuf,
     pub area: Rect,
@@ -891,6 +893,19 @@ pub enum PendingRetitleRequest {
     },
 }
 
+/// Complete compare-and-set payload for a session-derived LLM title. Keeping
+/// its provenance, title pair, and icon together prevents parallel argument
+/// lists from drifting as title metadata evolves.
+pub struct SessionPaneTitleRequest {
+    pub pane_id: NodeId,
+    pub expected_session_id: String,
+    pub expected_title_generation: u64,
+    pub title: String,
+    pub short_title: Option<String>,
+    pub inferred_icon: Option<String>,
+    pub title_source: ilium_core::PaneTitleSource,
+}
+
 /// One project-scoped restructure worker `App` has decided to start but
 /// cannot spawn itself; the event loop owns the worker lifecycle.
 /// `contexts` is already fully gathered except for agent panes' transcript
@@ -938,6 +953,10 @@ pub struct App {
     pub right_panel_target: RightPanelTarget,
     pub focus: FocusTarget,
     pub mode: Mode,
+    /// Suspended parent layers, ordered from the oldest visible layer to the
+    /// immediate parent of `mode`. Input always targets `mode`; rendering
+    /// walks this stack first so nested dialogs never erase their parents.
+    pub(crate) modal_stack: Vec<Mode>,
     pub status_message: Option<String>,
     /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
     pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
@@ -1021,6 +1040,7 @@ pub struct App {
     /// rooted here.
     pub session_cwd: PathBuf,
     pub project_name: Option<String>,
+    pub project_icon: Option<String>,
     pub is_project_name_loading: bool,
     /// Terminal panes currently awaiting `session_naming::infer_pane_title`
     /// -- see `crate::naming_workers`.
@@ -1160,6 +1180,7 @@ impl App {
             right_panel_target: RightPanelTarget::Empty,
             focus: FocusTarget::Pane,
             mode: Mode::Normal,
+            modal_stack: Vec::new(),
             status_message: None,
             pending_terminal_link: None,
             exit_reason: None,
@@ -1206,6 +1227,7 @@ impl App {
             help_leader_pending: false,
             session_cwd,
             project_name: None,
+            project_icon: None,
             is_project_name_loading: false,
             titles_loading: HashSet::new(),
             pending_editor_opens: Vec::new(),
@@ -1231,6 +1253,35 @@ impl App {
             tree_version: 0,
             tree_hit_test_cache: tree_ui::TreeItemCache::default(),
         }
+    }
+
+    /// Suspends the visible mode and opens one input-blocking child above it.
+    /// The stack owns the complete parent state, so closing the child restores
+    /// the exact selection, scroll position, and in-progress form values.
+    pub(crate) fn push_modal(&mut self, modal: Mode) {
+        let parent = std::mem::replace(&mut self.mode, modal);
+        self.modal_stack.push(parent);
+    }
+
+    /// Opens a child when input dispatch has already moved its parent state
+    /// out of `App::mode`. This is the normal keyboard/mouse handler path.
+    pub(crate) fn push_modal_over(&mut self, parent: Mode, modal: Mode) {
+        self.mode = parent;
+        self.push_modal(modal);
+    }
+
+    /// Closes only the active child and restores its immediate parent. This
+    /// deliberately supports arbitrary nesting rather than a settings-only
+    /// return flag or a freshly reconstructed parent screen.
+    pub(crate) fn pop_modal(&mut self) {
+        self.mode = self.modal_stack.pop().unwrap_or(Mode::Normal);
+    }
+
+    /// Finishes a nested interaction whose successful action exits the whole
+    /// flow, such as creating a board from a file-picker action menu.
+    pub(crate) fn close_modal_flow(&mut self) {
+        self.modal_stack.clear();
+        self.mode = Mode::Normal;
     }
 
     pub fn queue_icon_semantic_search(&mut self, request: IconSearchRequest) {
@@ -1624,6 +1675,9 @@ impl App {
     /// the actor. Multiple changes in one input turn intentionally coalesce.
     pub fn apply_and_persist_voice_settings(&mut self, settings: VoiceSettings) {
         let was_enabled = self.voice_settings.enabled;
+        let has_same_runtime_configuration = self
+            .voice_settings
+            .has_same_runtime_configuration(&settings);
         self.voice_settings = settings;
         if let Some(config_dir) = self.config_dir.clone() {
             if let Err(error) =
@@ -1636,7 +1690,8 @@ impl App {
             Some(match (was_enabled, self.voice_settings.enabled) {
                 (false, true) => VoiceRuntimeRequest::Start,
                 (true, false) => VoiceRuntimeRequest::Stop,
-                (true, true) => VoiceRuntimeRequest::Reconfigure,
+                (true, true) if !has_same_runtime_configuration => VoiceRuntimeRequest::Reconfigure,
+                (true, true) => return,
                 (false, false) => return,
             });
     }
@@ -1673,8 +1728,10 @@ impl App {
         match row {
             VoiceRow::Enabled => self.toggle_voice_control(),
             VoiceRow::ApiKey => {
-                self.mode =
-                    Mode::VoiceSettingPrompt(VoiceSettingField::ApiKey, TextPromptState::new(""));
+                self.push_modal(Mode::VoiceSettingPrompt(
+                    VoiceSettingField::ApiKey,
+                    TextPromptState::new(""),
+                ));
             }
             VoiceRow::Model => {
                 let mut settings = self.voice_settings.clone();
@@ -1726,9 +1783,14 @@ impl App {
                     .clamp(0, 100) as u8;
                 self.apply_and_persist_voice_settings(settings);
             }
+            VoiceRow::ConfirmTerminalSubmissions => {
+                let mut settings = self.voice_settings.clone();
+                settings.confirm_terminal_submissions = !settings.confirm_terminal_submissions;
+                self.apply_and_persist_voice_settings(settings);
+            }
             VoiceRow::CustomPrompt => {
-                self.mode = Mode::VoicePromptEditor(Box::new(VoicePromptEditorState::new(
-                    &self.voice_settings.custom_prompt,
+                self.push_modal(Mode::VoicePromptEditor(Box::new(
+                    VoicePromptEditorState::new(&self.voice_settings.custom_prompt),
                 )));
             }
             VoiceRow::Reconnect => {
@@ -1999,7 +2061,10 @@ impl App {
                 self.inference_settings.openrouter.model.clone()
             }
         };
-        self.mode = Mode::InferenceSettingPrompt(field, TextPromptState::new(value));
+        self.push_modal(Mode::InferenceSettingPrompt(
+            field,
+            TextPromptState::new(value),
+        ));
     }
 
     pub fn settings_commit_inference_field(&mut self, field: InferenceSettingField, value: String) {
@@ -2496,6 +2561,14 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles the optional LLM-provided visual marker that precedes inferred
+    /// titles in the left panel. The metadata remains stored while hidden.
+    pub fn settings_toggle_inferred_title_icons(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.show_inferred_title_icons = !ui.show_inferred_title_icons;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
@@ -2565,6 +2638,7 @@ impl App {
                 self.apply_and_persist_ui_settings(ui);
             }
             AppearanceRow::UseStableGlyphs => self.settings_toggle_stable_glyphs(),
+            AppearanceRow::ShowInferredTitleIcons => self.settings_toggle_inferred_title_icons(),
         }
     }
 
@@ -3249,11 +3323,18 @@ impl App {
     /// panel is narrow (see `crate::tree_ui`) -- `None` when this rename's
     /// source has no distinct short form (e.g. the user typed `title`
     /// directly into the rename dialog).
-    pub fn request_rename(&mut self, node_id: NodeId, title: String, short_title: Option<String>) {
+    pub fn request_rename(
+        &mut self,
+        node_id: NodeId,
+        title: String,
+        short_title: Option<String>,
+        inferred_icon: Option<String>,
+    ) {
         self.queue_request(ClientRequest::RenameNode {
             node_id,
             title,
             short_title,
+            inferred_icon,
         });
     }
 
@@ -3268,33 +3349,28 @@ impl App {
         pane_id: NodeId,
         title: String,
         short_title: Option<String>,
+        inferred_icon: Option<String>,
     ) {
         self.queue_request(ClientRequest::SetAutomaticPaneTitle {
             pane_id,
             title,
             short_title,
+            inferred_icon,
         });
     }
 
     /// Queues an agent-session title with an expected-ID compare-and-set.
     /// The detached server, not client event ordering, decides whether the
     /// summarized session is still current when the result arrives.
-    pub fn request_session_pane_title(
-        &mut self,
-        pane_id: NodeId,
-        expected_session_id: String,
-        expected_title_generation: u64,
-        title: String,
-        short_title: Option<String>,
-        title_source: ilium_core::PaneTitleSource,
-    ) {
+    pub fn request_session_pane_title(&mut self, request: SessionPaneTitleRequest) {
         self.queue_request(ClientRequest::SetSessionPaneTitle {
-            pane_id,
-            expected_session_id,
-            expected_title_generation,
-            title,
-            short_title,
-            title_source,
+            pane_id: request.pane_id,
+            expected_session_id: request.expected_session_id,
+            expected_title_generation: request.expected_title_generation,
+            title: request.title,
+            short_title: request.short_title,
+            inferred_icon: request.inferred_icon,
+            title_source: request.title_source,
         });
     }
 
@@ -3389,8 +3465,7 @@ impl App {
         let screen = self.layout.screen_area;
         let x = position.x.min(screen.right().saturating_sub(menu_width));
         let y = position.y.min(screen.bottom().saturating_sub(menu_height));
-        self.mode = Mode::ExplorerFileMenu(ExplorerFileMenu {
-            overlay,
+        let menu = Mode::ExplorerFileMenu(ExplorerFileMenu {
             target_group,
             file_path,
             area: Rect::new(
@@ -3400,6 +3475,7 @@ impl App {
                 menu_height.min(screen.height),
             ),
         });
+        self.push_modal_over(Mode::Explorer(overlay, target_group), menu);
     }
 
     pub fn open_create_board_dialog(&mut self) {
@@ -3510,11 +3586,30 @@ impl App {
             BoardStorageKind::MarkdownFile => ExplorerOverlay::open_at(&picker_root),
         };
         match picker {
-            Ok(picker) => self.mode = Mode::BoardPathPicker(Box::new(picker), state),
+            Ok(picker) => self.push_modal_over(
+                Mode::CreateBoard(state),
+                Mode::BoardPathPicker(Box::new(picker)),
+            ),
             Err(error) => {
                 self.status_message = Some(format!("Could not open board path picker: {error}"));
                 self.mode = Mode::CreateBoard(state);
             }
+        }
+    }
+
+    /// Closes the stacked path picker and optionally applies its selection to
+    /// the suspended board form. A broken parent invariant degrades to Normal
+    /// with a visible error instead of leaving an unreachable modal layer.
+    pub fn return_to_create_board(&mut self, selected_path: Option<PathBuf>) {
+        self.pop_modal();
+        let Mode::CreateBoard(state) = &mut self.mode else {
+            self.close_modal_flow();
+            self.status_message = Some("Board path picker lost its parent dialog".to_string());
+            return;
+        };
+        if let Some(path) = selected_path {
+            state.path = TextPromptState::new(path.display().to_string());
+            state.editing_path = true;
         }
     }
 
@@ -4322,7 +4417,7 @@ impl App {
             Ok(()) => {
                 editor.path = Some(path.clone());
                 if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    self.request_rename(id, name.to_string(), None);
+                    self.request_rename(id, name.to_string(), None, None);
                 }
                 self.status_message = Some("Saved".to_string());
             }
@@ -7230,6 +7325,26 @@ mod tests {
                 .unwrap()
                 .ui
                 .use_stable_glyphs
+        );
+    }
+
+    #[test]
+    fn terminal_submission_confirmation_is_opt_in_and_does_not_reconnect_voice() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        app.voice_settings.enabled = true;
+
+        assert!(!app.voice_settings.confirm_terminal_submissions);
+        app.settings_adjust_voice_row(VoiceRow::ConfirmTerminalSubmissions, 1);
+
+        assert!(app.voice_settings.confirm_terminal_submissions);
+        assert!(app.take_voice_runtime_request().is_none());
+        assert!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .voice
+                .confirm_terminal_submissions
         );
     }
 

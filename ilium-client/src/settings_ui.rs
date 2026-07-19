@@ -489,6 +489,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 elapsed_ms: app.started_at.elapsed().as_millis(),
                 current_unix_millis: crate::scheduled_input::unix_millis_now(),
                 project_name: app.project_name.as_deref(),
+                project_icon: app.project_icon.as_deref(),
                 is_project_name_loading: app.is_project_name_loading,
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
@@ -498,6 +499,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 tree_order: app.ui_settings.tree_order,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+                show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
                 hover: crate::tree_ui::TreeHoverState::default(),
                 panes: &app.panes,
             },
@@ -2125,6 +2127,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::MotionLevel => "Motion level",
         AppearanceRow::SidebarDensity => "Sidebar density",
         AppearanceRow::UseStableGlyphs => "Use stable glyphs",
+        AppearanceRow::ShowInferredTitleIcons => "Show inferred title icons",
     }
 }
 
@@ -2147,6 +2150,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::SidebarDensity => "Controls the vertical spacing used by the tree sidebar.",
         AppearanceRow::UseStableGlyphs => {
             "Use plain one-cell symbols for hover actions on terminals that cannot render emoji; normal icons remain the default."
+        }
+        AppearanceRow::ShowInferredTitleIcons => {
+            "Show the LLM-provided UTF-8 icon before short and long inferred titles in the left panel."
         }
     }
 }
@@ -2174,6 +2180,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off (normal icons)".to_string()
+            }
+        }
+        AppearanceRow::ShowInferredTitleIcons => {
+            if ui.show_inferred_title_icons {
+                "On".to_string()
+            } else {
+                "Off".to_string()
             }
         }
     }
@@ -2354,6 +2367,11 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
                 "Output volume",
                 format!("{}%", settings.output_volume_percent),
                 "Local playback gain; this does not change microphone input.",
+            ),
+            (
+                "Confirm terminal submissions",
+                on_off(settings.confirm_terminal_submissions),
+                "On stages dictated text visibly and asks before Enter; off submits explicit requests immediately.",
             ),
             (
                 "Custom prompt",
@@ -3347,6 +3365,23 @@ mod tests {
         assert!(rendered.contains("Agent needs approval"));
         assert!(rendered.contains("/usr/share/sounds"));
         assert!(rendered.contains("freedesktop / stereo / complete"));
+    }
+
+    #[test]
+    fn voice_lines_explain_the_opt_in_visible_staging_policy() {
+        let app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        let rendered = voice_lines(&app, 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Confirm terminal submissions"));
+        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("stages dictated text visibly"));
     }
 
     #[test]

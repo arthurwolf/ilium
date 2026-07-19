@@ -186,7 +186,7 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.enabled", "voice.api_key", "voice.model", "voice.voice",
             "voice.reasoning_effort", "voice.input_mode", "voice.vad_eagerness",
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
-            "voice.custom_prompt"
+            "voice.confirm_terminal_submissions", "voice.custom_prompt"
         ],
         "ui": {
             "auto_resize_tree": app.ui_settings.auto_resize_tree_on_focus,
@@ -248,6 +248,7 @@ fn settings_snapshot(app: &App) -> Value {
             "input_device": app.voice_settings.input_device_name,
             "output_device": app.voice_settings.output_device_name,
             "output_volume_percent": app.voice_settings.output_volume_percent,
+            "confirm_terminal_submissions": app.voice_settings.confirm_terminal_submissions,
             "custom_prompt": app.voice_settings.custom_prompt,
         },
     })
@@ -295,7 +296,7 @@ fn mode_label(mode: &Mode) -> &'static str {
         Mode::CreateSplitOrientation(_) => "create_split_orientation",
         Mode::CreateSplitMembers(_) => "create_split_members",
         Mode::CreateBoard(_) => "create_board",
-        Mode::BoardPathPicker(..) => "board_path_picker",
+        Mode::BoardPathPicker(_) => "board_path_picker",
         Mode::BoardCardPrompt(..) => "board_card_prompt",
         Mode::BoardColumnPrompt(..) => "board_column_prompt",
         Mode::BoardRenamePrompt(..) => "board_rename_prompt",

@@ -583,6 +583,7 @@ async fn run_due_panes(
                     pane_id,
                     runtime.origin.pane_name_without_stale_session(),
                     None,
+                    None,
                 ) {
                     Ok(changed) => tree_snapshot_changed |= changed,
                     Err(error) => tracing::warn!(
@@ -647,6 +648,7 @@ async fn run_due_panes(
                 match tree.set_automatic_pane_title(
                     pane_id,
                     runtime.origin.pane_name_without_stale_session(),
+                    None,
                     None,
                 ) {
                     Ok(changed) => tree_snapshot_changed |= changed,

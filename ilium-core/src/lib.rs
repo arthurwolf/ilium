@@ -609,6 +609,11 @@ pub struct Node {
     /// distinct short form, so they leave this `None` and every width
     /// renders `name`.
     pub short_name: Option<String>,
+    /// Optional LLM-suggested visual marker for this title. It is durable but
+    /// presentation-only: the client displays it only when its Appearance
+    /// preference enables inferred title icons.
+    #[serde(default)]
+    pub inferred_icon: Option<String>,
     /// Kept separately from pane title provenance because a manual move can
     /// change the meaning of a structure even when no pane title changed.
     /// Missing fields in older JSON crash snapshots are manual by default.
@@ -732,21 +737,25 @@ pub enum RestructureNode {
         id: NodeId,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
     },
     Folder {
         id: NodeId,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
     },
     Group {
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
         children: Vec<RestructureNode>,
     },
     SplitView {
         orientation: SplitOrientation,
         title: String,
         short_title: Option<String>,
+        icon: Option<String>,
         /// Enforced pane-only and `<= MAXIMUM_SPLIT_VIEW_PANES` by
         /// [`Tree::apply_restructure`], mirroring [`Tree::create_split_view`].
         children: Vec<RestructureNode>,
@@ -799,6 +808,7 @@ impl Tree {
                 parent: None,
                 name: "session".to_string(),
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
@@ -932,6 +942,7 @@ impl Tree {
                 parent: Some(ROOT_ID),
                 name,
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::project(path)),
             },
@@ -1007,6 +1018,7 @@ impl Tree {
                 parent: Some(parent),
                 name: name.into(),
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
@@ -1038,6 +1050,7 @@ impl Tree {
                 parent: Some(parent),
                 name: name.into(),
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content,
@@ -1094,6 +1107,7 @@ impl Tree {
                 parent: Some(parent),
                 name,
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content: PaneContentKind::Board,
@@ -1132,6 +1146,7 @@ impl Tree {
                 parent: Some(parent),
                 name,
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Folder { path },
             },
@@ -1186,6 +1201,7 @@ impl Tree {
                 parent: Some(parent_group),
                 name: name.into(),
                 short_name: None,
+                inferred_icon: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::split_view(orientation)),
             },
@@ -1423,11 +1439,13 @@ impl Tree {
                     id,
                     title,
                     short_title,
+                    icon,
                 } => {
                     let existing = tree.get_mut(*id)?;
                     existing.parent = Some(parent);
                     existing.name = title.clone();
                     existing.short_name = short_title.clone();
+                    existing.inferred_icon = icon.clone();
                     existing.structure_source = StructureSource::LlmRestructure;
                     // A restructure-authored title is curated, not a
                     // per-turn automatic guess: freeze it the same way a
@@ -1442,17 +1460,20 @@ impl Tree {
                     id,
                     title,
                     short_title,
+                    icon,
                 } => {
                     let existing = tree.get_mut(*id)?;
                     existing.parent = Some(parent);
                     existing.name = title.clone();
                     existing.short_name = short_title.clone();
+                    existing.inferred_icon = icon.clone();
                     existing.structure_source = StructureSource::LlmRestructure;
                     *id
                 }
                 RestructureNode::Group {
                     title,
                     short_title,
+                    icon,
                     children,
                 } => {
                     let group_id = tree.alloc_id();
@@ -1463,6 +1484,7 @@ impl Tree {
                             parent: Some(parent),
                             name: title.clone(),
                             short_name: short_title.clone(),
+                            inferred_icon: icon.clone(),
                             structure_source: StructureSource::LlmRestructure,
                             kind: NodeKind::Container(ContainerNode::group()),
                         },
@@ -1474,6 +1496,7 @@ impl Tree {
                     orientation,
                     title,
                     short_title,
+                    icon,
                     children,
                 } => {
                     let split_id = tree.alloc_id();
@@ -1484,6 +1507,7 @@ impl Tree {
                             parent: Some(parent),
                             name: title.clone(),
                             short_name: short_title.clone(),
+                            inferred_icon: icon.clone(),
                             structure_source: StructureSource::LlmRestructure,
                             kind: NodeKind::Container(ContainerNode::split_view(*orientation)),
                         },
@@ -1539,10 +1563,12 @@ impl Tree {
         id: NodeId,
         name: impl Into<String>,
         short_name: Option<String>,
+        inferred_icon: Option<String>,
     ) -> Result<(), TreeError> {
         let node = self.get_mut(id)?;
         node.name = name.into();
         node.short_name = short_name;
+        node.inferred_icon = inferred_icon;
         node.structure_source = StructureSource::Manual;
         if let NodeKind::Pane { title_source, .. } = &mut node.kind {
             *title_source = PaneTitleSource::UserSpecified;
@@ -1560,6 +1586,7 @@ impl Tree {
         id: NodeId,
         title: impl Into<String>,
         short_title: Option<String>,
+        inferred_icon: Option<String>,
     ) -> Result<bool, TreeError> {
         let node = self.get_mut(id)?;
         let NodeKind::Pane { title_source, .. } = &node.kind else {
@@ -1569,11 +1596,15 @@ impl Tree {
             return Ok(false);
         }
         let title = title.into();
-        if node.name == title && node.short_name == short_title {
+        if node.name == title
+            && node.short_name == short_title
+            && node.inferred_icon == inferred_icon
+        {
             return Ok(false);
         }
         node.name = title;
         node.short_name = short_title;
+        node.inferred_icon = inferred_icon;
         Ok(true)
     }
 
@@ -2238,10 +2269,12 @@ mod tests {
                 children: vec![RestructureNode::Group {
                     title: "Reorganized".to_string(),
                     short_title: None,
+                    icon: None,
                     children: vec![RestructureNode::Pane {
                         id: first_pane,
                         title: "renamed one".to_string(),
                         short_title: None,
+                        icon: None,
                     }],
                 }],
             },
@@ -2631,7 +2664,7 @@ mod tests {
     fn rename_and_toggle_expanded() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        tree.rename_node(group, "renamed", None).unwrap();
+        tree.rename_node(group, "renamed", None, None).unwrap();
         assert_eq!(tree.get(group).unwrap().name, "renamed");
         tree.toggle_expanded(group).unwrap();
         match &tree.get(group).unwrap().kind {
@@ -2959,16 +2992,19 @@ mod tests {
             children: vec![RestructureNode::Group {
                 title: "Auth refactor".to_string(),
                 short_title: Some("Auth".to_string()),
+                icon: None,
                 children: vec![
                     RestructureNode::Pane {
                         id: pane_a,
                         title: "Backend agent".to_string(),
                         short_title: None,
+                        icon: None,
                     },
                     RestructureNode::Pane {
                         id: pane_b,
                         title: "Frontend shell".to_string(),
                         short_title: None,
+                        icon: None,
                     },
                 ],
             }],
@@ -2994,7 +3030,7 @@ mod tests {
         };
         assert_eq!(*title_source, PaneTitleSource::UserSpecified);
 
-        tree.rename_node(pane_a, "User refined backend task", None)
+        tree.rename_node(pane_a, "User refined backend task", None, None)
             .unwrap();
         assert_eq!(
             tree.get(pane_a).unwrap().structure_source,
@@ -3022,16 +3058,19 @@ mod tests {
                     orientation: SplitOrientation::Vertical,
                     title: "Split".to_string(),
                     short_title: None,
+                    icon: None,
                     children: vec![
                         RestructureNode::Pane {
                             id: pane_a,
                             title: "a2".to_string(),
                             short_title: None,
+                            icon: None,
                         },
                         RestructureNode::Pane {
                             id: pane_b,
                             title: "b2".to_string(),
                             short_title: None,
+                            icon: None,
                         },
                     ],
                 },
@@ -3039,6 +3078,7 @@ mod tests {
                     id: folder,
                     title: "Project root".to_string(),
                     short_title: None,
+                    icon: None,
                 },
             ],
         };
@@ -3069,6 +3109,7 @@ mod tests {
                 id: pane_a,
                 title: "only a".to_string(),
                 short_title: None,
+                icon: None,
             }],
         };
         let err = tree.apply_restructure(plan).unwrap_err();
@@ -3098,11 +3139,13 @@ mod tests {
                     id: pane_a,
                     title: "a1".to_string(),
                     short_title: None,
+                    icon: None,
                 },
                 RestructureNode::Pane {
                     id: pane_a,
                     title: "a2".to_string(),
                     short_title: None,
+                    icon: None,
                 },
             ],
         };
@@ -3126,6 +3169,7 @@ mod tests {
                 id: NodeId(9999),
                 title: "ghost".to_string(),
                 short_title: None,
+                icon: None,
             }],
         };
         let err = tree.apply_restructure(plan).unwrap_err();
@@ -3145,6 +3189,7 @@ mod tests {
                 id: group,
                 title: "not a pane".to_string(),
                 short_title: None,
+                icon: None,
             }],
         };
         let err = tree.apply_restructure(plan).unwrap_err();
@@ -3170,12 +3215,14 @@ mod tests {
                 orientation: SplitOrientation::Vertical,
                 title: "too many".to_string(),
                 short_title: None,
+                icon: None,
                 children: panes
                     .into_iter()
                     .map(|id| RestructureNode::Pane {
                         id,
                         title: "p".to_string(),
                         short_title: None,
+                        icon: None,
                     })
                     .collect(),
             }],
@@ -3200,13 +3247,16 @@ mod tests {
                 orientation: SplitOrientation::Vertical,
                 title: "bad".to_string(),
                 short_title: None,
+                icon: None,
                 children: vec![RestructureNode::Group {
                     title: "nested".to_string(),
                     short_title: None,
+                    icon: None,
                     children: vec![RestructureNode::Pane {
                         id: pane_a,
                         title: "a".to_string(),
                         short_title: None,
+                        icon: None,
                     }],
                 }],
             }],

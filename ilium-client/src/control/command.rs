@@ -145,6 +145,36 @@ pub enum BoardStorageChoice {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TerminalSubmissionCommand {
+    #[serde(default)]
+    pub target: NodeTarget,
+    pub text: String,
+    #[serde(default = "default_true")]
+    pub send_enter: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl From<TerminalSubmissionCommand> for TerminalCommand {
+    fn from(command: TerminalSubmissionCommand) -> Self {
+        Self {
+            action: TerminalAction::Write,
+            target: command.target,
+            text: Some(command.text),
+            key: None,
+            lines: None,
+            delay_seconds: None,
+            send_enter: Some(command.send_enter),
+            delivery: None,
+            runs: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TerminalCommand {
     pub action: TerminalAction,
     #[serde(default)]

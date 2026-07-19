@@ -76,6 +76,8 @@ pub fn parse_bounded_word_json(
 /// pipeline produced them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DualTitle {
+    /// One concise UTF-8 visual marker for the work the title describes.
+    pub icon: String,
     /// 2-3 words, shown when the tree panel is too narrow for `long`.
     pub short: String,
     /// 5-7 words, shown when the tree panel is wide enough.
@@ -103,6 +105,7 @@ pub fn parse_dual_bounded_word_json(
 ) -> anyhow::Result<DualTitle> {
     let parsed = parse_json_object(response, context_label)?;
     Ok(DualTitle {
+        icon: extract_icon_field(&parsed, "icon", context_label)?,
         short: extract_bounded_word_field(
             &parsed,
             short.field,
@@ -118,6 +121,39 @@ pub fn parse_dual_bounded_word_json(
             context_label,
         )?,
     })
+}
+
+/// Accepts one compact UTF-8 icon/emoticon while rejecting prose, spacing,
+/// and terminal control characters. Emoji sequences may contain several
+/// scalar values (variation selectors / ZWJ), so validation is deliberately
+/// character-count based rather than assuming one Unicode scalar.
+pub fn extract_icon_field(
+    parsed: &serde_json::Value,
+    field: &str,
+    context_label: &str,
+) -> anyhow::Result<String> {
+    let raw_value = parsed
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            anyhow::anyhow!("{context_label} response missing string field \"{field}\"")
+        })?;
+    normalize_icon(raw_value).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{context_label} response field \"{field}\" must be one compact UTF-8 icon or emoticon"
+        )
+    })
+}
+
+/// Normalizes a model-supplied visual marker without turning it into prose.
+pub fn normalize_icon(value: &str) -> Option<String> {
+    let icon = value.trim();
+    (!icon.is_empty()
+        && icon.chars().count() <= 16
+        && !icon
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace()))
+    .then_some(icon.to_string())
 }
 
 fn parse_json_object(response: &str, context_label: &str) -> anyhow::Result<serde_json::Value> {
@@ -253,7 +289,7 @@ mod tests {
     #[test]
     fn parse_dual_bounded_word_json_reads_both_fields_in_one_pass() {
         let result = parse_dual_bounded_word_json(
-            r#"{"short":"Auth Bug","long":"Fix the login authentication bug today"}"#,
+            r#"{"icon":"🔐","short":"Auth Bug","long":"Fix the login authentication bug today"}"#,
             BoundedField {
                 field: "short",
                 min_words: 2,

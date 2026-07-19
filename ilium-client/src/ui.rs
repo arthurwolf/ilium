@@ -33,29 +33,34 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let layout = app.layout;
 
-    if let Mode::Search(state) = &app.mode {
+    draw_base_layer(frame, area, app);
+    draw_voice_control(frame, layout.voice_control_area, app);
+
+    // Every suspended parent draws before its child. This makes stack depth
+    // a rendering concern rather than forcing child modes to clone or embed
+    // the state of the screen they temporarily cover.
+    for mode in &app.modal_stack {
+        draw_mode_overlay(frame, area, app, mode);
+    }
+    draw_mode_overlay(frame, area, app, &app.mode);
+}
+
+/// Draws the one full-screen root behind every stacked overlay. Settings and
+/// Search replace the ordinary workspace only when they are the oldest layer.
+fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
+    let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
+    if let Mode::Search(state) = root_mode {
         search_ui::render(frame, area, state, &app.ui_settings.icons);
-        draw_voice_control(frame, layout.voice_control_area, app);
         return;
     }
-
-    // The full-screen settings view replaces everything else this frame --
-    // see `crate::settings_ui`'s module doc comment ("the **entire** screen
-    // is replaced") -- so it returns before any of the ordinary tree/pane/
-    // status-bar drawing below ever runs, rather than layering on top of it
-    // like the popup overlays further down do.
-    if let Mode::Settings(state) = &app.mode {
+    if let Mode::Settings(state) = root_mode {
         crate::settings_ui::render(frame, area, app, state);
-        draw_voice_control(frame, layout.voice_control_area, app);
         return;
     }
 
-    // The pane renders first: `PseudoTerminal` clears its whole area before
-    // drawing (so a shrunk PTY screen never leaves stale content behind),
-    // which would wipe out the tree's border character on the one column
-    // they share. Drawing the tree second means its border merge (which
-    // never clears) has the last word and actually fuses the two into a
-    // connected `┬`/`┴` joint instead of losing to the pane's plain corner.
+    let layout = app.layout;
+    // The pane renders before the tree because `PseudoTerminal` clears its
+    // area; the tree then restores the connected shared-border joints.
     draw_pane(frame, layout.pane_area, app);
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
     tree_ui::render(
@@ -75,6 +80,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             },
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
             project_name: app.project_name.as_deref(),
+            project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
             titles_loading: &app.titles_loading,
             recently_created: &app.recently_created,
@@ -84,6 +90,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             tree_order: app.ui_settings.tree_order,
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+            show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
@@ -92,121 +99,108 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             panes: &app.panes,
         },
     );
-
     draw_status_bar(frame, layout.status_area, app);
-    draw_voice_control(frame, layout.voice_control_area, app);
+}
 
-    // Overlays render last, on top of the layout above.
-    if let Mode::Explorer(overlay, _)
-    | Mode::FolderExplorer(overlay, _)
-    | Mode::ProjectFolderExplorer(overlay, _)
-    | Mode::BoardPathPicker(overlay, _) = &app.mode
-    {
-        explorer_overlay::render(frame, area, overlay, std::time::SystemTime::now());
-    }
-    if let Mode::ExplorerFileMenu(menu) = &app.mode {
-        explorer_overlay::render(frame, area, &menu.overlay, std::time::SystemTime::now());
-        frame.render_widget(Clear, menu.area);
-        let label = menu
-            .file_path
-            .file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_default();
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Markdown file",
-                    Style::new().add_modifier(Modifier::DIM),
-                )),
-                Line::from(format!("▦ Create board from {label}")),
-            ])
-            .block(theme::block(true).title(theme::chrome_title("File actions"))),
-            menu.area,
-        );
-    }
-    if matches!(app.mode, Mode::Help) {
-        help::render(
+/// Draws one non-root layer without deciding which layer owns input. Input
+/// dispatch remains top-only through `App::mode`; this function is read-only.
+fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
+    match mode {
+        Mode::Explorer(overlay, _)
+        | Mode::FolderExplorer(overlay, _)
+        | Mode::ProjectFolderExplorer(overlay, _)
+        | Mode::BoardPathPicker(overlay) => {
+            explorer_overlay::render(frame, area, overlay, std::time::SystemTime::now());
+        }
+        Mode::ExplorerFileMenu(menu) => {
+            frame.render_widget(Clear, menu.area);
+            let label = menu
+                .file_path
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_default();
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        "Markdown file",
+                        Style::new().add_modifier(Modifier::DIM),
+                    )),
+                    Line::from(format!("▦ Create board from {label}")),
+                ])
+                .block(theme::block(true).title(theme::chrome_title("File actions"))),
+                menu.area,
+            );
+        }
+        Mode::Help => help::render(
             frame,
             area,
             app.keyboard_settings.shortcut_base,
             &app.keybindings,
-        );
-    }
-    if let Mode::ContextMenu(menu) = &app.mode {
-        draw_context_menu(frame, menu, app.ui_settings.tree_order);
-    }
-    if let Mode::SchedulePaneInput(state) = &app.mode {
-        draw_scheduled_input_dialog(frame, area, app, state);
-    }
-    if let Mode::QueuePrompt(state) = &app.mode {
-        draw_prompt_queue_dialog(frame, area, app, state);
-    }
-    if let Mode::EditorLineContextMenu(menu) = &app.mode {
-        draw_editor_line_context_menu(frame, menu);
-    }
-    if let Mode::CreateAgentFromLine(state) = &app.mode {
-        draw_create_agent_from_line(frame, area, state);
-    }
-    if let Mode::CreateGroup(state) = &app.mode {
-        draw_create_group(frame, app, state);
-    }
-    if let Mode::CreateSplitOrientation(state) = &app.mode {
-        draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
-    }
-    if let Mode::CreateSplitMembers(state) = &app.mode {
-        draw_create_split_members(frame, area, state);
-    }
-    if let Mode::CreateBoard(state) = &app.mode {
-        draw_create_board(frame, area, state);
-    }
-    if let Mode::BoardCardPrompt(_, state) = &app.mode {
-        modal::render_text_prompt(frame, area, "New card", state);
-    }
-    if let Mode::BoardColumnPrompt(_, state) = &app.mode {
-        modal::render_text_prompt(frame, area, "New column", state);
-    }
-    if let Mode::BoardRenamePrompt(_, target, state) = &app.mode {
-        let title = match target {
-            BoardRenameTarget::Card => "Rename card",
-            BoardRenameTarget::Column => "Rename column",
-        };
-        modal::render_text_prompt(frame, area, title, state);
-    }
-    if let Mode::BoardDeleteConfirm(_, target) = &app.mode {
-        let (title, message) = match target {
-            BoardDeleteTarget::Card => ("Delete card?", "Delete the selected card?"),
-            BoardDeleteTarget::Column => ("Delete column?", "Delete the empty selected column?"),
-        };
-        modal::render_confirm(frame, area, title, message);
-    }
-    if let Mode::Rename(state) = &app.mode {
-        modal::render_text_prompt(frame, area, "Rename", state);
-    }
-    if let Mode::CommandPrompt(state) = &app.mode {
-        modal::render_text_prompt(frame, area, "Run command", state);
-    }
-    if let Mode::InferenceSettingPrompt(field, state) = &app.mode {
-        modal::render_text_prompt(frame, area, field.label(), state);
-    }
-    if let Mode::VoiceSettingPrompt(field, state) = &app.mode {
-        modal::render_masked_text_prompt(frame, area, field.label(), state);
-    }
-    if let Mode::VoicePromptEditor(state) = &app.mode {
-        modal::render_multiline_prompt(frame, area, "Voice control custom prompt", &state.textarea);
-    }
-    if let Mode::SaveAs(_, state) = &app.mode {
-        modal::render_text_prompt(frame, area, "Save As", state);
-    }
-    if let Mode::ConfirmClose(target) = &app.mode {
-        draw_confirm_close(frame, area, app, *target);
-    }
-    if let Mode::ConfirmSessionRecovery { pane_count } = &app.mode {
-        modal::render_confirm(
+        ),
+        Mode::ContextMenu(menu) => {
+            draw_context_menu(frame, menu, app.ui_settings.tree_order);
+        }
+        Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
+        Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
+        Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu),
+        Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
+        Mode::CreateGroup(state) => draw_create_group(frame, app, state),
+        Mode::CreateSplitOrientation(state) => {
+            draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
+        }
+        Mode::CreateSplitMembers(state) => draw_create_split_members(frame, area, state),
+        Mode::CreateBoard(state) => draw_create_board(frame, area, state),
+        Mode::BoardCardPrompt(_, state) => {
+            modal::render_text_prompt(frame, area, "New card", state);
+        }
+        Mode::BoardColumnPrompt(_, state) => {
+            modal::render_text_prompt(frame, area, "New column", state);
+        }
+        Mode::BoardRenamePrompt(_, target, state) => {
+            let title = match target {
+                BoardRenameTarget::Card => "Rename card",
+                BoardRenameTarget::Column => "Rename column",
+            };
+            modal::render_text_prompt(frame, area, title, state);
+        }
+        Mode::BoardDeleteConfirm(_, target) => {
+            let (title, message) = match target {
+                BoardDeleteTarget::Card => ("Delete card?", "Delete the selected card?"),
+                BoardDeleteTarget::Column => {
+                    ("Delete column?", "Delete the empty selected column?")
+                }
+            };
+            modal::render_confirm(frame, area, title, message);
+        }
+        Mode::Rename(state) => modal::render_text_prompt(frame, area, "Rename", state),
+        Mode::CommandPrompt(state) => {
+            modal::render_text_prompt(frame, area, "Run command", state);
+        }
+        Mode::InferenceSettingPrompt(field, state) => {
+            modal::render_text_prompt(frame, area, field.label(), state);
+        }
+        Mode::VoiceSettingPrompt(field, state) => {
+            modal::render_masked_text_prompt(frame, area, field.label(), state);
+        }
+        Mode::VoicePromptEditor(state) => modal::render_multiline_prompt(
+            frame,
+            area,
+            "Voice control custom prompt",
+            &state.textarea,
+        ),
+        Mode::SaveAs(_, state) => modal::render_text_prompt(frame, area, "Save As", state),
+        Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
+        Mode::ConfirmSessionRecovery { pane_count } => modal::render_confirm(
             frame,
             area,
             "Restore previous session?",
             &format!("Restore {pane_count} pane(s) from the stored snapshot?  Enter/Y: restore · N/Esc: start fresh"),
-        );
+        ),
+        Mode::Normal
+        | Mode::LeaderPending
+        | Mode::Move
+        | Mode::Settings(_)
+        | Mode::Search(_) => {}
     }
 }
 
@@ -1127,7 +1121,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::CreateSplitOrientation(_) => "NEW SPLIT",
         Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES",
         Mode::CreateBoard(_) => "NEW BOARD",
-        Mode::BoardPathPicker(_, _) => "BOARD PATH",
+        Mode::BoardPathPicker(_) => "BOARD PATH",
         Mode::BoardCardPrompt(_, _) => "NEW CARD",
         Mode::BoardColumnPrompt(_, _) => "NEW COLUMN",
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
@@ -1296,6 +1290,33 @@ mod tests {
             .expect("enabled dot");
         assert_eq!(enabled_dot.fg, Color::Red);
         assert!(enabled_dot.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn stacked_voice_credential_prompt_renders_over_live_settings() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.mode = Mode::Settings(crate::app::SettingsState {
+            tab: crate::app::SettingsTab::VoiceControl,
+            selected_row: 1,
+            ..crate::app::SettingsState::default()
+        });
+        app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::ApiKey, 1);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("⚙ Settings"));
+        assert!(rendered.contains("Voice control"));
+        assert!(rendered.contains("OpenAI API key"));
+        assert!(rendered.contains("Enter to replace · Esc to keep the existing key"));
     }
 
     #[test]

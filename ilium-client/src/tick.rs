@@ -41,7 +41,10 @@ pub fn apply_naming_worker_event(
             workers.project_name_worker_finished();
             app.is_project_name_loading = false;
             match result {
-                Ok(bootstrap) => app.project_name = Some(bootstrap.project_name),
+                Ok(bootstrap) => {
+                    app.project_name = Some(bootstrap.project_name);
+                    app.project_icon = bootstrap.icon;
+                }
                 Err(err) => {
                     app.status_message = Some(format!("Could not infer project name: {err}"))
                 }
@@ -70,24 +73,26 @@ pub fn apply_naming_worker_event(
                     TitleTrigger::Automatic => {
                         app.inferred_title_session_ids
                             .insert(pane_id, session_id.clone());
-                        app.request_session_pane_title(
+                        app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
                             pane_id,
-                            session_id,
-                            title_generation,
-                            title.long,
-                            Some(title.short),
-                            ilium_core::PaneTitleSource::Automatic,
-                        );
+                            expected_session_id: session_id,
+                            expected_title_generation: title_generation,
+                            title: title.long,
+                            short_title: Some(title.short),
+                            inferred_icon: Some(title.icon),
+                            title_source: ilium_core::PaneTitleSource::Automatic,
+                        });
                     }
                     TitleTrigger::Manual => {
-                        app.request_session_pane_title(
+                        app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
                             pane_id,
-                            session_id,
-                            title_generation,
-                            title.long,
-                            Some(title.short),
-                            ilium_core::PaneTitleSource::UserSpecified,
-                        );
+                            expected_session_id: session_id,
+                            expected_title_generation: title_generation,
+                            title: title.long,
+                            short_title: Some(title.short),
+                            inferred_icon: Some(title.icon),
+                            title_source: ilium_core::PaneTitleSource::UserSpecified,
+                        });
                     }
                 },
                 Err(err) => {
@@ -109,10 +114,20 @@ pub fn apply_naming_worker_event(
             match result {
                 Ok(title) => match trigger {
                     TitleTrigger::Automatic => {
-                        app.request_automatic_pane_title(pane_id, title.long, Some(title.short));
+                        app.request_automatic_pane_title(
+                            pane_id,
+                            title.long,
+                            Some(title.short),
+                            Some(title.icon),
+                        );
                     }
                     TitleTrigger::Manual => {
-                        app.request_rename(pane_id, title.long, Some(title.short));
+                        app.request_rename(
+                            pane_id,
+                            title.long,
+                            Some(title.short),
+                            Some(title.icon),
+                        );
                     }
                 },
                 Err(err) => {
@@ -173,6 +188,7 @@ mod tests {
                 "old-session".to_string(),
                 0,
                 Ok(DualTitle {
+                    icon: "📜".to_string(),
                     short: "Old Session".to_string(),
                     long: "Title From The Previous Agent Session".to_string(),
                 }),

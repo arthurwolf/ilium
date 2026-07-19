@@ -218,7 +218,7 @@ fn normalize_agent_resumes(
     for (pane_id, bare_command) in invalid_automatic_titles {
         let _ = snapshot
             .tree
-            .set_automatic_pane_title(pane_id, bare_command, None);
+            .set_automatic_pane_title(pane_id, bare_command, None, None);
     }
     changed
 }
@@ -294,7 +294,7 @@ fn append_legacy_node(
         } => {
             let pane_id = tree.add_pane(parent, name.clone(), PaneContentKind::Terminal)?;
             if matches!(title_source, Some(LegacyTitleSource::User)) {
-                tree.rename_node(pane_id, name, None)?;
+                tree.rename_node(pane_id, name, None, None)?;
             }
             let origin = agent.map_or(TerminalOrigin::PlainShell, legacy_agent_origin);
             panes.push(PaneSnapshot {
@@ -672,7 +672,7 @@ mod tests {
         let mut second = sample_snapshot();
         second
             .tree
-            .rename_node(ROOT_ID, "renamed root", None)
+            .rename_node(ROOT_ID, "renamed root", None, None)
             .unwrap();
 
         write_snapshot_to(&path, &first).await.unwrap();
@@ -804,6 +804,7 @@ root:
                 cross_project_pane,
                 "Cross Project Title Must Not Survive",
                 Some("Wrong Project".to_string()),
+                None,
             )
             .unwrap();
         let user_named_pane = snapshot
@@ -812,7 +813,7 @@ root:
             .unwrap();
         snapshot
             .tree
-            .rename_node(user_named_pane, "My Persistent Name", None)
+            .rename_node(user_named_pane, "My Persistent Name", None, None)
             .unwrap();
         snapshot.panes.push(PaneSnapshot {
             node_id: cross_project_pane,

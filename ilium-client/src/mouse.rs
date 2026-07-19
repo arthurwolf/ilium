@@ -172,18 +172,13 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             Mode::ProjectFolderExplorer(overlay, selection) => {
                 handle_project_folder_explorer_mouse(app, overlay, selection, mouse)
             }
-            Mode::BoardPathPicker(mut overlay, mut state) => {
+            Mode::BoardPathPicker(mut overlay) => {
                 match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-                    Ok(Some(path)) => {
-                        state.path =
-                            crate::text_prompt::TextPromptState::new(path.display().to_string());
-                        state.editing_path = true;
-                        app.mode = Mode::CreateBoard(state);
-                    }
-                    Ok(None) => app.mode = Mode::BoardPathPicker(overlay, state),
+                    Ok(Some(path)) => app.return_to_create_board(Some(path)),
+                    Ok(None) => app.mode = Mode::BoardPathPicker(overlay),
                     Err(error) => {
                         app.status_message = Some(format!("Board path picker error: {error}"));
-                        app.mode = Mode::BoardPathPicker(overlay, state);
+                        app.mode = Mode::BoardPathPicker(overlay);
                     }
                 }
             }
@@ -206,6 +201,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         Mode::Help
             | Mode::Rename(_)
             | Mode::CommandPrompt(_)
+            | Mode::InferenceSettingPrompt(_, _)
+            | Mode::VoiceSettingPrompt(_, _)
+            | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
             | Mode::ConfirmClose(_)
             | Mode::BoardCardPrompt(_, _)
@@ -1001,6 +999,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             crate::app::InferenceSettingField::OllamaModel,
                         ) => app.settings_adjust_ollama_model(direction),
                         crate::app::InferenceRow::Field(field) => {
+                            app.mode = Mode::Settings(state);
                             app.settings_open_inference_field(field);
                             return;
                         }
@@ -1037,10 +1036,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 ) {
                     state.selected_row = index;
                     if let Some(row) = crate::voice_settings::VoiceRow::ALL.get(index).copied() {
+                        app.mode = Mode::Settings(state);
                         app.settings_adjust_voice_row(row, direction);
-                        if !matches!(app.mode, Mode::Normal) {
-                            return;
-                        }
+                        return;
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Appearance {
@@ -1229,9 +1227,9 @@ fn handle_explorer_file_menu_mouse(
         && mouse.row == menu.area.y.saturating_add(1)
     {
         app.request_new_markdown_board(menu.target_group, menu.file_path);
-        app.mode = Mode::Normal;
+        app.close_modal_flow();
     } else {
-        app.mode = Mode::Explorer(menu.overlay, menu.target_group);
+        app.pop_modal();
     }
 }
 

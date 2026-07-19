@@ -432,9 +432,18 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the historical close happened on the next periodic maintenance tick,
     // when the workspace-search poll replaced every non-search mode with
     // Normal while merely checking whether a debounced scan was due.
-    let (settings_column, settings_row) = tui
+    let (_, settings_row) = tui
         .with_screen(|screen| first_cell_containing(screen, "🎚️"))
-        .expect("rendered settings toolbar icon should have a concrete cell");
+        .expect("rendered settings toolbar icon should have a concrete row");
+    // The emoji's vt100 payload can occupy a different cell than ratatui's
+    // Unicode-width calculation under load. The Settings hit box is anchored
+    // to the tree's right edge, so click its stable interior cell two columns
+    // left of the rendered tree/pane divider instead of deriving x from the
+    // grapheme-storage cell.
+    let (tree_divider_column, _) = tui
+        .with_screen(|screen| first_cell_containing(screen, "┬"))
+        .expect("tree/pane divider should have a concrete cell");
+    let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
     assert!(
@@ -465,6 +474,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("OpenAI API key")
                 && screen.contains("Reasoning effort")
                 && screen.contains("VAD eagerness")
+                && screen.contains("Confirm terminal submissions")
                 && screen.contains("Custom prompt")
         },
         WAIT_TIMEOUT,
@@ -478,6 +488,42 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     assert!(
         tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
         "expected the global voice control over Settings, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Open the API-key child dialog from the real Settings screen. Both the
+    // parent header/tab and the child hint must remain in the same captured
+    // terminal frame; this is the regression boundary for stacked modals.
+    tui.write(b"j\r")
+        .expect("opening the voice API-key child dialog");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("⚙ Settings")
+                    && screen.contains("Voice control")
+                    && screen.contains("Enter to replace · Esc to keep the existing key")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the API-key dialog over still-open Settings, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"smoke-key\r")
+        .expect("committing the isolated smoke-test API key");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("⚙ Settings")
+                    && screen.contains("Voice control")
+                    && !screen.contains("Enter to replace · Esc to keep the existing key")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected committing the child to reveal the same Settings parent, got: {:?}",
         tui.screen_text()
     );
 

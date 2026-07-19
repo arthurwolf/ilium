@@ -76,11 +76,13 @@ mod tests {
                 node_id: NodeId(2),
                 title: "renamed".to_string(),
                 short_title: None,
+                inferred_icon: None,
             },
             ClientRequest::RenameNode {
                 node_id: NodeId(2),
                 title: "renamed with short form".to_string(),
                 short_title: Some("Renamed".to_string()),
+                inferred_icon: Some("✏️".to_string()),
             },
             ClientRequest::ResizePane {
                 pane_id: NodeId(2),
@@ -122,11 +124,13 @@ mod tests {
                 pane_id: NodeId(2),
                 title: "git status".to_string(),
                 short_title: None,
+                inferred_icon: None,
             },
             ClientRequest::SetAutomaticPaneTitle {
                 pane_id: NodeId(2),
                 title: "Fix Auth Bug In Login Flow".to_string(),
                 short_title: Some("Fix Auth".to_string()),
+                inferred_icon: Some("🔐".to_string()),
             },
             ClientRequest::SetPaneFocus {
                 pane_id: NodeId(2),
@@ -180,6 +184,7 @@ mod tests {
                 expected_title_generation: 0,
                 title: "Fix Auth Bug In Login Flow".to_string(),
                 short_title: Some("Fix Auth".to_string()),
+                inferred_icon: Some("🔐".to_string()),
                 title_source: ilium_core::PaneTitleSource::Automatic,
             },
             ClientRequest::SetSessionPaneTitle {
@@ -188,6 +193,7 @@ mod tests {
                 expected_title_generation: 0,
                 title: "My Agent Name".to_string(),
                 short_title: None,
+                inferred_icon: None,
                 title_source: ilium_core::PaneTitleSource::UserSpecified,
             },
             ClientRequest::ApplyRestructurePlan(ilium_core::RestructurePlan {
@@ -195,20 +201,24 @@ mod tests {
                     ilium_core::RestructureNode::Group {
                         title: "Auth refactor".to_string(),
                         short_title: Some("Auth".to_string()),
+                        icon: Some("🔐".to_string()),
                         children: vec![
                             ilium_core::RestructureNode::Pane {
                                 id: NodeId(2),
                                 title: "Backend agent".to_string(),
                                 short_title: None,
+                                icon: Some("🔧".to_string()),
                             },
                             ilium_core::RestructureNode::SplitView {
                                 orientation: SplitOrientation::Vertical,
                                 title: "Split".to_string(),
                                 short_title: None,
+                                icon: Some("🪟".to_string()),
                                 children: vec![ilium_core::RestructureNode::Pane {
                                     id: NodeId(3),
                                     title: "Frontend shell".to_string(),
                                     short_title: None,
+                                    icon: Some("🖥️".to_string()),
                                 }],
                             },
                         ],
@@ -217,6 +227,7 @@ mod tests {
                         id: NodeId(4),
                         title: "Project root".to_string(),
                         short_title: None,
+                        icon: Some("📁".to_string()),
                     },
                 ],
             }),
@@ -228,6 +239,7 @@ mod tests {
                         id: NodeId(2),
                         title: "Scoped shell".to_string(),
                         short_title: None,
+                        icon: Some("🖥️".to_string()),
                     }],
                 },
             },
