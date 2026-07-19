@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
+tracing = "0.1.44"
 ureq = { version = "3.2.0", features = ["json"] }

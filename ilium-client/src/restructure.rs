@@ -479,31 +479,53 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
         },
     )?;
 
-    let call_id = debug_call_id();
-    maybe_debug_log(call_id, "prompt", &prompt);
+    static NEXT_OPERATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let operation_id = NEXT_OPERATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    tracing::info!(
+        operation_id,
+        prompt = %prompt,
+        item_count = contexts.len(),
+        "restructure inference started"
+    );
 
     let mut last_parse_error = None;
     for attempt in 1..=RESTRUCTURE_MAX_ATTEMPTS {
         let response = match generator.complete_restructure_prompt(&prompt) {
             Ok(response) => response,
             Err(error) => {
-                maybe_debug_log(
-                    call_id,
-                    &format!("error-attempt-{attempt}"),
-                    &format!("gateway call failed: {error}"),
+                tracing::error!(
+                    operation_id,
+                    attempt,
+                    error = %error,
+                    error_debug = ?error,
+                    "restructure inference request failed"
                 );
                 return Err(error);
             }
         };
-        maybe_debug_log(call_id, &format!("response-attempt-{attempt}"), &response);
+        tracing::info!(
+            operation_id,
+            attempt,
+            response = %response,
+            "restructure inference response received"
+        );
 
         match parse_restructure_response(&response, contexts) {
-            Ok(plan) => return Ok(plan),
+            Ok(plan) => {
+                tracing::info!(
+                    operation_id,
+                    attempt,
+                    "restructure inference response parsed"
+                );
+                return Ok(plan);
+            }
             Err(error) => {
-                maybe_debug_log(
-                    call_id,
-                    &format!("error-attempt-{attempt}"),
-                    &error.to_string(),
+                tracing::error!(
+                    operation_id,
+                    attempt,
+                    error = %error,
+                    response = %response,
+                    "restructure inference response could not be parsed"
                 );
                 last_parse_error = Some(error);
             }
@@ -511,102 +533,6 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
     }
     Err(last_parse_error
         .expect("the loop above always records an error before exhausting attempts"))
-}
-
-/// Millisecond Unix timestamp used to correlate one call's prompt/response/
-/// error debug files -- collisions are harmless (a same-millisecond retry
-/// would just interleave into the same file set, which is still readable).
-fn debug_call_id() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
-}
-
-/// `infer_restructure_plan`'s own call sites, gated so the unit tests in
-/// this module (which exercise that function dozens of times with fixture
-/// text) don't spam `/tmp/ilium-debug/` with noise that would bury a real
-/// call's files. `debug_log` itself stays unconditional -- see its own
-/// dedicated test, which calls it directly to verify the write path works.
-fn maybe_debug_log(call_id: u128, suffix: &str, content: &str) {
-    if !cfg!(test) {
-        debug_log(call_id, suffix, content);
-    }
-}
-
-/// How many distinct restructure calls' debug files to keep under
-/// `/tmp/ilium-debug/` -- bounds the directory to a constant size (at most
-/// this many call-id groups, each up to 7 files) regardless of how long the
-/// server/client stays up, instead of growing forever. `/tmp` on this host
-/// is tmpfs, so unbounded growth here is unbounded resident RAM, not just
-/// disk.
-const RESTRUCTURE_DEBUG_RETAINED_CALLS: usize = 20;
-
-/// Best-effort debug capture of exactly what this feature sent to and
-/// received from the LLM, under `/tmp/ilium-debug/`. Requested explicitly
-/// for debugging why a free model's reply sometimes fails to parse; never
-/// fails the actual restructure call -- an unwritable `/tmp` just means no
-/// log this time.
-fn debug_log(call_id: u128, suffix: &str, content: &str) {
-    let dir = std::path::Path::new("/tmp/ilium-debug");
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    // Prune once per call rather than once per file: "prompt" is always the
-    // first write `infer_restructure_plan` makes for a given `call_id`, so
-    // this still bounds the directory without scanning it on every one of a
-    // call's up-to-7 writes.
-    if suffix == "prompt" {
-        prune_debug_dir(dir, RESTRUCTURE_DEBUG_RETAINED_CALLS);
-    }
-    let _ = std::fs::write(
-        dir.join(format!("restructure-{call_id}-{suffix}.txt")),
-        content,
-    );
-}
-
-/// Deletes debug files belonging to any call older than the
-/// `retained_calls` most recent distinct call ids found in `dir`. Best
-/// effort like `debug_log` itself: an unreadable directory or a file that
-/// won't delete just leaves that entry for next time, it never fails the
-/// caller.
-fn prune_debug_dir(dir: &std::path::Path, retained_calls: usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    // Each entry's call id is the `{n}` in `restructure-{n}-{suffix}.txt`;
-    // group by it so a single stale call's several files sort together.
-    let mut files_by_call_id: HashMap<u128, Vec<std::path::PathBuf>> = HashMap::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        let Some(rest) = stem.strip_prefix("restructure-") else {
-            continue;
-        };
-        let Some((call_id_text, _suffix)) = rest.split_once('-') else {
-            continue;
-        };
-        let Ok(call_id) = call_id_text.parse::<u128>() else {
-            continue;
-        };
-        files_by_call_id.entry(call_id).or_default().push(path);
-    }
-
-    if files_by_call_id.len() <= retained_calls {
-        return;
-    }
-
-    let mut call_ids: Vec<u128> = files_by_call_id.keys().copied().collect();
-    call_ids.sort_unstable();
-    let stale_count = call_ids.len() - retained_calls;
-    for call_id in &call_ids[..stale_count] {
-        for path in &files_by_call_id[call_id] {
-            let _ = std::fs::remove_file(path);
-        }
-    }
 }
 
 /// Parses `response` after stripping whatever a free model tacked on around
@@ -1103,52 +1029,6 @@ mod tests {
     #[test]
     fn extract_json_object_leaves_a_bare_object_unchanged() {
         assert_eq!(extract_json_object(r#"{"a":1}"#), r#"{"a":1}"#);
-    }
-
-    #[test]
-    fn debug_log_writes_readable_files_under_tmp_ilium_debug() {
-        let call_id = debug_call_id() + 1; // avoid colliding with a real concurrent call
-        debug_log(call_id, "prompt", "the prompt text");
-        debug_log(call_id, "response", "the response text");
-
-        let dir = std::path::Path::new("/tmp/ilium-debug");
-        let prompt =
-            std::fs::read_to_string(dir.join(format!("restructure-{call_id}-prompt.txt"))).unwrap();
-        let response =
-            std::fs::read_to_string(dir.join(format!("restructure-{call_id}-response.txt")))
-                .unwrap();
-        assert_eq!(prompt, "the prompt text");
-        assert_eq!(response, "the response text");
-
-        let _ = std::fs::remove_file(dir.join(format!("restructure-{call_id}-prompt.txt")));
-        let _ = std::fs::remove_file(dir.join(format!("restructure-{call_id}-response.txt")));
-    }
-
-    #[test]
-    fn prune_debug_dir_deletes_only_the_calls_beyond_the_retained_count() {
-        // Isolated directory (not the shared `/tmp/ilium-debug/`) so this
-        // doesn't race the other debug-log test or a concurrent real call.
-        let dir =
-            std::env::temp_dir().join(format!("ilium-restructure-prune-test-{}", debug_call_id()));
-        std::fs::create_dir_all(&dir).unwrap();
-
-        // Three synthetic calls, oldest to newest, one prompt file each.
-        for call_id in [100_u128, 200, 300] {
-            std::fs::write(
-                dir.join(format!("restructure-{call_id}-prompt.txt")),
-                "prompt",
-            )
-            .unwrap();
-        }
-
-        // Retain only the newest 2 of the 3 calls.
-        prune_debug_dir(&dir, 2);
-
-        assert!(!dir.join("restructure-100-prompt.txt").exists());
-        assert!(dir.join("restructure-200-prompt.txt").exists());
-        assert!(dir.join("restructure-300-prompt.txt").exists());
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

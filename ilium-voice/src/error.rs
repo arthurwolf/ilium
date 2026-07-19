@@ -37,7 +37,7 @@ pub enum VoiceError {
         source: cpal::Error,
     },
     #[error("failed to connect to the OpenAI Realtime API: {0}")]
-    Connect(#[source] tokio_tungstenite::tungstenite::Error),
+    Connect(String),
     #[error("timed out while connecting to the OpenAI Realtime API")]
     ConnectionTimeout,
     #[error("the OpenAI API key could not be used as an authorization header")]

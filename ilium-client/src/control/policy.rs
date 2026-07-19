@@ -4,7 +4,7 @@ use crate::app::App;
 
 use super::command::{
     BoardAction, ControlCommand, EditorAction, NodeTarget, SessionAction, TerminalAction,
-    TerminalCommand, TerminalKey, TreeAction,
+    TerminalCommand, TerminalKey, TerminalSubmissionCommand, TerminalTypingCommand, TreeAction,
 };
 use super::resolver::resolve_node;
 
@@ -42,15 +42,17 @@ pub fn confirmation_plan(
         {
             Some("Replace the editor's entire current document?".to_owned())
         }
+        ControlCommand::TerminalSubmission(command)
+            if app.voice_settings.confirm_terminal_submissions =>
+        {
+            return staged_terminal_submission_plan(app, command);
+        }
         ControlCommand::Terminal(command) if app.voice_settings.confirm_terminal_submissions => {
             match command.action {
-                TerminalAction::Write if command.send_enter.unwrap_or(false) => {
-                    return staged_terminal_submission_plan(app, command);
-                }
                 TerminalAction::PressKey if matches!(command.key, Some(TerminalKey::Enter)) => {
                     Some("Press Enter and submit what you see in the target terminal?".to_owned())
                 }
-                TerminalAction::ScheduleInput if command.send_enter.unwrap_or(true) => {
+                TerminalAction::ScheduleInput => {
                     Some("Schedule this terminal input for automatic submission?".to_owned())
                 }
                 _ => None,
@@ -88,7 +90,7 @@ pub fn confirmation_plan(
 
 fn staged_terminal_submission_plan(
     app: &App,
-    command: &TerminalCommand,
+    command: &TerminalSubmissionCommand,
 ) -> Result<Option<ConfirmationPlan>, String> {
     let pane_id = resolve_node(app, &command.target)?;
     let target = NodeTarget {
@@ -96,13 +98,13 @@ fn staged_terminal_submission_plan(
         name: None,
         path: None,
     };
-    let mut staged_command = command.clone();
-    staged_command.target = target.clone();
-    staged_command.send_enter = Some(false);
 
     Ok(Some(ConfirmationPlan {
         question: "I typed it into the target terminal without pressing Enter. Send what you see on screen?".to_owned(),
-        preparation: Some(ControlCommand::Terminal(staged_command)),
+        preparation: Some(ControlCommand::TerminalTyping(TerminalTypingCommand {
+            target: target.clone(),
+            text: command.text.clone(),
+        })),
         confirmed_command: ControlCommand::Terminal(TerminalCommand {
             action: TerminalAction::PressKey,
             target,
@@ -110,7 +112,6 @@ fn staged_terminal_submission_plan(
             key: Some(TerminalKey::Enter),
             lines: None,
             delay_seconds: None,
-            send_enter: None,
             delivery: None,
             runs: None,
         }),
@@ -189,12 +190,9 @@ mod tests {
         assert!(plan.question.contains("what you see on screen"));
         assert!(matches!(
             plan.preparation,
-            Some(ControlCommand::Terminal(TerminalCommand {
-                action: TerminalAction::Write,
+            Some(ControlCommand::TerminalTyping(TerminalTypingCommand {
                 target: NodeTarget { id: Some(id), .. },
-                text: Some(ref text),
-                send_enter: Some(false),
-                ..
+                ref text,
             })) if id == pane_id.0 && text == "/clear"
         ));
         assert!(matches!(
@@ -220,16 +218,9 @@ mod tests {
             PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
         );
         app.focus_pane(pane_id);
-        let command = ControlCommand::Terminal(TerminalCommand {
-            action: TerminalAction::Write,
+        let command = ControlCommand::TerminalSubmission(TerminalSubmissionCommand {
             target: NodeTarget::default(),
-            text: Some("/clear".to_owned()),
-            key: None,
-            lines: None,
-            delay_seconds: None,
-            send_enter: Some(true),
-            delivery: None,
-            runs: None,
+            text: "/clear".to_owned(),
         });
 
         (app, pane_id, command)

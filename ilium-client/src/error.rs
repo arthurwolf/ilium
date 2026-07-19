@@ -12,6 +12,8 @@ pub enum ClientError {
     Connection(#[from] crate::connection::ConnectionError),
     #[error("session directory {0:?} is not a valid directory")]
     InvalidSessionCwd(PathBuf),
+    #[error("failed to initialize session file logging: {0}")]
+    Logging(#[from] ilium_logging::LoggingError),
     /// Reading or parsing `~/.config/ilium/config.toml`'s client-side
     /// tables (`[keybindings]`, `[theme]`) failed. Not fatal on its own --
     /// `crate::run` logs it and falls back to defaults -- kept as a typed

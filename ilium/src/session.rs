@@ -7,12 +7,16 @@
 //! making every project attach to a machine-wide `default` session.
 
 use std::fmt::Write as _;
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use chrono::Local;
 use directories::BaseDirs;
 use ilium_ipc::{write_frame, ClientRequest};
 use sha2::{Digest, Sha256};
@@ -27,6 +31,9 @@ const SERVER_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const GRACEFUL_RESTART_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_SOCKET_PATH_BYTES: usize = 100;
 const MAX_SOCKET_SLUG_BYTES: usize = 48;
+const DEBUG_LOG_ROOT: &str = "/tmp/.ilium";
+const ACTIVE_LOG_PATH_FILE: &str = ".active-log-path";
+const SERVER_START_LOCK_FILE: &str = ".server-start.lock";
 
 /// Every path needed to own exactly one project-local session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +42,9 @@ pub struct ProjectSession {
     pub project_root: PathBuf,
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
-    pub log_path: PathBuf,
+    pub log_directory: PathBuf,
+    pub active_log_path_file: PathBuf,
+    pub server_start_lock_file: PathBuf,
 }
 
 /// One project-local session visible to `ilium ls`.
@@ -63,12 +72,6 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         path: snapshot_dir.clone(),
         source,
     })?;
-    let log_dir = project_root.join(".ilium").join("logs");
-    std::fs::create_dir_all(&log_dir).map_err(|source| CliError::SessionStorage {
-        path: log_dir.clone(),
-        source,
-    })?;
-
     let socket_dir = runtime_socket_dir()?;
     let socket_key = socket_key(&project_root, session_name);
     let socket_path = socket_dir.join(format!("{socket_key}.sock"));
@@ -76,12 +79,99 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         return Err(CliError::SocketPathTooLong(socket_path));
     }
 
+    let log_root = Path::new(DEBUG_LOG_ROOT);
+    ensure_private_directory(log_root)?;
+    let log_directory = log_root.join(&socket_key);
+    ensure_private_directory(&log_directory)?;
+
     Ok(ProjectSession {
         name: session_name.to_string(),
         project_root,
         socket_path,
         snapshot_path: snapshot_dir.join(format!("{session_name}.json")),
-        log_path: log_dir.join(format!("{session_name}.log")),
+        active_log_path_file: log_directory.join(ACTIVE_LOG_PATH_FILE),
+        server_start_lock_file: log_directory.join(SERVER_START_LOCK_FILE),
+        log_directory,
+    })
+}
+
+/// Holds the cross-process first-attach lock for one project session.
+/// Keeping the file descriptor alive keeps `flock` ownership alive.
+struct ServerStartLock(File);
+
+impl Drop for ServerStartLock {
+    fn drop(&mut self) {
+        // SAFETY: the descriptor remains owned by this guard until after the
+        // unlock call and `LOCK_UN` does not dereference process memory.
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+/// Serializes the socket recheck, log-path publication, and detached spawn so
+/// simultaneous clients cannot start competing servers with different logs.
+fn acquire_server_start_lock(session: &ProjectSession) -> Result<ServerStartLock, CliError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&session.server_start_lock_file)
+        .map_err(|source| CliError::SessionStorage {
+            path: session.server_start_lock_file.clone(),
+            source,
+        })?;
+    std::fs::set_permissions(
+        &session.server_start_lock_file,
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .map_err(|source| CliError::SessionStorage {
+        path: session.server_start_lock_file.clone(),
+        source,
+    })?;
+
+    loop {
+        // SAFETY: `file` owns a valid descriptor for the full call and flock
+        // only changes kernel lock state associated with that descriptor.
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if result == 0 {
+            return Ok(ServerStartLock(file));
+        }
+        let source = std::io::Error::last_os_error();
+        if source.kind() != std::io::ErrorKind::Interrupted {
+            return Err(CliError::SessionStorage {
+                path: session.server_start_lock_file.clone(),
+                source,
+            });
+        }
+    }
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), CliError> {
+    std::fs::create_dir_all(path).map_err(|source| CliError::SessionStorage {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|source| CliError::SessionStorage {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(CliError::SessionStorage {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "debug log directory must be a real directory, not a symlink",
+            ),
+        });
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|source| {
+        CliError::SessionStorage {
+            path: path.to_path_buf(),
+            source,
+        }
     })
 }
 
@@ -259,8 +349,10 @@ fn locate_server_binary() -> PathBuf {
 /// attach, restart, or exec for the server's exit status to be collected.
 /// The short-lived middle process this fork creates is reaped
 /// immediately below, so this still leaves nothing unwaited.
-fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
+fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> {
     let server_binary = locate_server_binary();
+    let log_path = log_path_for_new_server(session);
+    write_active_log_path(session, &log_path)?;
     let mut command = Command::new(&server_binary);
     command
         .args([
@@ -273,7 +365,7 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
             "--session-cwd",
             session.project_root.to_string_lossy().as_ref(),
             "--log-path",
-            session.log_path.to_string_lossy().as_ref(),
+            log_path.to_string_lossy().as_ref(),
         ])
         .current_dir(&session.project_root)
         .stdin(Stdio::null())
@@ -308,35 +400,44 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<(), CliError> {
         });
     }
 
-    let mut middle_process = command.spawn().map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            CliError::ServerBinaryNotFound(server_binary)
-        } else {
-            CliError::SpawnServer {
-                session: session.name.clone(),
-                source,
-            }
+    let mut middle_process = match command.spawn() {
+        Ok(middle_process) => middle_process,
+        Err(source) => {
+            remove_active_log_path_if_matches(session, &log_path);
+            return Err(if source.kind() == std::io::ErrorKind::NotFound {
+                CliError::ServerBinaryNotFound(server_binary)
+            } else {
+                CliError::SpawnServer {
+                    session: session.name.clone(),
+                    source,
+                }
+            });
         }
-    })?;
+    };
     // `spawn()` only returns `Ok` once the exec-status pipe closes, which
     // requires the middle process to have already run `_exit` above --
     // so this reaps an already-dead process and does not block. Without
     // it the middle process would sit as a zombie for this CLI's
     // lifetime, the exact leak this function exists to avoid.
     let _ = middle_process.wait();
-    Ok(())
+    Ok(log_path)
 }
 
-/// Returns only after this project session owns a live server socket.
-pub async fn ensure_server_running(session: &ProjectSession) -> Result<(), CliError> {
+/// Returns only after this project session owns a live server socket, together
+/// with the timestamped file shared by that server and its attached clients.
+pub async fn ensure_server_running(session: &ProjectSession) -> Result<PathBuf, CliError> {
     if is_session_live(&session.socket_path) {
-        return Ok(());
+        return read_active_log_path(session);
+    }
+    let _server_start_lock = acquire_server_start_lock(session)?;
+    if is_session_live(&session.socket_path) {
+        return read_active_log_path(session);
     }
     spawn_server_detached(session)?;
     let deadline = Instant::now() + SERVER_START_TIMEOUT;
     while Instant::now() < deadline {
         if is_session_live(&session.socket_path) {
-            return Ok(());
+            return read_active_log_path(session);
         }
         tokio::time::sleep(SERVER_START_POLL_INTERVAL).await;
     }
@@ -354,7 +455,7 @@ pub async fn ensure_server_running(session: &ProjectSession) -> Result<(), CliEr
 /// `SIGTERM` deliberately leaves the project snapshot in place. The newly
 /// spawned server restores that snapshot, retaining the session layout while
 /// replacing the server executable during development.
-pub async fn replace_server(session: &ProjectSession) -> Result<(), CliError> {
+pub async fn replace_server(session: &ProjectSession) -> Result<PathBuf, CliError> {
     stop_server(session).await?;
     ensure_server_running(session).await
 }
@@ -386,7 +487,7 @@ async fn stop_server(session: &ProjectSession) -> Result<(), CliError> {
 /// Deletes this one project's session snapshot and starts an empty server.
 /// Unlike `replace_server`, this is intentionally destructive and only runs
 /// when the CLI caller explicitly requested a reset.
-pub async fn reset_session(session: &ProjectSession) -> Result<(), CliError> {
+pub async fn reset_session(session: &ProjectSession) -> Result<PathBuf, CliError> {
     stop_server(session).await?;
     for path in reset_storage_paths(session) {
         match std::fs::remove_file(&path) {
@@ -396,6 +497,67 @@ pub async fn reset_session(session: &ProjectSession) -> Result<(), CliError> {
         }
     }
     ensure_server_running(session).await
+}
+
+/// Builds a collision-resistant, human-readable process-start filename using
+/// the machine's local timezone. Milliseconds keep rapid development restarts
+/// from appending to the same file while preserving the requested date/time.
+fn log_path_for_new_server(session: &ProjectSession) -> PathBuf {
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S%.3f");
+    session.log_directory.join(format!("log-{timestamp}.txt"))
+}
+
+/// Publishes the current server's immutable log path for later client
+/// attachments. The file is metadata only; disabled logging still does not
+/// create the target `.txt` file.
+fn write_active_log_path(session: &ProjectSession, log_path: &Path) -> Result<(), CliError> {
+    std::fs::write(
+        &session.active_log_path_file,
+        log_path.as_os_str().as_encoded_bytes(),
+    )
+    .and_then(|()| {
+        std::fs::set_permissions(
+            &session.active_log_path_file,
+            std::fs::Permissions::from_mode(0o600),
+        )
+    })
+    .map_err(|source| CliError::SessionLogMetadata {
+        path: session.active_log_path_file.clone(),
+        source,
+    })
+}
+
+/// Clears metadata published for a spawn that failed before `ilium-server`
+/// could exist, without deleting a path replaced by another lifecycle owner.
+fn remove_active_log_path_if_matches(session: &ProjectSession, expected_path: &Path) {
+    if matches!(
+        read_active_log_path(session),
+        Ok(active_path) if active_path == expected_path
+    ) {
+        let _ = std::fs::remove_file(&session.active_log_path_file);
+    }
+}
+
+/// Resolves the timestamped path selected when an already-running server
+/// started, so a newly attached client appends to the same diagnostic stream.
+pub fn read_active_log_path(session: &ProjectSession) -> Result<PathBuf, CliError> {
+    let path = std::fs::read_to_string(&session.active_log_path_file).map_err(|source| {
+        CliError::SessionLogMetadata {
+            path: session.active_log_path_file.clone(),
+            source,
+        }
+    })?;
+    let path = PathBuf::from(path);
+    if path.parent() != Some(session.log_directory.as_path()) {
+        return Err(CliError::SessionLogMetadata {
+            path: session.active_log_path_file.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "active log path points outside this session's log directory",
+            ),
+        });
+    }
+    Ok(path)
 }
 
 /// Returns the durable artifacts an explicit reset must remove. Kept pure so
@@ -511,11 +673,41 @@ mod tests {
 
         assert_ne!(first_session.socket_path, second_session.socket_path);
         assert_ne!(first_session.snapshot_path, second_session.snapshot_path);
-        assert_ne!(first_session.log_path, second_session.log_path);
+        assert_ne!(first_session.log_directory, second_session.log_directory);
         assert!(first_session.snapshot_path.starts_with(&first));
         assert!(second_session.snapshot_path.starts_with(&second));
-        assert!(first_session.log_path.starts_with(&first));
-        assert!(second_session.log_path.starts_with(&second));
+        assert!(first_session.log_directory.starts_with(DEBUG_LOG_ROOT));
+        assert!(second_session.log_directory.starts_with(DEBUG_LOG_ROOT));
+        assert_eq!(
+            std::fs::metadata(DEBUG_LOG_ROOT)
+                .expect("debug root")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&first_session.log_directory)
+                .expect("session log directory")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            first_session
+                .active_log_path_file
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(ACTIVE_LOG_PATH_FILE)
+        );
+        assert_eq!(
+            first_session
+                .server_start_lock_file
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(SERVER_START_LOCK_FILE)
+        );
     }
 
     #[test]
@@ -578,5 +770,70 @@ mod tests {
         let session = resolve_project_session(&unicode_dir, DEFAULT_SESSION_NAME)
             .expect("should not panic on multi-byte path truncation");
         assert!(session.socket_path.to_string_lossy().ends_with(".sock"));
+    }
+
+    #[test]
+    fn new_server_log_path_has_timestamped_text_filename() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+
+        let log_path = log_path_for_new_server(&session);
+        let filename = log_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("filename");
+
+        assert!(filename.starts_with("log-20"));
+        assert!(filename.ends_with(".txt"));
+        assert_eq!(log_path.parent(), Some(session.log_directory.as_path()));
+    }
+
+    #[test]
+    fn active_log_metadata_round_trips_only_inside_session_directory() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+        let log_path = session
+            .log_directory
+            .join("log-2026-07-19_12-00-00.000.txt");
+
+        write_active_log_path(&session, &log_path).expect("write metadata");
+
+        assert_eq!(
+            read_active_log_path(&session).expect("read metadata"),
+            log_path
+        );
+    }
+
+    #[test]
+    fn server_start_lock_serializes_competing_first_attach_processes() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+        let first_lock = acquire_server_start_lock(&session).expect("first lock");
+        let (acquired_sender, acquired_receiver) = std::sync::mpsc::channel();
+
+        let competing_session = session.clone();
+        let competing_thread = std::thread::spawn(move || {
+            let competing_lock =
+                acquire_server_start_lock(&competing_session).expect("competing lock");
+            acquired_sender.send(()).expect("report acquisition");
+            drop(competing_lock);
+        });
+
+        assert!(acquired_receiver
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
+        drop(first_lock);
+        acquired_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("competing lock should acquire after release");
+        competing_thread.join().expect("competing thread");
+        assert_eq!(
+            std::fs::metadata(&session.server_start_lock_file)
+                .expect("lock metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 }

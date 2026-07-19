@@ -8,6 +8,7 @@ members = [
     "ilium-ipc",
     "ilium-inference",
     "ilium-kilo-gateway",
+    "ilium-logging",
     "ilium-pty",
     "ilium-server",
     "ilium-sound",

@@ -42,10 +42,16 @@ pub fn apply_naming_worker_event(
             app.is_project_name_loading = false;
             match result {
                 Ok(bootstrap) => {
+                    tracing::info!(
+                        project_name = %bootstrap.project_name,
+                        project_icon = ?bootstrap.icon,
+                        "project naming completed"
+                    );
                     app.project_name = Some(bootstrap.project_name);
                     app.project_icon = bootstrap.icon;
                 }
                 Err(err) => {
+                    tracing::error!(error = %err, error_debug = ?err, "project naming failed");
                     app.status_message = Some(format!("Could not infer project name: {err}"))
                 }
             }
@@ -69,32 +75,43 @@ pub fn apply_naming_worker_event(
                 return;
             }
             match result {
-                Ok(title) => match trigger {
-                    TitleTrigger::Automatic => {
-                        app.inferred_title_session_ids
-                            .insert(pane_id, session_id.clone());
-                        app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
-                            pane_id,
-                            expected_session_id: session_id,
-                            expected_title_generation: title_generation,
-                            title: title.long,
-                            short_title: Some(title.short),
-                            inferred_icon: Some(title.icon),
-                            title_source: ilium_core::PaneTitleSource::Automatic,
-                        });
+                Ok(title) => {
+                    tracing::info!(
+                        ?pane_id,
+                        %session_id,
+                        ?trigger,
+                        icon = %title.icon,
+                        short_title = %title.short,
+                        long_title = %title.long,
+                        "session title inference completed"
+                    );
+                    match trigger {
+                        TitleTrigger::Automatic => {
+                            app.inferred_title_session_ids
+                                .insert(pane_id, session_id.clone());
+                            app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
+                                pane_id,
+                                expected_session_id: session_id,
+                                expected_title_generation: title_generation,
+                                title: title.long,
+                                short_title: Some(title.short),
+                                inferred_icon: Some(title.icon),
+                                title_source: ilium_core::PaneTitleSource::Automatic,
+                            });
+                        }
+                        TitleTrigger::Manual => {
+                            app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
+                                pane_id,
+                                expected_session_id: session_id,
+                                expected_title_generation: title_generation,
+                                title: title.long,
+                                short_title: Some(title.short),
+                                inferred_icon: Some(title.icon),
+                                title_source: ilium_core::PaneTitleSource::UserSpecified,
+                            });
+                        }
                     }
-                    TitleTrigger::Manual => {
-                        app.request_session_pane_title(crate::app::SessionPaneTitleRequest {
-                            pane_id,
-                            expected_session_id: session_id,
-                            expected_title_generation: title_generation,
-                            title: title.long,
-                            short_title: Some(title.short),
-                            inferred_icon: Some(title.icon),
-                            title_source: ilium_core::PaneTitleSource::UserSpecified,
-                        });
-                    }
-                },
+                }
                 Err(err) => {
                     // Deliberately no permanent failure marker here (unlike
                     // the pre-client/server bin crate's `titles_inference_failed`):
@@ -104,6 +121,14 @@ pub fn apply_naming_worker_event(
                     // attempt (e.g. the transcript had nothing to
                     // summarize yet) gets a few more chances instead of
                     // silently never being retried for the rest of the run.
+                    tracing::error!(
+                        ?pane_id,
+                        %session_id,
+                        ?trigger,
+                        error = %err,
+                        error_debug = ?err,
+                        "session title inference failed"
+                    );
                     app.status_message = Some(format!("Could not infer session title: {err}"));
                 }
             }
@@ -112,25 +137,42 @@ pub fn apply_naming_worker_event(
             workers.terminal_title_worker_finished(pane_id);
             app.titles_loading.remove(&pane_id);
             match result {
-                Ok(title) => match trigger {
-                    TitleTrigger::Automatic => {
-                        app.request_automatic_pane_title(
-                            pane_id,
-                            title.long,
-                            Some(title.short),
-                            Some(title.icon),
-                        );
+                Ok(title) => {
+                    tracing::info!(
+                        ?pane_id,
+                        ?trigger,
+                        icon = %title.icon,
+                        short_title = %title.short,
+                        long_title = %title.long,
+                        "terminal title inference completed"
+                    );
+                    match trigger {
+                        TitleTrigger::Automatic => {
+                            app.request_automatic_pane_title(
+                                pane_id,
+                                title.long,
+                                Some(title.short),
+                                Some(title.icon),
+                            );
+                        }
+                        TitleTrigger::Manual => {
+                            app.request_rename(
+                                pane_id,
+                                title.long,
+                                Some(title.short),
+                                Some(title.icon),
+                            );
+                        }
                     }
-                    TitleTrigger::Manual => {
-                        app.request_rename(
-                            pane_id,
-                            title.long,
-                            Some(title.short),
-                            Some(title.icon),
-                        );
-                    }
-                },
+                }
                 Err(err) => {
+                    tracing::error!(
+                        ?pane_id,
+                        ?trigger,
+                        error = %err,
+                        error_debug = ?err,
+                        "terminal title inference failed"
+                    );
                     app.status_message = Some(format!("Could not infer terminal title: {err}"));
                 }
             }
@@ -141,6 +183,16 @@ pub fn apply_naming_worker_event(
             result,
         } => {
             workers.inference_test_worker_finished();
+            match &result {
+                Ok(_) => tracing::info!(?provider, ?elapsed, "inference test completed"),
+                Err(error) => tracing::error!(
+                    ?provider,
+                    ?elapsed,
+                    error = %error,
+                    error_debug = ?error,
+                    "inference test failed"
+                ),
+            }
             app.finish_inference_test(provider, elapsed, result);
         }
         NamingWorkerEvent::OllamaModels {
@@ -149,6 +201,21 @@ pub fn apply_naming_worker_event(
             result,
         } => {
             workers.ollama_models_worker_finished();
+            match &result {
+                Ok(models) => tracing::info!(
+                    %endpoint,
+                    ?elapsed,
+                    ?models,
+                    "Ollama model discovery completed"
+                ),
+                Err(error) => tracing::error!(
+                    %endpoint,
+                    ?elapsed,
+                    error = %error,
+                    error_debug = ?error,
+                    "Ollama model discovery failed"
+                ),
+            }
             app.finish_ollama_model_discovery(
                 endpoint,
                 elapsed,
@@ -157,6 +224,15 @@ pub fn apply_naming_worker_event(
         }
         NamingWorkerEvent::Restructure(project_id, result) => {
             workers.restructure_worker_finished(project_id);
+            match &result {
+                Ok(_) => tracing::info!(?project_id, "project restructure inference completed"),
+                Err(error) => tracing::error!(
+                    ?project_id,
+                    error = %error,
+                    error_debug = ?error,
+                    "project restructure inference failed"
+                ),
+            }
             app.finish_project_restructure(project_id, result);
         }
     }

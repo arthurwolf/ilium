@@ -1,3 +1,23 @@
+# Voice-mode self-stop tool
+
+- [x] Add a dedicated typed `ilium_stop_voice_mode` function tool and explicit model instructions for stop, disable, turn-off, and end-voice requests.
+- [x] Return the final Realtime `function_call_output` before cleanly shutting down the owned voice actor, persisting the disabled setting, and resuming any media paused for voice mode.
+- [ ] Add focused protocol/control/event-loop regressions, run workspace gates, rebuild/install, and prove the real OpenAI model selects the stop tool and the installed runtime transitions from listening to disabled.
+
+# Session-scoped debug file logging
+
+- [x] Replace the always-on project log with disabled-by-default, timestamped per-server logs under `/tmp/.ilium/<session-id>/` and a live shared client/server logging boundary.
+- [x] Instrument major session, IPC, settings, worker, HTTP, LLM, and OpenAI Realtime actions, preserving complete text request/response/error diagnostics while redacting credentials and summarizing binary audio payloads.
+- [x] Add a live-persisted Debug settings tab and synchronize its logging toggle with the current detached server.
+- [x] Add focused coverage for path generation, disabled/enabled behavior, persistence, IPC, UI, HTTP error bodies, and LLM payload diagnostics.
+- [x] Enable logging in this installation, run workspace gates, rebuild/install, and prove the installed TUI plus generated log file through an isolated runtime session.
+
+# Voice command Enter submission invariant
+
+- [x] Make immediate voice text delivery a typed submission that always appends Enter, with no model-controlled opt-out.
+- [x] Keep explicit type-without-submitting behavior behind its own tool while scheduled and queued delivery preserve the submission invariant and confirmation can stage internally.
+- [ ] Add focused regressions, run workspace gates, rebuild/install, and prove the updated voice path against the real runtime boundary.
+
 # Automatic LLM title and structure triggers
 
 - [x] Define a typed, persisted event-to-actions contract with explicit scope rules, safe deduplication, and reasonable defaults.

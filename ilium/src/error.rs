@@ -29,6 +29,12 @@ pub enum CliError {
     },
     #[error("session {0:?}'s server did not become ready within {1:?}")]
     ServerStartTimeout(String, Duration),
+    #[error("failed to resolve session log metadata at {path:?}: {source}")]
+    SessionLogMetadata {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("could not determine the process that owns session socket {path:?}: {source}")]
     ServerProcessLookup {
         path: PathBuf,
@@ -59,4 +65,6 @@ pub enum CliError {
     Connection(#[from] ilium_client::connection::ConnectionError),
     #[error(transparent)]
     Client(#[from] ilium_client::error::ClientError),
+    #[error(transparent)]
+    Logging(#[from] ilium_logging::LoggingError),
 }

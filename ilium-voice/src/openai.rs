@@ -75,6 +75,12 @@ enum SessionExit {
     Shutdown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandOutcome {
+    Continue,
+    Shutdown,
+}
+
 /// Runs one owned audio pipeline across proactively renewed provider sessions.
 pub(crate) async fn run_session(
     config: VoiceRuntimeConfig,
@@ -83,6 +89,14 @@ pub(crate) async fn run_session(
     mut shutdown_receiver: watch::Receiver<bool>,
     event_sender: mpsc::Sender<VoiceEvent>,
 ) -> Result<(), VoiceError> {
+    tracing::info!(
+        model = config.model.api_name(),
+        voice = config.voice.api_name(),
+        input_mode = ?config.input_mode,
+        tool_count = tools.len(),
+        instructions = %config.instructions,
+        "OpenAI Realtime voice session starting"
+    );
     let mut audio = AudioEngine::start(
         config.input_device_name.as_deref(),
         config.output_device_name.as_deref(),
@@ -104,6 +118,7 @@ pub(crate) async fn run_session(
                 return Ok(());
             }
         };
+        tracing::info!("OpenAI Realtime WebSocket connected");
         let configure_session = async {
             send_json(
                 &mut socket,
@@ -120,6 +135,7 @@ pub(crate) async fn run_session(
                 return Ok(());
             }
         }
+        tracing::info!("OpenAI Realtime session configuration accepted");
         send_event(
             &event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Listening),
@@ -138,9 +154,11 @@ pub(crate) async fn run_session(
         .await?
         {
             SessionExit::Renew => {
+                tracing::info!("OpenAI Realtime session reached renewal boundary");
                 close_socket(&mut socket).await;
             }
             SessionExit::Shutdown => {
+                tracing::info!("OpenAI Realtime voice session shutting down");
                 close_socket(&mut socket).await;
                 send_disabled(&event_sender).await;
                 return Ok(());
@@ -165,7 +183,7 @@ async fn await_session_updated(socket: &mut RealtimeSocket) -> Result<(), VoiceE
             let Message::Text(text) = message else {
                 continue;
             };
-            let event: Value = serde_json::from_str(&text)?;
+            let event = parse_provider_event(&text)?;
             match event.get("type").and_then(Value::as_str) {
                 Some("session.updated") => return Ok(()),
                 Some("error") => {
@@ -174,6 +192,7 @@ async fn await_session_updated(socket: &mut RealtimeSocket) -> Result<(), VoiceE
                         .and_then(Value::as_str)
                         .unwrap_or("unknown session configuration error")
                         .to_owned();
+                    tracing::error!(provider_event = %diagnostic_json(&event), error = %message, "OpenAI Realtime rejected session configuration");
                     return Err(VoiceError::SessionConfigurationRejected(message));
                 }
                 _ => {}
@@ -203,7 +222,7 @@ async fn run_connected_session(
             _ = shutdown_receiver.changed() => return Ok(SessionExit::Shutdown),
             command = command_receiver.recv() => {
                 let command = command.ok_or(VoiceError::CommandChannelClosed)?;
-                handle_command(
+                let outcome = handle_command(
                     config,
                     state,
                     socket,
@@ -211,6 +230,9 @@ async fn run_connected_session(
                     event_sender,
                     command,
                 ).await?;
+                if matches!(outcome, CommandOutcome::Shutdown) {
+                    return Ok(SessionExit::Shutdown);
+                }
             }
             capture = audio.next_capture() => {
                 let capture = capture.ok_or(VoiceError::SessionEnded)?;
@@ -230,7 +252,7 @@ async fn run_connected_session(
                 let Message::Text(text) = message else {
                     continue;
                 };
-                let event: Value = serde_json::from_str(&text)?;
+                let event = parse_provider_event(&text)?;
                 handle_provider_event(
                     socket,
                     audio,
@@ -250,7 +272,7 @@ async fn handle_command(
     audio: &AudioEngine,
     event_sender: &mpsc::Sender<VoiceEvent>,
     command: VoiceCommand,
-) -> Result<(), VoiceError> {
+) -> Result<CommandOutcome, VoiceError> {
     match command {
         VoiceCommand::UpdateContext {
             instructions,
@@ -265,22 +287,15 @@ async fn handle_command(
             .await?;
         }
         VoiceCommand::SubmitToolOutputs(outputs) => {
-            let (output_events, request_follow_up) = tool_output_events(&outputs)?;
-            for output_event in output_events {
-                send_json(socket, &output_event).await?;
-            }
-            if request_follow_up {
-                send_json(socket, &json!({ "type": "response.create" })).await?;
-                send_event(
-                    event_sender,
-                    VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
-                )
-                .await;
-            }
+            submit_tool_outputs(socket, event_sender, &outputs, true).await?;
+        }
+        VoiceCommand::SubmitToolOutputsAndShutdown(outputs) => {
+            submit_tool_outputs(socket, event_sender, &outputs, false).await?;
+            return Ok(CommandOutcome::Shutdown);
         }
         VoiceCommand::SendText(text) => {
             if text.trim().is_empty() {
-                return Ok(());
+                return Ok(CommandOutcome::Continue);
             }
             send_json(
                 socket,
@@ -342,6 +357,31 @@ async fn handle_command(
                 .await;
             }
         }
+    }
+
+    Ok(CommandOutcome::Continue)
+}
+
+/// Writes every result before optionally creating the model's follow-up turn.
+/// A self-stop call passes `false`, making its function output the final
+/// provider frame before the caller closes the ordered WebSocket stream.
+async fn submit_tool_outputs(
+    socket: &mut RealtimeSocket,
+    event_sender: &mpsc::Sender<VoiceEvent>,
+    outputs: &[VoiceToolOutput],
+    can_request_follow_up: bool,
+) -> Result<(), VoiceError> {
+    let (output_events, request_follow_up) = tool_output_events(outputs)?;
+    for output_event in output_events {
+        send_json(socket, &output_event).await?;
+    }
+    if can_request_follow_up && request_follow_up {
+        send_json(socket, &json!({ "type": "response.create" })).await?;
+        send_event(
+            event_sender,
+            VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
+        )
+        .await;
     }
 
     Ok(())
@@ -462,6 +502,11 @@ async fn handle_provider_event(
                 .and_then(Value::as_str)
                 .unwrap_or("OpenAI Realtime returned an unknown error")
                 .to_owned();
+            tracing::error!(
+                provider_event = %diagnostic_json(event),
+                error = %message,
+                "OpenAI Realtime provider error"
+            );
             send_event(event_sender, VoiceEvent::ProviderError(message)).await;
         }
         _ => {}
@@ -476,17 +521,76 @@ async fn connect(config: &VoiceRuntimeConfig) -> Result<RealtimeSocket, VoiceErr
     // feature unification leaves process-wide provider choice ambiguous.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let url = format!("{REALTIME_ENDPOINT}?model={}", config.model.api_name());
-    let mut request = url.into_client_request().map_err(VoiceError::Connect)?;
+    let diagnostic_url = ilium_logging::redacted_url(&url);
+    tracing::info!(
+        method = "GET",
+        url = %diagnostic_url,
+        headers = ?[("Authorization", "<redacted>"), ("Upgrade", "websocket")],
+        "HTTP WebSocket upgrade started"
+    );
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|error| VoiceError::Connect(error.to_string()))?;
     let authorization =
         HeaderValue::from_str(&format!("Bearer {}", config.api_key.expose_secret()))
             .map_err(|_| VoiceError::InvalidApiKeyHeader)?;
     request
         .headers_mut()
         .insert(header::AUTHORIZATION, authorization);
-    let (socket, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(VoiceError::Connect)?;
+    let (socket, response) = match tokio_tungstenite::connect_async(request).await {
+        Ok(result) => result,
+        Err(error) => {
+            let diagnostic_error = diagnostic_websocket_connect_error(&error);
+            tracing::error!(
+                method = "GET",
+                url = %diagnostic_url,
+                error = %diagnostic_error,
+                "HTTP WebSocket upgrade failed"
+            );
+            // Keep the propagated error as useful as the durable event without
+            // reintroducing raw response headers through a later Debug render.
+            return Err(VoiceError::Connect(diagnostic_error.to_string()));
+        }
+    };
+    tracing::info!(
+        method = "GET",
+        url = %diagnostic_url,
+        status = response.status().as_u16(),
+        response_headers = ?redacted_response_headers(response.headers()),
+        "HTTP WebSocket upgrade completed"
+    );
     Ok(socket)
+}
+
+fn diagnostic_websocket_connect_error(error: &tokio_tungstenite::tungstenite::Error) -> Value {
+    let diagnostic = match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => json!({
+            "status": response.status().as_u16(),
+            "headers": redacted_response_headers(response.headers()),
+            "body": response
+                .body()
+                .as_ref()
+                .map(|body| String::from_utf8_lossy(body).into_owned()),
+        }),
+        _ => json!({ "message": error.to_string() }),
+    };
+    ilium_logging::redacted_json_credentials(&diagnostic)
+}
+
+fn redacted_response_headers(
+    headers: &tokio_tungstenite::tungstenite::http::HeaderMap,
+) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let value = value.to_str().unwrap_or("<non-text header>");
+            (
+                name.as_str().to_owned(),
+                ilium_logging::redacted_header_value(name.as_str(), value),
+            )
+        })
+        .collect()
 }
 
 async fn connect_with_timeout(config: &VoiceRuntimeConfig) -> Result<RealtimeSocket, VoiceError> {
@@ -496,7 +600,13 @@ async fn connect_with_timeout(config: &VoiceRuntimeConfig) -> Result<RealtimeSoc
 }
 
 async fn close_socket(socket: &mut RealtimeSocket) {
-    let _ = tokio::time::timeout(SOCKET_CLOSE_TIMEOUT, socket.close(None)).await;
+    match tokio::time::timeout(SOCKET_CLOSE_TIMEOUT, socket.close(None)).await {
+        Ok(Ok(())) => tracing::info!("OpenAI Realtime WebSocket closed"),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, error_debug = ?error, "OpenAI Realtime WebSocket close failed")
+        }
+        Err(_) => tracing::warn!("OpenAI Realtime WebSocket close timed out"),
+    }
 }
 
 async fn send_disabled(event_sender: &mpsc::Sender<VoiceEvent>) {
@@ -611,14 +721,94 @@ fn tool_output_events(outputs: &[VoiceToolOutput]) -> Result<(Vec<Value>, bool),
 }
 
 async fn send_json(socket: &mut RealtimeSocket, payload: &Value) -> Result<(), VoiceError> {
+    let serialized = serde_json::to_string(payload).map_err(|error| {
+        tracing::error!(
+            payload = %diagnostic_json(payload),
+            error = %error,
+            "failed to serialize OpenAI Realtime outbound event"
+        );
+        VoiceError::Protocol(error)
+    })?;
+    tracing::info!(
+        event_type = payload
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown"),
+        payload = %diagnostic_json(payload),
+        "OpenAI Realtime event sent"
+    );
     socket
-        .send(Message::Text(serde_json::to_string(payload)?.into()))
+        .send(Message::Text(serialized.into()))
         .await
-        .map_err(VoiceError::Transport)
+        .map_err(|error| {
+            tracing::error!(
+                event_type = payload
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown"),
+                payload = %diagnostic_json(payload),
+                error = %error,
+                error_debug = ?error,
+                "OpenAI Realtime event send failed"
+            );
+            VoiceError::Transport(error)
+        })
 }
 
 async fn send_event(event_sender: &mpsc::Sender<VoiceEvent>, event: VoiceEvent) {
-    let _ = event_sender.send(event).await;
+    if event_sender.send(event).await.is_err() {
+        tracing::warn!("voice event receiver closed before event delivery");
+    }
+}
+
+/// Parses and records one complete provider text event. Base64 audio is
+/// replaced with byte/character counts so diagnostics retain sequencing and
+/// correlation metadata without producing multi-gigabyte text logs.
+fn parse_provider_event(text: &str) -> Result<Value, VoiceError> {
+    let event: Value = serde_json::from_str(text).map_err(|error| {
+        tracing::error!(
+            raw_provider_text_bytes = text.len(),
+            error = %error,
+            "OpenAI Realtime event was not valid JSON"
+        );
+        VoiceError::Protocol(error)
+    })?;
+    tracing::info!(
+        event_type = event
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown"),
+        payload = %diagnostic_json(&event),
+        "OpenAI Realtime event received"
+    );
+    Ok(event)
+}
+
+/// Clones a protocol event and replaces known binary and credential fields.
+/// Text, non-secret tool arguments/results, provider errors, IDs, usage, and
+/// session metadata remain complete because those are actionable diagnostics.
+fn diagnostic_json(payload: &Value) -> Value {
+    let mut sanitized = ilium_logging::redacted_json_credentials(payload);
+    let event_type = sanitized
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let binary_field = match event_type {
+        "input_audio_buffer.append" => "audio",
+        "response.output_audio.delta" | "response.audio.delta" => "delta",
+        _ => return sanitized,
+    };
+    if let Some(encoded) = sanitized.get(binary_field).and_then(Value::as_str) {
+        let summary = format!(
+            "<base64 audio omitted: {} characters, approximately {} bytes>",
+            encoded.len(),
+            encoded.len().saturating_mul(3) / 4
+        );
+        if let Some(object) = sanitized.as_object_mut() {
+            object.insert(binary_field.to_owned(), Value::String(summary));
+        }
+    }
+    sanitized
 }
 
 #[derive(Default)]
@@ -694,6 +884,69 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_omit_binary_audio_but_retain_text_tools_and_provider_errors() {
+        let outbound_audio = diagnostic_json(&json!({
+            "type": "input_audio_buffer.append",
+            "audio": "QUJDREVGRw==",
+            "event_id": "event-1",
+        }));
+        assert_eq!(outbound_audio["event_id"], "event-1");
+        assert!(outbound_audio["audio"]
+            .as_str()
+            .unwrap()
+            .contains("base64 audio omitted"));
+        assert!(!outbound_audio.to_string().contains("QUJDREVGRw=="));
+
+        let tool_and_error = diagnostic_json(&json!({
+            "type": "error",
+            "error": {"message": "invalid tool arguments"},
+            "tool": {"name": "ilium_ui", "arguments": "{\"action\":\"open_help\"}"},
+        }));
+        assert_eq!(tool_and_error["error"]["message"], "invalid tool arguments");
+        assert_eq!(tool_and_error["tool"]["name"], "ilium_ui");
+        assert!(tool_and_error["tool"]["arguments"]
+            .as_str()
+            .unwrap()
+            .contains("open_help"));
+
+        let credential_tool = diagnostic_json(&json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "name": "ilium_write_setting",
+                "arguments": "{\"path\":\"voice.api_key\",\"value\":\"provider-secret\",\"unrelated\":\"kept\"}"
+            }
+        }));
+        let credential_diagnostic = credential_tool.to_string();
+        assert!(!credential_diagnostic.contains("provider-secret"));
+        assert!(credential_diagnostic.contains("<redacted>"));
+        assert!(credential_diagnostic.contains("kept"));
+
+        let mut headers = tokio_tungstenite::tungstenite::http::HeaderMap::new();
+        headers.insert("set-cookie", HeaderValue::from_static("session=secret"));
+        headers.insert("x-request-id", HeaderValue::from_static("request-42"));
+        let headers = redacted_response_headers(&headers);
+        assert!(headers.contains(&("set-cookie".to_owned(), "<redacted>".to_owned())));
+        assert!(headers.contains(&("x-request-id".to_owned(), "request-42".to_owned())));
+
+        let rejection_response = tokio_tungstenite::tungstenite::http::Response::builder()
+            .status(401)
+            .header("set-cookie", "session=rejection-cookie-secret")
+            .body(Some(
+                br#"{"api_key":"rejection-body-secret","message":"denied"}"#.to_vec(),
+            ))
+            .unwrap();
+        let rejection = diagnostic_websocket_connect_error(
+            &tokio_tungstenite::tungstenite::Error::Http(Box::new(rejection_response)),
+        )
+        .to_string();
+        assert!(rejection.contains("denied"));
+        assert!(rejection.contains("<redacted>"));
+        assert!(!rejection.contains("rejection-cookie-secret"));
+        assert!(!rejection.contains("rejection-body-secret"));
+    }
+
+    #[test]
     fn completed_function_calls_are_extracted_and_deduplicated() {
         let event = json!({
             "response": {
@@ -731,11 +984,13 @@ mod tests {
                 call_id: "call-1".to_owned(),
                 result: json!({ "ok": true }),
                 request_follow_up: false,
+                terminate_session_after_delivery: true,
             },
             VoiceToolOutput {
                 call_id: "call-2".to_owned(),
                 result: json!({ "selected": "pane-2" }),
                 request_follow_up: true,
+                terminate_session_after_delivery: false,
             },
         ];
 
@@ -745,6 +1000,7 @@ mod tests {
         assert_eq!(events[0]["item"]["call_id"], "call-1");
         assert_eq!(events[1]["item"]["call_id"], "call-2");
         assert_eq!(events[0]["item"]["output"], r#"{"ok":true}"#);
+        assert!(!events[0].to_string().contains("terminate_session"));
         assert!(request_follow_up);
     }
 }

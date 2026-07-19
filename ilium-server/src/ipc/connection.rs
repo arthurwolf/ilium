@@ -94,6 +94,27 @@ async fn read_requests<R>(
             }
         };
 
+        let request_name = request.diagnostic_name();
+        if request.is_high_frequency_diagnostic() {
+            tracing::debug!(request_name, "client request received");
+        } else {
+            tracing::info!(request_name, "client request received");
+        }
+        if let ClientRequest::KeyInput {
+            pane_id,
+            bytes,
+            submission: Some(submission),
+        } = &request
+        {
+            tracing::info!(
+                request_name,
+                ?pane_id,
+                ?submission,
+                byte_count = bytes.len(),
+                "terminal submission received"
+            );
+        }
+
         let completes_attach = matches!(&request, ClientRequest::Attach { .. });
         if completes_attach {
             // Switch phases before the handler awaits or snapshots replay so

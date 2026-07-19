@@ -61,6 +61,14 @@ pub struct NotificationsConfig {
     pub enabled: bool,
 }
 
+/// Whether this process writes its instrumented events to the session's
+/// timestamped `/tmp/.ilium/...` file. It is deliberately disabled unless the
+/// user opts in through the Debug settings tab or `[debug]` config table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DebugConfig {
+    pub file_logging_enabled: bool,
+}
+
 impl Default for NotificationsConfig {
     fn default() -> Self {
         Self { enabled: true }
@@ -89,6 +97,7 @@ pub struct ServerConfig {
     /// point this list feeds.
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
+    pub debug: DebugConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -115,6 +124,13 @@ struct RawConfig {
     sound: SoundSettings,
     #[serde(default)]
     session: RawSessionConfig,
+    #[serde(default)]
+    debug: RawDebugConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawDebugConfig {
+    file_logging_enabled: Option<bool>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
@@ -270,6 +286,9 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
             Some("ask_before_restore") => SessionRecoveryConfig::AskBeforeRestore,
             _ => SessionRecoveryConfig::RestoreAutomatically,
         },
+        debug: DebugConfig {
+            file_logging_enabled: raw.debug.file_logging_enabled.unwrap_or(false),
+        },
     })
 }
 
@@ -297,6 +316,20 @@ mod tests {
         assert_eq!(config.notifications, NotificationsConfig::default());
         assert_eq!(config.sound, SoundSettings::default());
         assert!(config.custom_signatures.is_empty());
+        assert!(!config.debug.file_logging_enabled);
+    }
+
+    #[test]
+    fn debug_file_logging_can_be_enabled_explicitly() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[debug]\nfile_logging_enabled = true\n",
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid debug config should load");
+        assert!(config.debug.file_logging_enabled);
     }
 
     #[test]

@@ -7,6 +7,7 @@ edition.workspace = true
 base64 = "0.22.1"
 cpal = "0.18.1"
 futures-util = "0.3.33"
+ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
 rustls = { version = "0.23.41", default-features = false, features = ["ring", "std"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }

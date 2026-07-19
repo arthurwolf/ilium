@@ -24,4 +24,8 @@ pub struct VoiceToolOutput {
     pub call_id: String,
     pub result: serde_json::Value,
     pub request_follow_up: bool,
+    /// Ends the owned provider/audio session only after this result has been
+    /// written to the provider. This keeps self-stop tools protocol-complete
+    /// without racing the actor's ordinary shutdown signal.
+    pub terminate_session_after_delivery: bool,
 }

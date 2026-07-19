@@ -51,6 +51,7 @@ pub mod keymap;
 pub mod keys;
 pub mod layout;
 pub mod markdown;
+pub mod media_control;
 pub mod minimap;
 pub mod modal;
 pub mod mouse;
@@ -119,6 +120,9 @@ pub struct RunOptions {
     /// control to the TUI, so a client can never accidentally derive the
     /// machine-wide socket belonging to a different project.
     pub socket_path: PathBuf,
+    /// Timestamped path selected once when this detached server process began.
+    /// Every attached client appends to the same session-lifetime stream.
+    pub log_path: PathBuf,
 }
 
 /// Bounded capacity for the crossterm-input and naming-worker-result
@@ -171,6 +175,63 @@ fn screen_updates_fit(current_bytes: usize, incoming_bytes: usize) -> bool {
     current_bytes.saturating_add(incoming_bytes) <= MAX_MERGED_SCREEN_BYTES_PER_BATCH
 }
 
+/// Records the application status boundary once per visible transition. This
+/// captures major actions and every user-visible failure across components
+/// without making each board, editor, picker, search, or settings branch own a
+/// second logging policy that can drift from what the user actually sees.
+fn record_status_message_change(
+    status_message: Option<&str>,
+    last_recorded_status_message: &mut Option<String>,
+) {
+    if status_message == last_recorded_status_message.as_deref() {
+        return;
+    }
+    match status_message {
+        Some(message) if status_message_is_failure(message) => {
+            tracing::error!(status_message = %message, "client action reported a failure");
+        }
+        Some(message) => {
+            tracing::info!(status_message = %message, "client status changed");
+        }
+        None if last_recorded_status_message.is_some() => {
+            tracing::info!("client status cleared");
+        }
+        None => {}
+    }
+    *last_recorded_status_message = status_message.map(str::to_owned);
+}
+
+fn status_message_is_failure(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.starts_with("could not ")
+        || normalized.starts_with("failed ")
+        || normalized.starts_with("save failed")
+        || normalized.contains(" error:")
+        || normalized.contains(" failed:")
+        || normalized.ends_with(" unexpectedly")
+        || normalized.contains(" lost its ")
+}
+
+/// Records semantic client-surface changes rather than raw key or mouse
+/// traffic. Settings includes its active tab so Debug/Inference/Voice visits
+/// remain visible while typing and pointer motion stay out of the major-action
+/// trail.
+fn record_client_surface_change(app: &App, last_recorded_surface: &mut Option<String>) {
+    let surface = match &app.mode {
+        crate::app::Mode::Settings(settings) => format!(
+            "{}:{}",
+            crate::control::mode_label(&app.mode),
+            settings.tab.label()
+        ),
+        _ => crate::control::mode_label(&app.mode).to_owned(),
+    };
+    if last_recorded_surface.as_deref() == Some(surface.as_str()) {
+        return;
+    }
+    tracing::info!(client_surface = %surface, "client surface changed");
+    *last_recorded_surface = Some(surface);
+}
+
 /// Runs ilium-client until the user quits, requests a client-only restart, or
 /// loses the server connection. The typed result lets the CLI wrapper re-exec
 /// only for the explicit restart path after this function restores the terminal.
@@ -185,7 +246,26 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     // safe this early. `config_dir` is threaded through to `run_inner` too:
     // the settings screen (`crate::app::Mode::Settings`) needs it later to
     // persist a change (`crate::config::save_ui_settings`).
-    let (config, config_dir) = init_config();
+    let config_dir_result = crate::paths::config_dir();
+    let file_logging_enabled_hint = config_dir_result
+        .as_ref()
+        .ok()
+        .and_then(|config_dir| {
+            ilium_logging::file_logging_enabled_hint(&config_dir.join("config.toml"))
+                .ok()
+                .flatten()
+        })
+        .unwrap_or(false);
+    ilium_logging::initialize(&options.log_path, file_logging_enabled_hint, "client")?;
+    ilium_logging::install_panic_logging();
+    let (config, config_dir) = init_config(config_dir_result, file_logging_enabled_hint);
+    ilium_logging::set_enabled(config.debug.file_logging_enabled)?;
+    tracing::info!(
+        session_name = options.session_name,
+        session_cwd = %options.session_cwd.display(),
+        log_path = %options.log_path.display(),
+        "ilium-client starting"
+    );
     let sound_discovery = ilium_sound::discover_system_sounds();
     let voice_input_devices = ilium_voice::available_input_devices().unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to enumerate voice input devices");
@@ -198,7 +278,10 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
 
     // `TerminalGuard::drop` restores the terminal whether this function
     // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
-    let guard = TerminalGuard::enter()?;
+    let guard = TerminalGuard::enter().map_err(|error| {
+        tracing::error!(%error, error_debug = ?error, "failed to enter terminal UI mode");
+        error
+    })?;
     let result = run_inner(
         &options,
         config,
@@ -209,6 +292,11 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     )
     .await;
     drop(guard);
+    if let Err(error) = &result {
+        tracing::error!(%error, error_debug = ?error, "ilium-client exited with an error");
+    } else {
+        tracing::info!("ilium-client stopped");
+    }
     result
 }
 
@@ -223,8 +311,11 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
 /// not a fatal error" policy. An unresolvable config directory means
 /// settings changes can still apply live this session, just never persist
 /// (see `App::config_dir`'s doc comment).
-fn init_config() -> (crate::config::ClientConfig, Option<PathBuf>) {
-    let config_dir = match crate::paths::config_dir() {
+fn init_config(
+    config_dir_result: Result<PathBuf, ClientError>,
+    fallback_debug_logging_enabled: bool,
+) -> (crate::config::ClientConfig, Option<PathBuf>) {
+    let config_dir = match config_dir_result {
         Ok(dir) => Some(dir),
         Err(error) => {
             tracing::warn!("failed to resolve config directory, using defaults: {error}");
@@ -236,10 +327,16 @@ fn init_config() -> (crate::config::ClientConfig, Option<PathBuf>) {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!("failed to load config, using defaults: {error}");
-                crate::config::ClientConfig::default()
+                let mut config = crate::config::ClientConfig::default();
+                config.debug.file_logging_enabled = fallback_debug_logging_enabled;
+                config
             }
         },
-        None => crate::config::ClientConfig::default(),
+        None => {
+            let mut config = crate::config::ClientConfig::default();
+            config.debug.file_logging_enabled = fallback_debug_logging_enabled;
+            config
+        }
     };
     crate::keymap::init_effective_bindings(config.keybindings.clone());
     crate::theme::init(config.theme);
@@ -269,6 +366,8 @@ async fn run_inner(
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
     app.apply_voice_settings(config.voice);
+    app.apply_debug_settings(config.debug);
+    app.request_debug_logging_reconciliation();
     app.sound_discovery = sound_discovery;
     app.voice_input_devices = voice_input_devices;
     app.voice_output_devices = voice_output_devices;
@@ -293,6 +392,17 @@ async fn run_inner(
     } else {
         None
     };
+    // Bus names of the MPRIS players `pause_playing_players` paused, so a
+    // later stop resumes only those -- see `reconcile_voice_runtime` and
+    // `VoiceSettings::pause_media_while_active`. Voice mode can already be
+    // enabled at startup (a persisted setting, not just an F8 press), so
+    // this covers that path the same way as an in-session toggle.
+    let mut paused_media_players =
+        if voice_service.is_some() && app.voice_settings.pause_media_while_active {
+            crate::media_control::pause_playing_players().await
+        } else {
+            Vec::new()
+        };
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
     // equivalent), rather than per pane -- `None` on a platform/environment
     // where it can't be resolved simply disables session-title inference
@@ -313,6 +423,11 @@ async fn run_inner(
             naming_workers.spawn_project_name_worker(app.session_cwd.clone());
         }
         Err(error) => {
+            tracing::error!(
+                error = %error,
+                error_debug = ?error,
+                "failed to load stored project name"
+            );
             app.status_message = Some(format!("Could not infer project name: {error}"));
         }
     }
@@ -327,6 +442,8 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
+    let mut last_recorded_status_message = None;
+    let mut last_recorded_surface = None;
 
     'event_loop: while app.exit_reason.is_none() {
         let now = Instant::now();
@@ -357,7 +474,10 @@ async fn run_inner(
                     // (see `keys.rs`), so without this the client would
                     // otherwise keep running forever, fully unresponsive to
                     // the user, until something external kills the process.
-                    None => break,
+                    None => {
+                        tracing::error!("input event channel closed; client can no longer accept input");
+                        break;
+                    }
                 }
             }
             server_event = connection.events.recv() => {
@@ -378,7 +498,10 @@ async fn run_inner(
                     }
                     // The reader task ended -- the server is gone or the
                     // connection dropped; nothing left to attach to.
-                    None => break,
+                    None => {
+                        tracing::error!("server event channel closed unexpectedly");
+                        break;
+                    }
                 }
             }
             Some(naming_event) = naming_events_rx.recv() => {
@@ -404,6 +527,7 @@ async fn run_inner(
                             handle_voice_event(&mut app, &mut control_plane, event);
                     }
                     None if voice_service.is_some() => {
+                        tracing::error!("voice service event stream closed");
                         voice_service = None;
                         if should_report_unexpected_voice_stop(
                             app.voice_settings.enabled,
@@ -415,6 +539,12 @@ async fn run_inner(
                                 ),
                             );
                         }
+                        // An unexpected stop is still voice mode ending from
+                        // the user's perspective -- media paused for it must
+                        // not stay paused just because the actor crashed
+                        // instead of shutting down through `reconcile_voice_runtime`.
+                        let players = std::mem::take(&mut paused_media_players);
+                        crate::media_control::resume_players(players).await;
                     }
                     None => {}
                 }
@@ -434,8 +564,23 @@ async fn run_inner(
             &mut icon_search_workers,
             home_dir.as_deref(),
         );
-        reconcile_voice_runtime(&mut app, &control_plane, &mut voice_service).await;
-        deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+        reconcile_debug_logging(&mut app);
+        let is_voice_tool_shutdown = voice_tool_outputs_request_shutdown(&voice_tool_outputs);
+        if is_voice_tool_shutdown {
+            // A terminating result dominates any parallel tool call that may
+            // have touched `voice.enabled` in the same provider response.
+            app.stop_voice_control();
+        }
+        if !is_voice_tool_shutdown {
+            reconcile_voice_runtime(
+                &mut app,
+                &control_plane,
+                &mut voice_service,
+                &mut paused_media_players,
+            )
+            .await;
+            deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+        }
 
         let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
         for request in outbound_requests {
@@ -443,6 +588,7 @@ async fn run_inner(
             // applies lossless backpressure to crossterm's already-bounded
             // input channel instead of silently dropping a key or command.
             if connection.requests.send(request).await.is_err() {
+                tracing::error!("server request channel closed before request delivery");
                 break 'event_loop;
             }
         }
@@ -451,7 +597,23 @@ async fn run_inner(
         // text as IPC before returning the tool result that makes the voice
         // model ask the question. This preserves the user-facing contract:
         // type first, then ask whether to press Enter.
-        deliver_voice_tool_outputs(&mut app, voice_service.as_ref(), voice_tool_outputs).await;
+        deliver_voice_tool_outputs(&mut app, &mut voice_service, voice_tool_outputs).await;
+        if is_voice_tool_shutdown {
+            reconcile_voice_runtime(
+                &mut app,
+                &control_plane,
+                &mut voice_service,
+                &mut paused_media_players,
+            )
+            .await;
+            deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+        }
+
+        record_client_surface_change(&app, &mut last_recorded_surface);
+        record_status_message_change(
+            app.status_message.as_deref(),
+            &mut last_recorded_status_message,
+        );
 
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         if needs_redraw && can_draw {
@@ -467,10 +629,35 @@ async fn run_inner(
     if let Some(service) = voice_service {
         service.shutdown().await;
     }
+    crate::media_control::resume_players(paused_media_players).await;
 
     // A dropped input/server channel remains an ordinary exit. Only the
     // explicit Restart menu action can request a process re-exec.
     Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
+}
+
+/// Applies one coalesced Debug toggle to this client process and queues the
+/// matching live update for the detached server. Credentials are never logged;
+/// disabling records one final boundary event before closing the local file.
+fn reconcile_debug_logging(app: &mut App) {
+    let Some(enabled) = app.take_pending_debug_logging_enabled() else {
+        return;
+    };
+    if !enabled {
+        tracing::info!("client file logging disabled from Debug settings");
+    }
+    match ilium_logging::set_enabled(enabled) {
+        Ok(()) => {
+            app.queue_request(ilium_ipc::ClientRequest::UpdateDebugLogging { enabled });
+            if enabled {
+                tracing::info!("client file logging enabled from Debug settings");
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, "failed to apply Debug file logging setting");
+            app.status_message = Some(format!("Could not apply debug logging: {error}"));
+        }
+    }
 }
 
 fn start_voice_service(
@@ -563,13 +750,22 @@ fn handle_voice_event(
 /// dispatched every terminal/UI request produced by their execution.
 async fn deliver_voice_tool_outputs(
     app: &mut App,
-    voice_service: Option<&ilium_voice::VoiceService>,
+    voice_service: &mut Option<ilium_voice::VoiceService>,
     outputs: Vec<ilium_voice::VoiceToolOutput>,
 ) {
     if outputs.is_empty() {
         return;
     }
-    let Some(service) = voice_service else {
+    let is_session_terminating = voice_tool_outputs_request_shutdown(&outputs);
+    if is_session_terminating {
+        let Some(service) = voice_service.take() else {
+            return;
+        };
+        service.shutdown_after_tool_outputs(outputs).await;
+        return;
+    }
+
+    let Some(service) = voice_service.as_ref() else {
         return;
     };
     if service
@@ -584,10 +780,27 @@ async fn deliver_voice_tool_outputs(
     }
 }
 
+/// One terminating result makes shutdown the dominant disposition for the
+/// whole parallel function-call batch, while all results are still returned.
+fn voice_tool_outputs_request_shutdown(outputs: &[ilium_voice::VoiceToolOutput]) -> bool {
+    outputs
+        .iter()
+        .any(|output| output.terminate_session_after_delivery)
+}
+
+/// Reconciles a pending start/stop/reconfigure and, on a real start or stop
+/// (not a reconfigure -- that's a live settings change, not the user
+/// entering or leaving voice mode), pauses or resumes system media playback
+/// through [`crate::media_control`] when
+/// `VoiceSettings::pause_media_while_active` is on. Resuming always runs
+/// regardless of that setting's *current* value and drains
+/// `paused_media_players` unconditionally, so toggling the setting off
+/// mid-session can never strand a player paused.
 async fn reconcile_voice_runtime(
     app: &mut App,
     control_plane: &crate::control::ControlPlane,
     voice_service: &mut Option<ilium_voice::VoiceService>,
+    paused_media_players: &mut Vec<String>,
 ) {
     let Some(request) = app.take_voice_runtime_request() else {
         return;
@@ -598,8 +811,16 @@ async fn reconcile_voice_runtime(
     match request {
         crate::app::VoiceRuntimeRequest::Stop => {
             app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Disabled);
+            let players = std::mem::take(paused_media_players);
+            crate::media_control::resume_players(players).await;
         }
-        crate::app::VoiceRuntimeRequest::Start | crate::app::VoiceRuntimeRequest::Reconfigure => {
+        crate::app::VoiceRuntimeRequest::Start => {
+            *voice_service = start_voice_service(app, control_plane);
+            if voice_service.is_some() && app.voice_settings.pause_media_while_active {
+                *paused_media_players = crate::media_control::pause_playing_players().await;
+            }
+        }
+        crate::app::VoiceRuntimeRequest::Reconfigure => {
             *voice_service = start_voice_service(app, control_plane);
         }
     }
@@ -693,6 +914,11 @@ fn apply_server_events(
                         Some((incoming_pane_id, incoming_sequence, incoming_bytes));
                 }
             },
+            ServerEvent::DebugLoggingChanged { enabled } => {
+                observed_non_screen_event = true;
+                flush_pending_screen_update(app, &mut pending_screen_update);
+                synchronize_debug_logging_from_server(app, enabled);
+            }
             other => {
                 observed_non_screen_event = true;
                 flush_pending_screen_update(app, &mut pending_screen_update);
@@ -707,6 +933,27 @@ fn apply_server_events(
     flush_pending_screen_update(app, &mut pending_screen_update);
     dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
     observed_non_screen_event
+}
+
+/// Applies the server-accepted state to this client's writer and UI without
+/// persisting or queueing another request. This is what makes one Debug toggle
+/// converge every client already attached to the same detached session.
+fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
+    if !enabled {
+        tracing::info!("client file logging disabled after server synchronization");
+    }
+    match ilium_logging::set_enabled(enabled) {
+        Ok(()) => {
+            app.debug_settings.file_logging_enabled = enabled;
+            if enabled {
+                tracing::info!("client file logging synchronized from server");
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, "failed to synchronize client file logging from server");
+            app.status_message = Some(format!("Could not synchronize debug logging: {error}"));
+        }
+    }
 }
 
 /// Applies one received input event and any immediately queued successors.
@@ -936,6 +1183,19 @@ mod responsiveness_tests {
     }
 
     #[test]
+    fn user_visible_failures_are_promoted_without_misclassifying_progress() {
+        assert!(status_message_is_failure(
+            "Could not save inference settings: permission denied"
+        ));
+        assert!(status_message_is_failure("Save failed: disk full"));
+        assert!(status_message_is_failure(
+            "Board path picker lost its parent dialog"
+        ));
+        assert!(!status_message_is_failure("Testing inference provider…"));
+        assert!(!status_message_is_failure("Card saved"));
+    }
+
+    #[test]
     fn provider_failure_survives_the_following_voice_channel_close() {
         let provider_failure = ilium_voice::VoiceConnectionState::Failed(
             "OpenAI rejected one production tool schema".to_owned(),
@@ -953,5 +1213,55 @@ mod responsiveness_tests {
             false,
             &ilium_voice::VoiceConnectionState::Listening
         ));
+    }
+
+    #[test]
+    fn terminating_tool_output_dominates_a_parallel_batch() {
+        let outputs = vec![
+            ilium_voice::VoiceToolOutput {
+                call_id: "ordinary".to_owned(),
+                result: serde_json::json!({ "status": "ok" }),
+                request_follow_up: true,
+                terminate_session_after_delivery: false,
+            },
+            ilium_voice::VoiceToolOutput {
+                call_id: "stop".to_owned(),
+                result: serde_json::json!({ "status": "ok" }),
+                request_follow_up: false,
+                terminate_session_after_delivery: true,
+            },
+        ];
+
+        assert!(voice_tool_outputs_request_shutdown(&outputs));
+        assert!(!voice_tool_outputs_request_shutdown(&outputs[..1]));
+    }
+
+    #[tokio::test]
+    async fn stop_request_reconciles_to_disabled_without_a_running_actor() {
+        let mut app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        app.voice_settings.enabled = true;
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Listening);
+        app.stop_voice_control();
+        let control_plane = crate::control::ControlPlane::default();
+        let mut voice_service = None;
+        let mut paused_media_players = Vec::new();
+
+        reconcile_voice_runtime(
+            &mut app,
+            &control_plane,
+            &mut voice_service,
+            &mut paused_media_players,
+        )
+        .await;
+
+        assert!(!app.voice_settings.enabled);
+        assert_eq!(
+            app.voice_connection_state,
+            ilium_voice::VoiceConnectionState::Disabled
+        );
+        assert!(app.take_voice_runtime_request().is_none());
     }
 }

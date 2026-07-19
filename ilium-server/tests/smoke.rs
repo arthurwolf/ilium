@@ -240,6 +240,89 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
 }
 
 #[tokio::test]
+async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
+    let mut server = TestServer::start("voice-submission-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "voice-submission-test".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            // `read` cannot finish on typed text alone. Its marker therefore
+            // proves the carriage return reached the child as a real Enter.
+            kind: NewPaneKind::Command(
+                "IFS= read -r line; printf 'voice-enter-accepted:<%s>\\n' \"$line\"".to_owned(),
+            ),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let tree = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = tree else {
+        unreachable!("predicate only returns a populated tree")
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"message from voice\r".to_vec(),
+            submission: Some(PromptSubmissionSource::VoiceControl),
+        },
+    )
+    .await
+    .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut saw_prompt_event = false;
+    let mut screen_bytes = Vec::new();
+    while !saw_prompt_event
+        || !String::from_utf8_lossy(&screen_bytes)
+            .contains("voice-enter-accepted:<message from voice>")
+    {
+        let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
+            .await
+            .expect("voice submission events should arrive before timeout")
+            .expect("read voice submission event");
+        match event {
+            ServerEvent::PanePromptSubmitted {
+                pane_id: submitted_pane_id,
+                source: PromptSubmissionSource::VoiceControl,
+            } if submitted_pane_id == pane_id => saw_prompt_event = true,
+            ServerEvent::ScreenUpdate {
+                pane_id: updated_pane_id,
+                bytes,
+                ..
+            } if updated_pane_id == pane_id => screen_bytes.extend_from_slice(&bytes),
+            _ => {}
+        }
+    }
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
 async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
     let mut server = TestServer::start("initial-input-test").await;
     let mut client = server.connect().await;

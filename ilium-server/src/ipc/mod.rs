@@ -46,6 +46,7 @@ pub async fn accept_loop(state: Arc<ServerState>, listener: UnixListener) {
         };
 
         let connection_state = Arc::clone(&state);
+        tracing::info!(session_name = %state.session_name, "client connection accepted");
         let handle = tokio::spawn(async move {
             connection::handle(connection_state, stream).await;
         });

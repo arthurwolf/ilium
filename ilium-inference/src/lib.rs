@@ -2,8 +2,9 @@
 //! features. Every backend implements [`InferenceProvider`], insulating the
 //! client from individual HTTP envelopes and authentication details.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ilium_kilo_gateway::{ChatMessage, CompletionRequest, KiloGatewayClient};
 use serde::{Deserialize, Serialize};
@@ -166,7 +167,7 @@ pub trait InferenceProvider: Send + Sync {
 }
 
 pub fn provider_from_settings(settings: &InferenceSettings) -> Box<dyn InferenceProvider> {
-    match settings.selected_provider {
+    let inner: Box<dyn InferenceProvider> = match settings.selected_provider {
         InferenceProviderKind::KiloGateway => Box::new(KiloGatewayProvider),
         InferenceProviderKind::Ollama => {
             Box::new(OllamaProvider(Arc::new(settings.ollama.clone())))
@@ -180,6 +181,89 @@ pub fn provider_from_settings(settings: &InferenceSettings) -> Box<dyn Inference
         InferenceProviderKind::OpenRouter => {
             Box::new(OpenRouterProvider(Arc::new(settings.openrouter.clone())))
         }
+    };
+    Box::new(DiagnosticProvider { inner })
+}
+
+/// Logs the provider-neutral exchange once around every concrete adapter,
+/// including configuration and response-validation failures that occur before
+/// or after the HTTP transport seam.
+struct DiagnosticProvider {
+    inner: Box<dyn InferenceProvider>,
+}
+
+static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_operation_id() -> u64 {
+    NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+impl InferenceProvider for DiagnosticProvider {
+    fn kind(&self) -> InferenceProviderKind {
+        self.inner.kind()
+    }
+
+    fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
+        let operation_id = next_operation_id();
+        let provider = self.inner.kind();
+        let started_at = Instant::now();
+        let operation_span = tracing::info_span!("llm_inference", operation_id, ?provider);
+        let _operation_guard = operation_span.enter();
+        tracing::info!(
+            operation_id,
+            ?provider,
+            max_tokens = request.max_tokens,
+            system_prompt = %request.system_prompt,
+            user_prompt = %request.user_prompt,
+            "LLM inference started"
+        );
+        let result = self.inner.complete(request);
+        match &result {
+            Ok(response) => tracing::info!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                response_text = %response.text,
+                "LLM inference completed"
+            ),
+            Err(error) => tracing::error!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                error = %error,
+                error_debug = ?error,
+                "LLM inference failed"
+            ),
+        }
+        result
+    }
+
+    fn list_models(&self) -> Result<Vec<String>, InferenceError> {
+        let operation_id = next_operation_id();
+        let provider = self.inner.kind();
+        let started_at = Instant::now();
+        let operation_span = tracing::info_span!("llm_model_discovery", operation_id, ?provider);
+        let _operation_guard = operation_span.enter();
+        tracing::info!(operation_id, ?provider, "LLM model discovery started");
+        let result = self.inner.list_models();
+        match &result {
+            Ok(models) => tracing::info!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                ?models,
+                "LLM model discovery completed"
+            ),
+            Err(error) => tracing::error!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                error = %error,
+                error_debug = ?error,
+                "LLM model discovery failed"
+            ),
+        }
+        result
     }
 }
 
@@ -320,46 +404,118 @@ fn agent() -> &'static ureq::Agent {
         ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .timeout_global(Some(REQUEST_TIMEOUT))
+                .http_status_as_error(false)
                 .build(),
         )
     })
 }
 fn get_json(url: &str, headers: &[(&str, String)]) -> Result<serde_json::Value, InferenceError> {
+    let diagnostic_url = ilium_logging::redacted_url(url);
+    tracing::info!(
+        method = "GET",
+        url = %diagnostic_url,
+        headers = ?redacted_headers(headers),
+        "HTTP request started"
+    );
     let mut request = agent().get(url);
     for (name, value) in headers {
         request = request.header(*name, value);
     }
-    send(request.call())
+    send("GET", url, None, request.call())
 }
 fn post_json(
     url: &str,
     headers: &[(&str, String)],
     body: serde_json::Value,
 ) -> Result<serde_json::Value, InferenceError> {
+    let diagnostic_url = ilium_logging::redacted_url(url);
+    tracing::info!(
+        method = "POST",
+        url = %diagnostic_url,
+        headers = ?redacted_headers(headers),
+        request_body = %body,
+        "HTTP request started"
+    );
     let mut request = agent().post(url).header("Content-Type", "application/json");
     for (name, value) in headers {
         request = request.header(*name, value);
     }
-    send(request.send_json(body))
+    send("POST", url, Some(&body), request.send_json(&body))
 }
 fn send(
+    method: &'static str,
+    url: &str,
+    request_body: Option<&serde_json::Value>,
     result: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 ) -> Result<serde_json::Value, InferenceError> {
+    let diagnostic_url = ilium_logging::redacted_url(url);
     let mut response = match result {
         Ok(response) => response,
-        Err(ureq::Error::StatusCode(status)) => {
-            return Err(InferenceError::Http {
-                status,
-                message: "provider rejected the request".to_string(),
-            })
+        Err(error) => {
+            let error_message = error.to_string().replace(url, &diagnostic_url);
+            tracing::error!(
+                method,
+                url = %diagnostic_url,
+                request_body = ?request_body,
+                error = %error_message,
+                "HTTP transport failed"
+            );
+            return Err(InferenceError::Transport(error_message));
         }
-        Err(error) => return Err(InferenceError::Transport(error.to_string())),
     };
-    let body = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|error| InferenceError::Transport(error.to_string()))?;
-    serde_json::from_str(&body).map_err(|error| InferenceError::InvalidResponse(error.to_string()))
+    let status = response.status().as_u16();
+    let response_headers = redacted_response_headers(response.headers());
+    let body = response.body_mut().read_to_string().map_err(|error| {
+            tracing::error!(method, url = %diagnostic_url, status, ?response_headers, error = %error, "failed to read HTTP response body");
+        InferenceError::Transport(error.to_string())
+    })?;
+    if !(200..300).contains(&status) {
+        tracing::error!(method, url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request failed");
+        return Err(InferenceError::Http {
+            status,
+            message: body,
+        });
+    }
+    tracing::info!(method, url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request completed");
+    serde_json::from_str(&body).map_err(|error| {
+        tracing::error!(
+            method,
+            url = %diagnostic_url,
+            status,
+            ?response_headers,
+            response_body = %body,
+            error = %error,
+            "HTTP response was not valid JSON"
+        );
+        InferenceError::InvalidResponse(error.to_string())
+    })
+}
+
+/// Retains useful non-secret header values while making credential leakage
+/// impossible even when complete request bodies are enabled.
+fn redacted_headers(headers: &[(&str, String)]) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                (*name).to_owned(),
+                ilium_logging::redacted_header_value(name, value),
+            )
+        })
+        .collect()
+}
+
+fn redacted_response_headers(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let value = value.to_str().unwrap_or("<non-text header>");
+            (
+                name.as_str().to_owned(),
+                ilium_logging::redacted_header_value(name.as_str(), value),
+            )
+        })
+        .collect()
 }
 fn response_text(
     value: &serde_json::Value,
@@ -391,6 +547,64 @@ fn response_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    fn spawn_http_response(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local HTTP fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let status = status.to_owned();
+        let body = body.to_owned();
+        let (request_sender, request_receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept local HTTP request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("request timeout");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4_096];
+            loop {
+                let read = stream.read(&mut buffer).expect("read HTTP request");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                if request.len() >= header_end + 4 + content_length {
+                    break;
+                }
+            }
+            request_sender
+                .send(String::from_utf8_lossy(&request).into_owned())
+                .expect("capture HTTP request");
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write HTTP response");
+        });
+        (
+            format!("http://{address}/chat/completions"),
+            request_receiver,
+        )
+    }
+
     #[test]
     fn defaults_are_safe() {
         let settings = InferenceSettings::default();
@@ -410,5 +624,45 @@ mod tests {
             provider_from_settings(&settings).kind(),
             InferenceProviderKind::Anthropic
         );
+    }
+
+    #[test]
+    fn http_errors_preserve_the_complete_response_and_requests_send_the_complete_body() {
+        let response_body = r#"{"error":{"message":"model unavailable","code":"overloaded"}}"#;
+        let (url, request_receiver) = spawn_http_response("503 Service Unavailable", response_body);
+        let request_body = serde_json::json!({
+            "model": "fixture-model",
+            "messages": [{"role": "user", "content": "complete sensitive prompt"}],
+        });
+
+        let result = post_json(
+            &url,
+            &[("Authorization", "Bearer test-secret".to_owned())],
+            request_body,
+        );
+
+        assert!(matches!(
+            result,
+            Err(InferenceError::Http { status: 503, message }) if message == response_body
+        ));
+        let captured_request = request_receiver.recv().expect("captured HTTP request");
+        assert!(captured_request.contains("complete sensitive prompt"));
+        assert!(captured_request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-secret"));
+    }
+
+    #[test]
+    fn diagnostic_headers_redact_every_supported_api_key_header() {
+        let headers = redacted_headers(&[
+            ("Authorization", "Bearer secret-one".to_owned()),
+            ("x-api-key", "secret-two".to_owned()),
+            ("anthropic-version", "2023-06-01".to_owned()),
+        ]);
+
+        assert_eq!(headers[0].1, "<redacted>");
+        assert_eq!(headers[1].1, "<redacted>");
+        assert_eq!(headers[2].1, "2023-06-01");
+        assert!(!format!("{headers:?}").contains("secret"));
     }
 }

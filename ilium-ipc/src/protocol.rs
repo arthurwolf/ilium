@@ -303,6 +303,68 @@ pub enum ClientRequest {
     RevertProjectRestructure { project_id: NodeId },
     /// Resolves an attach-time crash-recovery prompt for this session.
     ResolveSessionRecovery { restore: bool },
+    /// Applies the Debug tab's file-logging toggle to the already-running
+    /// detached server. The client persists the same value before sending it,
+    /// so future server/client processes start with the identical policy.
+    UpdateDebugLogging { enabled: bool },
+}
+
+impl ClientRequest {
+    /// Stable, payload-free request name for process diagnostics. Keeping this
+    /// exhaustive means every future IPC feature must make an explicit logging
+    /// decision instead of silently disappearing from the major-action trail.
+    pub const fn diagnostic_name(&self) -> &'static str {
+        match self {
+            Self::Attach { .. } => "attach",
+            Self::NewPane { .. } => "new_pane",
+            Self::ClosePane { .. } => "close_pane",
+            Self::MoveNode { .. } => "move_node",
+            Self::RenameNode { .. } => "rename_node",
+            Self::ResizePane { .. } => "resize_pane",
+            Self::KeyInput { .. } => "key_input",
+            Self::MouseInput { .. } => "mouse_input",
+            Self::Detach => "detach",
+            Self::KillSession => "kill_session",
+            Self::NewGroup { .. } => "new_group",
+            Self::ReparentNode { .. } => "reparent_node",
+            Self::SetAutomaticPaneTitle { .. } => "set_automatic_pane_title",
+            Self::SetPaneFocus { .. } => "set_pane_focus",
+            Self::RestartServer => "restart_server",
+            Self::NewFolder { .. } => "new_folder",
+            Self::NewProject { .. } => "new_project",
+            Self::ChangeProjectFolder { .. } => "change_project_folder",
+            Self::NewBoard { .. } => "new_board",
+            Self::CreateSplitView { .. } => "create_split_view",
+            Self::UpdateSoundSettings { .. } => "update_sound_settings",
+            Self::PreviewSound { .. } => "preview_sound",
+            Self::SchedulePaneInput { .. } => "schedule_pane_input",
+            Self::EnqueuePrompt { .. } => "enqueue_prompt",
+            Self::ClearPromptQueue { .. } => "clear_prompt_queue",
+            Self::SetSessionPaneTitle { .. } => "set_session_pane_title",
+            Self::ApplyRestructurePlan(_) => "apply_restructure_plan",
+            Self::RevertLastRestructure => "revert_last_restructure",
+            Self::ApplyProjectRestructurePlan { .. } => "apply_project_restructure_plan",
+            Self::RevertProjectRestructure { .. } => "revert_project_restructure",
+            Self::ResolveSessionRecovery { .. } => "resolve_session_recovery",
+            Self::UpdateDebugLogging { .. } => "update_debug_logging",
+        }
+    }
+
+    /// High-frequency presentation/input traffic is available at `debug`
+    /// level; structural, lifecycle, scheduling, and settings requests form
+    /// the normal `info`-level major-action trail.
+    pub const fn is_high_frequency_diagnostic(&self) -> bool {
+        matches!(
+            self,
+            Self::ResizePane { .. }
+                | Self::KeyInput {
+                    submission: None,
+                    ..
+                }
+                | Self::MouseInput { .. }
+                | Self::SetPaneFocus { .. }
+        )
+    }
 }
 
 /// Events pushed from `ilium-server` to `ilium-client`, asynchronously
@@ -410,4 +472,9 @@ pub enum ServerEvent {
         pane_id: NodeId,
         source: PromptSubmissionSource,
     },
+    /// The detached server accepted a live Debug logging update. Every
+    /// attached client applies this to its own process writer and rendered
+    /// setting without echoing another request back to the server. Appended
+    /// last to preserve every existing bincode discriminant.
+    DebugLoggingChanged { enabled: bool },
 }

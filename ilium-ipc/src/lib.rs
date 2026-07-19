@@ -247,6 +247,8 @@ mod tests {
             ClientRequest::RevertProjectRestructure {
                 project_id: NodeId(1),
             },
+            ClientRequest::ResolveSessionRecovery { restore: true },
+            ClientRequest::UpdateDebugLogging { enabled: true },
         ]
     }
 
@@ -321,6 +323,7 @@ mod tests {
                 pane_id: NodeId(2),
                 source: PromptSubmissionSource::Keyboard,
             },
+            ServerEvent::DebugLoggingChanged { enabled: true },
         ]
     }
 
@@ -334,6 +337,28 @@ mod tests {
             let decoded: ClientRequest = read_frame(&mut cursor).await.unwrap();
             assert_eq!(decoded, request, "round trip changed the decoded value");
         }
+    }
+
+    #[test]
+    fn request_diagnostics_keep_payloads_out_and_classify_input_frequency() {
+        let major = ClientRequest::UpdateDebugLogging { enabled: true };
+        assert_eq!(major.diagnostic_name(), "update_debug_logging");
+        assert!(!major.is_high_frequency_diagnostic());
+
+        let ordinary_key = ClientRequest::KeyInput {
+            pane_id: NodeId(2),
+            bytes: b"secret command".to_vec(),
+            submission: None,
+        };
+        assert_eq!(ordinary_key.diagnostic_name(), "key_input");
+        assert!(ordinary_key.is_high_frequency_diagnostic());
+
+        let submitted_key = ClientRequest::KeyInput {
+            pane_id: NodeId(2),
+            bytes: b"cargo test\r".to_vec(),
+            submission: Some(PromptSubmissionSource::Keyboard),
+        };
+        assert!(!submitted_key.is_high_frequency_diagnostic());
     }
 
     #[tokio::test]

@@ -4,9 +4,11 @@ use ilium_voice::VoiceToolDefinition;
 use serde_json::{json, Value};
 
 pub(super) const GET_STATE_TOOL_NAME: &str = "ilium_get_state";
+pub(super) const STOP_VOICE_MODE_TOOL_NAME: &str = "ilium_stop_voice_mode";
 pub(super) const UI_TOOL_NAME: &str = "ilium_ui";
 pub(super) const TREE_TOOL_NAME: &str = "ilium_tree";
 pub(super) const SEND_TO_TERMINAL_TOOL_NAME: &str = "ilium_send_to_terminal";
+pub(super) const TYPE_IN_TERMINAL_TOOL_NAME: &str = "ilium_type_in_terminal";
 pub(super) const TERMINAL_TOOL_NAME: &str = "ilium_terminal";
 pub(super) const EDITOR_TOOL_NAME: &str = "ilium_editor";
 pub(super) const BOARD_TOOL_NAME: &str = "ilium_board";
@@ -26,6 +28,15 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
                     "detail": { "type": "string", "enum": ["compact", "full"] },
                     "target": target_schema(),
                 },
+                "additionalProperties": false,
+            }),
+        ),
+        tool(
+            STOP_VOICE_MODE_TOOL_NAME,
+            "Immediately stop and disable the current ilium voice mode when the user asks to stop, disable, turn off, exit, or end voice mode. This ends the voice session, so do not merely acknowledge the request in speech.",
+            json!({
+                "type": "object",
+                "properties": {},
                 "additionalProperties": false,
             }),
         ),
@@ -69,13 +80,25 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SEND_TO_TERMINAL_TOOL_NAME,
-            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane. Omit target for the currently active/open pane. Requests to send, tell, submit, or pass text to the current agent use send_enter=true; requests only to type or stage text use send_enter=false. Never merely say the text as a substitute for calling this tool.",
+            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane and submit it with a final Enter key. Omit target for the currently active/open pane. Every call submits; this tool cannot leave text staged or unsent. Never merely say the text as a substitute for calling this tool.",
             json!({
                 "type": "object",
                 "properties": {
                     "target": target_schema(),
                     "text": { "type": "string", "description": "Exact text to type, preserving slash commands, punctuation, paths, and code." },
-                    "send_enter": { "type": "boolean", "description": "Whether to submit with Enter. Defaults to true." },
+                },
+                "required": ["text"],
+                "additionalProperties": false,
+            }),
+        ),
+        tool(
+            TYPE_IN_TERMINAL_TOOL_NAME,
+            "Type exact text into a terminal without pressing Enter. Use only when the user explicitly asks to type, write, or stage text without sending it. If the user asks to send, submit, or press Enter afterward, use ilium_send_to_terminal instead.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "target": target_schema(),
+                    "text": { "type": "string", "description": "Exact text to leave visible and unsubmitted in the terminal." },
                 },
                 "required": ["text"],
                 "additionalProperties": false,
@@ -83,7 +106,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             TERMINAL_TOOL_NAME,
-            "Control non-dictation terminal behavior: press a supported key, scroll, schedule future input, or manage the durable completion prompt queue. Use ilium_send_to_terminal for immediate dictated text.",
+            "Control non-dictation terminal behavior: press a supported key, scroll, schedule future submitted input, or manage the durable completion prompt queue. Scheduled and queued text is always submitted with Enter. Use ilium_send_to_terminal for immediate dictated text.",
             json!({
                 "type": "object",
                 "properties": {
@@ -93,7 +116,6 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
                     "key": { "type": "string", "enum": ["enter", "escape", "tab", "backtab", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "backspace", "delete", "space", "control_c", "control_d", "control_l", "control_z"] },
                     "lines": { "type": "integer", "minimum": 1, "maximum": 10000 },
                     "delay_seconds": { "type": "integer", "minimum": 0 },
-                    "send_enter": { "type": "boolean" },
                     "delivery": { "type": "string", "enum": ["once", "times", "forever"] },
                     "runs": { "type": "integer", "minimum": 1 },
                 },
@@ -251,12 +273,30 @@ mod tests {
     }
 
     #[test]
+    fn voice_self_stop_has_one_argument_free_explicit_tool() {
+        let definitions = definitions();
+        let stop_tools = definitions
+            .iter()
+            .filter(|definition| definition.name == STOP_VOICE_MODE_TOOL_NAME)
+            .collect::<Vec<_>>();
+
+        assert_eq!(stop_tools.len(), 1);
+        assert_eq!(stop_tools[0].parameters["properties"], json!({}));
+        assert!(stop_tools[0].description.contains("stop and disable"));
+        assert!(stop_tools[0].description.contains("ends the voice session"));
+    }
+
+    #[test]
     fn focused_dictation_has_one_explicit_required_text_tool() {
         let definitions = definitions();
         let send_tool = definitions
             .iter()
             .find(|definition| definition.name == SEND_TO_TERMINAL_TOOL_NAME)
             .expect("dedicated terminal dictation tool");
+        let type_tool = definitions
+            .iter()
+            .find(|definition| definition.name == TYPE_IN_TERMINAL_TOOL_NAME)
+            .expect("dedicated unsubmitted terminal typing tool");
         let terminal_tool = definitions
             .iter()
             .find(|definition| definition.name == TERMINAL_TOOL_NAME)
@@ -264,7 +304,17 @@ mod tests {
 
         assert_eq!(send_tool.parameters["required"], json!(["text"]));
         assert!(send_tool.description.contains("currently active/open pane"));
+        assert!(send_tool.description.contains("final Enter key"));
         assert!(send_tool.description.contains("Never merely say the text"));
+        assert!(send_tool.parameters["properties"]
+            .get("send_enter")
+            .is_none());
+        assert_eq!(type_tool.parameters["required"], json!(["text"]));
+        assert!(type_tool.description.contains("without pressing Enter"));
+        assert!(type_tool.description.contains("ilium_send_to_terminal"));
+        assert!(terminal_tool.parameters["properties"]
+            .get("send_enter")
+            .is_none());
         assert!(!terminal_tool.parameters["properties"]["action"]["enum"]
             .as_array()
             .unwrap()

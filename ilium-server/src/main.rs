@@ -1,7 +1,7 @@
 //! Detached server entrypoint. The `ilium` CLI resolves a project session and
 //! passes its canonical root plus exact socket and snapshot paths here.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -26,18 +26,45 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let _log_guard = match initialize_tracing(&launch.log_path) {
-        Ok(log_guard) => log_guard,
+    let config_dir = match ilium_server::paths::config_dir() {
+        Ok(config_dir) => config_dir,
         Err(error) => {
-            eprintln!(
-                "failed to initialise server log {}: {error}",
-                launch.log_path.display()
-            );
+            eprintln!("failed to resolve config directory: {error}");
             return ExitCode::FAILURE;
         }
     };
-    install_panic_logging();
-    tracing::info!("ilium-server starting; log={}", launch.log_path.display());
+    let file_logging_enabled_hint =
+        ilium_logging::file_logging_enabled_hint(&config_dir.join("config.toml"))
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+    if let Err(error) =
+        ilium_logging::initialize(&launch.log_path, file_logging_enabled_hint, "server")
+    {
+        eprintln!("failed to initialise server logging: {error}");
+        return ExitCode::FAILURE;
+    }
+    ilium_logging::install_panic_logging();
+    let server_config = match ilium_server::config::load(&config_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(%error, "failed to load config, using defaults");
+            eprintln!("failed to load config, using defaults: {error}");
+            let mut config = ilium_server::config::ServerConfig::default();
+            config.debug.file_logging_enabled = file_logging_enabled_hint;
+            config
+        }
+    };
+    if let Err(error) = ilium_logging::set_enabled(server_config.debug.file_logging_enabled) {
+        tracing::error!(%error, "failed to apply server file logging configuration");
+        eprintln!("failed to apply server file logging configuration: {error}");
+        return ExitCode::FAILURE;
+    }
+    tracing::info!(
+        session_name = launch.session_name,
+        log_path = %launch.log_path.display(),
+        "ilium-server starting"
+    );
 
     // Configure this before any detection refresh can create sysinfo's
     // Linux process handles. The function is a no-op on other platforms.
@@ -60,29 +87,19 @@ fn main() -> ExitCode {
     {
         Ok(runtime) => runtime,
         Err(error) => {
+            tracing::error!(%error, error_debug = ?error, "failed to start the tokio runtime");
             eprintln!("failed to start the tokio runtime: {error}");
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(async_main(launch))
+    runtime.block_on(async_main(launch, config_dir, server_config))
 }
 
-async fn async_main(launch: ServerLaunch) -> ExitCode {
-    let config_dir = match ilium_server::paths::config_dir() {
-        Ok(config_dir) => config_dir,
-        Err(error) => {
-            tracing::error!("failed to resolve config directory: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let server_config = match ilium_server::config::load(&config_dir) {
-        Ok(config) => config,
-        Err(error) => {
-            tracing::warn!("failed to load config, using defaults: {error}");
-            ilium_server::config::ServerConfig::default()
-        }
-    };
-
+async fn async_main(
+    launch: ServerLaunch,
+    config_dir: PathBuf,
+    server_config: ilium_server::config::ServerConfig,
+) -> ExitCode {
     let options = ilium_server::ServerOptions {
         session_name: launch.session_name,
         socket_path: launch.socket_path,
@@ -106,50 +123,6 @@ async fn async_main(launch: ServerLaunch) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// Initializes non-blocking, append-only diagnostics before the server starts
-/// work. The detached launcher intentionally has no terminal, so this file is
-/// the authoritative record of ordinary errors and panics for one session.
-fn initialize_tracing(
-    log_path: &Path,
-) -> Result<tracing_appender::non_blocking::WorkerGuard, std::io::Error> {
-    let log_directory = log_path.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "server log path has no parent",
-        )
-    })?;
-    let log_file_name = log_path.file_name().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "server log path has no filename",
-        )
-    })?;
-    std::fs::create_dir_all(log_directory)?;
-    let file_appender = tracing_appender::rolling::never(log_directory, log_file_name);
-    let (writer, guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(writer)
-        .init();
-    Ok(guard)
-}
-
-/// Records a forced backtrace before the normal panic hook terminates the
-/// process, making otherwise silent detached crashes diagnosable.
-fn install_panic_logging() {
-    std::panic::set_hook(Box::new(|panic_info| {
-        tracing::error!(
-            panic = %panic_info,
-            backtrace = %std::backtrace::Backtrace::force_capture(),
-            "ilium-server panicked"
-        );
-    }));
 }
 
 fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
@@ -202,7 +175,7 @@ mod tests {
             "--session-cwd".to_string(),
             "/work/project".to_string(),
             "--log-path".to_string(),
-            "/work/project/.ilium/logs/default.log".to_string(),
+            "/tmp/.ilium/work-project-default/log-2026-07-19_12-00-00.000.txt".to_string(),
         ])
         .expect("valid launch");
         assert_eq!(launch.session_name, "default");
@@ -217,7 +190,7 @@ mod tests {
         assert_eq!(launch.session_cwd, PathBuf::from("/work/project"));
         assert_eq!(
             launch.log_path,
-            PathBuf::from("/work/project/.ilium/logs/default.log")
+            PathBuf::from("/tmp/.ilium/work-project-default/log-2026-07-19_12-00-00.000.txt")
         );
     }
 

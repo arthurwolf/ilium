@@ -112,6 +112,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
         }
         ServerEvent::Error { message } => {
+            tracing::error!(%message, "server reported a request error");
             app.status_message = Some(format!("Server error: {message}"));
             None
         }
@@ -244,6 +245,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             } else {
                 None
             }
+        }
+        // The runtime event loop intercepts this event to synchronize the
+        // process writer before applying the UI value. Keeping this state-only
+        // branch makes direct render-cache callers and exhaustive tests obey
+        // the same visible contract without creating an IPC echo loop.
+        ServerEvent::DebugLoggingChanged { enabled } => {
+            app.debug_settings.file_logging_enabled = enabled;
+            None
         }
     }
 }

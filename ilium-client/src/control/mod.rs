@@ -12,6 +12,8 @@ mod settings;
 mod snapshot;
 mod tools;
 
+pub(crate) use snapshot::mode_label;
+
 use std::collections::{HashMap, VecDeque};
 
 use ilium_voice::{VoiceToolDefinition, VoiceToolInvocation, VoiceToolOutput};
@@ -20,7 +22,9 @@ use serde_json::json;
 
 use crate::app::App;
 
-use command::{ConfirmationCommand, ControlCommand, TerminalSubmissionCommand};
+use command::{
+    ConfirmationCommand, ControlCommand, TerminalSubmissionCommand, TerminalTypingCommand,
+};
 
 const MAX_CACHED_CALLS: usize = 256;
 const MAX_PENDING_CONFIRMATIONS: usize = 32;
@@ -62,7 +66,19 @@ impl ControlPlane {
         app: &mut App,
         invocation: VoiceToolInvocation,
     ) -> VoiceToolOutput {
+        tracing::info!(
+            call_id = %invocation.call_id,
+            tool_name = %invocation.name,
+            arguments_json = %diagnostic_tool_arguments(&invocation.arguments_json),
+            "voice LLM tool invocation received"
+        );
         if let Some(output) = self.completed_outputs.get(&invocation.call_id) {
+            tracing::info!(
+                call_id = %invocation.call_id,
+                tool_name = %invocation.name,
+                result = %output.result,
+                "voice LLM tool invocation replayed from deduplication cache"
+            );
             return output.clone();
         }
 
@@ -76,6 +92,28 @@ impl ControlPlane {
                 Err(error) => tool_error(&invocation.call_id, error),
             }
         };
+        if output
+            .result
+            .get("status")
+            .and_then(|status| status.as_str())
+            == Some("error")
+        {
+            tracing::error!(
+                call_id = %invocation.call_id,
+                tool_name = %invocation.name,
+                result = %output.result,
+                "voice LLM tool invocation failed"
+            );
+        } else {
+            tracing::info!(
+                call_id = %invocation.call_id,
+                tool_name = %invocation.name,
+                result = %output.result,
+                request_follow_up = output.request_follow_up,
+                terminate_session_after_delivery = output.terminate_session_after_delivery,
+                "voice LLM tool invocation completed"
+            );
+        }
         self.cache_output(output.clone());
         output
     }
@@ -123,6 +161,7 @@ impl ControlPlane {
                     "instruction": "Ask only the exact question. Do not read or repeat staged terminal text. Call ilium_confirm_action only after an explicit yes or no answer.",
                 }),
                 request_follow_up: true,
+                terminate_session_after_delivery: false,
             };
         }
 
@@ -155,6 +194,7 @@ impl ControlPlane {
                     "message": pending.cancellation_message,
                 }),
                 request_follow_up: true,
+                terminate_session_after_delivery: false,
             };
         }
         execution_output(&invocation.call_id, executor::execute(app, pending.command))
@@ -175,6 +215,13 @@ impl ControlPlane {
     }
 }
 
+/// Preserves complete semantic tool arguments except credential values. Most
+/// settings mutations use `{ "path": "voice.api_key", "value": "..." }`
+/// rather than naming the secret field directly, so both shapes are covered.
+fn diagnostic_tool_arguments(arguments_json: &str) -> String {
+    ilium_logging::redacted_json_string_credentials(arguments_json)
+}
+
 /// Base instructions shared by every voice model. The custom user prompt is
 /// an additive section and cannot silently replace the safety/control
 /// contract required for deterministic tool use.
@@ -190,9 +237,10 @@ You are ilium's live voice controller. Your primary job is to operate ilium and 
 
 # Tool execution
 - An action request is complete only through the matching ilium tool. Never speak, paraphrase, promise, or repeat an action instead of calling its tool.
-- For "send", "tell", "pass", "submit", or "say X to" a terminal or agent, call ilium_send_to_terminal with the exact text and send_enter=true.
-- For "type", "write", or "stage" without sending, call ilium_send_to_terminal with send_enter=false.
-- Exact example: "send /clear to the currently open terminal" means call ilium_send_to_terminal with {{"text":"/clear","send_enter":true}} and no target. Do not say "send /clear to the agent" aloud instead.
+- When the user asks to stop, disable, turn off, exit, or end voice mode, immediately call ilium_stop_voice_mode with an empty object. Do not answer in speech instead; the tool ends this voice session.
+- For "send", "tell", "pass", "submit", "say X to", or "type X and press Enter" in a terminal or agent, call ilium_send_to_terminal with the exact text. The tool always appends a final Enter key, so the command is actually submitted.
+- Only when the user explicitly asks to type, write, or stage text without sending it, call ilium_type_in_terminal. Never use this staging tool when the request includes Enter or submission.
+- Exact example: "send /clear to the currently open terminal" means call ilium_send_to_terminal with {{"text":"/clear"}} and no target. Do not say "send /clear to the agent" aloud instead.
 - Do not add a spoken preamble before lightweight terminal or UI tool calls. After success, acknowledge briefly without reading the payload back.
 - Use semantic ilium tools; never describe keyboard shortcuts when a tool can perform the action.
 - A queued result is not proof the detached server accepted the mutation. Inspect state before claiming completion when acceptance matters.
@@ -221,14 +269,21 @@ fn decode_command(invocation: &VoiceToolInvocation) -> Result<ControlCommand, St
         tools::GET_STATE_TOOL_NAME => {
             decode_arguments(&invocation.arguments_json).map(ControlCommand::State)
         }
+        tools::STOP_VOICE_MODE_TOOL_NAME => {
+            decode_arguments::<command::StopVoiceModeCommand>(&invocation.arguments_json)
+                .map(ControlCommand::StopVoiceMode)
+        }
         tools::UI_TOOL_NAME => decode_arguments(&invocation.arguments_json).map(ControlCommand::Ui),
         tools::TREE_TOOL_NAME => {
             decode_arguments(&invocation.arguments_json).map(ControlCommand::Tree)
         }
         tools::SEND_TO_TERMINAL_TOOL_NAME => {
             decode_arguments::<TerminalSubmissionCommand>(&invocation.arguments_json)
-                .map(Into::into)
-                .map(ControlCommand::Terminal)
+                .map(ControlCommand::TerminalSubmission)
+        }
+        tools::TYPE_IN_TERMINAL_TOOL_NAME => {
+            decode_arguments::<TerminalTypingCommand>(&invocation.arguments_json)
+                .map(ControlCommand::TerminalTyping)
         }
         tools::TERMINAL_TOOL_NAME => {
             decode_arguments(&invocation.arguments_json).map(ControlCommand::Terminal)
@@ -261,12 +316,17 @@ fn execution_output(
     result: Result<executor::ExecutionReceipt, String>,
 ) -> VoiceToolOutput {
     match result {
-        Ok(receipt) => VoiceToolOutput {
-            call_id: call_id.to_owned(),
-            result: serde_json::to_value(receipt)
-                .unwrap_or_else(|error| json!({ "status": "error", "message": error.to_string() })),
-            request_follow_up: true,
-        },
+        Ok(receipt) => {
+            let terminate_session_after_delivery = receipt.terminate_session_after_delivery;
+            VoiceToolOutput {
+                call_id: call_id.to_owned(),
+                result: serde_json::to_value(receipt).unwrap_or_else(
+                    |error| json!({ "status": "error", "message": error.to_string() }),
+                ),
+                request_follow_up: !terminate_session_after_delivery,
+                terminate_session_after_delivery,
+            }
+        }
         Err(error) => tool_error(call_id, error),
     }
 }
@@ -279,6 +339,7 @@ fn tool_error(call_id: &str, error: String) -> VoiceToolOutput {
             "message": error,
         }),
         request_follow_up: true,
+        terminate_session_after_delivery: false,
     }
 }
 
@@ -289,6 +350,24 @@ mod tests {
     use ilium_core::{PaneContentKind, ROOT_ID};
 
     use super::*;
+
+    #[test]
+    fn diagnostic_tool_arguments_redact_direct_and_path_addressed_credentials() {
+        let direct = diagnostic_tool_arguments(
+            r#"{"api_key":"direct-secret","nested":{"access_token":"nested-secret"},"action":"test"}"#,
+        );
+        assert!(!direct.contains("direct-secret"));
+        assert!(!direct.contains("nested-secret"));
+        assert!(direct.contains("<redacted>"));
+        assert!(direct.contains("test"));
+
+        let path_addressed = diagnostic_tool_arguments(
+            r#"{"path":"voice.api_key","value":"path-secret","unrelated":"kept"}"#,
+        );
+        assert!(!path_addressed.contains("path-secret"));
+        assert!(path_addressed.contains("<redacted>"));
+        assert!(path_addressed.contains("kept"));
+    }
 
     #[test]
     fn duplicate_call_ids_return_the_original_output_without_reexecution() {
@@ -376,8 +455,63 @@ mod tests {
         assert!(prompt.contains("Preserve the user's clean IP reputation"));
         assert!(prompt.contains("send /clear to the currently open terminal"));
         assert!(prompt.contains("ilium_send_to_terminal"));
+        assert!(prompt.contains("ilium_type_in_terminal"));
+        assert!(prompt.contains("ilium_stop_voice_mode"));
+        assert!(prompt.contains("always appends a final Enter key"));
+        assert!(!prompt.contains("send_enter"));
         assert!(prompt.contains("never read, quote, or summarize the staged text aloud"));
         assert!(prompt.contains("Use a calm voice."));
+    }
+
+    #[test]
+    fn dedicated_stop_tool_disables_voice_and_finishes_after_its_result() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        app.voice_settings.enabled = true;
+        let mut plane = ControlPlane::default();
+
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "stop-voice".to_owned(),
+                name: tools::STOP_VOICE_MODE_TOOL_NAME.to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "ok");
+        assert!(output
+            .result
+            .get("terminate_session_after_delivery")
+            .is_none());
+        assert!(!output.request_follow_up);
+        assert!(output.terminate_session_after_delivery);
+        assert!(!app.voice_settings.enabled);
+        assert_eq!(
+            app.take_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Stop)
+        );
+    }
+
+    #[test]
+    fn stop_tool_rejects_unknown_arguments_without_disabling_voice() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        app.voice_settings.enabled = true;
+        let mut plane = ControlPlane::default();
+
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "invalid-stop-voice".to_owned(),
+                name: tools::STOP_VOICE_MODE_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"reason":"done"}"#.to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "error");
+        assert!(output.request_follow_up);
+        assert!(!output.terminate_session_after_delivery);
+        assert!(app.voice_settings.enabled);
+        assert!(app.take_voice_runtime_request().is_none());
     }
 
     #[test]
@@ -406,6 +540,31 @@ mod tests {
     }
 
     #[test]
+    fn explicit_terminal_typing_preserves_unsubmitted_text_without_weakening_send() {
+        let (mut app, pane_id) = active_terminal_app();
+        let mut plane = ControlPlane::default();
+
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "type-clear".to_owned(),
+                name: tools::TYPE_IN_TERMINAL_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"text":"/clear"}"#.to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "queued");
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"/clear".to_vec(),
+                submission: None,
+            }]
+        );
+    }
+
+    #[test]
     fn enabled_terminal_confirmation_stages_without_enter_then_submits_on_yes() {
         let (mut app, pane_id) = active_terminal_app();
         app.voice_settings.confirm_terminal_submissions = true;
@@ -416,7 +575,7 @@ mod tests {
             VoiceToolInvocation {
                 call_id: "stage-clear".to_owned(),
                 name: tools::SEND_TO_TERMINAL_TOOL_NAME.to_owned(),
-                arguments_json: r#"{"text":"/clear","send_enter":true}"#.to_owned(),
+                arguments_json: r#"{"text":"/clear"}"#.to_owned(),
             },
         );
         let token = request.result["token"].as_str().unwrap();
@@ -494,6 +653,55 @@ mod tests {
             .unwrap()
             .contains("visible and unsubmitted"));
         assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn voice_model_cannot_disable_enter_for_immediate_text() {
+        let (mut app, _) = active_terminal_app();
+        let mut plane = ControlPlane::default();
+
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "attempt-stage".to_owned(),
+                name: tools::SEND_TO_TERMINAL_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"text":"/clear","send_enter":false}"#.to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "error");
+        assert!(output.result["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown field `send_enter`"));
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn scheduled_voice_text_always_requests_enter_submission() {
+        let (mut app, pane_id) = active_terminal_app();
+        let mut plane = ControlPlane::default();
+
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "schedule-next".to_owned(),
+                name: tools::TERMINAL_TOOL_NAME.to_owned(),
+                arguments_json:
+                    r#"{"action":"schedule_input","text":"continue","delay_seconds":5}"#.to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "queued");
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SchedulePaneInput {
+                pane_id,
+                delay_seconds: 5,
+                text: "continue".to_owned(),
+                send_enter: true,
+            }]
+        );
     }
 
     fn active_terminal_app() -> (App, ilium_core::NodeId) {

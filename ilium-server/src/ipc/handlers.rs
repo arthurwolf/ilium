@@ -268,6 +268,25 @@ pub async fn handle_request(
             handle_revert_project_restructure(state, project_id, direct_tx).await;
             false
         }
+        ClientRequest::UpdateDebugLogging { enabled } => {
+            if !enabled {
+                tracing::info!("server file logging disabled from Debug settings");
+            }
+            if let Err(error) = ilium_logging::set_enabled(enabled) {
+                tracing::error!(%error, "failed to apply Debug file logging setting");
+                send_direct_error(
+                    direct_tx,
+                    format!("failed to apply Debug file logging setting: {error}"),
+                )
+                .await;
+            } else {
+                if enabled {
+                    tracing::info!("server file logging enabled from Debug settings");
+                }
+                state.broadcast(ServerEvent::DebugLoggingChanged { enabled });
+            }
+            false
+        }
     }
 }
 
@@ -282,13 +301,9 @@ async fn send_direct(direct_tx: &mpsc::Sender<ServerEvent>, event: ServerEvent) 
 }
 
 async fn send_direct_error(direct_tx: &mpsc::Sender<ServerEvent>, message: impl Into<String>) {
-    send_direct(
-        direct_tx,
-        ServerEvent::Error {
-            message: message.into(),
-        },
-    )
-    .await;
+    let message = message.into();
+    tracing::error!(%message, "request failed");
+    send_direct(direct_tx, ServerEvent::Error { message }).await;
 }
 
 /// Clones a fresh tree snapshot under a brief **read** lock. Callers that

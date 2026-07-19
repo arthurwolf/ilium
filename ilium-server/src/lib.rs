@@ -94,6 +94,13 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
             path: options.socket_path.clone(),
             source,
         })?;
+    tracing::info!(
+        session_name = %options.session_name,
+        session_cwd = %options.session_cwd.display(),
+        socket_path = %options.socket_path.display(),
+        snapshot_path = %options.snapshot_path.display(),
+        "detached session server listening"
+    );
 
     let (sound_requests, sound_playback_task) = sounds::spawn(Arc::clone(&options.sound_player));
     // See `task_guard`'s module doc: wrapping every long-lived child task's
@@ -193,6 +200,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
             options.socket_path
         ),
     }
+    tracing::info!(session_name = %state.session_name, "detached session server stopped");
     Ok(())
 }
 

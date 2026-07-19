@@ -63,6 +63,8 @@ pub struct ClientConfig {
     /// OpenAI Realtime voice-controller settings. The API key remains on the
     /// client side and is never included in semantic state snapshots.
     pub voice: VoiceSettings,
+    /// Opt-in process diagnostics shown in the Debug tab.
+    pub debug: DebugSettings,
 }
 
 impl Default for ClientConfig {
@@ -80,8 +82,18 @@ impl Default for ClientConfig {
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
             voice: VoiceSettings::default(),
+            debug: DebugSettings::default(),
         }
     }
+}
+
+/// Durable `[debug]` settings. File diagnostics remain opt-in for a fresh
+/// installation because LLM request/response bodies may contain private task
+/// context even though authentication credentials are always redacted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DebugSettings {
+    pub file_logging_enabled: bool,
 }
 
 /// Durable `[voice]` settings. Runtime ownership lives in `crate::run`; this
@@ -100,6 +112,7 @@ pub struct VoiceSettings {
     pub output_device_name: Option<String>,
     pub output_volume_percent: u8,
     pub confirm_terminal_submissions: bool,
+    pub pause_media_while_active: bool,
     pub custom_prompt: String,
 }
 
@@ -117,6 +130,7 @@ impl Default for VoiceSettings {
             output_device_name: None,
             output_volume_percent: 80,
             confirm_terminal_submissions: false,
+            pause_media_while_active: true,
             custom_prompt: String::new(),
         }
     }
@@ -635,6 +649,8 @@ struct RawClientConfig {
     session: RawSessionConfig,
     #[serde(default)]
     voice: VoiceSettings,
+    #[serde(default)]
+    debug: DebugSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -867,6 +883,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         editor,
         session,
         voice: raw.voice,
+        debug: raw.debug,
     })
 }
 
@@ -1503,6 +1520,15 @@ pub fn save_voice_settings(config_dir: &Path, voice: &VoiceSettings) -> Result<(
     })?;
     table.insert("voice".to_owned(), value);
     write_toml_document(&path, &document)
+}
+
+/// Persists the opt-in `[debug]` table without rewriting unrelated settings.
+pub fn save_debug_settings(config_dir: &Path, debug: &DebugSettings) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(debug).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "debug", value)
 }
 
 /// Reads and parses `path` as a generic TOML document for [`save_ui_settings`]
@@ -2380,6 +2406,7 @@ mod tests {
             output_device_name: Some("Desk speakers".to_owned()),
             output_volume_percent: 65,
             confirm_terminal_submissions: true,
+            pause_media_while_active: false,
             custom_prompt: "Prefer terse confirmations.\nNever guess targets.".to_owned(),
         };
 
@@ -2416,5 +2443,43 @@ mod tests {
         assert!(!base.confirm_terminal_submissions);
         assert!(base.has_same_runtime_configuration(&policy_changed));
         assert!(!base.has_same_runtime_configuration(&prompt_changed));
+    }
+
+    #[test]
+    fn pause_media_while_active_defaults_on_and_is_not_runtime_configuration() {
+        let base = VoiceSettings::default();
+        let mut policy_changed = base.clone();
+        policy_changed.pause_media_while_active = false;
+
+        assert!(base.pause_media_while_active);
+        assert!(base.has_same_runtime_configuration(&policy_changed));
+    }
+
+    #[test]
+    fn debug_file_logging_defaults_off_and_round_trips_without_replacing_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[notifications]\nenabled = false\n",
+        )
+        .unwrap();
+
+        let defaults = load(&dir).expect("config should load");
+        assert!(!defaults.debug.file_logging_enabled);
+
+        save_debug_settings(
+            &dir,
+            &DebugSettings {
+                file_logging_enabled: true,
+            },
+        )
+        .expect("debug settings should save");
+
+        let loaded = load(&dir).expect("saved debug settings should load");
+        assert!(loaded.debug.file_logging_enabled);
+        let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(raw.contains("[notifications]"));
+        assert!(raw.contains("[debug]"));
+        assert!(raw.contains("file_logging_enabled = true"));
     }
 }

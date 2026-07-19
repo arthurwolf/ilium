@@ -1068,6 +1068,21 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         return;
                     }
                 }
+            } else if state.tab == crate::app::SettingsTab::Debug {
+                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::app::DebugRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if matches!(
+                        crate::app::DebugRow::ALL.get(index),
+                        Some(crate::app::DebugRow::FileLogging)
+                    ) {
+                        app.settings_toggle_file_logging();
+                    }
+                }
             } else if state.tab == crate::app::SettingsTab::Appearance {
                 if let Some((row, direction)) = crate::settings_ui::appearance_content_hit(
                     layout.content_area,

@@ -23,6 +23,10 @@ pub struct ExecutionReceipt {
     pub status: &'static str,
     pub message: String,
     pub data: Value,
+    /// Provider-control metadata, omitted from the JSON result sent back to
+    /// the model. The voice actor consumes it only after writing that result.
+    #[serde(skip)]
+    pub terminate_session_after_delivery: bool,
 }
 
 impl ExecutionReceipt {
@@ -31,6 +35,7 @@ impl ExecutionReceipt {
             status: "ok",
             message: message.into(),
             data: Value::Null,
+            terminate_session_after_delivery: false,
         }
     }
 
@@ -39,6 +44,18 @@ impl ExecutionReceipt {
             status: "queued",
             message: message.into(),
             data: json!({ "verification": "Read ilium_get_state after the server confirms the mutation." }),
+            terminate_session_after_delivery: false,
+        }
+    }
+
+    /// Completes a function call without asking the provider for another
+    /// response because this result is the final frame of the voice session.
+    fn terminating(message: impl Into<String>) -> Self {
+        Self {
+            status: "ok",
+            message: message.into(),
+            data: Value::Null,
+            terminate_session_after_delivery: true,
         }
     }
 }
@@ -51,17 +68,72 @@ pub fn execute(app: &mut App, command: ControlCommand) -> Result<ExecutionReceip
                 status: "ok",
                 message: "Current ilium state".to_owned(),
                 data: serde_json::to_value(snapshot).map_err(|error| error.to_string())?,
+                terminate_session_after_delivery: false,
             })
         }
         ControlCommand::Ui(command) => execute_ui(app, command),
         ControlCommand::Tree(command) => execute_tree(app, command),
+        ControlCommand::TerminalSubmission(command) => execute_terminal_submission(app, command),
+        ControlCommand::TerminalTyping(command) => execute_terminal_typing(app, command),
         ControlCommand::Terminal(command) => execute_terminal(app, command),
         ControlCommand::Editor(command) => execute_editor(app, command),
         ControlCommand::Board(command) => execute_board(app, command),
         ControlCommand::Settings(command) => super::settings::execute(app, command),
         ControlCommand::Search(command) => execute_search(app, command),
         ControlCommand::Session(command) => execute_session(app, command),
+        ControlCommand::StopVoiceMode(command) => execute_stop_voice_mode(app, command),
     }
+}
+
+/// Sends voice-originated text and its submission key in one request so the
+/// PTY cannot observe the command without the final Enter or interleave input.
+fn execute_terminal_submission(
+    app: &mut App,
+    command: TerminalSubmissionCommand,
+) -> Result<ExecutionReceipt, String> {
+    let pane_id = resolve_node(app, &command.target)?;
+    require_terminal(app, pane_id)?;
+    let mut bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
+    bytes.push(b'\r');
+    queue_terminal_text(
+        app,
+        pane_id,
+        bytes,
+        Some(PromptSubmissionSource::VoiceControl),
+    );
+    Ok(ExecutionReceipt::queued(
+        "Sent and submitted text to the terminal",
+    ))
+}
+
+/// Types text without Enter for an explicit staging request or the local
+/// submission-confirmation preparation step.
+fn execute_terminal_typing(
+    app: &mut App,
+    command: TerminalTypingCommand,
+) -> Result<ExecutionReceipt, String> {
+    let pane_id = resolve_node(app, &command.target)?;
+    require_terminal(app, pane_id)?;
+    let bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
+    queue_terminal_text(app, pane_id, bytes, None);
+    Ok(ExecutionReceipt::queued("Staged text in the terminal"))
+}
+
+/// Applies the shared presentation update and queues one atomic PTY payload.
+fn queue_terminal_text(
+    app: &mut App,
+    pane_id: ilium_core::NodeId,
+    bytes: Vec<u8>,
+    submission: Option<PromptSubmissionSource>,
+) {
+    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+        view.scroll_to_bottom();
+    }
+    app.queue_request(ClientRequest::KeyInput {
+        pane_id,
+        bytes,
+        submission,
+    });
 }
 
 fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionReceipt, String> {
@@ -132,6 +204,7 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
         status: "ok",
         message: format!("Found {} workspace results for {query:?}", results.len()),
         data: json!({ "query": query, "results": results }),
+        terminate_session_after_delivery: false,
     })
 }
 
@@ -417,24 +490,6 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
     match command.action {
-        TerminalAction::Write => {
-            let mut bytes = required_nonempty(command.text, "text")?.into_bytes();
-            if command.send_enter.unwrap_or(false) {
-                bytes.push(b'\r');
-            }
-            if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                view.scroll_to_bottom();
-            }
-            app.queue_request(ClientRequest::KeyInput {
-                pane_id,
-                bytes,
-                submission: command
-                    .send_enter
-                    .unwrap_or(false)
-                    .then_some(PromptSubmissionSource::VoiceControl),
-            });
-            Ok(ExecutionReceipt::queued("Sent text to the terminal"))
-        }
         TerminalAction::PressKey => {
             let key = command.key.ok_or("key is required")?;
             app.queue_request(ClientRequest::KeyInput {
@@ -467,15 +522,11 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
         }
         TerminalAction::ScheduleInput => {
             let text = command.text.unwrap_or_default();
-            let send_enter = command.send_enter.unwrap_or(true);
-            if text.trim().is_empty() && !send_enter {
-                return Err("Scheduled input needs text or Enter".to_owned());
-            }
             app.queue_request(ClientRequest::SchedulePaneInput {
                 pane_id,
                 delay_seconds: command.delay_seconds.unwrap_or(0),
                 text,
-                send_enter,
+                send_enter: true,
             });
             Ok(ExecutionReceipt::queued("Scheduled terminal input"))
         }
@@ -621,6 +672,16 @@ fn execute_session(app: &mut App, command: SessionCommand) -> Result<ExecutionRe
         SessionAction::KillSession => app.request_session_kill(),
     }
     Ok(ExecutionReceipt::queued("Session lifecycle request queued"))
+}
+
+/// Disables voice through the same persisted App boundary as F8/settings, but
+/// marks this receipt so the provider result is flushed before actor teardown.
+fn execute_stop_voice_mode(
+    app: &mut App,
+    _command: StopVoiceModeCommand,
+) -> Result<ExecutionReceipt, String> {
+    app.stop_voice_control();
+    Ok(ExecutionReceipt::terminating("Voice mode stopped"))
 }
 
 fn require_runtime_kind(app: &App, pane_id: ilium_core::NodeId, label: &str) -> Result<(), String> {

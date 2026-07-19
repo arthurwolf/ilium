@@ -29,8 +29,8 @@ use crate::agent_from_line::{
 };
 use crate::board::BoardPane;
 use crate::config::{
-    EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
-    TreeOrder, UiSettings, VoiceSettings,
+    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
+    TerminalSettings, TreeOrder, UiSettings, VoiceSettings,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
@@ -265,6 +265,7 @@ pub enum SettingsTab {
     KanbanBoard,
     Sound,
     VoiceControl,
+    Debug,
     About,
 }
 
@@ -367,7 +368,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 12] = [
+    pub const ALL: [SettingsTab; 13] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -379,6 +380,7 @@ impl SettingsTab {
         Self::VoiceControl,
         Self::Inference,
         Self::Triggers,
+        Self::Debug,
         Self::About,
     ];
 
@@ -395,6 +397,7 @@ impl SettingsTab {
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
+            Self::Debug => "Debug",
             Self::About => "About",
         }
     }
@@ -480,6 +483,17 @@ pub enum SessionRow {
 }
 impl SessionRow {
     pub const ALL: [Self; 1] = [Self::RecoveryPolicy];
+}
+
+/// Rows in the Debug tab. The registry keeps keyboard and mouse interaction
+/// exhaustive when more diagnostic controls are added later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugRow {
+    FileLogging,
+}
+
+impl DebugRow {
+    pub const ALL: [Self; 1] = [Self::FileLogging];
 }
 
 /// One live-persisted layout control in the Kanban Board settings tab.
@@ -1011,6 +1025,7 @@ pub struct App {
     /// actor remains owned by `crate::run`, following the same outbox pattern
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
+    pub debug_settings: DebugSettings,
     pub voice_connection_state: ilium_voice::VoiceConnectionState,
     pub voice_input_devices: Vec<String>,
     pub voice_output_devices: Vec<String>,
@@ -1018,6 +1033,7 @@ pub struct App {
     pub voice_last_assistant_transcript: Option<String>,
     pending_voice_runtime_request: Option<VoiceRuntimeRequest>,
     pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
+    pending_debug_logging_enabled: Option<bool>,
     pending_inference_test: bool,
     pending_ollama_model_refresh: bool,
     /// Semantic icon searches are decided by the picker state but spawned by
@@ -1215,6 +1231,7 @@ impl App {
             editor_settings: EditorSettings::default(),
             session_settings: SessionSettings::default(),
             voice_settings: VoiceSettings::default(),
+            debug_settings: DebugSettings::default(),
             voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
             voice_input_devices: Vec::new(),
             voice_output_devices: Vec::new(),
@@ -1222,6 +1239,7 @@ impl App {
             voice_last_assistant_transcript: None,
             pending_voice_runtime_request: None,
             pending_voice_interaction_requests: Vec::new(),
+            pending_debug_logging_enabled: None,
             pending_inference_test: false,
             pending_ollama_model_refresh: false,
             pending_icon_semantic_search: None,
@@ -1684,6 +1702,39 @@ impl App {
         self.voice_settings = settings;
     }
 
+    /// Installs startup diagnostics policy. The process writer is owned by the
+    /// async event loop; `App` keeps only the settings value rendered by UI.
+    pub fn apply_debug_settings(&mut self, settings: DebugSettings) {
+        self.debug_settings = settings;
+    }
+
+    /// Asks the async owner to synchronize this value with both the local
+    /// tracing writer and the detached server. `Option<bool>` coalesces rapid
+    /// toggles before the event loop next runs.
+    pub fn request_debug_logging_reconciliation(&mut self) {
+        self.pending_debug_logging_enabled = Some(self.debug_settings.file_logging_enabled);
+    }
+
+    pub fn take_pending_debug_logging_enabled(&mut self) -> Option<bool> {
+        self.pending_debug_logging_enabled.take()
+    }
+
+    /// Toggles complete session diagnostics immediately and persists the
+    /// choice. The Debug tab explains that prompts/responses may contain
+    /// private project and transcript context.
+    pub fn settings_toggle_file_logging(&mut self) {
+        self.debug_settings.file_logging_enabled = !self.debug_settings.file_logging_enabled;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_debug_settings(&config_dir, &self.debug_settings)
+            {
+                self.status_message = Some(format!("Could not save debug settings: {error}"));
+                tracing::error!(%error, "failed to persist debug settings");
+            }
+        }
+        self.request_debug_logging_reconciliation();
+    }
+
     /// Persists one live voice change and asks the async owner to reconcile
     /// the actor. Multiple changes in one input turn intentionally coalesce.
     pub fn apply_and_persist_voice_settings(&mut self, settings: VoiceSettings) {
@@ -1709,10 +1760,31 @@ impl App {
             });
     }
 
-    pub fn toggle_voice_control(&mut self) {
+    /// Applies an explicit enabled state. Unlike a toggle, this is idempotent
+    /// when a semantic tool call is retried or races another stop request.
+    pub fn set_voice_control_enabled(&mut self, is_enabled: bool) {
+        if self.voice_settings.enabled == is_enabled {
+            return;
+        }
+
         let mut settings = self.voice_settings.clone();
-        settings.enabled = !settings.enabled;
+        settings.enabled = is_enabled;
         self.apply_and_persist_voice_settings(settings);
+    }
+
+    /// Requests an idempotent stop even if settings were already disabled.
+    /// This repairs any transient settings/actor mismatch and guarantees the
+    /// async owner still resumes media and publishes the Disabled state.
+    pub fn stop_voice_control(&mut self) {
+        if self.voice_settings.enabled {
+            self.set_voice_control_enabled(false);
+        } else {
+            self.pending_voice_runtime_request = Some(VoiceRuntimeRequest::Stop);
+        }
+    }
+
+    pub fn toggle_voice_control(&mut self) {
+        self.set_voice_control_enabled(!self.voice_settings.enabled);
     }
 
     pub fn take_voice_runtime_request(&mut self) -> Option<VoiceRuntimeRequest> {
@@ -1799,6 +1871,11 @@ impl App {
             VoiceRow::ConfirmTerminalSubmissions => {
                 let mut settings = self.voice_settings.clone();
                 settings.confirm_terminal_submissions = !settings.confirm_terminal_submissions;
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::PauseMediaWhileActive => {
+                let mut settings = self.voice_settings.clone();
+                settings.pause_media_while_active = !settings.pause_media_while_active;
                 self.apply_and_persist_voice_settings(settings);
             }
             VoiceRow::CustomPrompt => {
@@ -7534,9 +7611,25 @@ mod tests {
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::Triggers);
-        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::Debug);
+        assert_eq!(SettingsTab::Debug.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
+    }
+
+    #[test]
+    fn debug_logging_toggle_persists_and_requests_live_reconciliation() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        assert!(!app.debug_settings.file_logging_enabled);
+        app.settings_toggle_file_logging();
+
+        assert!(app.debug_settings.file_logging_enabled);
+        assert_eq!(app.take_pending_debug_logging_enabled(), Some(true));
+        let loaded = crate::config::load(config_dir.path()).expect("saved debug config");
+        assert!(loaded.debug.file_logging_enabled);
     }
 
     #[test]
@@ -7573,6 +7666,26 @@ mod tests {
                 .unwrap()
                 .voice
                 .confirm_terminal_submissions
+        );
+    }
+
+    #[test]
+    fn pause_media_while_active_toggle_persists_and_does_not_reconnect_voice() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        app.voice_settings.enabled = true;
+
+        assert!(app.voice_settings.pause_media_while_active);
+        app.settings_adjust_voice_row(VoiceRow::PauseMediaWhileActive, 1);
+
+        assert!(!app.voice_settings.pause_media_while_active);
+        assert!(app.take_voice_runtime_request().is_none());
+        assert!(
+            !crate::config::load(config_dir.path())
+                .unwrap()
+                .voice
+                .pause_media_while_active
         );
     }
 

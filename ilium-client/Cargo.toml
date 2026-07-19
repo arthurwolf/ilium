@@ -20,6 +20,7 @@ ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-inference = { version = "0.1.0", path = "../ilium-inference" }
+ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
 ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
 ilium-voice = { version = "0.1.0", path = "../ilium-voice" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
@@ -42,6 +43,7 @@ two-face = "0.5.1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-onig", "parsing", "dump-load"] }
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
+zbus = "5.18.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

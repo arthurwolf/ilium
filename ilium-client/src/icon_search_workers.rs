@@ -109,9 +109,24 @@ fn run_worker(
             request = newer_request;
         }
         if index.is_none() {
+            tracing::info!(
+                model = ?EmbeddingModel::AllMiniLML6V2,
+                cache_directory = %icon_model_cache_dir().display(),
+                "icon semantic model initialization started"
+            );
             match build_index() {
-                Ok(new_index) => index = Some(new_index),
+                Ok(new_index) => {
+                    tracing::info!(
+                        indexed_icons = new_index.icons.len(),
+                        "icon semantic model initialization completed"
+                    );
+                    index = Some(new_index);
+                }
                 Err(message) => {
+                    // Initialization can include a dependency-owned model download,
+                    // so preserve its complete diagnostic even though the dependency
+                    // does not expose the individual HTTP exchange to this adapter.
+                    tracing::error!(%message, "icon semantic model initialization failed");
                     let _ = events_tx.blocking_send(IconSemanticSearchEvent::Failed {
                         revision: request.revision,
                         message,
@@ -131,6 +146,12 @@ fn run_worker(
                 });
             }
             Err(message) => {
+                tracing::error!(
+                    revision = request.revision,
+                    query = %request.query,
+                    %message,
+                    "icon semantic search failed"
+                );
                 let _ = events_tx.blocking_send(IconSemanticSearchEvent::Failed {
                     revision: request.revision,
                     message,
@@ -144,6 +165,19 @@ fn build_index() -> Result<IconSemanticIndex, String> {
     let cache_dir = icon_model_cache_dir();
     std::fs::create_dir_all(&cache_dir)
         .map_err(|error| format!("could not create icon model cache: {error}"))?;
+    let model_info = TextEmbedding::get_model_info(&EmbeddingModel::AllMiniLML6V2)
+        .map_err(|error| format!("could not resolve icon embedding model metadata: {error}"))?;
+    let model_endpoint =
+        std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_owned());
+    let diagnostic_endpoint = ilium_logging::redacted_url(&model_endpoint);
+    tracing::info!(
+        method = "GET",
+        url = %diagnostic_endpoint,
+        model_repository = %model_info.model_code,
+        model_file = %model_info.model_file,
+        cache_directory = %cache_dir.join("model").display(),
+        "HTTP model artifact resolution started; FastEmbed may satisfy files from its local cache"
+    );
     let mut model = TextEmbedding::try_new(
         // The standard MiniLM graph supports bounded batching, keeping the
         // first catalogue build practical on CPU-only machines.
@@ -153,6 +187,12 @@ fn build_index() -> Result<IconSemanticIndex, String> {
             .with_show_download_progress(false),
     )
     .map_err(|error| format!("could not load local icon embedding model: {error}"))?;
+    tracing::info!(
+        method = "GET",
+        url = %diagnostic_endpoint,
+        model_repository = %model_info.model_code,
+        "HTTP model artifact resolution completed"
+    );
     let metadata = icon_categories()
         .iter()
         .flat_map(|category| {

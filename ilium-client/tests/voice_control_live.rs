@@ -2,8 +2,10 @@
 //!
 //! Run with `OPENAI_API_KEY=... cargo test -p ilium-client --test voice_control_live -- --ignored`.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
+use ilium_client::app::{App, VoiceRuntimeRequest};
 use ilium_client::control::{system_instructions, ControlPlane};
 use ilium_voice::{
     ReasoningEffort, VadEagerness, VoiceCommand, VoiceConnectionState, VoiceEvent, VoiceInputMode,
@@ -74,7 +76,7 @@ async fn wait_for_tool_invocation(
         }
     })
     .await
-    .expect("Realtime model should call the terminal-submission tool")
+    .expect("Realtime model should call one production tool")
 }
 
 /// Captures the spoken confirmation question through its return to Listening.
@@ -112,7 +114,7 @@ async fn wait_for_confirmation_question(service: &mut VoiceService) -> String {
 
 #[tokio::test]
 #[ignore = "uses the live OpenAI Realtime API"]
-async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
+async fn explicit_enter_phrase_calls_the_dedicated_submission_tool() {
     let control_plane = ControlPlane::default();
     let mut service = VoiceService::start(live_config(), control_plane.tool_definitions())
         .expect("start voice actor");
@@ -122,7 +124,7 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
 
     sender
         .send(VoiceCommand::SendText(
-            "Send /clear to the currently open terminal.".to_owned(),
+            "Send /clear to the currently open terminal, followed by Enter.".to_owned(),
         ))
         .await
         .expect("send deterministic text turn");
@@ -137,7 +139,10 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
     let arguments: Value =
         serde_json::from_str(&invocation.arguments_json).expect("valid tool arguments");
     assert_eq!(arguments["text"], "/clear");
-    assert_eq!(arguments["send_enter"], true);
+    assert!(
+        arguments.get("send_enter").is_none(),
+        "the submission tool owns the final Enter instead of delegating it to the model"
+    );
     assert!(
         arguments.get("target").is_none() || arguments["target"].is_null(),
         "the active pane should be selected by omitting target"
@@ -159,6 +164,7 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
                 "instruction": "Ask only the exact question. Do not read or repeat staged terminal text. Call ilium_confirm_action only after an explicit yes or no answer.",
             }),
             request_follow_up: true,
+            terminate_session_after_delivery: false,
         }]))
         .await
         .expect("submit staged-terminal result");
@@ -180,6 +186,64 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
         serde_json::from_str(&confirmation.arguments_json).expect("valid confirmation arguments");
     assert_eq!(confirmation_arguments["token"], "voice-confirm-live");
     assert_eq!(confirmation_arguments["confirmed"], true);
+
+    service.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "uses the live OpenAI Realtime API"]
+async fn stop_voice_request_calls_the_dedicated_tool_and_ends_the_session() {
+    let mut control_plane = ControlPlane::default();
+    let mut service = VoiceService::start(live_config(), control_plane.tool_definitions())
+        .expect("start voice actor");
+    let sender = service.command_sender();
+
+    wait_until_listening(&mut service).await;
+
+    sender
+        .send(VoiceCommand::SendText("Stop voice mode now.".to_owned()))
+        .await
+        .expect("send deterministic stop turn");
+
+    let (invocation, pre_tool_transcript) = wait_for_tool_invocation(&mut service).await;
+    assert_eq!(invocation.name, "ilium_stop_voice_mode");
+    assert!(pre_tool_transcript.trim().is_empty());
+    assert_eq!(
+        serde_json::from_str::<Value>(&invocation.arguments_json).expect("valid stop arguments"),
+        json!({})
+    );
+
+    let mut app = App::new("voice-live".to_owned(), PathBuf::from("/tmp/project"));
+    app.voice_settings.enabled = true;
+    let output = control_plane.execute_invocation(&mut app, invocation);
+
+    assert!(!output.request_follow_up);
+    assert!(output.terminate_session_after_delivery);
+    assert!(!app.voice_settings.enabled);
+    assert_eq!(
+        app.take_voice_runtime_request(),
+        Some(VoiceRuntimeRequest::Stop)
+    );
+
+    sender
+        .send(VoiceCommand::SubmitToolOutputsAndShutdown(vec![output]))
+        .await
+        .expect("submit final stop result");
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            match service.next_event().await.expect("voice event channel") {
+                VoiceEvent::StateChanged(VoiceConnectionState::Disabled) => break,
+                VoiceEvent::StateChanged(VoiceConnectionState::Failed(error)) => {
+                    panic!("Realtime self-stop failed: {error}")
+                }
+                VoiceEvent::ProviderError(error) => panic!("Realtime self-stop error: {error}"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Realtime voice actor should stop after returning the tool result");
 
     service.shutdown().await;
 }

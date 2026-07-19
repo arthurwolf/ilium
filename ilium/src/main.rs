@@ -93,6 +93,7 @@ async fn main() -> ExitCode {
     match dispatch(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            tracing::error!(%error, error_debug = ?error, "ilium CLI action failed");
             eprintln!("ilium: {error}");
             ExitCode::FAILURE
         }
@@ -135,17 +136,25 @@ async fn attach_or_create(
     // the directory entry backing the running executable, but the original
     // path remains the correct location from which Restart must load it.
     let client_executable = std::env::current_exe().map_err(CliError::ResolveClientExecutable)?;
-    if should_reset_session {
-        session::reset_session(&project_session).await?;
+    let log_path = if should_reset_session {
+        session::reset_session(&project_session).await?
     } else if should_restart_server {
-        session::replace_server(&project_session).await?;
+        session::replace_server(&project_session).await?
     } else {
-        session::ensure_server_running(&project_session).await?;
-    }
+        session::ensure_server_running(&project_session).await?
+    };
+    initialize_cli_logging(&log_path)?;
+    tracing::info!(
+        session_name,
+        should_restart_server,
+        should_reset_session,
+        "interactive session attach started"
+    );
     let exit_reason = ilium_client::run(ilium_client::RunOptions {
         session_name: project_session.name.clone(),
         session_cwd: project_session.project_root.clone(),
         socket_path: project_session.socket_path.clone(),
+        log_path,
     })
     .await?;
     match exit_reason {
@@ -211,6 +220,8 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     if !session::is_session_live(&project_session.socket_path) {
         return Err(CliError::SessionNotRunning(session_name.to_string()));
     }
+    initialize_cli_logging(&session::read_active_log_path(&project_session)?)?;
+    tracing::info!(session_name, "kill-session action started");
 
     let mut connection = ilium_client::connection::Connection::connect(
         &project_session.socket_path,
@@ -243,7 +254,13 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
 
 async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
-    session::ensure_server_running(&project_session).await?;
+    let log_path = session::ensure_server_running(&project_session).await?;
+    initialize_cli_logging(&log_path)?;
+    tracing::info!(
+        session_name,
+        command_argument_count = cmd.len(),
+        "new-pane CLI action started"
+    );
 
     let mut connection = ilium_client::connection::Connection::connect(
         &project_session.socket_path,
@@ -325,6 +342,22 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
     }
 }
 
+/// Starts the session-scoped writer before short-lived IPC actions and reuses
+/// it when this process hands off to the full client. Reading only the Debug
+/// boolean first preserves diagnostics even if an unrelated config table is
+/// malformed and the client later falls back to defaults.
+fn initialize_cli_logging(log_path: &Path) -> Result<(), CliError> {
+    let enabled = directories::ProjectDirs::from("", "", "ilium")
+        .and_then(|directories| {
+            ilium_logging::file_logging_enabled_hint(&directories.config_dir().join("config.toml"))
+                .ok()
+                .flatten()
+        })
+        .unwrap_or(false);
+    ilium_logging::initialize(log_path, enabled, "cli")?;
+    Ok(())
+}
+
 /// Joins `new-pane`'s trailing `CMD` arguments into the single shell
 /// command string `NewPaneKind::Command` carries over IPC -- the server
 /// always runs it as `$SHELL -c <command_line>` (see
@@ -384,7 +417,13 @@ mod tests {
             project_root: PathBuf::from("/work/project"),
             socket_path: PathBuf::from("/tmp/session.sock"),
             snapshot_path: PathBuf::from("/work/project/.ilium/sessions/session.json"),
-            log_path: PathBuf::from("/work/project/.ilium/logs/session.log"),
+            log_directory: PathBuf::from("/tmp/.ilium/work-project-default"),
+            active_log_path_file: PathBuf::from(
+                "/tmp/.ilium/work-project-default/.active-log-path",
+            ),
+            server_start_lock_file: PathBuf::from(
+                "/tmp/.ilium/work-project-default/.server-start.lock",
+            ),
         }
     }
 

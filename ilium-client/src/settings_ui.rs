@@ -40,8 +40,8 @@ use crate::app::{
     SettingsState, SettingsTab, SoundRow,
 };
 use crate::config::{
-    EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
-    UiSettings,
+    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
+    TerminalSettings, UiSettings,
 };
 use crate::icon_settings::{
     catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
@@ -274,6 +274,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             voice_lines(app, state.selected_row),
             state.scroll,
         ),
+        SettingsTab::Debug => render_scrollable(
+            frame,
+            layout.content_area,
+            debug_lines(&app.debug_settings, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::About => {
             render_scrollable(frame, layout.content_area, about_lines(), state.scroll);
         }
@@ -439,6 +445,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             sound_lines(&app.sound_settings, &app.sound_discovery, selected_row).len() as u16
         }
         SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
+        SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
@@ -2323,6 +2330,17 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
     )
 }
 
+fn debug_lines(settings: &DebugSettings, selected: usize) -> Vec<Line<'static>> {
+    setting_lines(
+        &[(
+            "File logging",
+            on_off(settings.file_logging_enabled),
+            "Write major actions, every instrumented error, and full text LLM requests/responses to this session's timestamped /tmp/.ilium log. Credential headers/URL parameters are redacted; binary audio is summarized.",
+        )],
+        selected,
+    )
+}
+
 fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     let settings = &app.voice_settings;
     let state = match &app.voice_connection_state {
@@ -2411,6 +2429,11 @@ fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
                 "Confirm terminal submissions",
                 on_off(settings.confirm_terminal_submissions),
                 "On stages dictated text visibly and asks before Enter; off submits explicit requests immediately.",
+            ),
+            (
+                "Pause media while active",
+                on_off(settings.pause_media_while_active),
+                "On sends the same D-Bus signal your media key does to pause playback when voice mode starts, and resumes it when voice mode stops.",
             ),
             (
                 "Custom prompt",
@@ -2619,7 +2642,8 @@ mod tests {
             tab_at(area, Position::new(2, 11)),
             Some(SettingsTab::Triggers)
         );
-        assert_eq!(tab_at(area, Position::new(2, 12)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 12)), Some(SettingsTab::Debug));
+        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
@@ -2628,6 +2652,10 @@ mod tests {
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
         assert_eq!(
             tab_at(spacious, Position::new(2, 23)),
+            Some(SettingsTab::Debug)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 25)),
             Some(SettingsTab::About)
         );
     }
@@ -3465,6 +3493,37 @@ mod tests {
         assert!(rendered.contains("Confirm terminal submissions"));
         assert!(rendered.contains("Off"));
         assert!(rendered.contains("stages dictated text visibly"));
+    }
+
+    #[test]
+    fn voice_lines_show_the_pause_media_row_on_by_default() {
+        let app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        let rendered = voice_lines(&app, 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Pause media while active"));
+        assert!(rendered.contains("D-Bus signal your media key does"));
+    }
+
+    #[test]
+    fn debug_lines_explain_scope_redaction_and_default_state() {
+        let rendered = debug_lines(&DebugSettings::default(), 0)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("File logging"));
+        assert!(rendered.contains("Off"));
+        assert!(rendered.contains("LLM requests/responses"));
+        assert!(rendered.contains("Credential headers/URL parameters are redacted"));
+        assert!(rendered.contains("binary audio is summarized"));
     }
 
     #[test]

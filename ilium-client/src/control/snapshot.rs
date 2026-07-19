@@ -187,7 +187,8 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.enabled", "voice.api_key", "voice.model", "voice.voice",
             "voice.reasoning_effort", "voice.input_mode", "voice.vad_eagerness",
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
-            "voice.confirm_terminal_submissions", "voice.custom_prompt"
+            "voice.confirm_terminal_submissions", "voice.custom_prompt",
+            "debug.file_logging_enabled"
         ],
         "ui": {
             "auto_resize_tree": app.ui_settings.auto_resize_tree_on_focus,
@@ -253,6 +254,9 @@ fn settings_snapshot(app: &App) -> Value {
             "confirm_terminal_submissions": app.voice_settings.confirm_terminal_submissions,
             "custom_prompt": app.voice_settings.custom_prompt,
         },
+        "debug": {
+            "file_logging_enabled": app.debug_settings.file_logging_enabled,
+        },
     })
 }
 
@@ -273,7 +277,7 @@ fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
     }
 }
 
-fn mode_label(mode: &Mode) -> &'static str {
+pub(crate) fn mode_label(mode: &Mode) -> &'static str {
     match mode {
         Mode::Normal => "normal",
         Mode::LeaderPending => "leader_pending",

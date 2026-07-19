@@ -149,28 +149,17 @@ pub struct TerminalSubmissionCommand {
     #[serde(default)]
     pub target: NodeTarget,
     pub text: String,
-    #[serde(default = "default_true")]
-    pub send_enter: bool,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-impl From<TerminalSubmissionCommand> for TerminalCommand {
-    fn from(command: TerminalSubmissionCommand) -> Self {
-        Self {
-            action: TerminalAction::Write,
-            target: command.target,
-            text: Some(command.text),
-            key: None,
-            lines: None,
-            delay_seconds: None,
-            send_enter: Some(command.send_enter),
-            delivery: None,
-            runs: None,
-        }
-    }
+/// Terminal text that is deliberately typed without a submission key. This
+/// separate type keeps staging explicit instead of making Enter a fragile
+/// boolean on the primary submission command.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalTypingCommand {
+    #[serde(default)]
+    pub target: NodeTarget,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -183,7 +172,6 @@ pub struct TerminalCommand {
     pub key: Option<TerminalKey>,
     pub lines: Option<u16>,
     pub delay_seconds: Option<u64>,
-    pub send_enter: Option<bool>,
     pub delivery: Option<PromptDeliveryChoice>,
     pub runs: Option<u32>,
 }
@@ -191,7 +179,6 @@ pub struct TerminalCommand {
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalAction {
-    Write,
     PressKey,
     ScrollUp,
     ScrollDown,
@@ -344,6 +331,13 @@ pub enum SessionAction {
     KillSession,
 }
 
+/// Argument-free request to end the currently running voice controller.
+/// A dedicated type keeps this lifecycle action distinct from persisted
+/// settings mutation and makes unknown model-provided arguments invalid.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopVoiceModeCommand {}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfirmationCommand {
@@ -356,10 +350,13 @@ pub enum ControlCommand {
     State(StateCommand),
     Ui(UiCommand),
     Tree(TreeCommand),
+    TerminalSubmission(TerminalSubmissionCommand),
+    TerminalTyping(TerminalTypingCommand),
     Terminal(TerminalCommand),
     Editor(EditorCommand),
     Board(BoardCommand),
     Settings(SettingsCommand),
     Search(SearchCommand),
     Session(SessionCommand),
+    StopVoiceMode(StopVoiceModeCommand),
 }

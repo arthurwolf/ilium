@@ -29,6 +29,7 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
                 status: "ok",
                 message: "Current redacted ilium settings".to_owned(),
                 data: data.get("settings").cloned().unwrap_or(Value::Null),
+                terminate_session_after_delivery: false,
             })
         }
         SettingsAction::Set => {
@@ -377,11 +378,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             |settings, value| settings.openrouter.model = value,
             string(&value)?,
         ),
-        "voice.enabled" => {
-            if app.voice_settings.enabled != boolean(&value)? {
-                app.toggle_voice_control();
-            }
-        }
+        "voice.enabled" => app.set_voice_control_enabled(boolean(&value)?),
         "voice.api_key" => update_voice(app, |settings| {
             settings.api_key = string(&value)?.trim().to_owned();
             Ok(())
@@ -426,10 +423,19 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             settings.confirm_terminal_submissions = boolean(&value)?;
             Ok(())
         })?,
+        "voice.pause_media_while_active" => update_voice(app, |settings| {
+            settings.pause_media_while_active = boolean(&value)?;
+            Ok(())
+        })?,
         "voice.custom_prompt" => update_voice(app, |settings| {
             settings.custom_prompt = string(&value)?.to_owned();
             Ok(())
         })?,
+        "debug.file_logging_enabled" => {
+            if app.debug_settings.file_logging_enabled != boolean(&value)? {
+                app.settings_toggle_file_logging();
+            }
+        }
         _ => return Err(format!("Unknown or read-only setting path {path:?}")),
     }
     Ok(())
@@ -483,6 +489,10 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         }
         "voice.confirm_terminal_submissions" => app.settings_adjust_voice_row(
             crate::voice_settings::VoiceRow::ConfirmTerminalSubmissions,
+            direction,
+        ),
+        "voice.pause_media_while_active" => app.settings_adjust_voice_row(
+            crate::voice_settings::VoiceRow::PauseMediaWhileActive,
             direction,
         ),
         _ => return Err(format!("Setting {path:?} is not adjustable; use set")),

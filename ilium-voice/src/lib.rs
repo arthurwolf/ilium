@@ -50,6 +50,9 @@ pub enum VoiceCommand {
         tools: Vec<VoiceToolDefinition>,
     },
     SubmitToolOutputs(Vec<VoiceToolOutput>),
+    /// Writes final function results, suppresses a follow-up response, and
+    /// closes the provider/audio session in that exact order.
+    SubmitToolOutputsAndShutdown(Vec<VoiceToolOutput>),
     /// Adds a user text turn to the same conversation. The TUI does not use
     /// this for ordinary operation; it provides a deterministic accessibility
     /// and live-protocol test seam without synthesizing microphone audio.
@@ -90,6 +93,7 @@ impl VoiceService {
             )
             .await
             {
+                tracing::error!(%error, "OpenAI Realtime voice session failed");
                 let _ = event_sender
                     .send(VoiceEvent::StateChanged(VoiceConnectionState::Failed(
                         error.to_string(),
@@ -121,6 +125,21 @@ impl VoiceService {
     /// Stops the actor and waits for every owned stream and task to drop.
     pub async fn shutdown(mut self) {
         let _ = self.shutdown_sender.send(true);
+        let _ = (&mut self.task).await;
+    }
+
+    /// Completes a self-stop function call before ending the actor. Falling
+    /// back to the ordinary shutdown signal covers an actor that already
+    /// closed its command receiver after a provider or device failure.
+    pub async fn shutdown_after_tool_outputs(mut self, outputs: Vec<VoiceToolOutput>) {
+        if self
+            .command_sender
+            .send(VoiceCommand::SubmitToolOutputsAndShutdown(outputs))
+            .await
+            .is_err()
+        {
+            let _ = self.shutdown_sender.send(true);
+        }
         let _ = (&mut self.task).await;
     }
 }

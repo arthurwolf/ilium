@@ -163,13 +163,42 @@ impl KiloGatewayClient {
         let mut delay = self.retry_policy.initial_delay;
 
         for attempt in 1..=attempts {
+            tracing::info!(
+                provider = "kilo_gateway",
+                attempt,
+                attempts,
+                request_body = %serde_json::to_string(&payload).unwrap_or_else(|error| format!("<serialization failed: {error}>")),
+                "LLM provider attempt started"
+            );
             match send(&payload) {
-                Ok(response) => return response.assistant_text(),
+                Ok(response) => {
+                    let result = response.assistant_text();
+                    match &result {
+                        Ok(text) => {
+                            tracing::info!(provider = "kilo_gateway", attempt, response_text = %text, "LLM provider attempt completed")
+                        }
+                        Err(error) => {
+                            tracing::error!(provider = "kilo_gateway", attempt, error = %error, "LLM provider response validation failed")
+                        }
+                    }
+                    return result;
+                }
                 Err(error) if error.is_retryable() && attempt < attempts => {
+                    tracing::warn!(
+                        provider = "kilo_gateway",
+                        attempt,
+                        error = %error,
+                        error_debug = ?error,
+                        retry_delay_milliseconds = delay.as_millis(),
+                        "LLM provider attempt failed and will retry"
+                    );
                     thread::sleep(delay);
                     delay = delay.saturating_mul(2).min(self.retry_policy.max_delay);
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    tracing::error!(provider = "kilo_gateway", attempt, error = %error, error_debug = ?error, "LLM provider attempt failed");
+                    return Err(error);
+                }
             }
         }
         unreachable!("the non-empty retry loop always returns")
@@ -180,11 +209,20 @@ impl KiloGatewayClient {
         payload: &ChatCompletionPayload<'_>,
     ) -> Result<ChatCompletionResponse, GatewayError> {
         let url = format!("{}/chat/completions", self.base_url);
+        let diagnostic_url = ilium_logging::redacted_url(&url);
+        tracing::info!(
+            method = "POST",
+            url = %diagnostic_url,
+            headers = ?[("Content-Type", "application/json")],
+            request_body = %serde_json::to_string(payload).unwrap_or_else(|error| format!("<serialization failed: {error}>")),
+            "HTTP request started"
+        );
         // A one-shot UI enrichment must never leave its tracked worker
         // waiting indefinitely on a broken network path.
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .timeout_global(Some(REQUEST_TIMEOUT))
+                .http_status_as_error(false)
                 .build(),
         );
         let mut response = match agent
@@ -193,23 +231,55 @@ impl KiloGatewayClient {
             .send_json(payload)
         {
             Ok(response) => response,
-            Err(ureq::Error::StatusCode(status)) => {
-                return Err(GatewayError::Http {
-                    status,
-                    message: "gateway rejected the request".to_string(),
-                });
+            Err(error) => {
+                let error_message = error.to_string().replace(&url, &diagnostic_url);
+                tracing::error!(method = "POST", url = %diagnostic_url, error = %error_message, "HTTP transport failed");
+                return Err(GatewayError::Transport(error_message));
             }
-            Err(error) => return Err(GatewayError::Transport(error.to_string())),
         };
         let status = response.status().as_u16();
+        let response_headers = redacted_response_headers(response.headers());
         let body = response
             .body_mut()
             .read_to_string()
-            .map_err(|error| GatewayError::Transport(error.to_string()))?;
-        debug_assert!((200..300).contains(&status));
-        serde_json::from_str(&body)
-            .map_err(|error| GatewayError::InvalidResponse(error.to_string()))
+            .map_err(|error| {
+                tracing::error!(method = "POST", url = %diagnostic_url, status, ?response_headers, error = %error, "failed to read HTTP response body");
+                GatewayError::Transport(error.to_string())
+            })?;
+        if !(200..300).contains(&status) {
+            tracing::error!(method = "POST", url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request failed");
+            return Err(GatewayError::Http {
+                status,
+                message: body,
+            });
+        }
+        tracing::info!(method = "POST", url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request completed");
+        serde_json::from_str(&body).map_err(|error| {
+            tracing::error!(
+                method = "POST",
+                url = %diagnostic_url,
+                status,
+                ?response_headers,
+                response_body = %body,
+                error = %error,
+                "HTTP response was not valid JSON"
+            );
+            GatewayError::InvalidResponse(error.to_string())
+        })
     }
+}
+
+fn redacted_response_headers(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let value = value.to_str().unwrap_or("<non-text header>");
+            (
+                name.as_str().to_owned(),
+                ilium_logging::redacted_header_value(name.as_str(), value),
+            )
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -258,6 +328,59 @@ struct ChatChoiceMessage {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    fn spawn_http_response(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local HTTP fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let status = status.to_owned();
+        let body = body.to_owned();
+        let (request_sender, request_receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept local HTTP request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("request timeout");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4_096];
+            loop {
+                let read = stream.read(&mut buffer).expect("read HTTP request");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                if request.len() >= header_end + 4 + content_length {
+                    break;
+                }
+            }
+            request_sender
+                .send(String::from_utf8_lossy(&request).into_owned())
+                .expect("capture HTTP request");
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write HTTP response");
+        });
+        (format!("http://{address}"), request_receiver)
+    }
 
     fn request() -> CompletionRequest {
         CompletionRequest::with_default_free_model(vec![ChatMessage::user("name this project")])
@@ -319,5 +442,30 @@ mod tests {
 
         assert!(matches!(result, Err(GatewayError::InvalidResponse(_))));
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn http_errors_preserve_the_complete_gateway_body_and_request_prompt() {
+        let response_body =
+            r#"{"error":{"message":"upstream rejected request","request_id":"req-42"}}"#;
+        let (base_url, request_receiver) = spawn_http_response("502 Bad Gateway", response_body);
+        let client = KiloGatewayClient::new(
+            base_url,
+            RetryPolicy {
+                max_attempts: 1,
+                initial_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+        );
+
+        let result = client.complete_text(&request());
+
+        assert!(matches!(
+            result,
+            Err(GatewayError::Http { status: 502, message }) if message == response_body
+        ));
+        let captured_request = request_receiver.recv().expect("captured HTTP request");
+        assert!(captured_request.contains("name this project"));
+        assert!(captured_request.contains("openrouter/free"));
     }
 }

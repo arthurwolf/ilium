@@ -359,7 +359,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // Phase 2: the actual attaching form, inside a real pty at a fixed
     // size -- exactly the technique `ilium-pty/tests/pty_integration.rs`
     // uses for a trivial command, applied to the real CLI/TUI binary.
-    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
         .arg("--restart-server")
         .arg("--cwd")
         .arg(project_dir.to_string_lossy().to_string());
@@ -963,6 +963,86 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected keyboard-following scroll to reveal Agent finishes work, got: {:?}",
         tui.screen_text()
+    );
+
+    // Debug follows Triggers. Its real toggle must preserve the fresh-install
+    // default (no `.txt` file before opt-in), persist the choice, open both
+    // process writers immediately, and make the next structural request land
+    // in the server's major-action trail.
+    tui.write(b"\t")
+        .expect("switching to the Debug settings tab");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Debug")
+                    && screen.contains("File logging")
+                    && screen.contains("‹ Off ›")
+                    && screen.contains("LLM requests/responses")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected disabled-by-default Debug file logging, got: {:?}",
+        tui.screen_text()
+    );
+    let socket_file_name = std::fs::read_dir(xdg.runtime_dir.join("ilium"))
+        .expect("read isolated socket directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .find(|name| name.to_string_lossy().ends_with(".sock"))
+        .expect("isolated session socket");
+    let session_log_directory =
+        Path::new("/tmp/.ilium").join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
+    let active_log_path = PathBuf::from(
+        std::fs::read_to_string(session_log_directory.join(".active-log-path"))
+            .expect("read active log metadata"),
+    );
+    assert!(
+        !active_log_path.exists(),
+        "disabled logging unexpectedly created {}",
+        active_log_path.display()
+    );
+
+    tui.write(b" ").expect("enabling Debug file logging");
+    assert!(
+        wait_until(
+            || {
+                let config =
+                    std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                        .unwrap_or_default();
+                let log = std::fs::read_to_string(&active_log_path).unwrap_or_default();
+                config.contains("[debug]")
+                    && config.contains("file_logging_enabled = true")
+                    && log.contains("client file logging enabled from Debug settings")
+                    && log.contains("server file logging enabled from Debug settings")
+                    && log.contains("client file logging synchronized from server")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected both process writers to enable at {}, config={:?}, log={:?}",
+        active_log_path.display(),
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml")),
+        std::fs::read_to_string(&active_log_path)
+    );
+    let logged_action = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    assert!(
+        logged_action.status.success(),
+        "creating a logged pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&logged_action.stdout),
+        String::from_utf8_lossy(&logged_action.stderr)
+    );
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&active_log_path)
+                .is_ok_and(|log| log.contains("request_name=\"new_pane\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected new-pane action in {}, got: {:?}",
+        active_log_path.display(),
+        std::fs::read_to_string(&active_log_path)
     );
 
     // Cleanup: reuse the CLI's own graceful `kill-session` subcommand

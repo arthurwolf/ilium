@@ -1575,6 +1575,28 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 return;
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Debug => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Debug => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::DebugRow::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Debug =>
+        {
+            if matches!(
+                crate::app::DebugRow::ALL.get(state.selected_row),
+                Some(crate::app::DebugRow::FileLogging)
+            ) {
+                app.settings_toggle_file_logging();
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Appearance => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
