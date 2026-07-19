@@ -10,27 +10,27 @@
 
 # Performance and interaction responsiveness (20 improvements)
 
-- [ ] Disable sysinfo's machine-wide `/proc/*/stat` descriptor cache before every server detection lifecycle.
-- [ ] Right-size each detached server's Tokio worker and blocking pools instead of multiplying one thread per CPU by every session.
-- [ ] Replace the detection loop's one-second polling tick with an exact nearest-pane deadline.
-- [ ] Wake detection immediately when focus, Enter, or a new pane forces an earlier check.
-- [ ] Capture VT screen text only for process trees that actually contain a detected agent.
-- [ ] Skip transcript/session rediscovery while the same verified agent process still owns the pane.
-- [ ] Refresh command and cwd process fields only for panes that genuinely need session discovery.
-- [ ] Resolve project paths only for those discovery candidates instead of every classified pane.
-- [ ] Short-circuit `/proc/<pid>/fd` transcript discovery as soon as ownership becomes ambiguous.
-- [ ] Fast-path already-equal process/project paths before filesystem canonicalization.
-- [ ] Replace lossy `try_send` client requests with a bounded, lossless staging queue.
-- [ ] Coalesce superseded queued PTY resize requests per pane.
-- [ ] Coalesce superseded queued focus-state requests per pane.
-- [ ] Cap client-side merged terminal bytes per event-loop turn as well as event count.
-- [ ] Rate-limit terminal-output redraw floods while keeping input-driven redraws immediate.
-- [ ] Flatten the sidebar tree once per ordinary render and reuse the result for motion plus scrollbar geometry.
-- [ ] Reuse one row-motion cell scratch allocation across every animated sidebar row.
-- [ ] Make bounded OSC-8 hyperlink eviction O(1) with a deque.
-- [ ] Schedule pending-input countdown redraws at their real 220 ms frame boundary instead of the generic 20 Hz animation tier.
-- [ ] Lower CPU priority for workspace-search and semantic-icon background workers so they cannot compete with input/render work.
-- [ ] Run focused regressions, workspace gates, release-install, descriptor/CPU measurements, and installed PTY responsiveness proof.
+- [x] Disable sysinfo's machine-wide `/proc/*/stat` descriptor cache before every server detection lifecycle.
+- [x] Right-size each detached server's Tokio worker and blocking pools instead of multiplying one thread per CPU by every session.
+- [x] Replace the detection loop's one-second polling tick with an exact nearest-pane deadline.
+- [x] Wake detection immediately when focus, Enter, or a new pane forces an earlier check.
+- [x] Capture VT screen text only for process trees that actually contain a detected agent.
+- [x] Skip transcript/session rediscovery while the same verified agent process still owns the pane.
+- [x] Refresh command and cwd process fields only for panes that genuinely need session discovery.
+- [x] Resolve project paths only for those discovery candidates instead of every classified pane.
+- [x] Short-circuit `/proc/<pid>/fd` transcript discovery as soon as ownership becomes ambiguous.
+- [x] Fast-path already-equal process/project paths before filesystem canonicalization.
+- [x] Replace lossy `try_send` client requests with a bounded, lossless staging queue.
+- [x] Coalesce superseded queued PTY resize requests per pane.
+- [x] Coalesce superseded queued focus-state requests per pane.
+- [x] Cap client-side merged terminal bytes per event-loop turn as well as event count.
+- [x] Rate-limit terminal-output redraw floods while keeping input-driven redraws immediate.
+- [x] Flatten the sidebar tree once per ordinary render and reuse the result for motion plus scrollbar geometry.
+- [x] Reuse one row-motion cell scratch allocation across every animated sidebar row.
+- [x] Make bounded OSC-8 hyperlink eviction O(1) with a deque.
+- [x] Schedule pending-input countdown redraws at their real 220 ms frame boundary instead of the generic 20 Hz animation tier.
+- [x] Lower CPU priority for workspace-search and semantic-icon background workers so they cannot compete with input/render work.
+- [x] Run focused regressions, workspace gates, release-install, descriptor/CPU measurements, and installed PTY responsiveness proof.
 
 # CPU semantic icon search
 
