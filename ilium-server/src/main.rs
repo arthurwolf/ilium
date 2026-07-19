@@ -3,6 +3,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
+
+const RUNTIME_WORKER_THREADS: usize = 2;
+const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
+const RUNTIME_THREAD_STACK_BYTES: usize = 1024 * 1024;
+const RUNTIME_BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(5);
 
 struct ServerLaunch {
     session_name: String,
@@ -33,7 +39,22 @@ fn main() -> ExitCode {
     install_panic_logging();
     tracing::info!("ilium-server starting; log={}", launch.log_path.display());
 
+    // Configure this before any detection refresh can create sysinfo's
+    // Linux process handles. The function is a no-op on other platforms.
+    ilium_detect::configure_process_refresh();
+
     let runtime = match tokio::runtime::Builder::new_multi_thread()
+        // A session coordinates IPC and timers; PTY reads already live on
+        // their own threads. Mirroring every host CPU for every detached
+        // session multiplies scheduler overhead without adding throughput.
+        .worker_threads(RUNTIME_WORKER_THREADS)
+        // Detection, snapshots, sounds, and notifications use short blocking
+        // jobs. Bound their pool so many sessions cannot create an unbounded
+        // fleet of retained helper threads.
+        .max_blocking_threads(RUNTIME_MAX_BLOCKING_THREADS)
+        .thread_keep_alive(RUNTIME_BLOCKING_THREAD_KEEP_ALIVE)
+        .thread_stack_size(RUNTIME_THREAD_STACK_BYTES)
+        .thread_name("ilium-server-rt")
         .enable_all()
         .build()
     {

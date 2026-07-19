@@ -452,15 +452,20 @@ async fn server_process_id(socket_path: &Path) -> Result<Option<u32>, CliError> 
 }
 
 /// Sends the normal Unix termination signal to one server process identified
-/// by its live socket peer credentials.
+/// by its live socket peer credentials. `ESRCH` is success: the graceful
+/// shutdown can finish between the preceding liveness probe and this fallback.
 fn terminate_server(server_pid: u32) -> Result<(), CliError> {
     let result = unsafe { libc::kill(server_pid as libc::pid_t, libc::SIGTERM) };
     if result == 0 {
         return Ok(());
     }
+    let source = std::io::Error::last_os_error();
+    if source.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
     Err(CliError::ServerTermination {
         pid: server_pid,
-        source: std::io::Error::last_os_error(),
+        source,
     })
 }
 
@@ -549,6 +554,17 @@ mod tests {
         std::fs::write(&stale_path, b"not a socket").expect("write stale file");
         assert!(!is_session_live(&stale_path));
         assert!(!stale_path.exists());
+    }
+
+    #[test]
+    fn terminating_an_already_exited_server_is_successful() {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn short-lived process");
+        let process_id = child.id();
+        child.wait().expect("wait for short-lived process");
+
+        terminate_server(process_id).expect("an already-exited server needs no signal");
     }
 
     #[test]

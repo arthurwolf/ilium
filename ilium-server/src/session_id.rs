@@ -122,13 +122,12 @@ fn from_arguments(class: &AgentClass, arguments: &[String]) -> Option<String> {
 #[cfg(target_os = "linux")]
 fn from_open_files(pid: u32, class: &AgentClass, locator: &TranscriptLocator) -> Option<String> {
     let entries = std::fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
-    let session_ids: HashSet<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| std::fs::read_link(entry.path()).ok())
-        .filter_map(|target| locator.transcript_from_path(class, &target))
-        .map(|transcript| transcript.session_id)
-        .collect();
-    exactly_one(session_ids)
+    uniquely_discovered_session_id(entries.filter_map(Result::ok).filter_map(|entry| {
+        let target = std::fs::read_link(entry.path()).ok()?;
+        locator
+            .transcript_from_path(class, &target)
+            .map(|transcript| transcript.session_id)
+    }))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -136,13 +135,24 @@ fn from_open_files(_pid: u32, _class: &AgentClass, _locator: &TranscriptLocator)
     None
 }
 
-fn exactly_one(values: HashSet<String>) -> Option<String> {
-    (values.len() == 1)
-        .then(|| values.into_iter().next())
-        .flatten()
+/// Accepts duplicate descriptors for one transcript, but stops consuming the
+/// descriptor stream immediately when two distinct session owners appear.
+fn uniquely_discovered_session_id(session_ids: impl Iterator<Item = String>) -> Option<String> {
+    let mut discovered_session_id = None;
+    for session_id in session_ids {
+        match &discovered_session_id {
+            Some(existing) if existing != &session_id => return None,
+            Some(_) => {}
+            None => discovered_session_id = Some(session_id),
+        }
+    }
+    discovered_session_id
 }
 
 fn same_canonical_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
     let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
     let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
     left == right
@@ -151,6 +161,21 @@ fn same_canonical_path(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_file_ownership_stops_at_the_first_conflicting_session() {
+        let session_ids = ["same", "same", "different"]
+            .into_iter()
+            .map(str::to_string)
+            .chain(std::iter::once_with(|| {
+                panic!("iterator must not be consumed after ambiguity is proven")
+            }));
+        assert_eq!(uniquely_discovered_session_id(session_ids), None);
+        assert_eq!(
+            uniquely_discovered_session_id(["same", "same"].into_iter().map(str::to_string)),
+            Some("same".to_string())
+        );
+    }
 
     fn write_claude_transcript(home: &Path, cwd: &Path, session_id: &str) {
         let slug: String = cwd

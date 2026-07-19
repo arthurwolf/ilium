@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use ilium_core::{
-    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, RestructurePlan,
-    ScheduledPaneInput, Tree, TreeError,
+    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
+    PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput, Tree, TreeError,
 };
 use ilium_ipc::{ClientRequest, NewPaneKind, NewPaneWorkingDirectory, ServerEvent};
 use ilium_pty::PtyError;
@@ -228,6 +228,18 @@ pub async fn handle_request(
                 .await;
             false
         }
+        ClientRequest::EnqueuePrompt {
+            pane_id,
+            text,
+            delivery,
+        } => {
+            handle_enqueue_prompt(state, pane_id, text, delivery, direct_tx).await;
+            false
+        }
+        ClientRequest::ClearPromptQueue { pane_id } => {
+            handle_clear_prompt_queue(state, pane_id, direct_tx).await;
+            false
+        }
         ClientRequest::ApplyRestructurePlan(plan) => {
             handle_apply_restructure_plan(state, plan, direct_tx).await;
             false
@@ -287,7 +299,7 @@ async fn tree_snapshot(state: &ServerState) -> Tree {
 /// after dropping any tree/pane write-lock guard their own mutation held,
 /// so this function's read-locked clone can never contend with a pending
 /// writer (see `ServerState`'s lock-ordering docs).
-pub(crate) async fn broadcast_and_persist(state: &Arc<ServerState>) {
+pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     let snapshot = tree_snapshot(state).await;
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
@@ -334,6 +346,42 @@ async fn handle_schedule_pane_input(
     }
     broadcast_and_persist(state).await;
     state.scheduled_input_changed.notify_one();
+}
+
+async fn handle_enqueue_prompt(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    text: String,
+    delivery: PromptQueueDelivery,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let _transaction = state.prompt_queue_transaction.lock().await;
+    let result = state
+        .tree
+        .write()
+        .await
+        .enqueue_prompt(pane_id, QueuedPrompt { text, delivery });
+    drop(_transaction);
+    if let Err(error) = result {
+        send_direct_error(direct_tx, format!("failed to enqueue prompt: {error}")).await;
+        return;
+    }
+    broadcast_and_persist(state).await;
+}
+
+async fn handle_clear_prompt_queue(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let _transaction = state.prompt_queue_transaction.lock().await;
+    let result = state.tree.write().await.clear_prompt_queue(pane_id);
+    drop(_transaction);
+    if let Err(error) = result {
+        send_direct_error(direct_tx, format!("failed to clear prompt queue: {error}")).await;
+        return;
+    }
+    broadcast_and_persist(state).await;
 }
 
 async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sender<ServerEvent>) {
@@ -730,8 +778,8 @@ async fn handle_session_pane_title(
 ///
 /// A focus-gain that finds the pane `Done` also clears it to `Idle`
 /// synchronously, right here, instead of leaving that solely to the
-/// detection loop's forced recheck. The detection loop only wakes once per
-/// `BASE_TICK_INTERVAL`; a focus-then-unfocus faster than that window
+/// detection loop's forced recheck. A focus-then-unfocus faster than the
+/// focused polling interval
 /// (an entirely ordinary quick glance) can flip `client_focused` back to
 /// `false` before any tick ever observes it `true`, so the tree's
 /// authoritative status never actually leaves `Done` -- the next tick then
@@ -749,7 +797,8 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
         return;
     };
     runtime.detection_schedule.client_focused = focused;
-    crate::detection::force_check(&mut runtime.detection_schedule, std::time::Instant::now());
+    let detection_was_forced =
+        crate::detection::force_check(&mut runtime.detection_schedule, std::time::Instant::now());
 
     let cleared_status = focused
         .then(|| match tree.get(pane_id).map(|node| &node.kind) {
@@ -775,6 +824,10 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
 
     drop(panes);
     drop(tree);
+
+    if detection_was_forced {
+        state.detection_schedule_changed.notify_one();
+    }
 
     if let Some(status) = cleared_status {
         state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
@@ -1067,6 +1120,7 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
 
     if is_terminal {
         *state.last_terminal_working_directory.lock().await = Some(cwd.to_path_buf());
+        state.detection_schedule_changed.notify_one();
     }
     Ok(())
 }
@@ -1247,7 +1301,7 @@ async fn handle_key_input(
 /// boundary prevents delayed Enter from behaving differently from a key the
 /// user pressed directly.
 pub(crate) async fn write_key_input(
-    state: &Arc<ServerState>,
+    state: &ServerState,
     pane_id: NodeId,
     bytes: &[u8],
 ) -> Result<(), String> {
@@ -1275,7 +1329,7 @@ pub(crate) async fn write_key_input(
     // Write lock (not read) on `panes`: a `KeyInput` always targets the
     // client's currently-focused pane (the client only ever forwards raw
     // keys for `self.focused_pane`), which `ClientRequest::SetPaneFocus`
-    // already pins to `BASE_TICK_INTERVAL` regardless of status -- so most
+    // already puts on the focused fast tier regardless of status -- so most
     // keystrokes need no extra scheduling push here. Enter is the
     // exception: it's the clearest possible signal a command/prompt was
     // just submitted, so it still forces an immediate (debounced) recheck
@@ -1291,6 +1345,7 @@ pub(crate) async fn write_key_input(
     let mut cleared_session_title_generation = None;
     let mut cleared_conversation_origin_name = None;
     let mut cleared_conversation_title_generation = None;
+    let mut detection_was_forced = false;
     let error_message = match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
@@ -1344,7 +1399,7 @@ pub(crate) async fn write_key_input(
                         Some(runtime.origin.pane_name_without_stale_session().to_string());
                 }
                 if bytes.contains(&b'\r') {
-                    crate::detection::force_check(
+                    detection_was_forced = crate::detection::force_check(
                         &mut runtime.detection_schedule,
                         std::time::Instant::now(),
                     );
@@ -1358,6 +1413,10 @@ pub(crate) async fn write_key_input(
         None => Some(format!("no pane found for node {pane_id:?}")),
     };
     drop(panes);
+
+    if detection_was_forced {
+        state.detection_schedule_changed.notify_one();
+    }
 
     if let Some(message) = error_message {
         return Err(message);

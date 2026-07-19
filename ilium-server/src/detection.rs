@@ -15,7 +15,7 @@
 use std::time::{Duration, Instant};
 
 use ilium_agent_session::TranscriptLocator;
-use ilium_core::{NodeId, PaneStatus};
+use ilium_core::{AgentActivity, NodeId, PaneStatus};
 use ilium_ipc::ServerEvent;
 use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
@@ -25,12 +25,6 @@ use crate::pane::PaneResource;
 use crate::sounds::{self, PlaybackRequest};
 use crate::state::ServerState;
 
-/// How often the loop wakes to check which panes are due. Independent of
-/// the *configured* working/idle poll intervals (`DetectionConfig`) --
-/// this is just the scheduling granularity; a pane's effective poll rate
-/// is `current_interval`, rounded up to the next multiple of this tick.
-const BASE_TICK_INTERVAL: Duration = Duration::from_secs(1);
-
 /// Minimum time between two "force an immediate recheck" requests actually
 /// taking effect for the same pane. A focus transition (entering/exiting a
 /// pane) or an Enter keypress each *ask* for an immediate recheck (see
@@ -39,6 +33,9 @@ const BASE_TICK_INTERVAL: Duration = Duration::from_secs(1);
 /// classification to run every single base tick regardless of its
 /// configured poll tier.
 const FORCE_CHECK_DEBOUNCE: Duration = Duration::from_secs(5);
+/// Focused panes retain the previous one-second classification cadence, while
+/// the scheduler itself now sleeps to exact deadlines instead of polling.
+const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Spawns the detection loop as a single tracked task and returns its
 /// handle. The loop runs until aborted (session shutdown) -- it has no
@@ -93,28 +90,23 @@ fn lower_current_thread_niceness() {}
 
 async fn run_loop(state: std::sync::Arc<ServerState>) {
     let mut system = System::new();
-    let mut ticker = tokio::time::interval(BASE_TICK_INTERVAL);
-    // `Burst` (default) makes a delayed tick fire immediately followed by
-    // however many ticks it "owes"; `Delay` (chosen here) just resumes on
-    // the normal cadence from whenever it actually fires. A detection tick
-    // that ran long (e.g. under test-runner load) should not then fire a
-    // burst of catch-up ticks -- there is nothing to "catch up" on, the
-    // per-pane `next_due` timestamps already say what's still due.
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
-        ticker.tick().await;
-
-        // Skip the expensive `/proc` refresh entirely when nothing is due
-        // yet -- its cost scales with *every* process on the machine, not
-        // with ilium's own workload, so paying it on every ~1s tick even
-        // when e.g. every pane is sitting on the 45s idle-tier interval
-        // wastes CPU under heavy machine load for no benefit (no pane's
-        // classification would even be looked at this tick). Only a brief
-        // `panes` read lock is needed to check this -- no `tree` lock, and
-        // nothing here mutates anything.
-        if !any_pane_due(&state, Instant::now()).await {
-            continue;
+        // Sleep to the exact nearest pane deadline. New panes and debounced
+        // force-checks notify this loop, so an earlier deadline interrupts
+        // the sleep immediately without a fixed polling granularity.
+        match next_detection_delay(&state, Instant::now()).await {
+            Some(delay) if !delay.is_zero() => {
+                tokio::select! {
+                    () = tokio::time::sleep(delay) => {}
+                    () = state.detection_schedule_changed.notified() => continue,
+                }
+            }
+            Some(_) => {}
+            None => {
+                state.detection_schedule_changed.notified().await;
+                continue;
+            }
         }
 
         // The refresh is the syscall-heavy part (`/proc` reads for every
@@ -168,18 +160,27 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
     }
 }
 
-/// True if at least one terminal pane's `next_due` deadline has already
-/// passed, i.e. this tick actually has work to do. Takes only a brief
-/// `panes` read lock (no `tree` lock -- nothing here needs it) to check
-/// timestamps; does not classify anything.
-async fn any_pane_due(state: &ServerState, now: Instant) -> bool {
+/// Returns the exact wait until the nearest terminal detection deadline.
+/// `None` means no terminal panes exist, so the loop can park on its notify.
+async fn next_detection_delay(state: &ServerState, now: Instant) -> Option<Duration> {
     let panes = state.panes.read().await;
-    panes.values().any(|resource| {
-        matches!(
-            resource,
-            PaneResource::Terminal(runtime) if runtime.detection_schedule.next_due <= now
-        )
-    })
+    minimum_detection_delay(
+        panes.values().filter_map(|resource| match resource {
+            PaneResource::Terminal(runtime) => Some(runtime.detection_schedule.next_due),
+            PaneResource::Editor { .. } => None,
+        }),
+        now,
+    )
+}
+
+/// Selects the nearest deadline without imposing any polling quantum.
+fn minimum_detection_delay(
+    deadlines: impl Iterator<Item = Instant>,
+    now: Instant,
+) -> Option<Duration> {
+    deadlines
+        .map(|deadline| deadline.saturating_duration_since(now))
+        .min()
 }
 
 /// Separates uniquely owned IDs from legacy/corrupt duplicate claims. A
@@ -252,7 +253,8 @@ async fn run_due_panes(
     struct DuePane {
         pane_id: NodeId,
         shell_pid: Option<u32>,
-        screen_text: String,
+        session_id: Option<String>,
+        session_agent_class: Option<ilium_core::AgentClass>,
         is_session_identity_invalidated: bool,
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
@@ -295,7 +297,8 @@ async fn run_due_panes(
                 Some(DuePane {
                     pane_id: *pane_id,
                     shell_pid: runtime.session.process_id(),
-                    screen_text: runtime.session.screen_text(),
+                    session_id: runtime.session_id.clone(),
+                    session_agent_class: runtime.session_agent_class.clone(),
                     is_session_identity_invalidated: runtime.is_session_identity_invalidated,
                     invalidated_session_id: runtime.invalidated_session_id.clone(),
                     session_process_id: runtime.session_process_id,
@@ -310,13 +313,52 @@ async fn run_due_panes(
         return Ok(());
     }
 
-    // Phase 2: pure classification, no locks held. `children_index` is
-    // built once here and shared across every due pane below --
-    // `identify_agent_with_extra`'s process-tree walk then only visits
-    // processes actually reachable as descendants of each pane's own
-    // shell, never the whole system process table (see
-    // `ilium_detect::ProcessChildrenIndex`).
+    // Phase 2a: identify process trees with no lock held. Screen contents
+    // are not captured until identity succeeds, so ordinary shell panes do
+    // not allocate a full vt100 text snapshot on every slow-tier check.
     let children_index = ilium_detect::ProcessChildrenIndex::build(system);
+    struct IdentifiedPane {
+        due: DuePane,
+        identity: Option<ilium_detect::AgentIdentity>,
+    }
+    let identified_panes: Vec<IdentifiedPane> = due_panes
+        .into_iter()
+        .map(|due| {
+            let identity = due.shell_pid.and_then(|shell_pid| {
+                ilium_detect::identify_agent_with_extra(
+                    system,
+                    Pid::from_u32(shell_pid),
+                    &children_index,
+                    &state.custom_signatures,
+                )
+            });
+            IdentifiedPane { due, identity }
+        })
+        .collect();
+
+    let identified_ids: std::collections::HashSet<NodeId> = identified_panes
+        .iter()
+        .filter(|pane| pane.identity.is_some())
+        .map(|pane| pane.due.pane_id)
+        .collect();
+    let screen_texts: std::collections::HashMap<NodeId, String> = {
+        let panes = state.panes.read().await;
+        panes
+            .iter()
+            .filter_map(|(pane_id, resource)| {
+                if !identified_ids.contains(pane_id) {
+                    return None;
+                }
+                match resource {
+                    PaneResource::Terminal(runtime) => {
+                        Some((*pane_id, runtime.session.screen_text()))
+                    }
+                    PaneResource::Editor { .. } => None,
+                }
+            })
+            .collect()
+    };
+
     struct ClassifiedPane {
         pane_id: NodeId,
         status: PaneStatus,
@@ -326,21 +368,33 @@ async fn run_due_panes(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         pending_generated_session_id: Option<String>,
+        needs_session_discovery: bool,
     }
 
-    let classifications: Vec<ClassifiedPane> = due_panes
+    let classifications: Vec<ClassifiedPane> = identified_panes
         .into_iter()
-        .map(|due_pane| {
-            let (status, identity) = classify_pane(
-                system,
-                &children_index,
-                due_pane.shell_pid,
-                &due_pane.screen_text,
-                &state.custom_signatures,
-            );
+        .map(|identified| {
+            let due_pane = identified.due;
+            let identity = identified.identity;
+            let screen_text = screen_texts
+                .get(&due_pane.pane_id)
+                .map(String::as_str)
+                .unwrap_or_default();
+            let status = classify_identity(identity.as_ref(), screen_text);
             let is_fresh_agent_screen = identity.as_ref().is_some_and(|identity| {
-                ilium_detect::is_fresh_agent_screen(&identity.class, &due_pane.screen_text)
+                ilium_detect::is_fresh_agent_screen(&identity.class, screen_text)
             });
+            let has_stable_session_owner = identity.as_ref().is_some_and(|identity| {
+                session_owner_is_stable(
+                    due_pane.session_id.as_deref(),
+                    due_pane.session_agent_class.as_ref(),
+                    due_pane.session_process_id,
+                    due_pane.is_session_identity_invalidated,
+                    identity,
+                    &ambiguous_session_ids,
+                )
+            });
+            let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
                 status,
@@ -350,6 +404,7 @@ async fn run_due_panes(
                 invalidated_session_id: due_pane.invalidated_session_id,
                 session_process_id: due_pane.session_process_id,
                 pending_generated_session_id: due_pane.pending_generated_session_id,
+                needs_session_discovery,
             }
         })
         .collect();
@@ -360,11 +415,9 @@ async fn run_due_panes(
     // contract, so they intentionally receive no session ID.
     let discovery_pids: Vec<Pid> = classifications
         .iter()
-        .filter_map(|pane| {
-            pane.identity
-                .as_ref()
-                .map(|identity| Pid::from_u32(identity.pid))
-        })
+        .filter(|pane| pane.needs_session_discovery)
+        .filter_map(|pane| pane.identity.as_ref())
+        .map(|identity| Pid::from_u32(identity.pid))
         .collect();
     crate::session_id::refresh_for_discovery(system, &discovery_pids);
     // Sequential (not a one-shot `filter_map`/`collect`) so `claimed_session_ids`
@@ -379,6 +432,7 @@ async fn run_due_panes(
         let tree = state.tree.read().await;
         classifications
             .iter()
+            .filter(|pane| pane.needs_session_discovery)
             .filter_map(|pane| {
                 tree.project_path_for(pane.pane_id)
                     .map(|path| (pane.pane_id, path.to_path_buf()))
@@ -386,6 +440,9 @@ async fn run_due_panes(
             .collect()
     };
     for pane in &classifications {
+        if !pane.needs_session_discovery {
+            continue;
+        }
         let Some(identity) = pane.identity.as_ref() else {
             continue;
         };
@@ -458,6 +515,7 @@ async fn run_due_panes(
     let sound_settings = state.sound_settings.read().await.clone();
     let mut pending_notifications = Vec::new();
     let mut pending_sounds = Vec::new();
+    let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
     let mut tree_snapshot_changed = false;
     {
@@ -672,6 +730,10 @@ async fn run_due_panes(
                 ));
             }
 
+            if is_agent_finished_transition(previous_status.as_ref(), &new_status) {
+                completed_pane_ids.push(pane_id);
+            }
+
             if let Some(event) =
                 ilium_sound::event_for_transition(previous_status.as_ref(), &new_status)
             {
@@ -704,6 +766,10 @@ async fn run_due_panes(
         state.request_snapshot_save();
     }
 
+    for pane_id in completed_pane_ids {
+        crate::prompt_queue::deliver_next_after_completion(state, pane_id).await;
+    }
+
     for pending in pending_notifications {
         notifications::send(pending).await;
     }
@@ -712,6 +778,53 @@ async fn run_due_panes(
     }
 
     Ok(())
+}
+
+/// Returns whether existing transcript ownership remains conclusive enough
+/// to avoid repeated command/cwd refreshes and `/proc/<pid>/fd` scans.
+fn session_owner_is_stable(
+    session_id: Option<&str>,
+    session_agent_class: Option<&ilium_core::AgentClass>,
+    session_process_id: Option<u32>,
+    is_invalidated: bool,
+    identity: &ilium_detect::AgentIdentity,
+    ambiguous_session_ids: &std::collections::HashSet<String>,
+) -> bool {
+    session_id.is_some()
+        && session_agent_class == Some(&identity.class)
+        && session_process_id == Some(identity.pid)
+        && !is_invalidated
+        && !session_id.is_some_and(|session_id| ambiguous_session_ids.contains(session_id))
+}
+
+fn is_agent_finished_transition(previous: Option<&PaneStatus>, next: &PaneStatus) -> bool {
+    matches!(
+        (previous, next),
+        (
+            Some(
+                PaneStatus::Agent(_, AgentActivity::Working)
+                    | PaneStatus::AgentWithGoal(_, AgentActivity::Working)
+            ),
+            PaneStatus::Agent(_, AgentActivity::Done)
+                | PaneStatus::AgentWithGoal(_, AgentActivity::Done)
+        )
+    )
+}
+
+#[cfg(test)]
+mod prompt_queue_transition_tests {
+    use super::*;
+    use ilium_core::AgentClass;
+
+    #[test]
+    fn only_working_to_done_opens_the_prompt_queue_gate() {
+        let working = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working);
+        let done = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done);
+        let idle = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
+        assert!(is_agent_finished_transition(Some(&working), &done));
+        assert!(!is_agent_finished_transition(Some(&idle), &done));
+        assert!(!is_agent_finished_transition(Some(&working), &idle));
+    }
 }
 
 fn session_identity_is_stale(
@@ -728,8 +841,8 @@ fn session_identity_is_stale(
         || session_is_ambiguously_claimed
 }
 
-/// Pulls `schedule.next_due` forward to `now` so the next detection tick
-/// (at most `BASE_TICK_INTERVAL` away) picks this pane up immediately,
+/// Pulls `schedule.next_due` forward to `now` so the deadline-driven loop
+/// picks this pane up immediately,
 /// unless a previous force-check request already did so within
 /// `FORCE_CHECK_DEBOUNCE` -- in which case this is a no-op, leaving
 /// whatever `next_due`/`last_forced` were already in place. Called from
@@ -737,61 +850,38 @@ fn session_identity_is_stale(
 /// `handle_set_pane_focus` (a pane gaining or losing client focus), the
 /// two triggers this crate treats as "the user just did something that
 /// means this pane's status may be stale right now."
-pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) {
+pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) -> bool {
     if schedule
         .last_forced
         .is_some_and(|since| now.duration_since(since) < FORCE_CHECK_DEBOUNCE)
     {
-        return;
+        return false;
     }
     schedule.last_forced = Some(now);
     schedule.next_due = now;
+    true
 }
 
-/// Runs the identity + activity classification for one terminal pane, from
-/// already-snapshotted inputs (`shell_pid`, `screen_text`) rather than a
-/// live `TerminalPaneRuntime` reference -- so this can run entirely outside
-/// the `tree`/`panes` locks (see `run_due_panes`'s phase breakdown).
-/// `children_index` is built once per tick and shared across every due
-/// pane's call (see `ilium_detect::ProcessChildrenIndex`).
-/// `extra_signatures` is the session's user-configured
-/// `[[detection.custom_signatures]]` list (`ServerState::custom_signatures`),
-/// checked alongside `ilium-detect`'s built-in registry via
-/// `identify_agent_with_extra`.
-fn classify_pane(
-    system: &System,
-    children_index: &ilium_detect::ProcessChildrenIndex,
-    shell_pid: Option<u32>,
+/// Combines an already-resolved process identity with the screen snapshot
+/// captured only for that identified agent. Process-tree traversal remains
+/// separate so plain shells never pay for a vt100 text allocation.
+fn classify_identity(
+    identity: Option<&ilium_detect::AgentIdentity>,
     screen_text: &str,
-    extra_signatures: &[ilium_detect::AgentSignature],
-) -> (PaneStatus, Option<ilium_detect::AgentIdentity>) {
-    let Some(shell_pid) = shell_pid else {
-        // The platform never reported a pid for this pane's shell (should
-        // not happen on the platforms ilium targets, but `process_id`'s
-        // own signature allows it) -- nothing to walk a process tree from,
-        // so this pane can only ever be reported as a plain shell.
-        return (PaneStatus::PlainShell, None);
-    };
-
-    match ilium_detect::identify_agent_with_extra(
-        system,
-        Pid::from_u32(shell_pid),
-        children_index,
-        extra_signatures,
-    ) {
+) -> PaneStatus {
+    match identity {
         Some(identity) => {
             let activity = ilium_detect::classify_activity_for_agent(&identity.class, screen_text);
             // Goal detection is independent from activity. A provider can
             // be working while its persistent goal remains active, so
             // preserve both signals in the status sent to the sidebar.
-            let status = if ilium_detect::has_visible_goal_for_agent(&identity.class, screen_text) {
+            if ilium_detect::has_visible_goal_for_agent(&identity.class, screen_text) {
                 PaneStatus::AgentWithGoal(identity.class.clone(), activity)
             } else {
                 PaneStatus::Agent(identity.class.clone(), activity)
-            };
-            (status, Some(identity))
+            }
         }
-        None => (PaneStatus::PlainShell, None),
+        None => PaneStatus::PlainShell,
     }
 }
 
@@ -854,7 +944,7 @@ fn promote_to_done(
 ///
 /// `client_focused` overrides all of the above: a pane the attached
 /// client currently has open (`ilium_ipc::ClientRequest::SetPaneFocus`)
-/// always polls at `BASE_TICK_INTERVAL`, the loop's own fastest possible
+/// always polls at `FOCUSED_POLL_INTERVAL`, the loop's own fastest tier
 /// cadence -- the pane the user is actually looking at right now should
 /// never lag behind the coarser working/idle tiers, regardless of what
 /// its last classification was.
@@ -870,7 +960,7 @@ fn interval_for(
     detection_config: &crate::config::DetectionConfig,
 ) -> Duration {
     if client_focused {
-        return BASE_TICK_INTERVAL;
+        return FOCUSED_POLL_INTERVAL;
     }
     match status {
         PaneStatus::Agent(
@@ -900,6 +990,72 @@ mod tests {
             working_poll_interval: Duration::from_secs(5),
             idle_poll_interval: Duration::from_secs(45),
         }
+    }
+
+    #[test]
+    fn nearest_detection_deadline_is_exact_and_overdue_is_immediate() {
+        let now = Instant::now();
+        assert_eq!(
+            minimum_detection_delay(
+                [
+                    now + Duration::from_millis(875),
+                    now + Duration::from_millis(23),
+                    now + Duration::from_secs(4),
+                ]
+                .into_iter(),
+                now,
+            ),
+            Some(Duration::from_millis(23))
+        );
+        assert_eq!(
+            minimum_detection_delay([now - Duration::from_millis(1)].into_iter(), now),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(minimum_detection_delay(std::iter::empty(), now), None);
+    }
+
+    #[test]
+    fn verified_same_process_session_skips_rediscovery_until_ambiguous() {
+        let identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 42,
+        };
+        let mut ambiguous = std::collections::HashSet::new();
+        assert!(session_owner_is_stable(
+            Some("session-a"),
+            Some(&AgentClass::Codex),
+            Some(42),
+            false,
+            &identity,
+            &ambiguous,
+        ));
+
+        ambiguous.insert("session-a".to_string());
+        assert!(!session_owner_is_stable(
+            Some("session-a"),
+            Some(&AgentClass::Codex),
+            Some(42),
+            false,
+            &identity,
+            &ambiguous,
+        ));
+        ambiguous.clear();
+        assert!(!session_owner_is_stable(
+            Some("session-a"),
+            Some(&AgentClass::Codex),
+            Some(99),
+            false,
+            &identity,
+            &ambiguous,
+        ));
+        assert!(!session_owner_is_stable(
+            Some("session-a"),
+            Some(&AgentClass::Codex),
+            Some(42),
+            true,
+            &identity,
+            &ambiguous,
+        ));
     }
 
     /// Regression test: `WaitingApproval` must poll on the fast tier, same
@@ -954,17 +1110,17 @@ mod tests {
         );
     }
 
-    /// A client-focused pane always polls at `BASE_TICK_INTERVAL`,
+    /// A client-focused pane always polls at `FOCUSED_POLL_INTERVAL`,
     /// overriding even the slow tier -- the pane the user is actually
     /// looking at right now must never lag behind coarser tiers.
     #[test]
-    fn focused_pane_polls_on_the_base_tick_regardless_of_status() {
+    fn focused_pane_polls_on_the_focused_tier_regardless_of_status() {
         let config = config();
         let idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
-        assert_eq!(interval_for(&idle, true, &config), BASE_TICK_INTERVAL);
+        assert_eq!(interval_for(&idle, true, &config), FOCUSED_POLL_INTERVAL);
         assert_eq!(
             interval_for(&PaneStatus::PlainShell, true, &config),
-            BASE_TICK_INTERVAL
+            FOCUSED_POLL_INTERVAL
         );
     }
 
@@ -981,12 +1137,12 @@ mod tests {
             last_forced: None,
         };
         let t0 = Instant::now();
-        force_check(&mut schedule, t0);
+        assert!(force_check(&mut schedule, t0));
         assert_eq!(schedule.next_due, t0);
 
         let t1 = t0 + Duration::from_secs(1);
         schedule.next_due = t0 + Duration::from_secs(30);
-        force_check(&mut schedule, t1);
+        assert!(!force_check(&mut schedule, t1));
         assert_eq!(
             schedule.next_due,
             t0 + Duration::from_secs(30),
@@ -994,7 +1150,7 @@ mod tests {
         );
 
         let t2 = t0 + FORCE_CHECK_DEBOUNCE;
-        force_check(&mut schedule, t2);
+        assert!(force_check(&mut schedule, t2));
         assert_eq!(
             schedule.next_due, t2,
             "a force after the debounce window must take effect"

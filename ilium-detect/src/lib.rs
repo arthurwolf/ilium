@@ -23,6 +23,19 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
+/// Ensures process detection never consumes the host's file-descriptor budget.
+///
+/// `sysinfo` otherwise keeps one `/proc/<pid>/stat` descriptor open for up to
+/// half the process limit. A long-lived ilium server only refreshes processes
+/// occasionally, so retaining thousands of descriptors between ticks costs
+/// substantially more than reopening the handful of files it needs.
+pub fn configure_process_refresh() {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = sysinfo::set_open_files_limit(0);
+    }
+}
+
 /// One entry in the agent-identity registry: a lowercase substring to
 /// match against a process name, and how to build the resulting
 /// [`AgentClass`] from the matched (lowercased) name.
@@ -400,6 +413,7 @@ fn is_numbered_option_line(line: &str) -> bool {
 /// those fields, scoped to just the one matched pid) is app-level
 /// orchestration that lives above this crate.
 pub fn refresh(system: &mut System) {
+    configure_process_refresh();
     system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
 }
 

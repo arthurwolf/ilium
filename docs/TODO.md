@@ -1,26 +1,43 @@
+# Full OpenAI Realtime voice control
+
+- [x] Add a provider-neutral, owned voice runtime with OpenAI Realtime WebSocket transport, microphone capture, speaker playback, interruption, and clean shutdown.
+- [ ] Add a typed semantic control plane, redacted UI snapshots, complete tool registry, target resolution, deterministic confirmation policy, deduplication, and structured results for every ilium surface.
+- [ ] Integrate voice events into the client event loop without making `App` async or coupling the provider/audio layers to ratatui, IPC, or ilium domain types.
+- [ ] Add a live-persisted Voice control settings tab with masked OpenAI key editing, model/voice/reasoning/VAD/audio controls, and multiline custom prompt text.
+- [ ] Add the bottom-right voice switch beyond the purple status bar, with a large red enabled/recording dot and black disabled dot, plus keyboard and mouse interaction.
+- [ ] Cover the voice protocol, audio conversion, tool schemas, command execution, security boundaries, settings persistence, bottom control, and full UI capability surface with focused and PTY tests.
+- [ ] Run workspace tests, strict Clippy, formatting, release build/install, and verify the installed TUI plus a real OpenAI Realtime voice session.
+
 # Performance and interaction responsiveness (20 improvements)
 
-- [x] Replace the unconditional 50 ms idle client wakeup with event-driven, deadline-aware maintenance scheduling.
-- [x] Wake exactly at the workspace-search debounce deadline instead of polling while the user waits.
-- [x] Wake exactly at pending editor-autosave deadlines instead of scanning all editors twenty times per second.
-- [x] Preserve 16 ms spatial animation frames only while a spatial animation is actually active.
-- [x] Preserve 50 ms semantic animation frames only while an indicator, countdown, or transition needs them.
-- [x] Defer costly rendered-Markdown parse/raster work until sidebar-width animation settles.
-- [x] Fast-path ordinary terminal output around the OSC-8 hyperlink parser.
-- [x] Merge immediately queued PTY output chunks before server broadcast/frame encoding.
-- [x] Cap merged PTY frames so one noisy pane cannot monopolize client parsing.
-- [x] Bound each client server-event batch to protect keyboard and pointer turns under output floods.
-- [x] Coalesce consecutive screen updates in the client before parsing them.
-- [x] Coalesce pointer-motion input to the latest position while preserving clicks, drags, and scrolls.
-- [x] Skip redundant PTY resizes during animated layout changes.
-- [x] Avoid terminal redraws when no visible state changed.
-- [x] Bound client input, client event, server reply, and session broadcast queues to prevent latency-growing backlogs.
-- [x] Keep detector process refresh off the async runtime and skip it when no pane is due.
-- [x] Perform detection classification outside tree/pane write locks and share one child-process index per tick.
-- [x] Use adaptive detection cadence with focused panes prioritized and forced checks debounced.
-- [x] Keep workspace search and title/inference work in owned background workers, rejecting stale results.
-- [x] Cache large icon-catalogue filtering and render only its viewport rows.
-- [x] Run focused performance regressions, full workspace checks, release installation, and an installed-binary PTY responsiveness proof.
+- [ ] Disable sysinfo's machine-wide `/proc/*/stat` descriptor cache before every server detection lifecycle.
+- [ ] Right-size each detached server's Tokio worker and blocking pools instead of multiplying one thread per CPU by every session.
+- [ ] Replace the detection loop's one-second polling tick with an exact nearest-pane deadline.
+- [ ] Wake detection immediately when focus, Enter, or a new pane forces an earlier check.
+- [ ] Capture VT screen text only for process trees that actually contain a detected agent.
+- [ ] Skip transcript/session rediscovery while the same verified agent process still owns the pane.
+- [ ] Refresh command and cwd process fields only for panes that genuinely need session discovery.
+- [ ] Resolve project paths only for those discovery candidates instead of every classified pane.
+- [ ] Short-circuit `/proc/<pid>/fd` transcript discovery as soon as ownership becomes ambiguous.
+- [ ] Fast-path already-equal process/project paths before filesystem canonicalization.
+- [ ] Replace lossy `try_send` client requests with a bounded, lossless staging queue.
+- [ ] Coalesce superseded queued PTY resize requests per pane.
+- [ ] Coalesce superseded queued focus-state requests per pane.
+- [ ] Cap client-side merged terminal bytes per event-loop turn as well as event count.
+- [ ] Rate-limit terminal-output redraw floods while keeping input-driven redraws immediate.
+- [ ] Flatten the sidebar tree once per ordinary render and reuse the result for motion plus scrollbar geometry.
+- [ ] Reuse one row-motion cell scratch allocation across every animated sidebar row.
+- [ ] Make bounded OSC-8 hyperlink eviction O(1) with a deque.
+- [ ] Schedule pending-input countdown redraws at their real 220 ms frame boundary instead of the generic 20 Hz animation tier.
+- [ ] Lower CPU priority for workspace-search and semantic-icon background workers so they cannot compete with input/render work.
+- [ ] Run focused regressions, workspace gates, release-install, descriptor/CPU measurements, and installed PTY responsiveness proof.
+
+# CPU semantic icon search
+
+- [x] Replace icon-name/category substring filtering with direct local dense-vector retrieval.
+- [x] Own one CPU-only MiniLM ONNX model and one normalized vector per catalogue icon in a background worker, persisting the completed vector matrix for future launches.
+- [x] Keep official UTF-8 semantic result chapters ahead of Nerd Font chapters, reject stale queries, and expose loading/failure state in the picker.
+- [ ] Run focused tests, workspace gates, release-install, and prove semantic retrieval through the installed TUI.
 
 # Settings toolbar click lifecycle
 

@@ -31,6 +31,7 @@
 
 pub mod agent_from_line;
 pub mod app;
+pub mod background_priority;
 pub mod board;
 pub mod board_ui;
 pub mod config;
@@ -42,6 +43,7 @@ pub mod editor_toolbar;
 pub mod error;
 pub mod explorer_overlay;
 pub mod help;
+pub mod icon_search_workers;
 pub mod icon_settings;
 pub mod inference_test;
 pub mod keymap;
@@ -53,9 +55,11 @@ pub mod modal;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+pub mod outbound_requests;
 pub mod paths;
 pub mod project_config;
 pub mod project_naming;
+pub mod prompt_queue;
 pub mod render_cache;
 pub mod restructure;
 pub mod scheduled_input;
@@ -82,7 +86,7 @@ pub mod ui;
 pub mod workspace_file;
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossterm::event::Event;
 use ratatui::backend::CrosstermBackend;
@@ -95,6 +99,7 @@ pub use crate::app::ClientExitReason;
 use crate::app::App;
 use crate::connection::Connection;
 use crate::error::ClientError;
+use crate::icon_search_workers::IconSearchWorkers;
 use crate::naming_workers::NamingWorkers;
 use crate::search_workers::SearchWorkers;
 use crate::terminal_guard::TerminalGuard;
@@ -124,15 +129,41 @@ const INPUT_CHANNEL_CAPACITY: usize = 256;
 /// bounded at all purely for consistency with every other channel in this
 /// crate, not because it could plausibly fill up.
 const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
+/// Semantic icon queries are revisioned, so a tiny bounded channel is enough:
+/// the worker drains superseded typing before it runs the next CPU inference.
+const ICON_SEARCH_EVENTS_CHANNEL_CAPACITY: usize = 4;
 /// Upper bound for server events applied in one select turn. Terminal output
 /// can arrive continuously; yielding after a bounded batch gives pointer and
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
+/// Byte ceiling for a same-pane raw-output run merged in one client turn.
+/// Event count alone is insufficient because a server frame can itself carry
+/// a large burst.
+const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// Input is intentionally favoured over render-cache updates, but it remains
 /// bounded so a key-repeat or pointer flood cannot starve incoming terminal
 /// frames forever.
 const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
+/// Terminal output is visual state, not input acknowledgement. Capping its
+/// redraw cadence at 60 Hz leaves CPU for parsing and input while every
+/// keyboard/pointer-driven change still bypasses this limit immediately.
+const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+
+/// Remaining delay before output-only damage may trigger another draw.
+fn output_redraw_delay(now: Instant, last_draw_at: Instant) -> Duration {
+    OUTPUT_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw_at))
+}
+
+/// Input and semantic state changes bypass output-only frame limiting.
+fn output_redraw_is_due(needs_immediate_redraw: bool, now: Instant, last_draw_at: Instant) -> bool {
+    needs_immediate_redraw || output_redraw_delay(now, last_draw_at).is_zero()
+}
+
+/// Event count and byte count are independent fairness limits.
+fn screen_updates_fit(current_bytes: usize, incoming_bytes: usize) -> bool {
+    current_bytes.saturating_add(incoming_bytes) <= MAX_MERGED_SCREEN_BYTES_PER_BATCH
+}
 
 /// Runs ilium-client until the user quits, requests a client-only restart, or
 /// loses the server connection. The typed result lets the CLI wrapper re-exec
@@ -205,6 +236,7 @@ async fn run_inner(
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.apply_ui_settings(config.ui);
     app.keyboard_settings = config.keyboard;
+    app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
     app.apply_sound_settings(config.sound);
     app.apply_inference_settings(config.inference);
@@ -223,6 +255,9 @@ async fn run_inner(
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
     let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
     let mut search_workers = SearchWorkers::new(search_events_tx);
+    let (icon_search_events_tx, mut icon_search_events_rx) =
+        mpsc::channel(ICON_SEARCH_EVENTS_CHANNEL_CAPACITY);
+    let mut icon_search_workers = IconSearchWorkers::new(icon_search_events_tx);
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
     // equivalent), rather than per pane -- `None` on a platform/environment
     // where it can't be resolved simply disables session-title inference
@@ -251,9 +286,15 @@ async fn run_inner(
     // happens. See the module docs on why an unconditional `terminal.draw`
     // every iteration was wasted work under load.
     let mut needs_redraw = true;
+    let mut needs_immediate_redraw = true;
+    let mut last_draw_at = Instant::now();
 
-    while app.exit_reason.is_none() {
-        let tick_delay = app.next_maintenance_delay(Instant::now());
+    'event_loop: while app.exit_reason.is_none() {
+        let now = Instant::now();
+        let mut tick_delay = app.next_maintenance_delay(now);
+        if needs_redraw && !needs_immediate_redraw {
+            tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
+        }
 
         tokio::select! {
             input_event = input_rx.recv() => {
@@ -263,10 +304,12 @@ async fn run_inner(
                             &mut app,
                             &mut input_rx,
                             &mut naming_workers,
+                            &mut icon_search_workers,
                             home_dir.as_deref(),
                             event,
                         );
                         needs_redraw = true;
+                        needs_immediate_redraw = true;
                     }
                     // The input-reading thread ended (a crossterm read
                     // error -- see `spawn_input_forwarder`); keyboard and
@@ -280,13 +323,15 @@ async fn run_inner(
             server_event = connection.events.recv() => {
                 match server_event {
                     Some(event) => {
-                        apply_server_events(
+                        if apply_server_events(
                             &mut app,
                             &mut connection.events,
                             event,
                             &mut naming_workers,
                             home_dir.as_deref(),
-                        );
+                        ) {
+                            needs_immediate_redraw = true;
+                        }
                         needs_redraw = true;
                     }
                     // The reader task ended -- the server is gone or the
@@ -297,11 +342,18 @@ async fn run_inner(
             Some(naming_event) = naming_events_rx.recv() => {
                 crate::tick::apply_naming_worker_event(&mut app, &mut naming_workers, naming_event);
                 needs_redraw = true;
+                needs_immediate_redraw = true;
             }
             Some(search_event) = search_events_rx.recv() => {
                 search_workers.finish();
                 app.apply_workspace_search_result(search_event);
                 needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
+            Some(icon_search_event) = icon_search_events_rx.recv() => {
+                app.apply_icon_semantic_search_event(icon_search_event);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
             }
             () = tokio::time::sleep(tick_delay) => {
                 if crate::tick::on_tick(&mut app, Instant::now(), &mut search_workers) {
@@ -310,28 +362,24 @@ async fn run_inner(
             }
         }
 
-        for request in app.take_outbound_requests() {
-            // `try_send` rather than an awaited `send`: this loop is the
-            // sole producer for `connection.requests`, so blocking here
-            // would stall every other branch above (input, server events,
-            // ticks) on the writer task keeping up -- exactly the
-            // responsiveness regression bounding this channel must not
-            // introduce. A full buffer (the writer task gone, or truly
-            // saturated) drops the request; the next loop iteration's
-            // `connection.events.recv()` returning `None` is what actually
-            // ends a dead session, same as before this channel was bounded.
-            if let Err(error) = connection.requests.try_send(request) {
-                tracing::warn!(
-                    "dropping outbound request, connection channel full or closed: {error}"
-                );
+        let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
+        for request in outbound_requests {
+            // The writer queue is deliberately bounded. Awaiting its capacity
+            // applies lossless backpressure to crossterm's already-bounded
+            // input channel instead of silently dropping a key or command.
+            if connection.requests.send(request).await.is_err() {
+                break 'event_loop;
             }
         }
 
-        if needs_redraw {
+        let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
+        if needs_redraw && can_draw {
             terminal
                 .draw(|frame| crate::ui::draw(frame, &mut app))
                 .map_err(ClientError::TerminalSetup)?;
             needs_redraw = false;
+            needs_immediate_redraw = false;
+            last_draw_at = Instant::now();
         }
     }
 
@@ -364,11 +412,12 @@ fn apply_server_events(
     first: ilium_ipc::ServerEvent,
     naming_workers: &mut NamingWorkers,
     home_dir: Option<&std::path::Path>,
-) {
+) -> bool {
     use ilium_ipc::ServerEvent;
 
     let mut pending_screen_update: Option<(ilium_core::NodeId, u64, Vec<u8>)> = None;
     let mut next = Some(first);
+    let mut observed_non_screen_event = false;
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
         let event = match next.take() {
             Some(event) => event,
@@ -385,7 +434,8 @@ fn apply_server_events(
             } => match &mut pending_screen_update {
                 Some((pending_pane_id, pending_sequence, pending_bytes))
                     if *pending_pane_id == incoming_pane_id
-                        && incoming_sequence == pending_sequence.saturating_add(1) =>
+                        && incoming_sequence == pending_sequence.saturating_add(1)
+                        && screen_updates_fit(pending_bytes.len(), incoming_bytes.len()) =>
                 {
                     pending_bytes.append(&mut incoming_bytes);
                     *pending_sequence = incoming_sequence;
@@ -397,6 +447,7 @@ fn apply_server_events(
                 }
             },
             other => {
+                observed_non_screen_event = true;
                 flush_pending_screen_update(app, &mut pending_screen_update);
                 let applied = crate::render_cache::apply(app, other);
                 maybe_start_title_inference(app, naming_workers, home_dir, &applied);
@@ -404,6 +455,7 @@ fn apply_server_events(
         }
     }
     flush_pending_screen_update(app, &mut pending_screen_update);
+    observed_non_screen_event
 }
 
 /// Applies one received input event and any immediately queued successors.
@@ -414,6 +466,7 @@ fn dispatch_ready_input_events(
     app: &mut App,
     input_rx: &mut mpsc::Receiver<Event>,
     naming_workers: &mut NamingWorkers,
+    icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
     first: Event,
 ) {
@@ -456,7 +509,7 @@ fn dispatch_ready_input_events(
             event
         };
 
-        dispatch_input_event(app, naming_workers, home_dir, event);
+        dispatch_input_event(app, naming_workers, icon_search_workers, home_dir, event);
 
         if next.is_none() {
             next = input_rx.try_recv().ok();
@@ -529,6 +582,7 @@ fn flush_pending_screen_update(
 fn dispatch_input_event(
     app: &mut App,
     naming_workers: &mut NamingWorkers,
+    icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
     event: Event,
 ) {
@@ -537,6 +591,9 @@ fn dispatch_input_event(
         return;
     }
     app.handle_event(event);
+    if let Some(request) = app.take_pending_icon_semantic_search() {
+        icon_search_workers.request(request);
+    }
     naming_workers.set_inference_settings(app.inference_settings.clone());
     if app.take_pending_inference_test() {
         naming_workers.spawn_inference_test_worker();
@@ -631,4 +688,33 @@ fn spawn_input_forwarder() -> mpsc::Receiver<Event> {
         }
     });
     rx
+}
+
+#[cfg(test)]
+mod responsiveness_tests {
+    use super::*;
+
+    #[test]
+    fn merged_screen_updates_respect_the_byte_ceiling() {
+        assert!(screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH - 1, 1));
+        assert!(!screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH, 1));
+        assert!(!screen_updates_fit(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn output_redraws_are_limited_but_input_redraws_are_immediate() {
+        let last_draw_at = Instant::now();
+        let early = last_draw_at + Duration::from_millis(5);
+        assert_eq!(
+            output_redraw_delay(early, last_draw_at),
+            Duration::from_millis(11)
+        );
+        assert!(!output_redraw_is_due(false, early, last_draw_at));
+        assert!(output_redraw_is_due(true, early, last_draw_at));
+        assert!(output_redraw_is_due(
+            false,
+            last_draw_at + OUTPUT_FRAME_INTERVAL,
+            last_draw_at,
+        ));
+    }
 }

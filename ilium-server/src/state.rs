@@ -81,6 +81,9 @@ pub struct ServerState {
     /// `panes`; no other workflow acquires it, so a replaced timer cannot fire
     /// after its replacement was accepted.
     pub scheduled_input_transaction: Mutex<()>,
+    /// Serializes enqueue/clear mutations with completion-driven delivery so
+    /// a successful PTY write advances exactly the FIFO head it observed.
+    pub prompt_queue_transaction: Mutex<()>,
     /// `true` when the on-disk crash-recovery snapshot no longer matches
     /// `tree`/`panes` and needs rewriting. Request handlers
     /// (`crate::ipc::handlers`) set this via `request_snapshot_save`
@@ -100,6 +103,9 @@ pub struct ServerState {
     /// One coalesced permit is sufficient because the executor always scans
     /// the authoritative tree again before deciding what to wait for.
     pub scheduled_input_changed: Notify,
+    /// Wakes the deadline-driven detection loop when a new pane or a user
+    /// interaction pulls a pane's next check earlier than its current sleep.
+    pub detection_schedule_changed: Notify,
     /// Broadcast to every currently-attached client. Connection tasks each
     /// hold their own `subscribe()`d receiver; this crate never reads from
     /// this sender's own channel, only sends into it.
@@ -142,9 +148,11 @@ impl ServerState {
             restructure_undo: Mutex::new(HashMap::new()),
             snapshot_write_lock: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
+            prompt_queue_transaction: Mutex::new(()),
             snapshot_dirty: AtomicBool::new(false),
             snapshot_requested: Notify::new(),
             scheduled_input_changed: Notify::new(),
+            detection_schedule_changed: Notify::new(),
             events,
             shutdown: Notify::new(),
             connection_tasks: std::sync::Mutex::new(Vec::new()),

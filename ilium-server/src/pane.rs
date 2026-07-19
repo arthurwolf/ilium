@@ -206,7 +206,7 @@ pub struct DetectionSchedule {
     /// Whether the attached client currently has this pane as its active
     /// view (`ilium_ipc::ClientRequest::SetPaneFocus`). While true,
     /// `crate::detection::interval_for` pins this pane to the loop's own
-    /// `BASE_TICK_INTERVAL` regardless of its classified status, since a
+    /// the focused fast tier regardless of its classified status, since a
     /// pane the user is actually looking at should never lag behind the
     /// coarser working/idle tiers.
     pub client_focused: bool,

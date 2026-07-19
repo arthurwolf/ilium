@@ -70,6 +70,7 @@ impl SearchWorkers {
         let handle = thread::Builder::new()
             .name("ilium-workspace-search".to_string())
             .spawn(move || {
+                crate::background_priority::lower_current_thread();
                 let results = search_ui::search_workspace(&request, || {
                     worker_cancellation.load(Ordering::Relaxed)
                 });
