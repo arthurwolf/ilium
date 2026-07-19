@@ -4,14 +4,14 @@
 //! only kind of write they ever get (everything else flows the other way,
 //! as a `ClientRequest`).
 
-use ilium_core::{AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus};
-use ilium_ipc::ServerEvent;
+use ilium_core::{NodeId, NodeKind, PaneContentKind, PaneStatus};
+use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 
 use crate::app::{App, PaneRuntime};
 use crate::board::BoardPane;
 use crate::editor_pane::EditorPane;
 use crate::terminal_view::TerminalView;
-use crate::title_inference::AppliedEvent;
+use crate::trigger_settings::{event_for_sound, TriggerEvent, TriggerOccurrence};
 
 /// How a new authoritative tree snapshot affects the current sidebar
 /// selection. Keeping the removed-without-successor state explicit ensures a
@@ -23,17 +23,17 @@ enum SelectionReconciliation {
 
 /// Applies one `ServerEvent` to `app`. Called from the connection task's
 /// read loop for every frame it decodes. Returns what this event means for
-/// `crate::title_inference`'s triggers -- `AppliedEvent::Other` for
-/// every event/transition that isn't one of them.
-pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
+/// the automatic-work trigger occurrence represented by this event, when
+/// there is one. State is always applied before the occurrence is returned.
+pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
         ServerEvent::TreeSnapshot(tree) => {
             apply_tree_snapshot(app, tree);
-            AppliedEvent::Other
+            None
         }
         ServerEvent::SessionRecoveryAvailable { pane_count } => {
             app.mode = crate::app::Mode::ConfirmSessionRecovery { pane_count };
-            AppliedEvent::Other
+            None
         }
         ServerEvent::ScreenUpdate {
             pane_id,
@@ -43,7 +43,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
             if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
                 view.apply_live_output(sequence, &bytes);
             }
-            AppliedEvent::Other
+            None
         }
         ServerEvent::TerminalReplay {
             pane_id,
@@ -54,7 +54,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
             if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
                 view.apply_replay(&bytes, through_sequence, is_complete);
             }
-            AppliedEvent::Other
+            None
         }
         ServerEvent::PaneStatusChanged { pane_id, status } => {
             // Read before `status` moves into `set_pane_status` below. The
@@ -69,11 +69,6 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
                 NodeKind::Pane { status, .. } => Some(status.clone()),
                 NodeKind::Container(_) | NodeKind::Folder { .. } => None,
             });
-            let became_done = matches!(
-                status,
-                PaneStatus::Agent(_, AgentActivity::Done)
-                    | PaneStatus::AgentWithGoal(_, AgentActivity::Done)
-            ) && previous_status.as_ref() != Some(&status);
             let became_agent = matches!(
                 status,
                 PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
@@ -93,31 +88,49 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
                     app.bump_tree_version();
-                    if became_done {
-                        AppliedEvent::PaneBecameDone { pane_id }
-                    } else if became_agent {
-                        AppliedEvent::PaneBecameAgent { pane_id }
-                    } else {
-                        AppliedEvent::Other
-                    }
+                    let lifecycle_event = app
+                        .tree
+                        .get(pane_id)
+                        .and_then(|node| match &node.kind {
+                            NodeKind::Pane { status, .. } => {
+                                ilium_sound::event_for_transition(previous_status.as_ref(), status)
+                            }
+                            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
+                        })
+                        .map(event_for_sound);
+                    lifecycle_event
+                        .or_else(|| {
+                            (became_agent && app.agent_session_ids.contains_key(&pane_id))
+                                .then_some(TriggerEvent::AgentSessionReady)
+                        })
+                        .map(|event| TriggerOccurrence::for_pane(event, pane_id))
                 }
                 Err(error) => {
                     tracing::warn!("dropping PaneStatusChanged for pane {pane_id:?}: {error}");
-                    AppliedEvent::Other
+                    None
                 }
             }
         }
         ServerEvent::Error { message } => {
             app.status_message = Some(format!("Server error: {message}"));
-            AppliedEvent::Other
+            None
         }
         ServerEvent::PaneSessionIdResolved {
             pane_id,
             session_id,
+            process_id,
             title_generation,
         } => {
             app.agent_title_generations
                 .insert(pane_id, title_generation);
+            match process_id {
+                Some(process_id) => {
+                    app.agent_process_ids.insert(pane_id, process_id);
+                }
+                None => {
+                    app.agent_process_ids.remove(&pane_id);
+                }
+            }
             let previous_session_id = app.agent_session_ids.insert(pane_id, session_id.clone());
             let changed = previous_session_id.as_ref() != Some(&session_id);
             if changed {
@@ -144,7 +157,20 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
                         .remove(&(pane_id, previous_session_id));
                 }
             }
-            AppliedEvent::SessionIdResolved { pane_id }
+            (changed
+                && app.tree.get(pane_id).is_some_and(|node| {
+                    matches!(
+                        node.kind,
+                        NodeKind::Pane {
+                            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                            ..
+                        }
+                    )
+                }))
+            .then_some(TriggerOccurrence::for_pane(
+                TriggerEvent::AgentSessionReady,
+                pane_id,
+            ))
         }
         ServerEvent::PaneSessionIdCleared {
             pane_id,
@@ -152,13 +178,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
         } => {
             app.agent_title_generations
                 .insert(pane_id, title_generation);
+            app.agent_process_ids.remove(&pane_id);
             if let Some(previous_session_id) = app.agent_session_ids.remove(&pane_id) {
                 app.title_inference_attempts
                     .remove(&(pane_id, previous_session_id));
             }
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
-            AppliedEvent::Other
+            None
         }
         ServerEvent::PaneSessionTitleCleared {
             pane_id,
@@ -172,16 +199,51 @@ pub fn apply(app: &mut App, event: ServerEvent) -> AppliedEvent {
             }
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
-            AppliedEvent::Other
+            None
         }
         ServerEvent::PaneEditorPathResolved { pane_id, path } => {
             let Some(path) = path else {
                 app.status_message = Some("Restored editor has no file path".to_string());
-                return AppliedEvent::Other;
+                return None;
             };
             app.restored_editor_paths.insert(pane_id, path);
             load_restored_editor(app, pane_id);
-            AppliedEvent::Other
+            None
+        }
+        ServerEvent::InitialStateSyncComplete => {
+            Some(TriggerOccurrence::global(TriggerEvent::StartupComplete))
+        }
+        ServerEvent::PanePromptSubmitted { pane_id, source } => {
+            let is_agent = source == PromptSubmissionSource::InitialAgentPrompt
+                || app.tree.get(pane_id).is_some_and(|node| {
+                    matches!(
+                        node.kind,
+                        NodeKind::Pane {
+                            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                            ..
+                        }
+                    )
+                });
+            if is_agent {
+                Some(TriggerOccurrence::for_pane(
+                    TriggerEvent::AgentPromptSubmitted,
+                    pane_id,
+                ))
+            } else if crate::terminal_title_inference::terminal_ready_for_retitle(app, pane_id) {
+                let count = app.enter_press_counts.entry(pane_id).or_insert(0);
+                *count += 1;
+                if *count >= crate::terminal_title_inference::RETITLE_ENTER_INTERVAL {
+                    *count = 0;
+                    Some(TriggerOccurrence::for_pane(
+                        TriggerEvent::TerminalActivityCheckpoint,
+                        pane_id,
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         }
     }
 }
@@ -226,6 +288,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     // closed pane's cached title-inference/session-id state is dropped in
     // the same place its runtime is.
     app.agent_session_ids
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.agent_process_ids
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.restored_editor_paths
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
@@ -410,7 +474,7 @@ fn load_restored_editor(app: &mut App, pane_id: NodeId) {
 
 #[cfg(test)]
 mod tests {
-    use ilium_core::{AgentClass, PaneContentKind, ROOT_ID};
+    use ilium_core::{AgentActivity, AgentClass, PaneContentKind, ROOT_ID};
     use ratatui::layout::{Position, Rect};
 
     use super::*;
@@ -429,7 +493,6 @@ mod tests {
             .unwrap();
 
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
-
         assert!(matches!(
             app.panes.get(&pane_id),
             Some(PaneRuntime::Terminal(_))
@@ -689,6 +752,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                process_id: Some(12345),
                 title_generation: 0,
             },
         );
@@ -702,6 +766,7 @@ mod tests {
         app.restored_editor_paths
             .insert(pane_id, std::path::PathBuf::from("/tmp/does-not-matter.md"));
         assert!(app.agent_session_ids.contains_key(&pane_id));
+        assert_eq!(app.agent_process_ids.get(&pane_id), Some(&12345));
         assert!(app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));
@@ -715,6 +780,7 @@ mod tests {
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
 
         assert!(!app.agent_session_ids.contains_key(&pane_id));
+        assert!(!app.agent_process_ids.contains_key(&pane_id));
         assert!(!app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));
@@ -747,6 +813,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                process_id: Some(12345),
                 title_generation: 0,
             },
         );
@@ -758,6 +825,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-2".to_string(),
+                process_id: Some(23456),
                 title_generation: 1,
             },
         );
@@ -765,6 +833,59 @@ mod tests {
         assert!(!app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));
+    }
+
+    #[test]
+    fn process_refresh_for_the_same_session_updates_metadata_without_retriggering() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            pane_id,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+        )
+        .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        let first_occurrence = apply(
+            &mut app,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id,
+                session_id: "session-1".to_string(),
+                process_id: Some(12345),
+                title_generation: 0,
+            },
+        );
+        assert_eq!(
+            first_occurrence,
+            Some(TriggerOccurrence::for_pane(
+                TriggerEvent::AgentSessionReady,
+                pane_id,
+            ))
+        );
+
+        app.title_inference_attempts
+            .insert((pane_id, "session-1".to_string()), 2);
+        let refresh_occurrence = apply(
+            &mut app,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id,
+                session_id: "session-1".to_string(),
+                process_id: Some(23456),
+                title_generation: 0,
+            },
+        );
+
+        assert_eq!(refresh_occurrence, None);
+        assert_eq!(app.agent_process_ids.get(&pane_id), Some(&23456));
+        assert_eq!(
+            app.title_inference_attempts
+                .get(&(pane_id, "session-1".to_string())),
+            Some(&2)
+        );
     }
 
     #[test]
@@ -781,6 +902,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                process_id: Some(12345),
                 title_generation: 0,
             },
         );
@@ -799,6 +921,7 @@ mod tests {
         );
 
         assert!(!app.agent_session_ids.contains_key(&pane_id));
+        assert!(!app.agent_process_ids.contains_key(&pane_id));
         assert!(!app
             .title_inference_attempts
             .contains_key(&(pane_id, "session-1".to_string())));
@@ -820,6 +943,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id,
                 session_id: "session-1".to_string(),
+                process_id: Some(12345),
                 title_generation: 0,
             },
         );
@@ -885,6 +1009,8 @@ mod tests {
             .add_pane(group, "claude", PaneContentKind::Terminal)
             .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        app.agent_session_ids
+            .insert(pane_id, "session-ready".to_owned());
 
         let applied = apply(
             &mut app,
@@ -897,7 +1023,13 @@ mod tests {
             },
         );
 
-        assert_eq!(applied, AppliedEvent::PaneBecameAgent { pane_id });
+        assert_eq!(
+            applied,
+            Some(TriggerOccurrence::for_pane(
+                TriggerEvent::AgentSessionReady,
+                pane_id,
+            ))
+        );
 
         match &app.tree.get(pane_id).unwrap().kind {
             NodeKind::Pane { status, .. } => assert_eq!(
@@ -909,5 +1041,112 @@ mod tests {
             ),
             _ => panic!("expected a pane"),
         }
+    }
+
+    #[test]
+    fn agent_finished_trigger_uses_the_sound_transition_classifier() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            pane_id,
+            PaneStatus::Agent(AgentClass::Codex, AgentActivity::WaitingBackground),
+        )
+        .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        let finished = apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            },
+        );
+
+        assert_eq!(
+            finished,
+            Some(TriggerOccurrence::for_pane(
+                TriggerEvent::AgentFinishedWork,
+                pane_id,
+            ))
+        );
+        assert_eq!(
+            ilium_sound::event_for_transition(
+                Some(&PaneStatus::Agent(
+                    AgentClass::Codex,
+                    AgentActivity::WaitingBackground,
+                )),
+                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            ),
+            Some(ilium_sound::SoundEvent::AgentFinished)
+        );
+    }
+
+    #[test]
+    fn prompt_events_distinguish_agent_submissions_from_terminal_cadence() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let shell_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let agent_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            agent_id,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+        )
+        .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(
+            apply(
+                &mut app,
+                ServerEvent::PanePromptSubmitted {
+                    pane_id: shell_id,
+                    source: PromptSubmissionSource::Keyboard,
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            apply(
+                &mut app,
+                ServerEvent::PanePromptSubmitted {
+                    pane_id: shell_id,
+                    source: PromptSubmissionSource::ScheduledInput,
+                },
+            ),
+            Some(TriggerOccurrence::for_pane(
+                TriggerEvent::TerminalActivityCheckpoint,
+                shell_id,
+            ))
+        );
+        assert_eq!(
+            apply(
+                &mut app,
+                ServerEvent::PanePromptSubmitted {
+                    pane_id: agent_id,
+                    source: PromptSubmissionSource::QueuedPrompt,
+                },
+            ),
+            Some(TriggerOccurrence::for_pane(
+                TriggerEvent::AgentPromptSubmitted,
+                agent_id,
+            ))
+        );
+    }
+
+    #[test]
+    fn initial_state_complete_is_the_global_startup_trigger() {
+        let mut app = app();
+        assert_eq!(
+            apply(&mut app, ServerEvent::InitialStateSyncComplete),
+            Some(TriggerOccurrence::global(TriggerEvent::StartupComplete))
+        );
     }
 }

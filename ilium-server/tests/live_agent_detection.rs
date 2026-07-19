@@ -35,7 +35,7 @@
 //! unconditionally deterministic.
 //!
 //! The fake script produces the two observable screen-text signals the
-//! detector owns: the persistent `Goal:` row plus activity state from
+//! detector owns: Codex's wide shared-footer goal suffix plus activity state
 //! (`ilium-detect/src/lib.rs`'s `WORKING_MARKER`, the literal substring
 //! `"esc to interrupt"`) for a few seconds, then clearing the screen and
 //! printing something else -- simulating a turn finishing. Everything
@@ -101,13 +101,12 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
         "#!/bin/sh\n\
          i=0\n\
          while [ \"$i\" -lt {WORKING_PHASE_SECONDS} ]; do\n\
-         \x20\x20printf 'Pursuing goal (5m)\\n'\n\
+         \x20\x20printf 'gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\\n'\n\
          \x20\x20printf 'Cogitating (esc to interrupt)\\n'\n\
          \x20\x20i=$((i + 1))\n\
          \x20\x20sleep 1\n\
          done\n\
          printf '\\033[2J\\033[H'\n\
-         printf 'Pursuing goal (5m)\\n'\n\
          printf 'Done. Ready for the next instruction.\\n'\n\
          IFS= read -r queued_prompt\n\
          printf 'queued:<%s>\\n' \"$queued_prompt\"\n\
@@ -242,7 +241,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // `ilium_detect::AGENT_SIGNATURES`) and classify it `Working` (by
     // real `vt100` screen-text scrape, via `ilium_detect::classify_activity`
     // matching the literal `"esc to interrupt"` marker this fake script
-    // prints), and preserve its visible `Pursuing goal (5m)` status as
+    // prints), and preserve the `Pursuing goal (5m)` suffix at the end of its
+    // shared metadata footer as
     // `AgentWithGoal` --
     // broadcast as a real `PaneStatusChanged` event to this
     // real connected IPC client.
@@ -273,9 +273,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         "the first Working classification is not a completed turn and must stay silent"
     );
 
-    // Structural assertion #2: once the script clears the screen and
-    // stops printing the marker, the real, unmodified pipeline must
-    // reclassify the same pane `Done`, not plain `Idle` -- this client
+    // Structural assertion #2: once the script clears the screen, both the
+    // working marker and goal footer become temporarily absent. The real,
+    // unmodified pipeline must retain goal ownership for the same process and
+    // reclassify the pane `Done`, not plain `Idle` -- this client
     // never sent `SetPaneFocus` for this pane, so
     // `ilium-server::detection::promote_to_done` must turn the raw
     // "just went idle" verdict `classify_activity` reports into the
@@ -514,12 +515,21 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         )
     })
     .await;
-    let ServerEvent::PaneSessionIdResolved { session_id, .. } = resolved_event else {
+    let ServerEvent::PaneSessionIdResolved {
+        session_id,
+        process_id,
+        ..
+    } = resolved_event
+    else {
         unreachable!("predicate only matches PaneSessionIdResolved");
     };
     assert_eq!(
         session_id, resumed_session_id,
         "expected the real process's --resume argument to be discovered verbatim"
+    );
+    assert!(
+        process_id.is_some_and(|process_id| process_id > 0),
+        "the resolved session event must carry its detected owning process"
     );
 
     write_frame(
@@ -554,6 +564,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::KeyInput {
             pane_id,
             bytes: b"/clear\r".to_vec(),
+            submission: None,
         },
     )
     .await
@@ -627,6 +638,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &ClientRequest::KeyInput {
             pane_id,
             bytes: b"/resume\r".to_vec(),
+            submission: None,
         },
     )
     .await

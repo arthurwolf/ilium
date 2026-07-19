@@ -110,6 +110,7 @@ mod tests {
             ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"x".to_vec(),
+                submission: None,
             },
             ClientRequest::ResizePane {
                 pane_id,

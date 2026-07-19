@@ -12,6 +12,14 @@ use ilium_inference::{
 };
 use serde::Serialize;
 
+/// Every dynamic value added to a single-pane LLM retitle prompt keeps this
+/// many Unicode characters from each edge. The task statement and latest
+/// refinement commonly live at opposite ends of a large prompt/output. Kept
+/// generous rather than minimal: a retitle/restructure decision is only as
+/// good as the context behind it, and the free-tier models this project
+/// targets have ample context windows relative to one pane's text.
+pub const LLM_CONTEXT_EDGE_CHARS: usize = 4_000;
+
 /// Sends one already-rendered prompt to the selected provider and returns its raw
 /// text reply. Both `project_naming` and `session_naming` implement this
 /// purely so tests can inject a fake generator without real HTTP; production
@@ -53,6 +61,27 @@ where
     handlebars.register_template_string(template_name, template)?;
     let prompt = handlebars.render(template_name, context)?;
     Ok(client.complete_prompt(prompt)?)
+}
+
+/// Bounds one independently meaningful LLM context value by keeping its first
+/// and last 1,000 Unicode characters. Applying this per field/entry rather than
+/// to the final rendered prompt prevents one large terminal screen or tool
+/// result from erasing the metadata and recent conversation around it.
+pub fn clip_llm_context_value(value: &str) -> String {
+    let value = value.trim();
+    let character_count = value.chars().count();
+    let retained_character_count = LLM_CONTEXT_EDGE_CHARS * 2;
+    if character_count <= retained_character_count {
+        return value.to_string();
+    }
+
+    let head: String = value.chars().take(LLM_CONTEXT_EDGE_CHARS).collect();
+    let tail: String = value
+        .chars()
+        .skip(character_count - LLM_CONTEXT_EDGE_CHARS)
+        .collect();
+    let omitted_character_count = character_count - retained_character_count;
+    format!("{head}\n… [{omitted_character_count} characters omitted] …\n{tail}")
 }
 
 /// Parses `response` as a JSON object, reads `field` as a string, and
@@ -154,6 +183,54 @@ pub fn normalize_icon(value: &str) -> Option<String> {
             .chars()
             .any(|character| character.is_control() || character.is_whitespace()))
     .then_some(icon.to_string())
+}
+
+/// Ceiling (characters) on the "[cmd]" prefix `format_with_command_hint`
+/// puts ahead of a terminal title -- keeps the bracketed hint itself
+/// compact even if a model ignores the prompt's own length guidance. See
+/// the "command hint" prompt rules in `terminal_naming`/`restructure` for
+/// what belongs in this field and why it's capped this short.
+const COMMAND_HINT_MAX_CHARS: usize = 24;
+
+/// Normalizes a model-supplied short command form (e.g. `"htop"`, `"git
+/// commit"`, `"ps faux"`) to a single line with no brackets of its own, no
+/// control characters, and at most `COMMAND_HINT_MAX_CHARS` -- or `None`
+/// when there's nothing usable: the field is missing, blank, or the model
+/// reported a "no command" placeholder instead of an empty string.
+pub fn normalize_command_hint(value: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    let trimmed = raw.trim_start_matches('[').trim_end_matches(']').trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    (!trimmed.is_empty()
+        && !matches!(lowered.as_str(), "none" | "n/a" | "na" | "null")
+        && trimmed.chars().count() <= COMMAND_HINT_MAX_CHARS
+        && !trimmed.contains('\n')
+        && trimmed.chars().all(|character| !character.is_control()))
+    .then_some(trimmed.to_string())
+}
+
+/// Prepends a normalized command hint to `title` as `"[cmd] title"`, or
+/// returns `title` unchanged when `command_hint` doesn't normalize to
+/// anything usable. Shared by `terminal_naming` (single-pane retitle) and
+/// `restructure` (project-wide retitle) -- the two callers that ask an LLM
+/// to report a terminal pane's currently-running, just-finished, or
+/// on-screen command alongside its title.
+pub fn format_with_command_hint(title: String, command_hint: Option<&str>) -> String {
+    match normalize_command_hint(command_hint) {
+        Some(command) => format!("[{command}] {title}"),
+        None => title,
+    }
+}
+
+/// Reads `field` as an optional string from an already-parsed JSON reply,
+/// without failing when it's absent -- unlike the bounded-word title
+/// fields, a terminal legitimately may have no current/recent command to
+/// report, so a missing or blank `command_hint` is expected, not an error.
+pub fn extract_optional_string_field(parsed: &serde_json::Value, field: &str) -> Option<String> {
+    parsed
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn parse_json_object(response: &str, context_label: &str) -> anyhow::Result<serde_json::Value> {
@@ -274,6 +351,27 @@ mod tests {
     }
 
     #[test]
+    fn llm_context_clipping_keeps_exact_unicode_edges() {
+        let head = "α".repeat(LLM_CONTEXT_EDGE_CHARS);
+        let middle = "discarded".repeat(300);
+        let tail = "ω".repeat(LLM_CONTEXT_EDGE_CHARS);
+        let clipped = clip_llm_context_value(&format!("{head}{middle}{tail}"));
+
+        assert!(clipped.starts_with(&head));
+        assert!(clipped.ends_with(&tail));
+        assert!(!clipped.contains("discarded"));
+        assert!(clipped.contains("characters omitted"));
+    }
+
+    #[test]
+    fn llm_context_clipping_leaves_short_values_untouched_except_outer_whitespace() {
+        assert_eq!(
+            clip_llm_context_value("  concise context  "),
+            "concise context"
+        );
+    }
+
+    #[test]
     fn parse_bounded_word_json_normalizes_whitespace_and_enforces_bounds() {
         let result =
             parse_bounded_word_json(r#"{"title":"  Fix   Auth Bug  "}"#, "title", 2, 4, "title");
@@ -347,5 +445,76 @@ mod tests {
         );
         assert_eq!(normalize_word_bounded("One Two Three", 1, 2), None);
         assert_eq!(normalize_word_bounded("bad\u{0007}name", 1, 2), None);
+    }
+
+    #[test]
+    fn normalize_command_hint_accepts_a_short_command_form() {
+        assert_eq!(
+            normalize_command_hint(Some("htop")),
+            Some("htop".to_string())
+        );
+        assert_eq!(
+            normalize_command_hint(Some("  ps faux  ")),
+            Some("ps faux".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_command_hint_rejects_blank_and_placeholder_values() {
+        assert_eq!(normalize_command_hint(None), None);
+        assert_eq!(normalize_command_hint(Some("")), None);
+        assert_eq!(normalize_command_hint(Some("   ")), None);
+        assert_eq!(normalize_command_hint(Some("none")), None);
+        assert_eq!(normalize_command_hint(Some("N/A")), None);
+    }
+
+    #[test]
+    fn normalize_command_hint_rejects_overlong_or_multiline_values() {
+        assert_eq!(
+            normalize_command_hint(Some(
+                "find . -name '*.rs' -exec grep -l TODO {} \\; | xargs wc -l"
+            )),
+            None
+        );
+        assert_eq!(normalize_command_hint(Some("git commit\n-m msg")), None);
+    }
+
+    #[test]
+    fn normalize_command_hint_strips_brackets_the_model_added_itself() {
+        assert_eq!(
+            normalize_command_hint(Some("[cargo build]")),
+            Some("cargo build".to_string())
+        );
+    }
+
+    #[test]
+    fn format_with_command_hint_prepends_a_bracketed_prefix() {
+        assert_eq!(
+            format_with_command_hint("Rust Build".to_string(), Some("cargo build")),
+            "[cargo build] Rust Build"
+        );
+    }
+
+    #[test]
+    fn format_with_command_hint_leaves_the_title_untouched_when_no_command_is_reported() {
+        assert_eq!(
+            format_with_command_hint("Rust Build".to_string(), Some("")),
+            "Rust Build"
+        );
+        assert_eq!(
+            format_with_command_hint("Rust Build".to_string(), None),
+            "Rust Build"
+        );
+    }
+
+    #[test]
+    fn extract_optional_string_field_reads_present_fields_and_tolerates_missing_ones() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(r#"{"command_hint":"cargo build"}"#).unwrap();
+        assert_eq!(
+            extract_optional_string_field(&parsed, "command_hint"),
+            Some("cargo build".to_string())
+        );
+        assert_eq!(extract_optional_string_field(&parsed, "missing"), None);
     }
 }

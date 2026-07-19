@@ -5,21 +5,22 @@
 //! transcript, so eligibility here is driven entirely by the pane's current
 //! `PaneStatus`/`PaneTitleSource` plus whether a worker is already in
 //! flight; the *cadence* (every second completed Enter press) is
-//! `App::maybe_trigger_terminal_retitle`'s concern, not this module's.
+//! the automatic trigger router's concern, not this module's.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use ilium_core::{NodeId, NodeKind, PaneContentKind, PaneStatus};
 
-use crate::app::App;
+use crate::app::{App, PaneRuntime};
+use crate::terminal_naming::TerminalTitleInput;
 
 /// Retitle after every Nth completed Enter press in an eligible terminal
 /// pane -- "once every 2 commands," per the product requirement.
 pub const RETITLE_ENTER_INTERVAL: u32 = 2;
 
 /// Hashes a captured terminal screen for `App::terminal_retitle_content_hashes`
-/// -- lets `App::maybe_trigger_terminal_retitle` skip the LLM call when the
+/// -- lets the automatic trigger router skip the LLM call when the
 /// pane's visible content hasn't materially changed since the last automatic
 /// retitle (e.g. two `ls` in a row on an otherwise-idle pane), instead of
 /// firing on cadence alone every `RETITLE_ENTER_INTERVAL` commands regardless
@@ -47,6 +48,38 @@ pub fn terminal_ready_for_retitle(app: &App, pane_id: NodeId) -> bool {
             ..
         }) if !title_source.is_user_specified()
     )
+}
+
+/// Gathers `pane_id`'s current screen text plus its identity/project
+/// metadata into one immutable input for `terminal_naming::infer_terminal_title`
+/// -- the terminal-pane analogue of `crate::title_inference::session_title_input`.
+/// Returns `None` only when the pane has no live terminal view to read a
+/// screen from (e.g. it was closed between the eligibility check and this
+/// call).
+pub fn terminal_title_input(app: &App, pane_id: NodeId) -> Option<TerminalTitleInput> {
+    let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {
+        return None;
+    };
+    let screen_text = view.with_screen(|screen| screen.contents());
+    let node = app.tree.get(pane_id)?;
+    let project_name = app
+        .tree
+        .project_ancestor(pane_id)
+        .and_then(|project_id| app.tree.get(project_id))
+        .map(|project| project.name.clone())
+        .unwrap_or_default();
+    let project_path = app
+        .tree
+        .project_path_for(pane_id)
+        .unwrap_or(&app.session_cwd)
+        .to_path_buf();
+    Some(TerminalTitleInput {
+        pane_id,
+        project_name,
+        project_path,
+        current_title: node.name.clone(),
+        screen_text,
+    })
 }
 
 #[cfg(test)]

@@ -47,6 +47,7 @@
 //! is kept only as a defensive fallback in case that ever hangs, so this
 //! test itself cannot hang the suite even if the graceful path regresses.
 
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -250,7 +251,14 @@ async fn isolated_server_identity(xdg: &IsolatedXdgDirs) -> (PathBuf, u32) {
         .unwrap_or_else(|error| {
             panic!("read isolated socket directory {socket_directory:?}: {error}")
         })
-        .map(|entry| entry.expect("read isolated socket entry").path())
+        .filter_map(|entry| {
+            let entry = entry.expect("read isolated socket entry");
+            entry
+                .file_type()
+                .expect("read isolated socket entry type")
+                .is_socket()
+                .then(|| entry.path())
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         socket_paths.len(),
@@ -902,6 +910,59 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         sound_event_disabled,
         "expected Agent finished sound checkbox to persist as disabled, config={:?}",
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+    );
+
+    // Triggers follows Voice control and Inference. Verify the installed
+    // binary renders the new event-to-actions surface, persists an opt-in
+    // startup action immediately, and keeps a later event visible while its
+    // longer document scrolls to follow keyboard selection.
+    tui.write(b"\t\t\t")
+        .expect("switching to the Triggers settings tab");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("AUTOMATION ROUTER")
+                    && screen.contains("Startup complete")
+                    && screen.contains("All projects")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the Triggers settings tab, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"l ")
+        .expect("enabling the startup all-project restructure trigger");
+    let startup_trigger_persisted = wait_until(
+        || {
+            let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .unwrap_or_default();
+            config.contains("startup_complete = [\"restructure_all_projects\"]")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        startup_trigger_persisted,
+        "expected the startup trigger to persist, config={:?}",
+        std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+    );
+    tui.write(b"jjjjjj")
+        .expect("moving to the Agent finishes work trigger event");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Agent finishes work")
+                    && screen.contains("Retitle")
+                    && screen.contains("Project")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected keyboard-following scroll to reveal Agent finishes work, got: {:?}",
+        tui.screen_text()
     );
 
     // Cleanup: reuse the CLI's own graceful `kill-session` subcommand
@@ -2001,6 +2062,19 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         )
         .await,
         "checkbox click should save immediately"
+    );
+
+    // Persistence and PTY redraw travel through separate observers. Wait for
+    // the checked marker to reach the captured screen before resolving its
+    // click coordinates instead of indexing an as-yet-unread frame.
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("[x] Context task"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "checked Context task should redraw, got: {:?}",
+        tui.screen_text()
     );
 
     // A complete click on the remaining card surface opens the editable

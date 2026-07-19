@@ -45,7 +45,7 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crossterm::event::MouseEvent;
@@ -112,6 +112,10 @@ pub struct PtySession {
     // a read/write lock respectively (see module docs for the locking
     // discipline).
     parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
+    /// Monotonic revision of the visible parser grid. The reader increments it
+    /// while holding the parser write lock, so [`Self::screen_snapshot`] can
+    /// return text and a revision that describe exactly the same frame.
+    screen_generation: Arc<AtomicU64>,
     // The pty master's write half; writing here sends bytes to the child's
     // stdin (as seen through the pty). Shared with the reader thread's
     // `TerminalQueryResponder`, which writes terminal capability-query
@@ -169,6 +173,15 @@ pub struct PtySession {
 pub struct PtyOutputChunk {
     pub sequence: u64,
     pub bytes: Vec<u8>,
+}
+
+/// One internally-consistent visible-screen read. Detection carries the
+/// generation through its lock-free classification phase so it can promptly
+/// revisit a pane when newer PTY output or a resize arrives before apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenSnapshot {
+    pub generation: u64,
+    pub text: String,
 }
 
 /// A consistent, bounded replay of a pane's output through `through_sequence`.
@@ -484,6 +497,7 @@ impl PtySession {
                 reply_writer: Arc::clone(&writer),
             },
         )));
+        let screen_generation = Arc::new(AtomicU64::new(0));
         let (screen_changed_tx, screen_changed_rx) = watch::channel(());
         // Capacity is chunks-buffered, not bytes: at 8KiB per chunk this
         // comfortably absorbs a slow/momentarily-disconnected subscriber
@@ -502,6 +516,7 @@ impl PtySession {
         let reader_should_stop = Arc::new(AtomicBool::new(false));
         {
             let parser = Arc::clone(&parser);
+            let screen_generation = Arc::clone(&screen_generation);
             let output_bytes_tx = output_bytes_tx.clone();
             let output_journal = Arc::clone(&output_journal);
             let child = Arc::clone(&child);
@@ -546,6 +561,7 @@ impl PtySession {
                         // we treat as unrecoverable for this pane.
                         let mut parser = parser.write().unwrap();
                         parser.process(&buf[..bytes_read]);
+                        screen_generation.fetch_add(1, Ordering::Release);
                     }
                     // Best-effort: `send` only errors once every receiver
                     // (including the one kept alive by this `PtySession`)
@@ -584,6 +600,7 @@ impl PtySession {
 
         Ok(Self {
             parser,
+            screen_generation,
             writer,
             master: Mutex::new(pair.master),
             child,
@@ -663,11 +680,9 @@ impl PtySession {
         // See the comment in `spawn`'s reader thread: a poisoned lock here
         // means some other holder already panicked, which we can't recover
         // from anyway.
-        self.parser
-            .write()
-            .unwrap()
-            .screen_mut()
-            .set_size(rows, cols);
+        let mut parser = self.parser.write().unwrap();
+        parser.screen_mut().set_size(rows, cols);
+        self.screen_generation.fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -681,6 +696,22 @@ impl PtySession {
     /// Plain-text dump of the current screen.
     pub fn screen_text(&self) -> String {
         self.with_screen(|screen| screen.contents())
+    }
+
+    /// Returns visible text and its monotonic parser generation under one read
+    /// lock, preventing a detection pass from pairing text from one frame with
+    /// the revision of another.
+    pub fn screen_snapshot(&self) -> ScreenSnapshot {
+        let parser = self.parser.read().unwrap();
+        ScreenSnapshot {
+            generation: self.screen_generation.load(Ordering::Acquire),
+            text: parser.screen().contents(),
+        }
+    }
+
+    /// Returns the current visible-screen generation without cloning its text.
+    pub fn screen_generation(&self) -> u64 {
+        self.screen_generation.load(Ordering::Acquire)
     }
 
     /// OS pid of the directly-spawned child, `None` if the platform didn't

@@ -21,4 +21,4 @@ mod query;
 mod session;
 
 pub use error::PtyError;
-pub use session::{PtyCommand, PtyOutputChunk, PtyOutputReplay, PtySession};
+pub use session::{PtyCommand, PtyOutputChunk, PtyOutputReplay, PtySession, ScreenSnapshot};

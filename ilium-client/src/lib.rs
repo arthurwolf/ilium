@@ -24,7 +24,7 @@
 //! Everything else (`ui`, `tree_ui`, `modal`, `help`, `theme`, `layout`,
 //! `settings_ui`, `text_prompt`, `explorer_overlay`, `editor_pane` and its
 //! chrome/highlight/toolbar/syntax/minimap helpers, `markdown`, `keymap`,
-//! `session_naming`, `project_naming`, `transcript_prompts`,
+//! `session_naming`, `project_naming`, `transcript_context`,
 //! `project_config`, `workspace_file`, `naming`, `restructure`) is
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
@@ -79,10 +79,13 @@ pub mod text_prompt;
 pub mod theme;
 pub mod tick;
 pub mod title_inference;
-pub mod transcript_prompts;
+pub mod transcript_context;
 pub mod tree_ordering;
 pub mod tree_transitions;
 pub mod tree_ui;
+pub mod trigger_execution_lease;
+pub mod trigger_settings;
+pub mod trigger_settings_ui;
 pub mod ui;
 pub mod voice_settings;
 pub mod workspace_file;
@@ -105,6 +108,7 @@ use crate::icon_search_workers::IconSearchWorkers;
 use crate::naming_workers::NamingWorkers;
 use crate::search_workers::SearchWorkers;
 use crate::terminal_guard::TerminalGuard;
+use crate::trigger_execution_lease::TriggerExecutionLease;
 
 /// Everything [`run`] needs to attach to one already-running
 /// `ilium-server` session and start rendering it.
@@ -260,6 +264,7 @@ async fn run_inner(
     app.kanban_board_settings = config.kanban_board;
     app.apply_sound_settings(config.sound);
     app.apply_inference_settings(config.inference);
+    app.apply_trigger_settings(config.triggers);
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
@@ -273,6 +278,7 @@ async fn run_inner(
 
     let mut connection =
         Connection::connect(&options.socket_path, options.session_name.clone()).await?;
+    let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
@@ -362,6 +368,8 @@ async fn run_inner(
                             &mut connection.events,
                             event,
                             &mut naming_workers,
+                            &mut icon_search_workers,
+                            &mut trigger_execution_lease,
                             home_dir.as_deref(),
                         ) {
                             needs_immediate_redraw = true;
@@ -648,6 +656,8 @@ fn apply_server_events(
     events_rx: &mut mpsc::Receiver<ilium_ipc::ServerEvent>,
     first: ilium_ipc::ServerEvent,
     naming_workers: &mut NamingWorkers,
+    icon_search_workers: &mut IconSearchWorkers,
+    trigger_execution_lease: &mut TriggerExecutionLease,
     home_dir: Option<&std::path::Path>,
 ) -> bool {
     use ilium_ipc::ServerEvent;
@@ -686,12 +696,16 @@ fn apply_server_events(
             other => {
                 observed_non_screen_event = true;
                 flush_pending_screen_update(app, &mut pending_screen_update);
-                let applied = crate::render_cache::apply(app, other);
-                maybe_start_title_inference(app, naming_workers, home_dir, &applied);
+                if let Some(occurrence) = crate::render_cache::apply(app, other) {
+                    if trigger_execution_lease.claim() {
+                        app.handle_trigger_occurrence(occurrence);
+                    }
+                }
             }
         }
     }
     flush_pending_screen_update(app, &mut pending_screen_update);
+    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
     observed_non_screen_event
 }
 
@@ -754,41 +768,6 @@ fn dispatch_ready_input_events(
     }
 }
 
-/// Spawns a background session-title-inference worker for whichever pane
-/// `crate::title_inference::pane_ready_for_inference` says is ready right
-/// now, given what `applied` just observed -- a no-op for every other
-/// event/transition, or when `home_dir` couldn't be resolved (session-title
-/// inference's transcript lookups are all rooted under the home
-/// directory, so there is nothing useful to attempt without it).
-fn maybe_start_title_inference(
-    app: &mut App,
-    naming_workers: &mut NamingWorkers,
-    home_dir: Option<&std::path::Path>,
-    applied: &crate::title_inference::AppliedEvent,
-) {
-    let Some(home_dir) = home_dir else {
-        return;
-    };
-    let Some((pane_id, agent_class, session_id, title_generation)) =
-        crate::title_inference::pane_ready_for_inference(app, applied)
-    else {
-        return;
-    };
-    app.titles_loading.insert(pane_id);
-    *app.title_inference_attempts
-        .entry((pane_id, session_id.clone()))
-        .or_insert(0) += 1;
-    naming_workers.spawn_session_title_worker(crate::naming_workers::SessionTitleWorkerRequest {
-        pane_id,
-        home: home_dir.to_path_buf(),
-        cwd: app.session_cwd.clone(),
-        agent_class,
-        session_id,
-        title_generation,
-        trigger: crate::naming_workers::TitleTrigger::Automatic,
-    });
-}
-
 /// Applies and clears `pending`, if it holds a merged `ScreenUpdate` run --
 /// see `apply_server_events`.
 fn flush_pending_screen_update(
@@ -808,14 +787,11 @@ fn flush_pending_screen_update(
 }
 
 /// Dispatches one crossterm input event, then drains and actually spawns
-/// any `PendingRetitleRequest`s that dispatch produced -- a manual retitle
-/// click (`App::action_request_retitle`) or the terminal Enter-press
-/// counter reaching its trigger interval (`App::maybe_trigger_terminal_retitle`).
+/// any `PendingRetitleRequest`s that dispatch produced -- from manual actions
+/// or the automatic trigger router.
 /// `App` only ever queues these (see `PendingRetitleRequest`'s doc
 /// comment); this is the one place with both an `App` and a
-/// `NamingWorkers` handle to actually start the background worker,
-/// mirroring how `maybe_start_title_inference` does the same for the
-/// server-event-driven agent-titling trigger.
+/// `NamingWorkers` handle to actually start the background worker.
 fn dispatch_input_event(
     app: &mut App,
     naming_workers: &mut NamingWorkers,
@@ -855,35 +831,26 @@ fn dispatch_pending_app_work(
     for request in app.take_pending_retitle_requests() {
         match request {
             crate::app::PendingRetitleRequest::Session {
-                pane_id,
-                agent_class,
-                session_id,
+                input,
                 title_generation,
                 trigger,
             } => match home_dir {
                 Some(home_dir) => naming_workers.spawn_session_title_worker(
                     crate::naming_workers::SessionTitleWorkerRequest {
-                        pane_id,
                         home: home_dir.to_path_buf(),
-                        cwd: app.session_cwd.clone(),
-                        agent_class,
-                        session_id,
+                        input,
                         title_generation,
                         trigger,
                     },
                 ),
                 None => {
-                    app.titles_loading.remove(&pane_id);
+                    app.titles_loading.remove(&input.pane_id);
                     app.status_message =
                         Some("Could not infer title: home directory unavailable".to_string());
                 }
             },
-            crate::app::PendingRetitleRequest::Terminal {
-                pane_id,
-                screen_text,
-                trigger,
-            } => {
-                naming_workers.spawn_terminal_title_worker(pane_id, screen_text, trigger);
+            crate::app::PendingRetitleRequest::Terminal { input, trigger } => {
+                naming_workers.spawn_terminal_title_worker(input, trigger);
             }
         }
     }

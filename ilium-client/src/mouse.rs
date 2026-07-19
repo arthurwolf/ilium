@@ -973,6 +973,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 if tab != state.tab {
                     state.tab = tab;
                     state.selected_row = 0;
+                    state.trigger_action_cursor = 0;
                     state.scroll = 0;
                 }
             } else if state.tab == crate::app::SettingsTab::Inference {
@@ -1004,6 +1005,32 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             return;
                         }
                         crate::app::InferenceRow::Test => app.request_inference_test(),
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Triggers {
+                if let Some((event, action_hit)) = crate::trigger_settings_ui::hit_test(
+                    app,
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    state.selected_row,
+                    state.trigger_action_cursor,
+                ) {
+                    state.selected_row = crate::trigger_settings::TriggerEvent::ALL
+                        .iter()
+                        .position(|candidate| *candidate == event)
+                        .unwrap_or(0);
+                    if let Some(action) = action_hit {
+                        state.trigger_action_cursor = action
+                            .and_then(|action| {
+                                event
+                                    .available_actions()
+                                    .iter()
+                                    .position(|candidate| *candidate == action)
+                                    .map(|index| index + 1)
+                            })
+                            .unwrap_or(0);
+                        app.settings_toggle_trigger_action(event, action);
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Icons {

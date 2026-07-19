@@ -18,7 +18,7 @@ pub use error::IpcError;
 pub use framing::{read_frame, write_frame, MAX_FRAME_LEN};
 pub use protocol::{
     ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, ServerEvent,
+    NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
 };
 
 #[cfg(test)]
@@ -92,6 +92,7 @@ mod tests {
             ClientRequest::KeyInput {
                 pane_id: NodeId(2),
                 bytes: vec![0x1b, b'[', b'A'],
+                submission: None,
             },
             ClientRequest::MouseInput {
                 pane_id: NodeId(2),
@@ -296,6 +297,7 @@ mod tests {
             ServerEvent::PaneSessionIdResolved {
                 pane_id: NodeId(2),
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                process_id: Some(12345),
                 title_generation: 0,
             },
             ServerEvent::PaneSessionIdCleared {
@@ -313,6 +315,11 @@ mod tests {
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
                 path: None,
+            },
+            ServerEvent::InitialStateSyncComplete,
+            ServerEvent::PanePromptSubmitted {
+                pane_id: NodeId(2),
+                source: PromptSubmissionSource::Keyboard,
             },
         ]
     }

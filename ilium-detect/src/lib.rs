@@ -209,37 +209,142 @@ fn screen_has_only_empty_composer_chrome(screen_text: &str, composer_label: &str
     })
 }
 
-/// Returns whether `class` visibly reports an active persistent task goal.
+/// Provider evidence about a persistent task goal in one visible-screen sample.
 ///
-/// Goal UI is provider-owned and changes independently from the stable
-/// process identity. Current Codex shows `Goal active Objective:`; current
-/// Claude Code keeps `/goal active` in its footer. The historical Codex
-/// forms remain supported without treating ordinary transcript prose as a
-/// goal. The server calls this only after process-tree identification.
-pub fn has_visible_goal_for_agent(class: &AgentClass, screen_text: &str) -> bool {
-    screen_text
-        .lines()
-        .map(goal_status_line)
-        .any(|line| match class {
-            AgentClass::Codex => {
-                line.starts_with("pursuing goal")
-                    || line.starts_with("goal active objective:")
-                    || line
-                        .strip_prefix("goal:")
-                        .is_some_and(|goal_value| !goal_value.trim().is_empty())
-            }
-            AgentClass::Claude => {
-                line.starts_with("goal active (") || line.starts_with("goal active:")
-            }
-            AgentClass::Antigravity | AgentClass::Other(_) => false,
-        })
+/// `Unknown` is deliberately distinct from `Inactive`: a provider can clear or
+/// replace its footer while an approval dialog, help overlay, resize, or
+/// multi-chunk redraw is in progress. The server retains an already-confirmed
+/// goal for the same agent process across those inconclusive samples and clears
+/// it only on explicit terminal evidence or process replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GoalEvidence {
+    Active,
+    Inactive,
+    Unknown,
 }
 
-/// Removes only leading terminal decoration before matching a status label.
-fn goal_status_line(line: &str) -> String {
-    line.trim_start()
+/// Extracts provider-owned goal evidence from the current visible screen.
+///
+/// Goal status may be a standalone row or the final segment of a shared footer.
+/// Current wide Codex layouts render metadata first and end the same line with
+/// `Pursuing goal (16m)`, so matching only the beginning of a line is
+/// width-dependent. Lines are inspected newest-first: a current `Goal achieved`
+/// footer must override an older positive row that is still visible above it.
+pub fn goal_evidence_for_agent(class: &AgentClass, screen_text: &str) -> GoalEvidence {
+    for line in screen_text.lines().rev().map(normalize_goal_status_line) {
+        let evidence = match class {
+            AgentClass::Codex => codex_goal_evidence(&line),
+            AgentClass::Claude => claude_goal_evidence(&line),
+            AgentClass::Antigravity | AgentClass::Other(_) => GoalEvidence::Unknown,
+        };
+        if evidence != GoalEvidence::Unknown {
+            return evidence;
+        }
+    }
+    GoalEvidence::Unknown
+}
+
+/// Recognizes Codex's active, paused, blocked, limited, and completed footer
+/// phases. Exact elapsed-time suffixes are high-signal terminal chrome and may
+/// appear after arbitrary model/cwd/context metadata on the same line.
+fn codex_goal_evidence(line: &str) -> GoalEvidence {
+    if has_elapsed_status_suffix(line, "goal achieved (")
+        || line_ends_with_status(line, "goal achieved")
+    {
+        return GoalEvidence::Inactive;
+    }
+
+    if [
+        "pursuing goal (",
+        "goal paused (",
+        "goal blocked (",
+        "goal hit usage limits (",
+    ]
+    .iter()
+    .any(|marker| has_elapsed_status_suffix(line, marker))
+        || line.starts_with("goal active objective:")
+        || line_ends_with_status(line, "goal paused (/goal resume)")
+        || line_ends_with_status(line, "goal blocked (/goal resume)")
+        || line_ends_with_status(line, "goal hit usage limits (/goal resume)")
+        || line
+            .strip_prefix("goal:")
+            .is_some_and(|goal_value| !goal_value.trim().is_empty())
+    {
+        return GoalEvidence::Active;
+    }
+
+    GoalEvidence::Unknown
+}
+
+/// Recognizes Claude Code's provider-owned active-goal footer forms without
+/// requiring them to be the first status segment on the line.
+fn claude_goal_evidence(line: &str) -> GoalEvidence {
+    if has_elapsed_status_suffix(line, "goal active (") || line.starts_with("goal active:") {
+        GoalEvidence::Active
+    } else {
+        GoalEvidence::Unknown
+    }
+}
+
+/// Normalizes case and removes decoration only from the beginning of a line.
+/// Interior separators remain available to establish status-segment boundaries.
+fn normalize_goal_status_line(line: &str) -> String {
+    line.trim()
         .trim_start_matches(|character: char| !character.is_alphanumeric())
         .to_ascii_lowercase()
+}
+
+/// Matches a status label followed by a well-formed elapsed-time token at the
+/// end of a line. This accepts a footer suffix after arbitrary metadata while
+/// rejecting ordinary prose such as "the footer says Pursuing goal (16m) here".
+fn has_elapsed_status_suffix(line: &str, marker: &str) -> bool {
+    let Some(marker_index) = line.rfind(marker) else {
+        return false;
+    };
+    if !has_status_boundary_before(line, marker_index) {
+        return false;
+    }
+
+    let duration_and_tail = &line[marker_index + marker.len()..];
+    let Some(closing_parenthesis) = duration_and_tail.find(')') else {
+        return false;
+    };
+    let duration = &duration_and_tail[..closing_parenthesis];
+    let trailing = &duration_and_tail[closing_parenthesis + 1..];
+    !duration.is_empty()
+        && duration.chars().any(|character| character.is_ascii_digit())
+        && duration.chars().all(|character| {
+            character.is_ascii_digit()
+                || character.is_ascii_whitespace()
+                || matches!(character, '.' | ':' | 'd' | 'h' | 'm' | 's')
+        })
+        && trailing
+            .chars()
+            .all(|character| character.is_whitespace() || !character.is_alphanumeric())
+}
+
+/// Matches an exact terminal status suffix after optional shared-footer chrome.
+fn line_ends_with_status(line: &str, marker: &str) -> bool {
+    let trimmed = line.trim_end_matches(|character: char| {
+        character.is_whitespace() || (!character.is_alphanumeric() && character != ')')
+    });
+    let Some(marker_index) = trimmed.rfind(marker) else {
+        return false;
+    };
+    has_status_boundary_before(trimmed, marker_index)
+        && marker_index + marker.len() == trimmed.len()
+}
+
+/// Requires a marker to begin at the normalized line start or after an actual
+/// footer-segment delimiter. Whitespace alone is intentionally insufficient:
+/// normal transcript prose can quote the exact visible status phrase.
+fn has_status_boundary_before(line: &str, marker_index: usize) -> bool {
+    marker_index == 0
+        || line[..marker_index]
+            .trim_end()
+            .chars()
+            .next_back()
+            .is_some_and(|character| matches!(character, '·' | '│' | '|' | '•' | '—' | '–' | '…'))
 }
 
 /// True if a line reads as "the agent is waiting on background
@@ -736,43 +841,118 @@ mod tests {
 
     #[test]
     fn visible_goal_status_is_detected_for_current_codex_and_claude_code() {
-        assert!(has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "  • Goal active Objective: Finish the detection pass"
-        ));
-        assert!(has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "  ◒ Pursuing goal (5m)"
-        ));
-        assert!(has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "🏁 Goal: keep the goal paused"
-        ));
-        assert!(has_visible_goal_for_agent(
-            &AgentClass::Claude,
-            "◎ /goal active (11s)"
-        ));
-        assert!(has_visible_goal_for_agent(
-            &AgentClass::Claude,
-            " /goal active: finish the detection pass"
-        ));
-        assert!(!has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "Goal achieved"
-        ));
-        assert!(!has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "This thread does not currently have a goal."
-        ));
-        assert!(!has_visible_goal_for_agent(&AgentClass::Codex, "Goal:"));
-        assert!(!has_visible_goal_for_agent(
-            &AgentClass::Codex,
-            "The project's goal: keep tests green."
-        ));
-        assert!(!has_visible_goal_for_agent(
-            &AgentClass::Claude,
-            "Goal set: an old transcript row is still visible"
-        ));
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Codex,
+                "  • Goal active Objective: Finish the detection pass"
+            ),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, "  ◒ Pursuing goal (5m)"),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, "🏁 Goal: keep the goal paused"),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, "◎ /goal active (11s)"),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Claude,
+                " /goal active: finish the detection pass"
+            ),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, "Goal achieved"),
+            GoalEvidence::Inactive
+        );
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Codex,
+                "This thread does not currently have a goal."
+            ),
+            GoalEvidence::Unknown
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, "Goal:"),
+            GoalEvidence::Unknown
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, "The project's goal: keep tests green."),
+            GoalEvidence::Unknown
+        );
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Claude,
+                "Goal set: an old transcript row is still visible"
+            ),
+            GoalEvidence::Unknown
+        );
+    }
+
+    #[test]
+    fn codex_goal_footer_is_detected_after_wide_layout_metadata() {
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Codex,
+                &fixture("codex_goal_active_wide_footer.txt")
+            ),
+            GoalEvidence::Active
+        );
+        assert_eq!(
+            goal_evidence_for_agent(
+                &AgentClass::Codex,
+                "gpt-5.6-sol xhigh · workspace · Waiting · Context … Pursuing goal (3m)"
+            ),
+            GoalEvidence::Active,
+            "a narrow footer can collapse hidden metadata into an ellipsis"
+        );
+    }
+
+    #[test]
+    fn newest_explicit_completion_overrides_an_older_visible_goal_row() {
+        let screen = format!(
+            "Pursuing goal (5m)\n{}",
+            fixture("codex_goal_achieved_wide_footer.txt")
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, &screen),
+            GoalEvidence::Inactive
+        );
+    }
+
+    #[test]
+    fn goal_phases_remain_attached_while_paused_blocked_or_limited() {
+        for status in [
+            "Goal paused (/goal resume)",
+            "Goal blocked (/goal resume)",
+            "Goal hit usage limits (/goal resume)",
+            "model · workspace · Goal paused (2m)",
+        ] {
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Codex, status),
+                GoalEvidence::Active,
+                "expected an attached goal for {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn prose_that_only_mentions_a_goal_footer_is_inconclusive() {
+        for prose in [
+            "The footer says Pursuing goal (16m) in the bottom-right corner.",
+            "The footer says Pursuing goal (16m).",
+        ] {
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Codex, prose),
+                GoalEvidence::Unknown
+            );
+        }
     }
 
     #[test]

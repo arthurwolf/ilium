@@ -14,7 +14,9 @@
 use std::time::Duration;
 
 use ilium_core::{NodeId, SplitOrientation, ROOT_ID};
-use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
+use ilium_ipc::{
+    read_frame, write_frame, ClientRequest, NewPaneKind, PromptSubmissionSource, ServerEvent,
+};
 
 mod common;
 use common::{expect_event, TestServer};
@@ -63,6 +65,11 @@ async fn attach_returns_a_tree_snapshot_with_an_empty_launch_project() {
         "a brand-new session should contain its launch project"
     );
     assert!(tree.get(launch_project_id(&tree)).unwrap().is_project());
+    let startup_complete = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+    assert_eq!(startup_complete, ServerEvent::InitialStateSyncComplete);
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -161,6 +168,78 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
 }
 
 #[tokio::test]
+async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
+    let mut server = TestServer::start("keyboard-submission-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "keyboard-submission-test".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let tree = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = tree else {
+        unreachable!("predicate only returns a populated tree")
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"printf trigger-keyboard\r".to_vec(),
+            submission: Some(PromptSubmissionSource::Keyboard),
+        },
+    )
+    .await
+    .unwrap();
+
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::PanePromptSubmitted {
+                pane_id: submitted_pane_id,
+                source: PromptSubmissionSource::Keyboard,
+            } if *submitted_pane_id == pane_id
+        )
+    })
+    .await;
+    assert_eq!(
+        event,
+        ServerEvent::PanePromptSubmitted {
+            pane_id,
+            source: PromptSubmissionSource::Keyboard,
+        }
+    );
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
 async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
     let mut server = TestServer::start("initial-input-test").await;
     let mut client = server.connect().await;
@@ -193,16 +272,28 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
     .await
     .expect("create command pane with initial input");
 
-    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut saw_prompt_event = false;
+    let mut saw_submitted_output = false;
+    while !(saw_prompt_event && saw_submitted_output) {
+        let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
+            .await
+            .expect("initial input events should arrive before timeout")
+            .expect("read initial input event");
+        saw_prompt_event |= matches!(
             event,
-            ServerEvent::ScreenUpdate { bytes, .. }
+            ServerEvent::PanePromptSubmitted {
+                source: PromptSubmissionSource::InitialAgentPrompt,
+                ..
+            }
+        );
+        saw_submitted_output |= matches!(
+            event,
+            ServerEvent::ScreenUpdate { ref bytes, .. }
                 if String::from_utf8_lossy(bytes)
                     .contains("submitted:</goal inspect the selected line>")
-        )
-    })
-    .await;
-    assert!(matches!(event, ServerEvent::ScreenUpdate { .. }));
+        );
+    }
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -519,6 +610,7 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
             bytes:
                 b"for number in $(seq 1 160); do printf 'replay-line-%03d\\n' \"$number\"; done\n"
                     .to_vec(),
+            submission: None,
         },
     )
     .await

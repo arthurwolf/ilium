@@ -31,13 +31,75 @@
 
 use ilium_core::{AgentClass, NodeId, NodeKind, PaneStatus};
 
-use crate::app::App;
+use crate::app::{App, PaneRuntime};
 
 /// Bounds the retry path so a pane whose transcript genuinely never has
 /// anything summarizable (e.g. a resumed session ilium can't read, or a
 /// provider that's consistently down) doesn't retry on every single `Done`
 /// transition for the rest of a long-running session.
 pub const MAX_ATTEMPTS: u32 = 5;
+
+/// Resolves the transcript-backed input for one configured automatic retitle.
+/// Event selection is intentionally absent: the trigger router has already
+/// decided *when* to act, while this function owns the stable eligibility
+/// contract shared by every agent lifecycle event.
+pub fn session_title_input(
+    app: &App,
+    pane_id: NodeId,
+    allow_user_specified_title: bool,
+) -> Option<crate::session_naming::SessionTitleInput> {
+    if app.titles_loading.contains(&pane_id) {
+        return None;
+    }
+    let session_id = app.agent_session_ids.get(&pane_id)?.clone();
+    let node = app.tree.get(pane_id)?;
+    let NodeKind::Pane {
+        status,
+        title_source,
+        ..
+    } = &node.kind
+    else {
+        return None;
+    };
+    if title_source.is_user_specified() && !allow_user_specified_title {
+        return None;
+    }
+    let (class, activity, has_persistent_goal) = match status {
+        PaneStatus::Agent(class, activity) => (class, activity, false),
+        PaneStatus::AgentWithGoal(class, activity) => (class, activity, true),
+        PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
+    };
+    class.provider()?;
+    let terminal_screen = match app.panes.get(&pane_id) {
+        Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
+        Some(PaneRuntime::Editor(_) | PaneRuntime::Board(_)) | None => String::new(),
+    };
+    let project_name = app
+        .tree
+        .project_ancestor(pane_id)
+        .and_then(|project_id| app.tree.get(project_id))
+        .map(|project| project.name.clone())
+        .unwrap_or_default();
+    Some(crate::session_naming::SessionTitleInput {
+        pane_id,
+        project_name,
+        project_path: app
+            .tree
+            .project_path_for(pane_id)
+            .unwrap_or(&app.session_cwd)
+            .to_path_buf(),
+        agent_class: class.clone(),
+        session_id,
+        process_id: app.agent_process_ids.get(&pane_id).copied(),
+        current_title: node.name.clone(),
+        current_short_title: node.short_name.clone(),
+        current_icon: node.inferred_icon.clone(),
+        title_source: *title_source,
+        activity: *activity,
+        has_persistent_goal,
+        terminal_screen,
+    })
+}
 
 /// What `render_cache::apply` just observed, as far as this module's two
 /// triggers care -- everything else `apply` handles (tree snapshots,

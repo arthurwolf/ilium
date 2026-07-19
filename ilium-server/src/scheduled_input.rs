@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ilium_core::{NodeId, ScheduledPaneInput, Tree};
-use ilium_ipc::ServerEvent;
+use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 use tokio::task::JoinHandle;
 
 use crate::ipc::handlers::{broadcast_and_persist, write_key_input};
@@ -140,7 +140,10 @@ async fn write_scheduled_input(
     scheduled_input: &ScheduledPaneInput,
 ) -> Result<(), String> {
     let bytes = scheduled_input_bytes(scheduled_input);
-    write_key_input(state, pane_id, &bytes).await
+    let submission = scheduled_input
+        .send_enter
+        .then_some(PromptSubmissionSource::ScheduledInput);
+    write_key_input(state, pane_id, &bytes, submission).await
 }
 
 /// Produces each supported payload form without special cases in the PTY

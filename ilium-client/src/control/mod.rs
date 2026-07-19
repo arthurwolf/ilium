@@ -400,6 +400,7 @@ mod tests {
             vec![ilium_ipc::ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"/clear\r".to_vec(),
+                submission: Some(ilium_ipc::PromptSubmissionSource::VoiceControl),
             }]
         );
     }
@@ -430,6 +431,7 @@ mod tests {
             vec![ilium_ipc::ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"/clear".to_vec(),
+                submission: None,
             }]
         );
 
@@ -448,6 +450,7 @@ mod tests {
             vec![ilium_ipc::ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"\r".to_vec(),
+                submission: Some(ilium_ipc::PromptSubmissionSource::VoiceControl),
             }]
         );
     }
@@ -472,6 +475,7 @@ mod tests {
             vec![ilium_ipc::ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"/clear".to_vec(),
+                submission: None,
             }]
         );
 

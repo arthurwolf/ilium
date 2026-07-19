@@ -5,6 +5,7 @@
 //! after the PTY accepts the complete payload.
 
 use ilium_core::{NodeId, QueuedPrompt};
+use ilium_ipc::PromptSubmissionSource;
 
 use crate::ipc::handlers::{broadcast_and_persist, write_key_input};
 use crate::state::ServerState;
@@ -30,7 +31,14 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     let mut bytes = Vec::with_capacity(prompt.text.len() + 1);
     bytes.extend_from_slice(prompt.text.as_bytes());
     bytes.push(b'\r');
-    if let Err(error) = write_key_input(state, pane_id, &bytes).await {
+    if let Err(error) = write_key_input(
+        state,
+        pane_id,
+        &bytes,
+        Some(PromptSubmissionSource::QueuedPrompt),
+    )
+    .await
+    {
         tracing::error!("queued prompt delivery failed for pane {pane_id:?}: {error}");
         return;
     }

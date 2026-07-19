@@ -496,6 +496,7 @@ mod restore_tests {
             &ClientRequest::KeyInput {
                 pane_id: terminal_pane_id,
                 bytes: b"restore-marker\n".to_vec(),
+                submission: None,
             },
         )
         .await

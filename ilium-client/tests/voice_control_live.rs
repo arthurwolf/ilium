@@ -7,9 +7,9 @@ use std::time::Duration;
 use ilium_client::control::{system_instructions, ControlPlane};
 use ilium_voice::{
     ReasoningEffort, VadEagerness, VoiceCommand, VoiceConnectionState, VoiceEvent, VoiceInputMode,
-    VoiceModel, VoiceName, VoiceRuntimeConfig, VoiceService,
+    VoiceModel, VoiceName, VoiceRuntimeConfig, VoiceService, VoiceToolOutput,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Uses the production prompt and tool definitions while muting audio output.
 fn live_config() -> VoiceRuntimeConfig {
@@ -48,15 +48,23 @@ async fn wait_until_listening(service: &mut VoiceService) {
 }
 
 /// Waits for the first model-selected production tool invocation.
-async fn wait_for_tool_invocation(service: &mut VoiceService) -> ilium_voice::VoiceToolInvocation {
+async fn wait_for_tool_invocation(
+    service: &mut VoiceService,
+) -> (ilium_voice::VoiceToolInvocation, String) {
     tokio::time::timeout(Duration::from_secs(30), async {
+        let mut assistant_transcript = String::new();
+
         loop {
             match service.next_event().await.expect("voice event channel") {
                 VoiceEvent::ToolInvocations(invocations) => {
                     assert_eq!(invocations.len(), 1, "one dictated action is one tool call");
 
-                    break invocations.into_iter().next().expect("one invocation");
+                    break (
+                        invocations.into_iter().next().expect("one invocation"),
+                        assistant_transcript,
+                    );
                 }
+                VoiceEvent::AssistantTranscript(delta) => assistant_transcript.push_str(&delta),
                 VoiceEvent::StateChanged(VoiceConnectionState::Failed(error)) => {
                     panic!("Realtime tool call failed: {error}")
                 }
@@ -67,6 +75,39 @@ async fn wait_for_tool_invocation(service: &mut VoiceService) -> ilium_voice::Vo
     })
     .await
     .expect("Realtime model should call the terminal-submission tool")
+}
+
+/// Captures the spoken confirmation question through its return to Listening.
+async fn wait_for_confirmation_question(service: &mut VoiceService) -> String {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut assistant_transcript = String::new();
+        let mut is_response_active = false;
+
+        loop {
+            match service.next_event().await.expect("voice event channel") {
+                VoiceEvent::StateChanged(VoiceConnectionState::Thinking) => {
+                    is_response_active = true;
+                }
+                VoiceEvent::AssistantTranscript(delta) if is_response_active => {
+                    assistant_transcript.push_str(&delta);
+                }
+                VoiceEvent::StateChanged(VoiceConnectionState::Listening)
+                    if is_response_active && !assistant_transcript.trim().is_empty() =>
+                {
+                    break assistant_transcript;
+                }
+                VoiceEvent::StateChanged(VoiceConnectionState::Failed(error)) => {
+                    panic!("Realtime confirmation failed: {error}")
+                }
+                VoiceEvent::ProviderError(error) => {
+                    panic!("Realtime confirmation error: {error}")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Realtime model should ask the confirmation question")
 }
 
 #[tokio::test]
@@ -86,8 +127,12 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
         .await
         .expect("send deterministic text turn");
 
-    let invocation = wait_for_tool_invocation(&mut service).await;
+    let (invocation, pre_tool_transcript) = wait_for_tool_invocation(&mut service).await;
     assert_eq!(invocation.name, "ilium_send_to_terminal");
+    assert!(
+        pre_tool_transcript.trim().is_empty(),
+        "dictation should call the tool without a spoken preamble"
+    );
 
     let arguments: Value =
         serde_json::from_str(&invocation.arguments_json).expect("valid tool arguments");
@@ -97,6 +142,44 @@ async fn exact_focused_terminal_phrase_calls_the_dedicated_submission_tool() {
         arguments.get("target").is_none() || arguments["target"].is_null(),
         "the active pane should be selected by omitting target"
     );
+
+    let confirmation_question =
+        "I typed it into the target terminal without pressing Enter. Send what you see on screen?";
+    sender
+        .send(VoiceCommand::SubmitToolOutputs(vec![VoiceToolOutput {
+            call_id: invocation.call_id,
+            result: json!({
+                "status": "confirmation_required",
+                "token": "voice-confirm-live",
+                "question": confirmation_question,
+                "preparation": {
+                    "status": "queued",
+                    "message": "Sent text to the terminal",
+                },
+                "instruction": "Ask only the exact question. Do not read or repeat staged terminal text. Call ilium_confirm_action only after an explicit yes or no answer.",
+            }),
+            request_follow_up: true,
+        }]))
+        .await
+        .expect("submit staged-terminal result");
+
+    let spoken_question = wait_for_confirmation_question(&mut service).await;
+    assert_eq!(spoken_question.trim(), confirmation_question);
+    assert!(!spoken_question.contains("/clear"));
+
+    sender
+        .send(VoiceCommand::SendText("Yes.".to_owned()))
+        .await
+        .expect("send explicit confirmation");
+
+    let (confirmation, pre_confirmation_transcript) = wait_for_tool_invocation(&mut service).await;
+    assert_eq!(confirmation.name, "ilium_confirm_action");
+    assert!(pre_confirmation_transcript.trim().is_empty());
+
+    let confirmation_arguments: Value =
+        serde_json::from_str(&confirmation.arguments_json).expect("valid confirmation arguments");
+    assert_eq!(confirmation_arguments["token"], "voice-confirm-live");
+    assert_eq!(confirmation_arguments["confirmed"], true);
 
     service.shutdown().await;
 }

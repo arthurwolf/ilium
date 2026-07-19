@@ -21,7 +21,7 @@ use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
 
 use crate::notifications::{self, PendingNotification};
-use crate::pane::PaneResource;
+use crate::pane::{ConfirmedGoalOwner, PaneResource};
 use crate::sounds::{self, PlaybackRequest};
 use crate::state::ServerState;
 
@@ -253,6 +253,9 @@ async fn run_due_panes(
     struct DuePane {
         pane_id: NodeId,
         shell_pid: Option<u32>,
+        screen_generation: u64,
+        request_generation: u64,
+        confirmed_goal_owner: Option<ConfirmedGoalOwner>,
         session_id: Option<String>,
         session_agent_class: Option<ilium_core::AgentClass>,
         is_session_identity_invalidated: bool,
@@ -297,6 +300,9 @@ async fn run_due_panes(
                 Some(DuePane {
                     pane_id: *pane_id,
                     shell_pid: runtime.session.process_id(),
+                    screen_generation: runtime.session.screen_generation(),
+                    request_generation: runtime.detection_schedule.request_generation,
+                    confirmed_goal_owner: runtime.confirmed_goal_owner.clone(),
                     session_id: runtime.session_id.clone(),
                     session_agent_class: runtime.session_agent_class.clone(),
                     is_session_identity_invalidated: runtime.is_session_identity_invalidated,
@@ -341,7 +347,7 @@ async fn run_due_panes(
         .filter(|pane| pane.identity.is_some())
         .map(|pane| pane.due.pane_id)
         .collect();
-    let screen_texts: std::collections::HashMap<NodeId, String> = {
+    let screen_snapshots: std::collections::HashMap<NodeId, ilium_pty::ScreenSnapshot> = {
         let panes = state.panes.read().await;
         panes
             .iter()
@@ -351,7 +357,7 @@ async fn run_due_panes(
                 }
                 match resource {
                     PaneResource::Terminal(runtime) => {
-                        Some((*pane_id, runtime.session.screen_text()))
+                        Some((*pane_id, runtime.session.screen_snapshot()))
                     }
                     PaneResource::Editor { .. } => None,
                 }
@@ -363,6 +369,9 @@ async fn run_due_panes(
         pane_id: NodeId,
         status: PaneStatus,
         identity: Option<ilium_detect::AgentIdentity>,
+        screen_generation: u64,
+        request_generation: u64,
+        confirmed_goal_owner: Option<ConfirmedGoalOwner>,
         is_fresh_agent_screen: bool,
         is_session_identity_invalidated: bool,
         invalidated_session_id: Option<String>,
@@ -376,13 +385,20 @@ async fn run_due_panes(
         .map(|identified| {
             let due_pane = identified.due;
             let identity = identified.identity;
-            let screen_text = screen_texts
+            let screen_snapshot = screen_snapshots
                 .get(&due_pane.pane_id)
-                .map(String::as_str)
-                .unwrap_or_default();
-            let status = classify_identity(identity.as_ref(), screen_text);
+                .cloned()
+                .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
+                    generation: due_pane.screen_generation,
+                    text: String::new(),
+                });
+            let classified_identity = classify_identity(
+                identity.as_ref(),
+                &screen_snapshot.text,
+                due_pane.confirmed_goal_owner.as_ref(),
+            );
             let is_fresh_agent_screen = identity.as_ref().is_some_and(|identity| {
-                ilium_detect::is_fresh_agent_screen(&identity.class, screen_text)
+                ilium_detect::is_fresh_agent_screen(&identity.class, &screen_snapshot.text)
             });
             let has_stable_session_owner = identity.as_ref().is_some_and(|identity| {
                 session_owner_is_stable(
@@ -397,8 +413,11 @@ async fn run_due_panes(
             let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
-                status,
+                status: classified_identity.status,
                 identity,
+                screen_generation: screen_snapshot.generation,
+                request_generation: due_pane.request_generation,
+                confirmed_goal_owner: classified_identity.confirmed_goal_owner,
                 is_fresh_agent_screen,
                 is_session_identity_invalidated: due_pane.is_session_identity_invalidated,
                 invalidated_session_id: due_pane.invalidated_session_id,
@@ -532,6 +551,24 @@ async fn run_due_panes(
                 continue;
             };
 
+            // A user-triggered force request that arrived after phase 2's
+            // snapshot explicitly asks for a newer sample. Never let this stale
+            // pass overwrite that request's due deadline or status.
+            if runtime.detection_schedule.request_generation != classified_pane.request_generation {
+                runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
+                continue;
+            }
+
+            // PTY output can arrive continuously while an agent works. Applying
+            // this coherent frame is safe, but it must not push the next check
+            // to a slow tier when a newer frame already exists. The focused-tier
+            // delay converges promptly without turning animated output into an
+            // unbounded process-table scan loop.
+            let screen_changed_after_snapshot =
+                runtime.session.screen_generation() != classified_pane.screen_generation;
+
+            runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
+
             let previous_status = tree.get(pane_id).and_then(|node| match &node.kind {
                 ilium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
                 ilium_core::NodeKind::Container(_) | ilium_core::NodeKind::Folder { .. } => None,
@@ -567,7 +604,11 @@ async fn run_due_panes(
                 runtime.detection_schedule.client_focused,
                 &state.detection_config,
             );
-            runtime.detection_schedule.next_due = now + runtime.detection_schedule.current_interval;
+            runtime.detection_schedule.next_due = if screen_changed_after_snapshot {
+                now + FOCUSED_POLL_INTERVAL
+            } else {
+                now + runtime.detection_schedule.current_interval
+            };
 
             let detected_agent_class = classified_pane
                 .identity
@@ -674,14 +715,24 @@ async fn run_due_panes(
                     state.broadcast(ServerEvent::PaneSessionIdResolved {
                         pane_id,
                         session_id: session_id.clone(),
+                        process_id: runtime.session_process_id,
                         title_generation: runtime.title_generation,
                     });
                 } else {
+                    let previous_process_id = runtime.session_process_id;
                     runtime.session_agent_class = detected_agent_class;
                     runtime.session_process_id = classified_pane
                         .identity
                         .as_ref()
                         .map(|identity| identity.pid);
+                    if runtime.session_process_id != previous_process_id {
+                        state.broadcast(ServerEvent::PaneSessionIdResolved {
+                            pane_id,
+                            session_id: session_id.clone(),
+                            process_id: runtime.session_process_id,
+                            title_generation: runtime.title_generation,
+                        });
+                    }
                 }
             }
 
@@ -843,47 +894,81 @@ fn session_identity_is_stale(
         || session_is_ambiguously_claimed
 }
 
-/// Pulls `schedule.next_due` forward to `now` so the deadline-driven loop
-/// picks this pane up immediately,
-/// unless a previous force-check request already did so within
-/// `FORCE_CHECK_DEBOUNCE` -- in which case this is a no-op, leaving
-/// whatever `next_due`/`last_forced` were already in place. Called from
+/// Pulls `schedule.next_due` forward so the deadline-driven loop picks this
+/// pane up immediately, or at the end of an active debounce window. Every
+/// request advances `request_generation`, even when its deadline is coalesced,
+/// so an in-flight classification can never overwrite a newer user request.
+/// Called from
 /// `ipc::handlers::handle_key_input` (Enter keypress) and
 /// `handle_set_pane_focus` (a pane gaining or losing client focus), the
 /// two triggers this crate treats as "the user just did something that
 /// means this pane's status may be stale right now."
 pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) -> bool {
-    if schedule
-        .last_forced
-        .is_some_and(|since| now.duration_since(since) < FORCE_CHECK_DEBOUNCE)
-    {
-        return false;
-    }
-    schedule.last_forced = Some(now);
-    schedule.next_due = now;
-    true
+    schedule.request_generation = schedule.request_generation.wrapping_add(1);
+
+    let requested_deadline = match schedule.last_forced {
+        Some(last_forced) if now.saturating_duration_since(last_forced) < FORCE_CHECK_DEBOUNCE => {
+            last_forced + FORCE_CHECK_DEBOUNCE
+        }
+        Some(_) | None => {
+            schedule.last_forced = Some(now);
+            now
+        }
+    };
+    let previous_deadline = schedule.next_due;
+    schedule.next_due = schedule.next_due.min(requested_deadline);
+    schedule.next_due < previous_deadline
+}
+
+/// One pure identity/screen reduction result. Goal ownership stays separate
+/// from `PaneStatus` so the caller can persist it across inconclusive frames.
+struct IdentityClassification {
+    status: PaneStatus,
+    confirmed_goal_owner: Option<ConfirmedGoalOwner>,
 }
 
 /// Combines an already-resolved process identity with the screen snapshot
 /// captured only for that identified agent. Process-tree traversal remains
-/// separate so plain shells never pay for a vt100 text allocation.
+/// separate so plain shells never pay for a vt100 text allocation. Positive
+/// and negative goal evidence update ownership; silence retains it only for
+/// the exact same PID and provider class.
 fn classify_identity(
     identity: Option<&ilium_detect::AgentIdentity>,
     screen_text: &str,
-) -> PaneStatus {
+    previous_goal_owner: Option<&ConfirmedGoalOwner>,
+) -> IdentityClassification {
     match identity {
         Some(identity) => {
             let activity = ilium_detect::classify_activity_for_agent(&identity.class, screen_text);
-            // Goal detection is independent from activity. A provider can
-            // be working while its persistent goal remains active, so
-            // preserve both signals in the status sent to the sidebar.
-            if ilium_detect::has_visible_goal_for_agent(&identity.class, screen_text) {
+            let current_owner = ConfirmedGoalOwner {
+                process_id: identity.pid,
+                agent_class: identity.class.clone(),
+            };
+            let confirmed_goal_owner =
+                match ilium_detect::goal_evidence_for_agent(&identity.class, screen_text) {
+                    ilium_detect::GoalEvidence::Active => Some(current_owner),
+                    ilium_detect::GoalEvidence::Inactive => None,
+                    ilium_detect::GoalEvidence::Unknown
+                        if previous_goal_owner == Some(&current_owner) =>
+                    {
+                        Some(current_owner)
+                    }
+                    ilium_detect::GoalEvidence::Unknown => None,
+                };
+            let status = if confirmed_goal_owner.is_some() {
                 PaneStatus::AgentWithGoal(identity.class.clone(), activity)
             } else {
                 PaneStatus::Agent(identity.class.clone(), activity)
+            };
+            IdentityClassification {
+                status,
+                confirmed_goal_owner,
             }
         }
-        None => PaneStatus::PlainShell,
+        None => IdentityClassification {
+            status: PaneStatus::PlainShell,
+            confirmed_goal_owner: None,
+        },
     }
 }
 
@@ -1060,6 +1145,52 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn confirmed_goal_survives_inconclusive_frames_only_for_the_same_agent_process() {
+        let codex = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 42,
+        };
+        let active = classify_identity(
+            Some(&codex),
+            "model · workspace · Working · Pursuing goal (16m)",
+            None,
+        );
+        assert!(matches!(
+            active.status,
+            PaneStatus::AgentWithGoal(AgentClass::Codex, _)
+        ));
+        let owner = active
+            .confirmed_goal_owner
+            .expect("positive footer evidence must establish process ownership");
+
+        let transient = classify_identity(Some(&codex), "Working (esc to interrupt)", Some(&owner));
+        assert!(matches!(
+            transient.status,
+            PaneStatus::AgentWithGoal(AgentClass::Codex, _)
+        ));
+        assert_eq!(transient.confirmed_goal_owner.as_ref(), Some(&owner));
+
+        let completed = classify_identity(Some(&codex), "Goal achieved (20m)", Some(&owner));
+        assert!(matches!(
+            completed.status,
+            PaneStatus::Agent(AgentClass::Codex, _)
+        ));
+        assert_eq!(completed.confirmed_goal_owner, None);
+
+        let replacement = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 43,
+        };
+        let replacement_without_evidence =
+            classify_identity(Some(&replacement), "Send a message", Some(&owner));
+        assert!(matches!(
+            replacement_without_evidence.status,
+            PaneStatus::Agent(AgentClass::Codex, _)
+        ));
+        assert_eq!(replacement_without_evidence.confirmed_goal_owner, None);
+    }
+
     /// Regression test: `WaitingApproval` must poll on the fast tier, same
     /// as `Working` -- previously it shared the slow `idle_poll_interval`
     /// tier with genuinely-static states, so a pane that was ever
@@ -1126,10 +1257,9 @@ mod tests {
         );
     }
 
-    /// `force_check` pulls `next_due` to `now` on first call, but a second
-    /// call within `FORCE_CHECK_DEBOUNCE` must not push it out again --
-    /// otherwise rapid focus-flicking or Enter-mashing would starve the
-    /// detection loop into checking a pane every base tick indefinitely.
+    /// `force_check` pulls `next_due` to `now` on first call. A second call
+    /// within `FORCE_CHECK_DEBOUNCE` coalesces at the existing window boundary
+    /// while still advancing the generation that invalidates an in-flight pass.
     #[test]
     fn force_check_is_debounced() {
         let mut schedule = crate::pane::DetectionSchedule {
@@ -1137,25 +1267,38 @@ mod tests {
             current_interval: Duration::from_secs(45),
             client_focused: false,
             last_forced: None,
+            request_generation: 0,
         };
         let t0 = Instant::now();
         assert!(force_check(&mut schedule, t0));
         assert_eq!(schedule.next_due, t0);
+        assert_eq!(schedule.request_generation, 1);
 
         let t1 = t0 + Duration::from_secs(1);
         schedule.next_due = t0 + Duration::from_secs(30);
-        assert!(!force_check(&mut schedule, t1));
+        assert!(force_check(&mut schedule, t1));
         assert_eq!(
             schedule.next_due,
-            t0 + Duration::from_secs(30),
-            "a second force within the debounce window must not move next_due"
+            t0 + FORCE_CHECK_DEBOUNCE,
+            "a second force must be coalesced at the current debounce boundary"
         );
+        assert_eq!(schedule.request_generation, 2);
 
         let t2 = t0 + FORCE_CHECK_DEBOUNCE;
+        schedule.next_due = t0 + Duration::from_secs(30);
         assert!(force_check(&mut schedule, t2));
         assert_eq!(
             schedule.next_due, t2,
             "a force after the debounce window must take effect"
+        );
+        assert_eq!(schedule.request_generation, 3);
+
+        let t3 = t2 + Duration::from_secs(1);
+        assert!(!force_check(&mut schedule, t3));
+        assert_eq!(schedule.next_due, t2);
+        assert_eq!(
+            schedule.request_generation, 4,
+            "even an already-earlier deadline must invalidate an in-flight pass"
         );
     }
 

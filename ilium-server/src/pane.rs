@@ -96,6 +96,11 @@ pub struct TerminalPaneRuntime {
     /// Edge detector for provider-specific fresh screens. A fresh screen can
     /// persist for many detection ticks, but it must reset titles once only.
     pub is_showing_fresh_agent_screen: bool,
+    /// Durable goal ownership confirmed for this exact detected agent process.
+    /// An inconclusive screen sample retains it; explicit completion,
+    /// `/goal clear`, or a different PID/class removes it so one process can never
+    /// leak its flag into a replacement CLI in the same terminal pane.
+    pub confirmed_goal_owner: Option<ConfirmedGoalOwner>,
     pub detection_schedule: DetectionSchedule,
     /// This pane's agent session/thread ID, once `crate::session_id`
     /// discovers one. Rechecked while an agent is detected because `/resume`
@@ -134,6 +139,7 @@ impl TerminalPaneRuntime {
             pending_generated_session_id,
             title_generation: 0,
             is_showing_fresh_agent_screen: false,
+            confirmed_goal_owner: None,
             origin,
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
@@ -144,6 +150,7 @@ impl TerminalPaneRuntime {
                 current_interval: initial_poll_interval,
                 client_focused: false,
                 last_forced: None,
+                request_generation: 0,
             },
             session_id: None,
             session_agent_class: None,
@@ -162,6 +169,13 @@ impl TerminalPaneRuntime {
     }
 }
 
+/// Identity boundary for a server-retained goal signal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmedGoalOwner {
+    pub process_id: u32,
+    pub agent_class: AgentClass,
+}
+
 /// Returns true only for interactive commands known to replace the active
 /// conversation within an already-running agent process. Invalidating on a
 /// false positive would suppress a correct ID, so ordinary prompt content and
@@ -178,6 +192,13 @@ pub fn invalidates_agent_session_identity(submitted_line: &str) -> bool {
 /// its externally discoverable session identity.
 pub fn clears_agent_conversation(submitted_line: &str) -> bool {
     submitted_line.trim() == "/clear"
+}
+
+/// Returns true only for the explicit command that removes a persistent goal.
+/// Other `/goal` commands edit, pause, or resume the same attached goal and
+/// must not clear the sidebar signal while their footer is temporarily hidden.
+pub fn clears_agent_goal(submitted_line: &str) -> bool {
+    submitted_line.split_whitespace().eq(["/goal", "clear"])
 }
 
 impl Drop for TerminalPaneRuntime {
@@ -210,11 +231,13 @@ pub struct DetectionSchedule {
     /// pane the user is actually looking at should never lag behind the
     /// coarser working/idle tiers.
     pub client_focused: bool,
-    /// Last time `crate::detection::force_check` actually pulled
-    /// `next_due` forward for this pane, used to debounce repeated
-    /// force-check requests (focus transitions, Enter keypresses) to at
-    /// most one every `crate::detection::FORCE_CHECK_DEBOUNCE`.
+    /// Start of the current `crate::detection::force_check` debounce window.
+    /// Repeated requests inside it are coalesced at the window boundary.
     pub last_forced: Option<Instant>,
+    /// Increments for every user-triggered recheck request, including requests
+    /// coalesced by the debounce window. A detection pass captures this value
+    /// and cannot overwrite a newer request with its stale deadline/status.
+    pub request_generation: u64,
 }
 
 /// What a pane resource should be built from -- either a terminal to spawn
@@ -357,6 +380,21 @@ mod tests {
         assert!(clears_agent_conversation("  /clear  "));
         for command in ["/clear later", "please /clear", "/clearance", "/new"] {
             assert!(!clears_agent_conversation(command));
+        }
+    }
+
+    #[test]
+    fn only_the_exact_goal_clear_command_removes_confirmed_goal_ownership() {
+        assert!(clears_agent_goal("/goal clear"));
+        assert!(clears_agent_goal("  /goal   clear  "));
+        for command in [
+            "/goal",
+            "/goal pause",
+            "/goal resume",
+            "/goal clear later",
+            "please /goal clear",
+        ] {
+            assert!(!clears_agent_goal(command));
         }
     }
 

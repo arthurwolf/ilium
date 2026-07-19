@@ -25,6 +25,7 @@ use crate::icon_settings::{IconSettings, IconTarget};
 use crate::keymap::{self, KeyBinding, ShortcutBase, LEADER_BINDINGS};
 use crate::layout::{DEFAULT_TREE_WIDTH, MAX_TREE_WIDTH, MIN_TREE_WIDTH};
 use crate::theme::{ColorScheme, Theme};
+use crate::trigger_settings::TriggerSettings;
 
 /// The four client-side config tables, already validated. What [`load`]
 /// returns; a config file that fails to load falls back to
@@ -51,6 +52,8 @@ pub struct ClientConfig {
     pub kanban_board: KanbanBoardSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
     pub inference: InferenceSettings,
+    /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
+    pub triggers: TriggerSettings,
     /// Terminal presentation and creation defaults.
     pub terminal: TerminalSettings,
     /// Defaults applied when a local editor buffer is opened.
@@ -72,6 +75,7 @@ impl Default for ClientConfig {
             sound: SoundSettings::default(),
             kanban_board: KanbanBoardSettings::default(),
             inference: InferenceSettings::default(),
+            triggers: TriggerSettings::default(),
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
@@ -622,6 +626,8 @@ struct RawClientConfig {
     #[serde(default)]
     inference: InferenceSettings,
     #[serde(default)]
+    triggers: TriggerSettings,
+    #[serde(default)]
     terminal: RawTerminalConfig,
     #[serde(default)]
     editor: RawEditorConfig,
@@ -856,6 +862,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         sound: raw.sound,
         kanban_board,
         inference: raw.inference,
+        triggers: raw.triggers.normalized(),
         terminal,
         editor,
         session,
@@ -1462,6 +1469,25 @@ pub fn save_inference_settings(
     write_toml_document(&path, &document)
 }
 
+/// Persists the complete `[triggers]` event-to-actions table while preserving
+/// every unrelated client and detached-server setting.
+pub fn save_trigger_settings(
+    config_dir: &Path,
+    triggers: &TriggerSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(triggers).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("triggers".to_owned(), value);
+    write_toml_document(&path, &document)
+}
+
 /// Persists only `[voice]`, preserving every unrelated client and server
 /// table. API keys are stored with the same local-file policy as inference
 /// provider keys and are never written to logs or tool results.
@@ -1738,6 +1764,45 @@ mod tests {
         assert!(saved.contains("[detection]"));
         let loaded = load(&dir).unwrap();
         assert_eq!(loaded.inference, inference);
+    }
+
+    #[test]
+    fn trigger_settings_round_trip_without_replacing_server_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 5\n",
+        )
+        .unwrap();
+        let triggers = TriggerSettings {
+            startup_complete: vec![crate::trigger_settings::TriggerAction::RestructureAllProjects],
+            agent_finished_work: Vec::new(),
+            ..TriggerSettings::default()
+        };
+
+        save_trigger_settings(&dir, &triggers).unwrap();
+
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[detection]"));
+        assert_eq!(load(&dir).unwrap().triggers, triggers);
+    }
+
+    #[test]
+    fn partial_trigger_table_keeps_defaults_for_omitted_events() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[triggers]\nagent_finished_work = []\n",
+        )
+        .unwrap();
+
+        let triggers = load(&dir).unwrap().triggers;
+
+        assert!(triggers.agent_finished_work.is_empty());
+        assert_eq!(
+            triggers.agent_session_ready,
+            TriggerSettings::default().agent_session_ready
+        );
     }
 
     #[test]

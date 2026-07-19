@@ -13,6 +13,7 @@ use crate::config::{
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
+use crate::trigger_settings::{TriggerAction, TriggerEvent};
 use crate::App;
 
 use super::command::{SettingsAction, SettingsCommand, StateDetail};
@@ -303,6 +304,24 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         }
         "sound.events.waiting_background" => {
             set_sound_event(app, SoundEvent::WaitingBackground, boolean(&value)?)
+        }
+        path if path.starts_with("triggers.") => {
+            let event_key = path.trim_start_matches("triggers.");
+            let event = TriggerEvent::from_key(event_key)
+                .ok_or_else(|| format!("Unknown trigger event {event_key:?}"))?;
+            let values = value
+                .as_array()
+                .ok_or("trigger actions must be an array of action names")?;
+            let mut actions = Vec::with_capacity(values.len());
+            for value in values {
+                let action_key = string(value)?;
+                let action = TriggerAction::from_key(action_key)
+                    .ok_or_else(|| format!("Unknown trigger action {action_key:?}"))?;
+                actions.push(action);
+            }
+            let mut settings = app.trigger_settings.clone();
+            settings.set_actions(event, actions);
+            app.apply_and_persist_trigger_settings(settings);
         }
         "inference.provider" => {
             let provider = parse_inference_provider(string(&value)?)?;
@@ -664,6 +683,22 @@ mod tests {
         assert_eq!(app.ui_settings.motion_level, MotionLevel::Reduced);
         set_setting(&mut app, "voice.confirm_terminal_submissions", json!(true)).unwrap();
         assert!(app.voice_settings.confirm_terminal_submissions);
+        set_setting(
+            &mut app,
+            "triggers.agent_finished_work",
+            json!(["restructure_all_projects", "retitle_element"]),
+        )
+        .unwrap();
+        assert_eq!(
+            app.trigger_settings.agent_finished_work,
+            vec![
+                TriggerAction::RetitleElement,
+                TriggerAction::RestructureAllProjects,
+            ]
+        );
+        assert!(
+            set_setting(&mut app, "triggers.agent_finished_work", json!(["made_up"]),).is_err()
+        );
         assert!(set_setting(&mut app, "ui.made_up", json!(true)).is_err());
     }
 }

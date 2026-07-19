@@ -13,7 +13,9 @@ use ilium_core::{
     AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
     PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput, Tree, TreeError,
 };
-use ilium_ipc::{ClientRequest, NewPaneKind, NewPaneWorkingDirectory, ServerEvent};
+use ilium_ipc::{
+    ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
+};
 use ilium_pty::PtyError;
 use tokio::sync::mpsc;
 
@@ -162,8 +164,12 @@ pub async fn handle_request(
             handle_resize_pane(state, pane_id, rows, cols, direct_tx).await;
             false
         }
-        ClientRequest::KeyInput { pane_id, bytes } => {
-            handle_key_input(state, pane_id, &bytes, direct_tx).await;
+        ClientRequest::KeyInput {
+            pane_id,
+            bytes,
+            submission,
+        } => {
+            handle_key_input(state, pane_id, &bytes, submission, direct_tx).await;
             false
         }
         ClientRequest::MouseInput {
@@ -402,19 +408,32 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
         .await;
         return;
     }
-    let tree = state.tree.read().await;
-    let snapshot = tree.clone();
-    drop(tree);
-    send_direct(direct_tx, ServerEvent::TreeSnapshot(snapshot)).await;
-    if let Some(snapshot) = state.pending_session_recovery.lock().await.as_ref() {
+    let recovery_pane_count = state
+        .pending_session_recovery
+        .lock()
+        .await
+        .as_ref()
+        .map(|snapshot| snapshot.panes.len());
+    if let Some(pane_count) = recovery_pane_count {
+        let snapshot = state.tree.read().await.clone();
+        send_direct(direct_tx, ServerEvent::TreeSnapshot(snapshot)).await;
         send_direct(
             direct_tx,
-            ServerEvent::SessionRecoveryAvailable {
-                pane_count: snapshot.panes.len(),
-            },
+            ServerEvent::SessionRecoveryAvailable { pane_count },
         )
         .await;
+        return;
     }
+
+    send_initial_state(state, direct_tx).await;
+}
+
+/// Sends one ordered, complete client render-cache seed. Both normal attach
+/// and post-recovery resolution use this exact path so the startup trigger
+/// always observes the same state boundary.
+async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<ServerEvent>) {
+    let snapshot = state.tree.read().await.clone();
+    send_direct(direct_tx, ServerEvent::TreeSnapshot(snapshot)).await;
 
     // Terminal scrollback, session IDs, and editor paths belong to live pane
     // resources rather than the persisted tree wire shape, so replay them
@@ -449,6 +468,7 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
                         events.push(ServerEvent::PaneSessionIdResolved {
                             pane_id: *pane_id,
                             session_id,
+                            process_id: runtime.session_process_id,
                             title_generation: runtime.title_generation,
                         });
                     }
@@ -465,6 +485,7 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
     for event in replay_events {
         send_direct(direct_tx, event).await;
     }
+    send_direct(direct_tx, ServerEvent::InitialStateSyncComplete).await;
 }
 
 async fn handle_session_recovery_resolution(
@@ -492,6 +513,7 @@ async fn handle_session_recovery_resolution(
             .await;
         }
     }
+    send_initial_state(state, direct_tx).await;
 }
 
 /// Shared plumbing for the two tree-only mutations (`MoveNode`,
@@ -1028,13 +1050,22 @@ async fn handle_new_pane(
         }
     }
 
+    // Make the pane addressable on every attached client before a semantic
+    // initial-prompt event can arrive for it.
+    broadcast_and_persist(state).await;
+
     if let Some(initial_input) = plan.initial_input {
         let bytes = initial_input_bytes(&initial_input);
-        handle_key_input(state, pane_id, &bytes, direct_tx).await;
-        handle_key_input(state, pane_id, b"\r", direct_tx).await;
+        handle_key_input(state, pane_id, &bytes, None, direct_tx).await;
+        handle_key_input(
+            state,
+            pane_id,
+            b"\r",
+            Some(PromptSubmissionSource::InitialAgentPrompt),
+            direct_tx,
+        )
+        .await;
     }
-
-    broadcast_and_persist(state).await;
 }
 
 /// Failure from [`spawn_and_register_pane_in_directory`]. Distinguishes an
@@ -1316,9 +1347,10 @@ async fn handle_key_input(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    if let Err(message) = write_key_input(state, pane_id, bytes).await {
+    if let Err(message) = write_key_input(state, pane_id, bytes, submission).await {
         send_direct_error(direct_tx, message).await;
     }
 }
@@ -1331,7 +1363,12 @@ pub(crate) async fn write_key_input(
     state: &ServerState,
     pane_id: NodeId,
     bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
 ) -> Result<(), String> {
+    if submission.is_some() && bytes.last() != Some(&b'\r') {
+        return Err("prompt submission metadata requires a trailing Enter".to_owned());
+    }
+
     // A cheap read-lock check up front: only an automatic-title
     // plain-shell pane can ever need this keystroke to touch the tree at
     // all. Escalating straight to `tree.write()` on every keystroke (as
@@ -1396,6 +1433,15 @@ pub(crate) async fn write_key_input(
                     }
                 }
                 let submitted_line = runtime.session_command_tracker.observe(bytes);
+                if submitted_line
+                    .as_deref()
+                    .is_some_and(crate::pane::clears_agent_goal)
+                {
+                    // The successful PTY write is authoritative user intent.
+                    // Clear retained ownership immediately so a footer-hidden
+                    // `/goal clear` cannot leave a sticky sidebar flag.
+                    runtime.confirmed_goal_owner = None;
+                }
                 let session_identity_invalidated = submitted_line
                     .as_deref()
                     .is_some_and(crate::pane::invalidates_agent_session_identity);
@@ -1447,6 +1493,10 @@ pub(crate) async fn write_key_input(
 
     if let Some(message) = error_message {
         return Err(message);
+    }
+
+    if let Some(source) = submission {
+        state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
     }
 
     if let Some(title_generation) = cleared_session_title_generation {

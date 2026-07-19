@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use ilium_core::{
     AgentProvider, BuiltinAgentProvider, PromptQueueDelivery, SplitOrientation, TreeMoveDirection,
 };
-use ilium_ipc::ClientRequest;
+use ilium_ipc::{ClientRequest, PromptSubmissionSource};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -425,7 +425,14 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
             if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
                 view.scroll_to_bottom();
             }
-            app.queue_request(ClientRequest::KeyInput { pane_id, bytes });
+            app.queue_request(ClientRequest::KeyInput {
+                pane_id,
+                bytes,
+                submission: command
+                    .send_enter
+                    .unwrap_or(false)
+                    .then_some(PromptSubmissionSource::VoiceControl),
+            });
             Ok(ExecutionReceipt::queued("Sent text to the terminal"))
         }
         TerminalAction::PressKey => {
@@ -433,6 +440,8 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
             app.queue_request(ClientRequest::KeyInput {
                 pane_id,
                 bytes: terminal_key_bytes(key).to_vec(),
+                submission: matches!(key, TerminalKey::Enter)
+                    .then_some(PromptSubmissionSource::VoiceControl),
             });
             Ok(ExecutionReceipt::queued("Sent the key to the terminal"))
         }

@@ -37,10 +37,12 @@ const RESTRUCTURE_MAX_TOKENS: u32 = 4096;
 
 /// How many lines of a content extract to keep from the start/end when it
 /// exceeds `HEAD_LINES + TAIL_LINES` -- mirrors `terminal_naming`'s
-/// character-based clip, but line-based here since the user asked for
-/// "beginning 20 lines + [...] + ending 20 lines".
-const CONTEXT_HEAD_LINES: usize = 20;
-const CONTEXT_TAIL_LINES: usize = 20;
+/// character-based clip, but line-based here. Kept generous, same rationale
+/// as `naming::LLM_CONTEXT_EDGE_CHARS`: a restructure decision covering an
+/// entire project benefits from seeing enough of each item to actually judge
+/// what it's doing, not just its first and last screenful.
+const CONTEXT_HEAD_LINES: usize = 60;
+const CONTEXT_TAIL_LINES: usize = 60;
 
 const RESTRUCTURE_TEMPLATE: &str = r#"<instructions>
 You are reorganizing a developer's workspace of terminals, coding agents, editors, and boards into groups by what they are working on, and giving every item -- including any new group you create -- a clear title.
@@ -48,12 +50,18 @@ You are reorganizing a developer's workspace of terminals, coding agents, editor
 Return one JSON object with a single "children" array describing the COMPLETE new structure. This is a full replacement, not an edit: every existing item listed below must appear exactly once somewhere in "children" (or nested inside a group/split_view within it), referenced by its exact numeric "id". Do not invent an id that isn't listed below. Do not omit any listed id. Do not reference any id more than once.
 
 Each entry in "children" (and in any nested "children") is exactly one of:
-- {"kind":"pane","id":<number>,"title":"...","short_title":"...","icon":"..."} -- an existing pane, referenced by id
+- {"kind":"pane","id":<number>,"title":"...","short_title":"...","icon":"...","command_hint":"..."} -- an existing pane, referenced by id
 - {"kind":"folder","id":<number>,"title":"...","short_title":"...","icon":"..."} -- an existing folder, referenced by id
 - {"kind":"group","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new group; never has an id
 - {"kind":"split_view","orientation":"vertical"|"horizontal","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new split view; never has an id; its "children" must all be "pane" entries, at most 4 of them
 
 "title" is a full descriptive title (5 to 7 words); "short_title" is a short form (2 to 3 words); "icon" is one compact UTF-8 icon/emoticon. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
+
+Every "pane" entry whose item below has kind="Plain shell" (a plain terminal, not an agent/editor/board) must also carry a "command_hint": the short form of whichever single command is currently running, most recently finished, or whose output is what's currently in that item's content -- or "" if none is clearly identifiable. Rules for "command_hint":
+- Keep only the program name, plus its first argument when that argument is a subcommand (e.g. "git commit", "cargo build", "docker ps", "npm run"), or its short flags when the flags are essential to what the command does (e.g. "ps faux", "ls -la").
+- Never include full argument lists, file paths, quoted strings, commit messages, URLs, environment variables, or anything piped/redirected after the first command.
+- Keep it under 20 characters. Do not wrap it in brackets yourself; that's done for you, and it is added in front of "title"/"short_title", so do not restate the command inside those two fields either.
+For every other pane kind (an agent, editor, or board), set "command_hint" to "" -- this rule is terminal-only. A pane's current-title above may already start with a "[...]" bracket from a previous restructure; ignore that bracket when writing the new "title"/"short_title" and let "command_hint" carry the command instead.
 </instructions>
 <current-structure>
 The following is the project's current hierarchy. Use it as context and preserve useful continuity where it still matches the items' current work. Entries marked "manual" reflect deliberate user organization and deserve particular weight; entries marked "LLM restructure" came from a previous AI reorganization and may be retained when still useful. This is inspiration, not a constraint: do not reproduce it mechanically, and reorganize it whenever the current item content supports a clearer structure.
@@ -71,7 +79,7 @@ The following is the project's current hierarchy. Use it as context and preserve
 </item>
 {{/each}}
 </items>
-<output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧"},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}</output-example>
+<output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧","command_hint":""},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️","command_hint":"npm run dev"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}</output-example>
 <response-format>Return exactly one JSON object following the output example's shape. Do not wrap it in Markdown.</response-format>"#;
 
 /// One pane or folder's current identity and content, as sent to the LLM.
@@ -267,22 +275,39 @@ fn render_structure_children(
 /// content extract by reading that agent's transcript -- disk I/O, so this
 /// is meant to run on the background worker thread, not the main loop.
 /// A transcript that can't be located or read falls back to a placeholder
-/// rather than failing the whole restructure over one pane.
+/// rather than failing the whole restructure over one pane. Reads the full
+/// typed user/assistant/tool stream (`transcript_context::recent_transcript_entries`),
+/// the same one `session_naming::infer_pane_title` uses, rather than only
+/// user prompts -- what an agent has actually been doing/answering matters
+/// just as much to a restructure decision as what it was asked to do.
 pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path, cwd: &Path) {
     for context in contexts.iter_mut() {
         let Some((class, session_id)) = context.agent_lookup.take() else {
             continue;
         };
-        let prompts = ilium_agent_session::TranscriptLocator::new(home, cwd)
+        let entries = ilium_agent_session::TranscriptLocator::new(home, cwd)
             .transcript_for_session(&class, &session_id)
             .and_then(|transcript| {
-                crate::transcript_prompts::recent_user_prompts(&class, &transcript.path).ok()
+                crate::transcript_context::recent_transcript_entries(&class, &transcript.path).ok()
             });
-        context.content_extract = match prompts {
-            Some(prompts) if !prompts.is_empty() => clip_lines(&prompts.join("\n\n")),
+        context.content_extract = match entries {
+            Some(entries) if !entries.is_empty() => {
+                clip_lines(&format_transcript_entries(&entries))
+            }
             _ => "(no transcript available)".to_string(),
         };
     }
+}
+
+/// Renders typed transcript entries as `[role] content` lines, one entry per
+/// paragraph, so a restructure item's content extract shows the same
+/// role-labeled shape `session_naming`'s prompt does.
+fn format_transcript_entries(entries: &[crate::transcript_context::TranscriptEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| format!("[{}] {}", entry.kind.prompt_label(), entry.content))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn describe_pane_status(status: &PaneStatus) -> String {
@@ -359,6 +384,14 @@ enum LlmRestructureNode {
         title: String,
         short_title: Option<String>,
         icon: Option<String>,
+        /// Short form of the pane's currently-running/most-recent command --
+        /// only meaningful for a plain-shell terminal pane (see the
+        /// "command_hint" prompt rule above); `apply_command_hints` restricts
+        /// it to those panes and folds it into `title`/`short_title` as a
+        /// "[cmd] " prefix before this struct converts into
+        /// `ilium_core::RestructureNode`, which has no field for it.
+        #[serde(default)]
+        command_hint: Option<String>,
     },
     Folder {
         id: NodeId,
@@ -610,8 +643,22 @@ fn parse_restructure_response(
     preserve_existing_leaf_icons(&mut parsed.children, contexts);
     validate_titles(&parsed.children)?;
 
+    // The "[cmd] " prefix rule is terminal-only (see the prompt's
+    // "command_hint" instructions): a model that mislabels some other pane
+    // kind with a command_hint must not have it applied, so this set --
+    // not the model's own claim -- is what actually gates the prefix.
+    let terminal_pane_ids: HashSet<NodeId> = contexts
+        .iter()
+        .filter(|context| context.kind_label == "Plain shell")
+        .map(|context| context.id)
+        .collect();
+
     Ok(RestructurePlan {
-        children: parsed.children.into_iter().map(convert_node).collect(),
+        children: parsed
+            .children
+            .into_iter()
+            .map(|node| convert_node(node, &terminal_pane_ids))
+            .collect(),
     })
 }
 
@@ -706,19 +753,35 @@ fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn convert_node(node: LlmRestructureNode) -> RestructureNode {
+/// Converts one LLM-shaped node into the core plan type, threading
+/// `terminal_pane_ids` down so the `Pane` arm can gate its "[cmd] " prefix
+/// (see `parse_restructure_response`) on the item actually being a plain-shell
+/// terminal rather than trusting the model's own `command_hint` placement.
+fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -> RestructureNode {
     match node {
         LlmRestructureNode::Pane {
             id,
             title,
             short_title,
             icon,
-        } => RestructureNode::Pane {
-            id,
-            title: title.trim().to_string(),
-            short_title: normalize_optional(short_title),
-            icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
-        },
+            command_hint,
+        } => {
+            let command_hint = terminal_pane_ids
+                .contains(&id)
+                .then_some(command_hint)
+                .flatten();
+            RestructureNode::Pane {
+                id,
+                title: crate::naming::format_with_command_hint(
+                    title.trim().to_string(),
+                    command_hint.as_deref(),
+                ),
+                short_title: normalize_optional(short_title).map(|short| {
+                    crate::naming::format_with_command_hint(short, command_hint.as_deref())
+                }),
+                icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
+            }
+        }
         LlmRestructureNode::Folder {
             id,
             title,
@@ -739,7 +802,10 @@ fn convert_node(node: LlmRestructureNode) -> RestructureNode {
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
             icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
-            children: children.into_iter().map(convert_node).collect(),
+            children: children
+                .into_iter()
+                .map(|child| convert_node(child, terminal_pane_ids))
+                .collect(),
         },
         LlmRestructureNode::SplitView {
             orientation,
@@ -755,7 +821,10 @@ fn convert_node(node: LlmRestructureNode) -> RestructureNode {
             title: title.trim().to_string(),
             short_title: normalize_optional(short_title),
             icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
-            children: children.into_iter().map(convert_node).collect(),
+            children: children
+                .into_iter()
+                .map(|child| convert_node(child, terminal_pane_ids))
+                .collect(),
         },
     }
 }
@@ -865,6 +934,58 @@ mod tests {
         assert!(matches!(
             &plan.children[0],
             RestructureNode::Pane { icon: Some(icon), .. } if icon == "🔧"
+        ));
+    }
+
+    #[test]
+    fn a_terminal_panes_command_hint_is_prefixed_onto_title_and_short_title() {
+        let generator = FakeGenerator::new(
+            r#"{"children":[{"kind":"pane","id":1,"title":"Monitor Live Processes","short_title":"Process Monitor","icon":"📊","command_hint":"htop"}]}"#,
+        );
+        let contexts = vec![leaf(1, "shell-a")];
+
+        let plan = infer_restructure_plan(&generator, &contexts).unwrap();
+
+        assert!(matches!(
+            &plan.children[0],
+            RestructureNode::Pane { title, short_title, .. }
+                if title == "[htop] Monitor Live Processes"
+                    && short_title.as_deref() == Some("[htop] Process Monitor")
+        ));
+    }
+
+    #[test]
+    fn an_empty_command_hint_leaves_a_terminal_panes_title_unprefixed() {
+        let generator = FakeGenerator::new(
+            r#"{"children":[{"kind":"pane","id":1,"title":"Idle Shell","short_title":null,"icon":"🐚","command_hint":""}]}"#,
+        );
+        let contexts = vec![leaf(1, "shell-a")];
+
+        let plan = infer_restructure_plan(&generator, &contexts).unwrap();
+
+        assert!(matches!(
+            &plan.children[0],
+            RestructureNode::Pane { title, .. } if title == "Idle Shell"
+        ));
+    }
+
+    #[test]
+    fn a_command_hint_on_a_non_terminal_pane_is_ignored() {
+        // The prompt asks the model to leave "command_hint" empty for
+        // anything that isn't a plain-shell terminal, but the gate must not
+        // rely on the model actually following that -- a mislabeled agent
+        // pane must never get a "[cmd] " prefix either.
+        let generator = FakeGenerator::new(
+            r#"{"children":[{"kind":"pane","id":1,"title":"Claude Fixing Login Bug","short_title":null,"icon":"🤖","command_hint":"claude"}]}"#,
+        );
+        let mut contexts = vec![leaf(1, "agent-a")];
+        contexts[0].kind_label = "Claude agent (working)".to_string();
+
+        let plan = infer_restructure_plan(&generator, &contexts).unwrap();
+
+        assert!(matches!(
+            &plan.children[0],
+            RestructureNode::Pane { title, .. } if title == "Claude Fixing Login Bug"
         ));
     }
 
@@ -1059,6 +1180,8 @@ mod tests {
         assert!(prompt.contains("shell-a"));
         assert!(prompt.contains("$ cargo build"));
         assert!(prompt.contains("<output-example>"));
+        assert!(prompt.contains("command_hint"));
+        assert!(prompt.contains("kind=\"Plain shell\""));
     }
 
     #[test]

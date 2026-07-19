@@ -94,6 +94,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
             &ClientRequest::KeyInput {
                 pane_id,
                 bytes: bytes.to_vec(),
+                submission: None,
             },
         )
         .await
@@ -157,6 +158,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
         &ClientRequest::KeyInput {
             pane_id,
             bytes: b"echo must-not-replace-user-name\r".to_vec(),
+            submission: None,
         },
     )
     .await
@@ -221,6 +223,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
         &ClientRequest::KeyInput {
             pane_id,
             bytes: b"not-a-shell-command-title\r".to_vec(),
+            submission: None,
         },
     )
     .await

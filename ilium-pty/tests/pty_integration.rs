@@ -121,9 +121,14 @@ fn process_id_is_reported_for_a_spawned_child() {
 
 #[tokio::test]
 async fn screen_changed_watch_channel_notifies_on_new_output() {
-    let command = PtyCommand::new("echo", std::env::temp_dir(), 24, 80).arg("watch-channel-marker");
-    let session = PtySession::spawn(command).expect("spawning echo should succeed");
+    let command = PtyCommand::new("cat", std::env::temp_dir(), 24, 80);
+    let session = PtySession::spawn(command).expect("spawning cat should succeed");
     let mut screen_changed = session.subscribe_screen_changed();
+    let initial_generation = session.screen_generation();
+
+    session
+        .write(b"watch-channel-marker\n")
+        .expect("writing the marker should succeed");
 
     let notified = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -146,9 +151,16 @@ async fn screen_changed_watch_channel_notifies_on_new_output() {
         "timed out waiting for a screen-changed notification"
     );
     assert!(
-        session.screen_text().contains("watch-channel-marker"),
+        session
+            .screen_snapshot()
+            .text
+            .contains("watch-channel-marker"),
         "expected echo's output on screen after being notified, got: {:?}",
         session.screen_text()
+    );
+    assert!(
+        session.screen_generation() > initial_generation,
+        "screen generation must advance when parser-visible output arrives"
     );
 }
 

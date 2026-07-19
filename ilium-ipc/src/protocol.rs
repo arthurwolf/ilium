@@ -79,6 +79,19 @@ pub struct MouseModifiers {
     pub control: bool,
 }
 
+/// The semantic origin of an Enter submission. Raw terminal bytes are not
+/// enough to recover this reliably: bracketed paste may contain newlines,
+/// while scheduled and queued prompts bypass the interactive key handler.
+/// The server echoes this value only after the complete PTY write succeeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PromptSubmissionSource {
+    Keyboard,
+    VoiceControl,
+    ScheduledInput,
+    QueuedPrompt,
+    InitialAgentPrompt,
+}
+
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here
 /// is either a tree-structural command (delegated straight to
 /// `ilium_core::Tree` methods server-side) or a pane-IO command (raw
@@ -126,7 +139,11 @@ pub enum ClientRequest {
     },
     /// Raw bytes already encoded for the terminal (arrow keys, control
     /// sequences, literal text) to write into a pane's PTY.
-    KeyInput { pane_id: NodeId, bytes: Vec<u8> },
+    KeyInput {
+        pane_id: NodeId,
+        bytes: Vec<u8>,
+        submission: Option<PromptSubmissionSource>,
+    },
     /// A mouse event to forward into a pane's PTY, already encoded per
     /// that pane's negotiated mouse protocol.
     MouseInput {
@@ -335,6 +352,10 @@ pub enum ServerEvent {
     PaneSessionIdResolved {
         pane_id: NodeId,
         session_id: String,
+        /// Exact detected agent process that owns this verified transcript.
+        /// `None` is retained only as a defensive representation for an
+        /// inconsistent restored runtime; normal discovery always supplies it.
+        process_id: Option<u32>,
         title_generation: u64,
     },
     /// The previously resolved ID no longer belongs to the detected agent
@@ -376,4 +397,17 @@ pub enum ServerEvent {
     },
     /// A stored session snapshot awaits an explicit recovery decision.
     SessionRecoveryAvailable { pane_count: usize },
+    /// The complete attach-time state stream has been delivered: tree,
+    /// terminal replay, agent session identities, and editor paths. This is
+    /// intentionally later than the first `TreeSnapshot`, so startup actions
+    /// cannot race partially reconstructed client state.
+    InitialStateSyncComplete,
+    /// A semantically identified prompt or command was accepted by the PTY.
+    /// Emitted only after the full write succeeds; consumers must never infer
+    /// submissions by scanning arbitrary key or paste bytes for carriage
+    /// returns.
+    PanePromptSubmitted {
+        pane_id: NodeId,
+        source: PromptSubmissionSource,
+    },
 }

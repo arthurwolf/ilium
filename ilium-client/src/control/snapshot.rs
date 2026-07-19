@@ -179,6 +179,7 @@ fn settings_snapshot(app: &App) -> Value {
             "kanban_board.minimum_column_width", "sound.source", "sound.file",
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
+            "triggers.<event_key>",
             "inference.provider", "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
@@ -235,6 +236,7 @@ fn settings_snapshot(app: &App) -> Value {
             "provider": app.inference_settings.selected_provider.label(),
             "credentials": "redacted",
         },
+        "triggers": &app.trigger_settings,
         "voice": {
             "enabled": app.voice_settings.enabled,
             "connection_state": format!("{:?}", app.voice_connection_state),

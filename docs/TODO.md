@@ -1,3 +1,12 @@
+# Automatic LLM title and structure triggers
+
+- [x] Define a typed, persisted event-to-actions contract with explicit scope rules, safe deduplication, and reasonable defaults.
+- [x] Add precise startup, prompt-submission, and semantic agent-lifecycle event seams without duplicating the sound/detection logic.
+- [x] Route trigger actions through the existing single-element retitle and project/all-project restructure worker boundaries.
+- [x] Add a dedicated, aerated Triggers settings tab with responsive multi-select action chips, keyboard navigation, mouse hit testing, live persistence, and clear safety/context copy.
+- [x] Cover configuration, event routing, concurrency guards, rendering, keyboard/mouse behavior, and IPC round trips with focused regressions.
+- [x] Run workspace gates, release-install, and controlled installed-TUI verification of the settings and automatic trigger flows.
+
 # Full OpenAI Realtime voice control
 
 - [x] Add a provider-neutral, owned voice runtime with OpenAI Realtime WebSocket transport, microphone capture, speaker playback, interruption, and clean shutdown.
@@ -301,8 +310,8 @@
 
 # AI session titles
 
-- [x] Add `transcript_prompts.rs`: locate a session's JSONL transcript (via `agent_detect::transcript_path_for_session`), extract the last few genuinely user-typed prompts (Claude `type:"user"`+string content, non-sidechain; Codex `event_msg`/`user_message`), compact each to a bounded head+tail.
-- [x] Add `session_naming.rs`: XML/Handlebars prompt template weighting recent prompts, `SessionTitleGenerator` trait over Kilo Gateway, 2-4 word response validation.
+- [x] Add `transcript_context.rs`: locate the project-verified JSONL transcript, extract separate recent user, assistant, and tool-result windows in chronological order, and compact every dynamic context value independently to its first/last 1,000 Unicode characters.
+- [x] Add `session_naming.rs`: XML/Handlebars prompt template combining the current title, pane/session/process/project/transcript metadata, activity/goal state, terminal screen, and typed transcript entries; validate icon plus 2-3-word short and 5-7-word long titles.
 - [x] Add a `TitleSource` (`Auto`/`User`) flag to `SavedNode::Terminal` in `workspace_file.rs` so a user-typed rename is never overwritten by auto-inference, and a restored pane never re-triggers inference for a title it already has.
 - [x] Wire `App::panes_needing_title_inference`/`mark_title_inference_started`/`apply_inferred_title`/`fail_title_inference` and per-pane worker orchestration in `main.rs` (mirrors the project-name worker, generalized to a map).
 - [x] Render the shared braille spinner in place of a pane's name in `tree_ui::pane_label` while its title inference is in flight.

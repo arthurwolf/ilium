@@ -8,19 +8,15 @@
 //! non-async `blocking_send` from off the runtime, so no second bridging
 //! hop is needed.
 //!
-//! Session-title inference (`spawn_session_title_worker`) is triggered by
-//! `crate::title_inference::pane_ready_for_inference`, called from
-//! `crate::run`'s event loop right after `render_cache::apply` -- see that
-//! module's docs for the triggers (a pane's session ID/status becoming
-//! usable, or a later `Done` transition retrying a still-untitled pane) and for
-//! why the decision itself lives in a separate, pure, unit-testable
-//! function rather than inline here.
+//! Session-title inference (`spawn_session_title_worker`) receives one
+//! immutable `SessionTitleInput` captured by the automatic trigger router or
+//! explicit row action before this background boundary.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use ilium_core::{AgentClass, NodeId};
+use ilium_core::NodeId;
 use ilium_inference::InferenceSettings;
 use tokio::sync::mpsc::Sender;
 
@@ -65,11 +61,8 @@ pub enum NamingWorkerEvent {
 /// contract explicit at the thread boundary instead of relying on callers to
 /// preserve their ordering across a long parameter list.
 pub struct SessionTitleWorkerRequest {
-    pub pane_id: NodeId,
     pub home: PathBuf,
-    pub cwd: PathBuf,
-    pub agent_class: AgentClass,
-    pub session_id: String,
+    pub input: crate::session_naming::SessionTitleInput,
     pub title_generation: u64,
     pub trigger: TitleTrigger,
 }
@@ -134,14 +127,13 @@ impl NamingWorkers {
     /// already running for it -- see the module docs for what triggers this.
     pub fn spawn_session_title_worker(&mut self, request: SessionTitleWorkerRequest) {
         let SessionTitleWorkerRequest {
-            pane_id,
             home,
-            cwd,
-            agent_class,
-            session_id,
+            input,
             title_generation,
             trigger,
         } = request;
+        let pane_id = input.pane_id;
+        let session_id = input.session_id.clone();
         if !self
             .session_title_in_flight
             .insert((pane_id, session_id.clone()))
@@ -151,13 +143,8 @@ impl NamingWorkers {
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         std::thread::spawn(move || {
-            let result = crate::session_naming::infer_pane_title(
-                &inference_settings,
-                &home,
-                &cwd,
-                &agent_class,
-                &session_id,
-            );
+            let result =
+                crate::session_naming::infer_pane_title(&inference_settings, &home, &input);
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
             let _ = events_tx.blocking_send(NamingWorkerEvent::SessionTitle(
@@ -175,24 +162,22 @@ impl NamingWorkers {
             .remove(&(pane_id, session_id.to_string()));
     }
 
-    /// Spawns a terminal-screen title inference worker for `pane_id`,
+    /// Spawns a terminal-screen title inference worker for `input.pane_id`,
     /// unless one is already running for it -- see `crate::terminal_naming`
-    /// and `App::maybe_trigger_terminal_retitle`/`App::action_request_retitle`
-    /// for what triggers this.
+    /// and the manual/automatic request paths in `App`.
     pub fn spawn_terminal_title_worker(
         &mut self,
-        pane_id: NodeId,
-        screen_text: String,
+        input: crate::terminal_naming::TerminalTitleInput,
         trigger: TitleTrigger,
     ) {
+        let pane_id = input.pane_id;
         if !self.terminal_title_in_flight.insert(pane_id) {
             return;
         }
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         std::thread::spawn(move || {
-            let result =
-                crate::terminal_naming::infer_terminal_title(&inference_settings, &screen_text);
+            let result = crate::terminal_naming::infer_terminal_title(&inference_settings, &input);
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
             let _ =

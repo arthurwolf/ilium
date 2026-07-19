@@ -135,10 +135,14 @@ pub struct SettingsLayout {
 /// border between the tab list and content -- [`GAP_WIDTH`] blank columns
 /// instead, per the module doc comment's "aerated, not boxy" brief.
 pub fn compute_layout(area: Rect) -> SettingsLayout {
+    // `ui::draw` renders the persistent voice affordance after this full-screen
+    // root. Reserve its bottom row here so scrollable settings content and
+    // pointer geometry never disappear underneath that later overlay.
+    let settings_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(HEADER_HEIGHT), Constraint::Min(1)])
-        .split(area);
+        .split(settings_area);
     let header_area = rows[0];
     let body_area = rows[1];
 
@@ -218,6 +222,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::Triggers => crate::trigger_settings_ui::render(
+            frame,
+            layout.content_area,
+            app,
+            state.selected_row,
+            state.trigger_action_cursor,
+            state.scroll,
+        ),
         SettingsTab::Appearance => {
             let lines = appearance_lines(&app.ui_settings, state.selected_row);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -316,8 +328,11 @@ pub fn close_button_hit(header_area: Rect, position: Position) -> bool {
 /// One blank top-padding line, then each tab's label with one blank spacer
 /// line after it -- see [`tab_at`] for the matching hit-test arithmetic.
 fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
-    let mut lines = Vec::with_capacity(1 + SettingsTab::ALL.len() * usize::from(TAB_ROW_HEIGHT));
-    lines.push(Line::from(""));
+    let row_height = tab_row_height(area);
+    let mut lines = Vec::with_capacity(
+        usize::from(TAB_LIST_TOP_PADDING) + SettingsTab::ALL.len() * usize::from(row_height),
+    );
+    lines.extend((0..TAB_LIST_TOP_PADDING).map(|_| Line::from("")));
     for tab in SettingsTab::ALL {
         let style = if tab == active {
             theme::selected_style().add_modifier(Modifier::BOLD)
@@ -328,7 +343,9 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
             format!("  {}", tab.label()),
             style,
         )));
-        lines.push(Line::from(""));
+        if row_height > 1 {
+            lines.push(Line::from(""));
+        }
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -344,11 +361,24 @@ pub fn tab_at(tab_list_area: Rect, position: Position) -> Option<SettingsTab> {
         return None;
     }
     let row = row - TAB_LIST_TOP_PADDING;
-    if !row.is_multiple_of(TAB_ROW_HEIGHT) {
+    let row_height = tab_row_height(tab_list_area);
+    if !row.is_multiple_of(row_height) {
         return None;
     }
-    let index = usize::from(row / TAB_ROW_HEIGHT);
+    let index = usize::from(row / row_height);
     SettingsTab::ALL.get(index).copied()
+}
+
+/// Keeps the spacious two-line rail when it fits and compacts to one line
+/// per tab on short terminals so the final Triggers/About entries remain
+/// visible and clickable.
+const fn tab_row_height(area: Rect) -> u16 {
+    let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
+    if area.height >= spacious_height {
+        TAB_ROW_HEIGHT
+    } else {
+        1
+    }
 }
 
 /// Renders `lines` scrolled by `scroll` rows, adding a vertical scrollbar
@@ -385,6 +415,15 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             selected_row,
         )
         .len() as u16,
+        SettingsTab::Triggers => {
+            return crate::trigger_settings_ui::max_scroll(
+                app,
+                content_area.width,
+                content_area.height,
+                selected_row,
+                0,
+            );
+        }
         SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
         SettingsTab::Icons => 0,
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
@@ -2549,38 +2588,48 @@ mod tests {
             tab_at(area, Position::new(2, 1)),
             Some(SettingsTab::Appearance)
         );
-        assert_eq!(tab_at(area, Position::new(2, 3)), Some(SettingsTab::Icons));
+        assert_eq!(tab_at(area, Position::new(2, 2)), Some(SettingsTab::Icons));
         assert_eq!(
-            tab_at(area, Position::new(2, 5)),
+            tab_at(area, Position::new(2, 3)),
             Some(SettingsTab::Keyboard)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 7)),
+            tab_at(area, Position::new(2, 4)),
             Some(SettingsTab::Terminal)
         );
-        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::Editor));
+        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::Editor));
         assert_eq!(
-            tab_at(area, Position::new(2, 11)),
+            tab_at(area, Position::new(2, 6)),
             Some(SettingsTab::Session)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 13)),
+            tab_at(area, Position::new(2, 7)),
             Some(SettingsTab::KanbanBoard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Sound));
+        assert_eq!(tab_at(area, Position::new(2, 8)), Some(SettingsTab::Sound));
         assert_eq!(
-            tab_at(area, Position::new(2, 17)),
+            tab_at(area, Position::new(2, 9)),
             Some(SettingsTab::VoiceControl)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 19)),
+            tab_at(area, Position::new(2, 10)),
             Some(SettingsTab::Inference)
         );
-        assert_eq!(tab_at(area, Position::new(2, 21)), Some(SettingsTab::About));
+        assert_eq!(
+            tab_at(area, Position::new(2, 11)),
+            Some(SettingsTab::Triggers)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 12)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
-        // Row 2 is the blank spacer after the first tab.
-        assert_eq!(tab_at(area, Position::new(2, 2)), None);
+
+        let spacious = Rect::new(0, 0, 30, 30);
+        // Spacious layouts retain the blank row after each tab.
+        assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 23)),
+            Some(SettingsTab::About)
+        );
     }
 
     #[test]
@@ -2683,6 +2732,40 @@ mod tests {
             !returned_to_icons.contains("rocket"),
             "returning to icon assignments must not retain catalogue cells"
         );
+    }
+
+    #[test]
+    fn triggers_tab_renders_event_cards_and_wrapped_action_chips() {
+        let app = App::new("test-session".to_owned(), std::path::PathBuf::from("/tmp"));
+        let state = SettingsState {
+            tab: SettingsTab::Triggers,
+            selected_row: 6,
+            trigger_action_cursor: 2,
+            ..SettingsState::default()
+        };
+        // Keep the complete event document visible here; compact scrolling is
+        // asserted separately below and by `trigger_settings_ui`'s narrow tests.
+        let backend = TestBackend::new(100, 80);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        let normalized_rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(rendered.contains("AUTOMATION ROUTER"));
+        assert!(normalized_rendered.contains("Agent finishes work"));
+        assert!(rendered.contains("Retitle"));
+        assert!(rendered.contains("All projects"));
+
+        let content = compute_layout(Rect::new(0, 0, 54, 16)).content_area;
+        assert!(max_scroll(SettingsTab::Triggers, &app, 6, content) > 0);
     }
 
     #[test]

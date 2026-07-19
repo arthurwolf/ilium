@@ -17,10 +17,10 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ilium_core::{
-    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId,
-    NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
+    AgentActivity, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId, NodeKind,
+    PaneContentKind, PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
 };
-use ilium_ipc::ClientRequest;
+use ilium_ipc::{ClientRequest, PromptSubmissionSource};
 use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
@@ -53,6 +53,7 @@ use crate::text_prompt::TextPromptState;
 use crate::theme::{self, ColorScheme, Theme};
 use crate::tree_transitions::TreeTransitions;
 use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
+use crate::trigger_settings::{TriggerAction, TriggerOccurrence, TriggerSettings};
 use crate::voice_settings::{VoicePromptEditorState, VoiceRow, VoiceSettingField};
 use ilium_inference::InferenceSettings;
 
@@ -254,6 +255,7 @@ pub enum VoiceInteractionRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Inference,
+    Triggers,
     Icons,
     Appearance,
     Terminal,
@@ -365,7 +367,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 11] = [
+    pub const ALL: [SettingsTab; 12] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -376,12 +378,14 @@ impl SettingsTab {
         Self::Sound,
         Self::VoiceControl,
         Self::Inference,
+        Self::Triggers,
         Self::About,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Inference => "Inference",
+            Self::Triggers => "Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
             Self::Terminal => "Terminal",
@@ -566,6 +570,9 @@ pub struct SettingsState {
     /// keyboard. It is separate from `selected_row`: a picker may be opened
     /// from a scrolled table row without changing table navigation.
     pub keyboard_picker: Option<Action>,
+    /// Horizontal chip cursor in the selected Triggers event. Zero is None;
+    /// later positions follow that event's available action registry.
+    pub trigger_action_cursor: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -668,6 +675,7 @@ impl SettingsState {
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
+            trigger_action_cursor: 0,
         }
     }
 }
@@ -876,9 +884,7 @@ pub enum PendingRetitleRequest {
     /// trigger (the automatic path spawns directly from `crate::run`, since
     /// it isn't input-driven).
     Session {
-        pane_id: NodeId,
-        agent_class: AgentClass,
-        session_id: String,
+        input: crate::session_naming::SessionTitleInput,
         title_generation: u64,
         trigger: TitleTrigger,
     },
@@ -887,8 +893,7 @@ pub enum PendingRetitleRequest {
     /// boundary, so the text must be read out on the main thread before
     /// queuing).
     Terminal {
-        pane_id: NodeId,
-        screen_text: String,
+        input: crate::terminal_naming::TerminalTitleInput,
         trigger: TitleTrigger,
     },
 }
@@ -996,6 +1001,9 @@ pub struct App {
     pub sound_discovery: ilium_sound::SoundDiscovery,
     /// Persisted inference provider settings used by title and organization workers.
     pub inference_settings: InferenceSettings,
+    /// Live event-to-actions routing table. Detection is server/render-cache
+    /// owned; this client value decides which LLM work enters the outboxes.
+    pub trigger_settings: TriggerSettings,
     pub terminal_settings: TerminalSettings,
     pub editor_settings: EditorSettings,
     pub session_settings: SessionSettings,
@@ -1084,6 +1092,10 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Exact detected process owning each verified agent session. Kept beside
+    /// `agent_session_ids` because title prompts need the PID while process
+    /// discovery remains server-owned.
+    pub agent_process_ids: HashMap<NodeId, u32>,
     /// Server-replayed paths for editor panes that existed before this
     /// client attached. They let this client construct its own local editor
     /// buffer instead of treating a restored editor as a missing pane.
@@ -1101,8 +1113,7 @@ pub struct App {
     /// from the agent session ID because `/clear` can retain the same ID.
     pub agent_title_generations: HashMap<NodeId, u64>,
     /// How many completed Enter presses have been observed in a plain
-    /// terminal pane since its last LLM retitle -- drives
-    /// `maybe_trigger_terminal_retitle`'s "every second command" cadence.
+    /// terminal pane since its last activity-checkpoint trigger.
     /// Only ever bumped while `terminal_title_inference::terminal_ready_for_retitle`
     /// says the pane is eligible, so a pane that becomes an agent, gets a
     /// user-specified title, or already has a retitle in flight simply
@@ -1110,8 +1121,8 @@ pub struct App {
     /// becomes eligible again.
     pub enter_press_counts: HashMap<NodeId, u32>,
     /// The hash (`terminal_title_inference::hash_screen_text`) of the screen
-    /// text last used for a terminal pane's automatic retitle -- lets
-    /// `maybe_trigger_terminal_retitle` skip firing again on cadence alone
+    /// text last used for a terminal pane's automatic retitle -- lets the
+    /// trigger router skip firing again on cadence alone
     /// when the pane's visible content is unchanged since that call, since
     /// unlike agent panes a plain shell has no "already titled for this
     /// session" cache to fall back on.
@@ -1199,6 +1210,7 @@ impl App {
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             inference_settings: InferenceSettings::default(),
+            trigger_settings: TriggerSettings::default(),
             terminal_settings: TerminalSettings::default(),
             editor_settings: EditorSettings::default(),
             session_settings: SessionSettings::default(),
@@ -1240,6 +1252,7 @@ impl App {
             recently_created: HashMap::new(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            agent_process_ids: HashMap::new(),
             restored_editor_paths: HashMap::new(),
             title_inference_attempts: HashMap::new(),
             inferred_title_session_ids: HashMap::new(),
@@ -2005,6 +2018,35 @@ impl App {
     /// snapshot, so a settings change never mutates a request mid-flight.
     pub fn apply_inference_settings(&mut self, inference: InferenceSettings) {
         self.inference_settings = inference;
+    }
+
+    /// Installs startup trigger mappings without writing them back. The
+    /// config loader has already normalized unsupported and duplicate actions.
+    pub fn apply_trigger_settings(&mut self, triggers: TriggerSettings) {
+        self.trigger_settings = triggers.normalized();
+    }
+
+    pub fn apply_and_persist_trigger_settings(&mut self, triggers: TriggerSettings) {
+        self.apply_trigger_settings(triggers);
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_trigger_settings(&config_dir, &self.trigger_settings)
+            {
+                self.status_message = Some(format!("Could not save trigger settings: {error}"));
+            }
+        }
+    }
+
+    /// Applies one chip selection immediately and persists the complete typed
+    /// mapping, matching every other Settings control's auto-save behavior.
+    pub fn settings_toggle_trigger_action(
+        &mut self,
+        event: crate::trigger_settings::TriggerEvent,
+        action: Option<TriggerAction>,
+    ) {
+        let mut settings = self.trigger_settings.clone();
+        settings.toggle(event, action);
+        self.apply_and_persist_trigger_settings(settings);
     }
 
     pub fn apply_and_persist_inference_settings(&mut self, inference: InferenceSettings) {
@@ -4859,10 +4901,11 @@ impl App {
             None => {}
         }
         if let Some(bytes) = pending_key_input {
-            self.queue_request(ClientRequest::KeyInput { pane_id: id, bytes });
-        }
-        if is_enter_press {
-            self.maybe_trigger_terminal_retitle(id);
+            self.queue_request(ClientRequest::KeyInput {
+                pane_id: id,
+                bytes,
+                submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
+            });
         }
     }
 
@@ -4889,42 +4932,90 @@ impl App {
             pasted.as_bytes().to_vec()
         };
 
-        self.queue_request(ClientRequest::KeyInput { pane_id, bytes });
+        self.queue_request(ClientRequest::KeyInput {
+            pane_id,
+            bytes,
+            submission: None,
+        });
         true
     }
 
-    /// Bumps `id`'s Enter-press counter and, once it reaches
-    /// `terminal_title_inference::RETITLE_ENTER_INTERVAL` (and only while
-    /// the pane is actually eligible), captures its current screen text and
-    /// queues a background LLM retitle -- the terminal-pane analogue of the
-    /// server-driven triggers `crate::title_inference` reacts to for agent
-    /// panes, since a plain shell has no session/turn-completion event to
-    /// key off instead.
-    ///
-    /// Cadence alone isn't enough of a gate: a pane sitting through several
-    /// short, visually-identical commands (`ls`, `ls -la`, a blank prompt)
-    /// would otherwise re-run the LLM every `RETITLE_ENTER_INTERVAL`
-    /// commands for no summarizable change, which is exactly the "retitled
-    /// too often for no reason" failure mode. So the screen text is hashed
-    /// and compared against the hash from this pane's last automatic
-    /// retitle (`App::terminal_retitle_content_hashes`) before firing --
-    /// unchanged content resets the counter (so the next interval gets a
-    /// fresh chance) without spending an LLM call on it.
-    fn maybe_trigger_terminal_retitle(&mut self, id: NodeId) {
+    /// Routes one semantic event through the persisted trigger table. The
+    /// event stream owns detection, this method owns only action selection,
+    /// and the existing pending-work outboxes retain async worker ownership.
+    pub fn handle_trigger_occurrence(&mut self, occurrence: TriggerOccurrence) {
+        let actions = self.trigger_settings.actions_for(occurrence.event).to_vec();
+        for action in actions {
+            match action {
+                TriggerAction::RetitleElement => {
+                    if let Some(pane_id) = occurrence.pane_id {
+                        self.request_automatic_retitle(pane_id);
+                    }
+                }
+                TriggerAction::RestructureProject => {
+                    if let Some(project_id) = occurrence
+                        .pane_id
+                        .and_then(|pane_id| self.tree.project_ancestor(pane_id))
+                    {
+                        if !self.is_project_restructure_loading(project_id) {
+                            self.action_request_project_restructure(project_id);
+                        }
+                    }
+                }
+                TriggerAction::RestructureAllProjects => self.action_request_restructure(),
+            }
+        }
+    }
+
+    /// Queues a silent automatic title refresh for either an agent transcript
+    /// or a plain terminal screen. User titles always win, and an in-flight
+    /// request coalesces later lifecycle events for the same pane.
+    fn request_automatic_retitle(&mut self, id: NodeId) {
+        if self.titles_loading.contains(&id) {
+            return;
+        }
+        if matches!(
+            self.tree.get(id).map(|node| &node.kind),
+            Some(NodeKind::Pane {
+                status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                ..
+            })
+        ) {
+            if let Some(input) = crate::title_inference::session_title_input(self, id, false) {
+                let title_generation = self.agent_title_generations.get(&id).copied().unwrap_or(0);
+                self.titles_loading.insert(id);
+                self.pending_retitle_requests
+                    .push(PendingRetitleRequest::Session {
+                        input,
+                        title_generation,
+                        trigger: TitleTrigger::Automatic,
+                    });
+            }
+            return;
+        }
+        if matches!(
+            self.tree.get(id).map(|node| &node.kind),
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                status: PaneStatus::PlainShell,
+                ..
+            })
+        ) {
+            self.queue_automatic_terminal_retitle(id);
+        }
+    }
+
+    /// Captures one eligible plain-terminal screen after the render-cache
+    /// cadence has produced a checkpoint occurrence. Identical content is
+    /// suppressed even when a later checkpoint fires.
+    fn queue_automatic_terminal_retitle(&mut self, id: NodeId) {
         if !terminal_title_inference::terminal_ready_for_retitle(self, id) {
             return;
         }
-        let counter = self.enter_press_counts.entry(id).or_insert(0);
-        *counter += 1;
-        if *counter < terminal_title_inference::RETITLE_ENTER_INTERVAL {
-            return;
-        }
-        *counter = 0;
-        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) else {
+        let Some(input) = terminal_title_inference::terminal_title_input(self, id) else {
             return;
         };
-        let screen_text = view.with_screen(|screen| screen.contents());
-        let content_hash = terminal_title_inference::hash_screen_text(&screen_text);
+        let content_hash = terminal_title_inference::hash_screen_text(&input.screen_text);
         if self.terminal_retitle_content_hashes.get(&id) == Some(&content_hash) {
             return;
         }
@@ -4933,8 +5024,7 @@ impl App {
         self.titles_loading.insert(id);
         self.pending_retitle_requests
             .push(PendingRetitleRequest::Terminal {
-                pane_id: id,
-                screen_text,
+                input,
                 trigger: TitleTrigger::Automatic,
             });
     }
@@ -4953,10 +5043,11 @@ impl App {
         }
         match self.tree.get(id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+                status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
                 ..
             }) => {
-                let Some(session_id) = self.agent_session_ids.get(&id).cloned() else {
+                let Some(input) = crate::title_inference::session_title_input(self, id, true)
+                else {
                     self.status_message = Some("No session detected yet for this pane".to_string());
                     return;
                 };
@@ -4964,9 +5055,7 @@ impl App {
                 self.titles_loading.insert(id);
                 self.pending_retitle_requests
                     .push(PendingRetitleRequest::Session {
-                        pane_id: id,
-                        agent_class: class.clone(),
-                        session_id,
+                        input,
                         title_generation,
                         trigger: TitleTrigger::Manual,
                     });
@@ -4976,21 +5065,21 @@ impl App {
                 status: PaneStatus::PlainShell,
                 ..
             }) => {
-                let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) else {
+                let Some(input) = terminal_title_inference::terminal_title_input(self, id) else {
                     self.status_message = Some("No terminal content available yet".to_string());
                     return;
                 };
-                let screen_text = view.with_screen(|screen| screen.contents());
                 // Keeps the automatic path's dedup baseline in sync, so it
                 // doesn't immediately re-fire on the same content right
                 // after this manual retitle completes.
-                self.terminal_retitle_content_hashes
-                    .insert(id, terminal_title_inference::hash_screen_text(&screen_text));
+                self.terminal_retitle_content_hashes.insert(
+                    id,
+                    terminal_title_inference::hash_screen_text(&input.screen_text),
+                );
                 self.titles_loading.insert(id);
                 self.pending_retitle_requests
                     .push(PendingRetitleRequest::Terminal {
-                        pane_id: id,
-                        screen_text,
+                        input,
                         trigger: TitleTrigger::Manual,
                     });
             }
@@ -5005,8 +5094,14 @@ impl App {
     /// project. Empty projects are reported as skipped and never spend an
     /// LLM call.
     pub fn action_request_restructure(&mut self) {
-        self.project_restructure_jobs.clear();
-        self.pending_restructure_requests.clear();
+        // Preserve queued/running jobs so an all-project trigger cannot make
+        // an earlier worker's eventual result look like a fresh batch result.
+        self.project_restructure_jobs.retain(|_, job| {
+            matches!(
+                job.state,
+                ProjectRestructureState::Queued | ProjectRestructureState::Running
+            )
+        });
         let project_ids = self.tree.project_ids();
         if project_ids.is_empty() {
             self.status_message = Some("No projects to restructure yet".to_string());
@@ -5841,6 +5936,8 @@ fn encode_bracketed_paste(pasted: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use ilium_core::AgentClass;
+
     use super::*;
 
     fn app() -> App {
@@ -6600,6 +6697,67 @@ mod tests {
     }
 
     #[test]
+    fn action_request_retitle_captures_complete_live_agent_context() {
+        let mut app = app();
+        let project_path = PathBuf::from("/tmp/retitle-project");
+        let project = app.tree.add_project(project_path.clone()).unwrap();
+        let group = app.tree.add_group(project, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "initial title", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval),
+            )
+            .unwrap();
+        app.tree
+            .rename_node(
+                pane_id,
+                "Current User Title",
+                Some("User Title".to_string()),
+                Some("🧭".to_string()),
+            )
+            .unwrap();
+        let mut view = TerminalView::new(24, 80);
+        view.feed(b"visible terminal answer");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.agent_session_ids
+            .insert(pane_id, "session-123".to_string());
+        app.agent_process_ids.insert(pane_id, 45678);
+        app.agent_title_generations.insert(pane_id, 9);
+
+        app.action_request_retitle(pane_id);
+
+        let pending = app.take_pending_retitle_requests();
+        let [PendingRetitleRequest::Session {
+            input,
+            title_generation,
+            trigger,
+        }] = pending.as_slice()
+        else {
+            panic!("manual agent refresh must queue one session-title request");
+        };
+        assert_eq!(*title_generation, 9);
+        assert_eq!(*trigger, TitleTrigger::Manual);
+        assert_eq!(input.pane_id, pane_id);
+        assert_eq!(input.project_path, project_path);
+        assert_eq!(input.agent_class, AgentClass::Claude);
+        assert_eq!(input.session_id, "session-123");
+        assert_eq!(input.process_id, Some(45678));
+        assert_eq!(input.current_title, "Current User Title");
+        assert_eq!(input.current_short_title.as_deref(), Some("User Title"));
+        assert_eq!(input.current_icon.as_deref(), Some("🧭"));
+        assert_eq!(input.title_source, PaneTitleSource::UserSpecified);
+        assert_eq!(input.activity, AgentActivity::WaitingApproval);
+        assert!(input.has_persistent_goal);
+        assert!(input.terminal_screen.contains("visible terminal answer"));
+        assert!(app.titles_loading.contains(&pane_id));
+    }
+
+    #[test]
     fn bracketed_terminal_paste_queues_one_atomic_key_input_request() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -6628,6 +6786,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: encode_bracketed_paste(&pasted),
+                submission: None,
             }]
         );
     }
@@ -6661,6 +6820,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: pasted.as_bytes().to_vec(),
+                submission: None,
             }]
         );
     }
@@ -6678,30 +6838,97 @@ mod tests {
         app.panes
             .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
 
-        // `RETITLE_ENTER_INTERVAL` completed Enter presses fire the first
-        // automatic retitle.
-        for _ in 0..terminal_title_inference::RETITLE_ENTER_INTERVAL {
-            app.maybe_trigger_terminal_retitle(pane_id);
-        }
+        app.queue_automatic_terminal_retitle(pane_id);
         assert_eq!(app.take_pending_retitle_requests().len(), 1);
         // Simulate the worker completing so the pane is eligible again.
         app.titles_loading.remove(&pane_id);
 
-        // Same screen content, another full interval of Enter presses:
-        // nothing new to summarize, so no second LLM call is queued.
-        for _ in 0..terminal_title_inference::RETITLE_ENTER_INTERVAL {
-            app.maybe_trigger_terminal_retitle(pane_id);
-        }
+        // Same screen content at another checkpoint has nothing new to
+        // summarize, so no second LLM call is queued.
+        app.queue_automatic_terminal_retitle(pane_id);
         assert_eq!(app.take_pending_retitle_requests().len(), 0);
 
         // Once the screen actually changes, the next interval fires again.
         if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
             view.feed(b"$ git status\r\n");
         }
-        for _ in 0..terminal_title_inference::RETITLE_ENTER_INTERVAL {
-            app.maybe_trigger_terminal_retitle(pane_id);
-        }
+        app.queue_automatic_terminal_retitle(pane_id);
         assert_eq!(app.take_pending_retitle_requests().len(), 1);
+    }
+
+    #[test]
+    fn finished_trigger_routes_retitle_and_owning_project_restructure() {
+        let mut app = app();
+        let project_id = app.tree.add_project(PathBuf::from("/tmp")).unwrap();
+        let group_id = app
+            .tree
+            .ensure_project_default_group(project_id, "default")
+            .unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            )
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.agent_session_ids
+            .insert(pane_id, "session-1".to_owned());
+
+        app.handle_trigger_occurrence(TriggerOccurrence::for_pane(
+            crate::trigger_settings::TriggerEvent::AgentFinishedWork,
+            pane_id,
+        ));
+
+        assert_eq!(app.take_pending_retitle_requests().len(), 1);
+        let restructure = app.take_pending_restructure_requests();
+        assert_eq!(restructure.len(), 1);
+        assert_eq!(restructure[0].project_id, project_id);
+    }
+
+    #[test]
+    fn configured_none_and_user_titles_prevent_automatic_retitle_work() {
+        let mut app = app();
+        let project_id = app.tree.add_project(PathBuf::from("/tmp")).unwrap();
+        let group_id = app
+            .tree
+            .ensure_project_default_group(project_id, "default")
+            .unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "kept by user", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .rename_node(pane_id, "kept by user".to_owned(), None, None)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, "session-1".to_owned());
+        app.trigger_settings.agent_finished_work = vec![TriggerAction::RetitleElement];
+
+        app.handle_trigger_occurrence(TriggerOccurrence::for_pane(
+            crate::trigger_settings::TriggerEvent::AgentFinishedWork,
+            pane_id,
+        ));
+        assert!(app.take_pending_retitle_requests().is_empty());
+
+        app.trigger_settings.agent_finished_work.clear();
+        app.handle_trigger_occurrence(TriggerOccurrence::for_pane(
+            crate::trigger_settings::TriggerEvent::AgentFinishedWork,
+            pane_id,
+        ));
+        assert!(app.take_pending_restructure_requests().is_empty());
     }
 
     #[test]
@@ -7306,7 +7533,8 @@ mod tests {
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
-        assert_eq!(SettingsTab::Inference.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::Inference.next(), SettingsTab::Triggers);
+        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
     }

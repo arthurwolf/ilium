@@ -1426,11 +1426,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         KeyCode::Tab => {
             state.tab = state.tab.next();
             state.selected_row = 0;
+            state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
         KeyCode::BackTab => {
             state.tab = state.tab.previous();
             state.selected_row = 0;
+            state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Icons => {
@@ -1507,6 +1509,42 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Test) => app.request_inference_test(),
                 None => {}
             }
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Triggers => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+            let choice_count = crate::trigger_settings::TriggerEvent::ALL[state.selected_row]
+                .available_actions()
+                .len()
+                + 1;
+            state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Triggers => {
+            state.selected_row = (state.selected_row + 1).min(
+                crate::trigger_settings::TriggerEvent::ALL
+                    .len()
+                    .saturating_sub(1),
+            );
+            let choice_count = crate::trigger_settings::TriggerEvent::ALL[state.selected_row]
+                .available_actions()
+                .len()
+                + 1;
+            state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Triggers => {
+            state.trigger_action_cursor = state.trigger_action_cursor.saturating_sub(1);
+        }
+        KeyCode::Right | KeyCode::Char('l') if state.tab == SettingsTab::Triggers => {
+            let event = crate::trigger_settings::TriggerEvent::ALL[state.selected_row];
+            state.trigger_action_cursor =
+                (state.trigger_action_cursor + 1).min(event.available_actions().len());
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Triggers => {
+            let event = crate::trigger_settings::TriggerEvent::ALL[state.selected_row];
+            let action = state
+                .trigger_action_cursor
+                .checked_sub(1)
+                .and_then(|index| event.available_actions().get(index).copied());
+            app.settings_toggle_trigger_action(event, action);
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::VoiceControl => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -1693,6 +1731,15 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
 
     let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+    if state.tab == SettingsTab::Triggers {
+        state.scroll = crate::trigger_settings_ui::scroll_for_selection(
+            app,
+            content_area,
+            state.selected_row,
+            state.trigger_action_cursor,
+            state.scroll,
+        );
+    }
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, content_area);
     state.scroll = state.scroll.min(max_scroll);
@@ -2067,6 +2114,44 @@ mod indent_outdent_tests {
         );
         assert!(matches!(app.mode, Mode::Explorer(_, _)));
         assert!(app.modal_stack.is_empty());
+    }
+
+    #[test]
+    fn triggers_keyboard_navigation_toggles_chips_and_none_clears_actions() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Triggers,
+            selected_row: 6,
+            trigger_action_cursor: 0,
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE)),
+        );
+        assert!(!app
+            .trigger_settings
+            .agent_finished_work
+            .contains(&crate::trigger_settings::TriggerAction::RetitleElement));
+        assert!(app
+            .trigger_settings
+            .agent_finished_work
+            .contains(&crate::trigger_settings::TriggerAction::RestructureProject));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(app.trigger_settings.agent_finished_work.is_empty());
     }
 
     #[test]
