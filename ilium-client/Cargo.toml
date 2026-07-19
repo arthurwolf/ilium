@@ -14,6 +14,7 @@ crossterm = "0.29.0"
 cosmic-text = "0.14"
 directories = "6.0.0"
 emoji = "0.2.1"
+fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 handlebars = "6.3.2"
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
@@ -21,6 +22,7 @@ ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-inference = { version = "0.1.0", path = "../ilium-inference" }
 ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+libc = "0.2"
 pulldown-cmark = "0.13"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-image = { version = "11.0", default-features = false }
