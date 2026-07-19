@@ -8,10 +8,13 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-/// Every independently configurable visual role currently shown in the tree.
+/// Every independently configurable semantic icon rendered by the sidebar,
+/// including its creation toolbar and per-row action controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IconTarget {
     Group,
+    TopLevel,
+    Project,
     SplitVertical,
     SplitHorizontal,
     Folder,
@@ -28,11 +31,22 @@ pub enum IconTarget {
     Done,
     Idle,
     Goal,
+    ToolbarSearch,
+    ToolbarRestructure,
+    ToolbarSettings,
+    RowRename,
+    RowMoveUp,
+    RowMoveDown,
+    RowClose,
+    RowRetitle,
+    RowProjectRestructure,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 28] = [
         Self::Group,
+        Self::TopLevel,
+        Self::Project,
         Self::SplitVertical,
         Self::SplitHorizontal,
         Self::Folder,
@@ -49,11 +63,22 @@ impl IconTarget {
         Self::Done,
         Self::Idle,
         Self::Goal,
+        Self::ToolbarSearch,
+        Self::ToolbarRestructure,
+        Self::ToolbarSettings,
+        Self::RowRename,
+        Self::RowMoveUp,
+        Self::RowMoveDown,
+        Self::RowClose,
+        Self::RowRetitle,
+        Self::RowProjectRestructure,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Group => "Group",
+            Self::TopLevel => "Top-level destination",
+            Self::Project => "Project",
             Self::SplitVertical => "Vertical split",
             Self::SplitHorizontal => "Horizontal split",
             Self::Folder => "Folder",
@@ -70,12 +95,23 @@ impl IconTarget {
             Self::Done => "Done",
             Self::Idle => "Idle",
             Self::Goal => "Goal attached",
+            Self::ToolbarSearch => "Toolbar: search",
+            Self::ToolbarRestructure => "Toolbar: restructure",
+            Self::ToolbarSettings => "Toolbar: settings",
+            Self::RowRename => "Row action: rename",
+            Self::RowMoveUp => "Row action: move up",
+            Self::RowMoveDown => "Row action: move down",
+            Self::RowClose => "Row action: close",
+            Self::RowRetitle => "Row action: retitle",
+            Self::RowProjectRestructure => "Row action: restructure project",
         }
     }
 
     pub const fn key(self) -> &'static str {
         match self {
             Self::Group => "group",
+            Self::TopLevel => "top_level",
+            Self::Project => "project",
             Self::SplitVertical => "split_vertical",
             Self::SplitHorizontal => "split_horizontal",
             Self::Folder => "folder",
@@ -92,6 +128,15 @@ impl IconTarget {
             Self::Done => "done",
             Self::Idle => "idle",
             Self::Goal => "goal",
+            Self::ToolbarSearch => "toolbar_search",
+            Self::ToolbarRestructure => "toolbar_restructure",
+            Self::ToolbarSettings => "toolbar_settings",
+            Self::RowRename => "row_rename",
+            Self::RowMoveUp => "row_move_up",
+            Self::RowMoveDown => "row_move_down",
+            Self::RowClose => "row_close",
+            Self::RowRetitle => "row_retitle",
+            Self::RowProjectRestructure => "row_project_restructure",
         }
     }
 
@@ -102,6 +147,8 @@ impl IconTarget {
     pub const fn default_glyph(self) -> &'static str {
         match self {
             Self::Group => "📁",
+            Self::TopLevel => "⌂",
+            Self::Project => "🗂️",
             Self::SplitVertical => "▥",
             Self::SplitHorizontal => "▤",
             Self::Folder => "📂",
@@ -118,12 +165,22 @@ impl IconTarget {
             Self::Done => "🔔",
             Self::Idle => "●",
             Self::Goal => "🏁",
+            Self::ToolbarSearch => "⌕",
+            Self::ToolbarRestructure => "♻️",
+            Self::ToolbarSettings => "🎚️",
+            Self::RowRename => "✏️",
+            Self::RowMoveUp => "🔼",
+            Self::RowMoveDown => "🔽",
+            Self::RowClose => "🚫",
+            Self::RowRetitle => "♻️",
+            Self::RowProjectRestructure => "♻️",
         }
     }
 
     pub const fn suggestions(self) -> &'static [&'static str] {
         match self {
-            Self::Group | Self::Folder => &["📁", "📂", "🗂️", "🧺"],
+            Self::Group | Self::Project | Self::Folder => &["📁", "📂", "🗂️", "🧺"],
+            Self::TopLevel => &["⌂", "⌘", "🏠", "◆"],
             Self::SplitVertical | Self::SplitHorizontal => &["▥", "▤", "⊞", "▦"],
             Self::Terminal => &["📟", "▸", "⌘", "🖥️"],
             Self::Editor => &["📝", "✎", "📄", "✦"],
@@ -138,6 +195,15 @@ impl IconTarget {
             Self::Done => &["🔔", "✓", "●", "✦"],
             Self::Idle => &["●", "·", "○", "—"],
             Self::Goal => &["🏁", "⚑", "◆", "✦"],
+            Self::ToolbarSearch => &["⌕", "🔎", "🔍", "◉"],
+            Self::ToolbarRestructure | Self::RowRetitle | Self::RowProjectRestructure => {
+                &["♻️", "↻", "⟳", "✦"]
+            }
+            Self::ToolbarSettings => &["🎚️", "⚙️", "🔧", "☷"],
+            Self::RowRename => &["✏️", "✎", "📝", "🖊️"],
+            Self::RowMoveUp => &["🔼", "↑", "⬆️", "⤴️"],
+            Self::RowMoveDown => &["🔽", "↓", "⬇️", "⤵️"],
+            Self::RowClose => &["🚫", "×", "✕", "⛔"],
         }
     }
 }
@@ -147,6 +213,8 @@ impl IconTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IconSettings {
     pub group: String,
+    pub top_level: String,
+    pub project: String,
     pub split_vertical: String,
     pub split_horizontal: String,
     pub folder: String,
@@ -163,6 +231,15 @@ pub struct IconSettings {
     pub done: String,
     pub idle: String,
     pub goal: String,
+    pub toolbar_search: String,
+    pub toolbar_restructure: String,
+    pub toolbar_settings: String,
+    pub row_rename: String,
+    pub row_move_up: String,
+    pub row_move_down: String,
+    pub row_close: String,
+    pub row_retitle: String,
+    pub row_project_restructure: String,
 }
 
 impl Default for IconSettings {
@@ -175,6 +252,8 @@ impl IconSettings {
     pub fn from_target(mut value: impl FnMut(IconTarget) -> String) -> Self {
         Self {
             group: value(IconTarget::Group),
+            top_level: value(IconTarget::TopLevel),
+            project: value(IconTarget::Project),
             split_vertical: value(IconTarget::SplitVertical),
             split_horizontal: value(IconTarget::SplitHorizontal),
             folder: value(IconTarget::Folder),
@@ -191,12 +270,23 @@ impl IconSettings {
             done: value(IconTarget::Done),
             idle: value(IconTarget::Idle),
             goal: value(IconTarget::Goal),
+            toolbar_search: value(IconTarget::ToolbarSearch),
+            toolbar_restructure: value(IconTarget::ToolbarRestructure),
+            toolbar_settings: value(IconTarget::ToolbarSettings),
+            row_rename: value(IconTarget::RowRename),
+            row_move_up: value(IconTarget::RowMoveUp),
+            row_move_down: value(IconTarget::RowMoveDown),
+            row_close: value(IconTarget::RowClose),
+            row_retitle: value(IconTarget::RowRetitle),
+            row_project_restructure: value(IconTarget::RowProjectRestructure),
         }
     }
 
     pub fn glyph(&self, target: IconTarget) -> &str {
         match target {
             IconTarget::Group => &self.group,
+            IconTarget::TopLevel => &self.top_level,
+            IconTarget::Project => &self.project,
             IconTarget::SplitVertical => &self.split_vertical,
             IconTarget::SplitHorizontal => &self.split_horizontal,
             IconTarget::Folder => &self.folder,
@@ -213,12 +303,23 @@ impl IconSettings {
             IconTarget::Done => &self.done,
             IconTarget::Idle => &self.idle,
             IconTarget::Goal => &self.goal,
+            IconTarget::ToolbarSearch => &self.toolbar_search,
+            IconTarget::ToolbarRestructure => &self.toolbar_restructure,
+            IconTarget::ToolbarSettings => &self.toolbar_settings,
+            IconTarget::RowRename => &self.row_rename,
+            IconTarget::RowMoveUp => &self.row_move_up,
+            IconTarget::RowMoveDown => &self.row_move_down,
+            IconTarget::RowClose => &self.row_close,
+            IconTarget::RowRetitle => &self.row_retitle,
+            IconTarget::RowProjectRestructure => &self.row_project_restructure,
         }
     }
 
     pub fn set(&mut self, target: IconTarget, glyph: String) {
         let slot = match target {
             IconTarget::Group => &mut self.group,
+            IconTarget::TopLevel => &mut self.top_level,
+            IconTarget::Project => &mut self.project,
             IconTarget::SplitVertical => &mut self.split_vertical,
             IconTarget::SplitHorizontal => &mut self.split_horizontal,
             IconTarget::Folder => &mut self.folder,
@@ -235,6 +336,15 @@ impl IconSettings {
             IconTarget::Done => &mut self.done,
             IconTarget::Idle => &mut self.idle,
             IconTarget::Goal => &mut self.goal,
+            IconTarget::ToolbarSearch => &mut self.toolbar_search,
+            IconTarget::ToolbarRestructure => &mut self.toolbar_restructure,
+            IconTarget::ToolbarSettings => &mut self.toolbar_settings,
+            IconTarget::RowRename => &mut self.row_rename,
+            IconTarget::RowMoveUp => &mut self.row_move_up,
+            IconTarget::RowMoveDown => &mut self.row_move_down,
+            IconTarget::RowClose => &mut self.row_close,
+            IconTarget::RowRetitle => &mut self.row_retitle,
+            IconTarget::RowProjectRestructure => &mut self.row_project_restructure,
         };
         *slot = glyph;
     }
@@ -302,10 +412,20 @@ pub struct IconPickerChapter {
 /// Cached search result owned by an open picker. Filtering 12,000 choices is
 /// intentionally done only when the query changes, never while a user moves
 /// through the viewport or the terminal redraws an animation frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IconPickerSearchResults {
     pub chapters: Vec<IconPickerChapter>,
     pub entry_count: usize,
+}
+
+/// One ranked result from the dense-vector index. The score itself remains an
+/// implementation detail of the worker; ordering is already semantic when
+/// this reaches the presentation layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IconSemanticSearchHit {
+    pub category_label: &'static str,
+    pub family: IconCatalogFamily,
+    pub entry: IconCatalogEntry,
 }
 
 impl IconPickerSearchResults {
@@ -317,37 +437,16 @@ impl IconPickerSearchResults {
     }
 }
 
-/// Returns the picker as a category-preserving document. A category-name
-/// match deliberately keeps that complete chapter, while an icon-name match
-/// keeps only the matching icons inside its original chapter.
-pub fn picker_chapters(search_query: &str) -> Vec<IconPickerChapter> {
-    picker_search_results(search_query).chapters
-}
-
-/// Computes one immutable filtered document. Query normalization happens
-/// once; every matching test uses allocation-free ASCII case comparison.
-pub fn picker_search_results(search_query: &str) -> IconPickerSearchResults {
-    let normalized_query = search_query.trim().to_ascii_lowercase();
+/// Returns the unfiltered catalogue as one category-preserving document.
+/// Non-empty queries never flow through this function: they are ranked by
+/// `icon_search_workers`' CPU dense-vector index instead.
+pub fn all_picker_search_results() -> IconPickerSearchResults {
     let chapters = icon_categories()
         .iter()
-        .filter_map(|category| {
-            let category_matches =
-                ascii_case_insensitive_contains(category.label, &normalized_query);
-            let entries = category
-                .entries
-                .iter()
-                .copied()
-                .filter(|entry| {
-                    normalized_query.is_empty()
-                        || category_matches
-                        || ascii_case_insensitive_contains(entry.name, &normalized_query)
-                })
-                .collect::<Vec<_>>();
-            (!entries.is_empty()).then_some(IconPickerChapter {
-                label: category.label,
-                family: category.family,
-                entries,
-            })
+        .map(|category| IconPickerChapter {
+            label: category.label,
+            family: category.family,
+            entries: category.entries.clone(),
         })
         .collect::<Vec<_>>();
     let entry_count = chapters.iter().map(|chapter| chapter.entries.len()).sum();
@@ -357,46 +456,30 @@ pub fn picker_search_results(search_query: &str) -> IconPickerSearchResults {
     }
 }
 
-fn ascii_case_insensitive_contains(haystack: &str, query: &str) -> bool {
-    query.is_empty()
-        || haystack
-            .as_bytes()
-            .windows(query.len())
-            .any(|candidate| candidate.eq_ignore_ascii_case(query.as_bytes()))
-}
-
-/// Compatibility lookup for callers that need a flat sequence. New picker
-/// rendering uses [`picker_chapters`] so category structure stays visible.
-pub fn picker_entries(category_index: usize, search_query: &str) -> Vec<IconCatalogEntry> {
-    let chapters = picker_chapters(search_query);
-    if search_query.trim().is_empty() {
-        return icon_categories()
-            .get(category_index)
-            .map(|category| category.entries.clone())
-            .unwrap_or_default();
+/// Builds a chaptered document exclusively from dense-vector hits. Hits are
+/// ranked before this function receives them; grouping only preserves the
+/// visible official-UTF-8-then-Nerd-Font boundary required by the picker.
+pub fn semantic_picker_search_results(hits: Vec<IconSemanticSearchHit>) -> IconPickerSearchResults {
+    let mut chapters = Vec::<IconPickerChapter>::new();
+    for hit in hits {
+        if let Some(chapter) = chapters
+            .iter_mut()
+            .find(|chapter| chapter.label == hit.category_label && chapter.family == hit.family)
+        {
+            chapter.entries.push(hit.entry);
+        } else {
+            chapters.push(IconPickerChapter {
+                label: hit.category_label,
+                family: hit.family,
+                entries: vec![hit.entry],
+            });
+        }
     }
-    chapters
-        .into_iter()
-        .flat_map(|chapter| chapter.entries)
-        .collect()
-}
-
-/// Resolves a selected document ordinal to its glyph. Keyboard and mouse
-/// selection use this shared lookup so neither has to recreate filtering.
-pub fn picker_entry(search_query: &str, selected_entry: usize) -> Option<IconCatalogEntry> {
-    picker_chapters(search_query)
-        .into_iter()
-        .flat_map(|chapter| chapter.entries)
-        .nth(selected_entry)
-}
-
-/// Counts the currently visible document entries without exposing a second
-/// representation of the category-preserving picker.
-pub fn picker_entry_count(search_query: &str) -> usize {
-    picker_chapters(search_query)
-        .iter()
-        .map(|chapter| chapter.entries.len())
-        .sum()
+    let entry_count = chapters.iter().map(|chapter| chapter.entries.len()).sum();
+    IconPickerSearchResults {
+        chapters,
+        entry_count,
+    }
 }
 
 /// Counts actual choices, not categories, for an honest picker status line.
@@ -602,8 +685,8 @@ fn category_label(subgroup: &'static str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        catalogue_icon_count, catalogue_icon_count_for, icon_categories, picker_chapters,
-        picker_entries, IconCatalogFamily,
+        all_picker_search_results, catalogue_icon_count, catalogue_icon_count_for, icon_categories,
+        semantic_picker_search_results, IconCatalogFamily, IconSemanticSearchHit,
     };
 
     #[test]
@@ -638,26 +721,8 @@ mod tests {
     }
 
     #[test]
-    fn search_finds_icons_by_official_name_and_category() {
-        assert!(picker_entries(0, "rocket")
-            .iter()
-            .any(|entry| entry.glyph == "🚀"));
-        assert!(!picker_entries(0, "mathematics").is_empty());
-    }
-
-    #[test]
-    fn chapter_search_preserves_family_order_and_removes_empty_chapters() {
-        let chapters = picker_chapters("rocket");
-        assert!(!chapters.is_empty());
-        assert!(chapters.iter().all(|chapter| !chapter.entries.is_empty()));
-        assert!(chapters.iter().any(|chapter| {
-            chapter
-                .entries
-                .iter()
-                .any(|entry| entry.glyph == "🚀" && entry.name.contains("rocket"))
-        }));
-
-        let all_chapters = picker_chapters("");
+    fn full_browse_document_preserves_family_order() {
+        let all_chapters = all_picker_search_results().chapters;
         let first_nerd_font = all_chapters
             .iter()
             .position(|chapter| chapter.family == IconCatalogFamily::NerdFont)
@@ -665,5 +730,21 @@ mod tests {
         assert!(all_chapters[..first_nerd_font]
             .iter()
             .all(|chapter| chapter.family == IconCatalogFamily::OfficialUtf8));
+    }
+
+    #[test]
+    fn semantic_hits_group_without_reintroducing_lexical_filtering() {
+        let rocket = icon_categories()
+            .iter()
+            .flat_map(|category| category.entries.iter().map(move |entry| (category, *entry)))
+            .find(|(_, entry)| entry.glyph == "🚀")
+            .expect("the Unicode catalogue includes rocket");
+        let results = semantic_picker_search_results(vec![IconSemanticSearchHit {
+            category_label: rocket.0.label,
+            family: rocket.0.family,
+            entry: rocket.1,
+        }]);
+        assert_eq!(results.entry_count, 1);
+        assert_eq!(results.entry(0).expect("one semantic hit").glyph, "🚀");
     }
 }

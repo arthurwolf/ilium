@@ -17,6 +17,7 @@ use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, Scroll
 use ratatui::Frame;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::icon_settings::{IconSettings, IconTarget};
 use crate::text_prompt::TextPromptState;
 use crate::theme;
 
@@ -31,12 +32,12 @@ pub enum SearchObjectKind {
 }
 
 impl SearchObjectKind {
-    pub const fn icon(self) -> &'static str {
+    pub fn icon(self, icons: &IconSettings) -> &str {
         match self {
-            Self::Agent => "◈",
-            Self::Shell => "▸",
-            Self::File => "▤",
-            Self::Board => "▦",
+            Self::Agent => icons.glyph(IconTarget::OtherAgent),
+            Self::Shell => icons.glyph(IconTarget::Terminal),
+            Self::File => icons.glyph(IconTarget::Editor),
+            Self::Board => icons.glyph(IconTarget::Board),
         }
     }
 
@@ -449,7 +450,7 @@ fn last_command_from_text(text: &str) -> Option<String> {
 /// Draws the full-screen result browser. The intentionally border-light
 /// layout gives the query room to breathe while keeping object facts and
 /// evidence dense enough to scan without opening every hit.
-pub fn render(frame: &mut Frame, area: Rect, state: &SearchState) {
+pub fn render(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
     frame.render_widget(Clear, area);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -460,9 +461,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SearchState) {
             Constraint::Length(2),
         ])
         .split(area);
-    render_header(frame, vertical[0], state);
+    render_header(frame, vertical[0], state, icons);
     render_summary(frame, vertical[1], state);
-    render_results(frame, vertical[2], state);
+    render_results(frame, vertical[2], state, icons);
     render_footer(frame, vertical[3]);
 }
 
@@ -493,10 +494,13 @@ pub fn visible_result_rows(area: Rect) -> usize {
 const RESULT_HEIGHT: usize = 5;
 const MAX_RESULTS: usize = 800;
 
-fn render_header(frame: &mut Frame, area: Rect, state: &SearchState) {
+fn render_header(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
     let header = Line::from(vec![
         Span::styled(
-            "⌕  Workspace Search",
+            format!(
+                "{}  Workspace Search",
+                icons.glyph(IconTarget::ToolbarSearch)
+            ),
             Style::new().add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -513,7 +517,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &SearchState) {
         return;
     }
 
-    let prompt = "⌕  ";
+    let prompt = format!("{}  ", icons.glyph(IconTarget::ToolbarSearch));
     let prompt_width = u16::try_from(prompt.width()).unwrap_or(u16::MAX);
     let available_width = inner.width.saturating_sub(prompt_width);
     let (query, cursor_offset, query_style) = if state.query.buf.is_empty() {
@@ -614,7 +618,7 @@ fn visible_query(state: &TextPromptState, available_width: u16) -> (String, u16)
     (text, u16::try_from(cursor_offset).unwrap_or(u16::MAX))
 }
 
-fn render_results(frame: &mut Frame, area: Rect, state: &SearchState) {
+fn render_results(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
     if state.results.is_empty() {
         return;
     }
@@ -641,7 +645,7 @@ fn render_results(frame: &mut Frame, area: Rect, state: &SearchState) {
             Line::from(vec![
                 Span::styled("  ", selection_style),
                 Span::styled(
-                    format!("{} {}", result.kind.icon(), result.kind.label()),
+                    format!("{} {}", result.kind.icon(icons), result.kind.label()),
                     Style::new()
                         .fg(result.kind.color())
                         .add_modifier(Modifier::BOLD),
@@ -919,7 +923,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).expect("test terminal");
 
         terminal
-            .draw(|frame| render(frame, frame.area(), &state))
+            .draw(|frame| render(frame, frame.area(), &state, &IconSettings::default()))
             .expect("render workspace search");
 
         let text = terminal
@@ -943,7 +947,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(48, 18)).expect("test terminal");
 
         terminal
-            .draw(|frame| render(frame, frame.area(), &state))
+            .draw(|frame| render(frame, frame.area(), &state, &IconSettings::default()))
             .expect("render searchable input");
 
         let text = terminal

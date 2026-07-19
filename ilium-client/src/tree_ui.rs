@@ -19,7 +19,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
-use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
+use tui_tree_widget::{Flattened, Tree as TreeWidget, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
@@ -63,14 +63,6 @@ const RECENTLY_CREATED_PULSE_PHASE_MS: u128 = 175;
 /// Fallback identifier for agent classes without their own configurable icon.
 #[cfg(test)]
 const AGENT_ICON: &str = "\u{1F916}";
-/// Plain terminal panes and the matching creation action share this glyph.
-const TERMINAL_ICON: &str = "📟";
-/// Text editor panes and their creation action share this glyph; rename keeps
-/// the pen icon because it represents an action rather than a pane kind.
-const TEXT_EDITOR_ICON: &str = "🗒️";
-/// Settings stays anchored at the bottom-right of the left panel.
-const SETTINGS_ICON: &str = "🎚️";
-
 /// Every row reserves the same display-cell width for its node-kind icon.
 /// Emoji glyphs such as the robot/folder/pen often occupy two terminal
 /// cells, while shell and activity glyphs occupy one; padding by display
@@ -157,27 +149,24 @@ impl TreeToolbarAction {
         Self::Folder,
     ];
 
-    /// Single glyph shown on the button, reusing the same symbol the tree
-    /// already uses for that node kind elsewhere (group/editor) so the
-    /// toolbar and the tree read as one visual language rather than two.
-    fn glyph(self) -> &'static str {
+    /// Single glyph shown on the button. Agent launchers resolve through the
+    /// same persisted icon assignment as their tree rows, keeping both
+    /// surfaces synchronized when the user changes a provider icon.
+    fn glyph(self, icons: &IconSettings) -> &str {
         match self {
-            Self::Search => "⌕",
-            Self::Shell => TERMINAL_ICON,
-            Self::Agent(BuiltinAgentProvider::Claude) => "Ⓒ",
-            Self::Agent(BuiltinAgentProvider::Codex) => "Ⓧ",
-            Self::Agent(BuiltinAgentProvider::Antigravity) => "Ⓐ",
-            Self::Editor => TEXT_EDITOR_ICON,
-            Self::Board => "▦",
-            Self::Group => "\u{1F4C1}",
-            Self::Project => "🗂️",
-            Self::Split => "▥",
-            Self::Folder => "\u{1F5C0}",
-            // Reuses the same recycle glyph as the per-row `TreeRowAction::Retitle`
-            // -- one visual language for "ask the LLM to redo a title" whether
-            // it's scoped to one row or the whole tree.
-            Self::Restructure => TreeRowAction::Retitle.normal_glyph(),
-            Self::Settings => SETTINGS_ICON,
+            Self::Search => icons.glyph(IconTarget::ToolbarSearch),
+            Self::Shell => icons.glyph(IconTarget::Terminal),
+            Self::Agent(BuiltinAgentProvider::Claude) => icons.glyph(IconTarget::Claude),
+            Self::Agent(BuiltinAgentProvider::Codex) => icons.glyph(IconTarget::Codex),
+            Self::Agent(BuiltinAgentProvider::Antigravity) => icons.glyph(IconTarget::Antigravity),
+            Self::Editor => icons.glyph(IconTarget::Editor),
+            Self::Board => icons.glyph(IconTarget::Board),
+            Self::Group => icons.glyph(IconTarget::Group),
+            Self::Project => icons.glyph(IconTarget::Project),
+            Self::Split => icons.glyph(IconTarget::SplitVertical),
+            Self::Folder => icons.glyph(IconTarget::Folder),
+            Self::Restructure => icons.glyph(IconTarget::ToolbarRestructure),
+            Self::Settings => icons.glyph(IconTarget::ToolbarSettings),
         }
     }
 
@@ -255,13 +244,14 @@ impl TreeRowAction {
     /// The default, expressive UTF-8 icon for this action. These remain the
     /// standard sidebar controls; `stable_glyph` is only an explicit user
     /// preference for terminals that cannot render the emoji correctly.
-    const fn normal_glyph(self) -> &'static str {
+    const fn icon_target(self) -> IconTarget {
         match self {
-            Self::Rename => theme::PEN_ICON,
-            Self::MoveUp => "🔼",
-            Self::MoveDown => "🔽",
-            Self::Close => "🚫",
-            Self::Retitle | Self::ProjectRestructure => "♻️",
+            Self::Rename => IconTarget::RowRename,
+            Self::MoveUp => IconTarget::RowMoveUp,
+            Self::MoveDown => IconTarget::RowMoveDown,
+            Self::Close => IconTarget::RowClose,
+            Self::Retitle => IconTarget::RowRetitle,
+            Self::ProjectRestructure => IconTarget::RowProjectRestructure,
         }
     }
 
@@ -279,12 +269,12 @@ impl TreeRowAction {
         }
     }
 
-    const fn glyph(self, use_stable_glyphs: bool) -> &'static str {
-        if use_stable_glyphs {
-            self.stable_glyph()
-        } else {
-            self.normal_glyph()
+    fn glyph(self, icons: &IconSettings, use_stable_glyphs: bool) -> &str {
+        let configured = icons.glyph(self.icon_target());
+        if use_stable_glyphs && configured == self.icon_target().default_glyph() {
+            return self.stable_glyph();
         }
+        configured
     }
 }
 
@@ -346,6 +336,7 @@ impl TreeRowActionStrip {
         row: u16,
         actions: &[TreeRowAction],
         style: Style,
+        icons: &IconSettings,
         use_stable_glyphs: bool,
     ) {
         for (index, action) in TreeRowAction::ALL.iter().enumerate() {
@@ -363,7 +354,7 @@ impl TreeRowActionStrip {
             }
 
             if actions.contains(action) {
-                let glyph = action.glyph(use_stable_glyphs);
+                let glyph = action.glyph(icons, use_stable_glyphs);
                 let padding =
                     usize::from(ROW_ACTION_WIDTH).saturating_sub(UnicodeWidthStr::width(glyph));
                 // This is intentionally one `Cell` holding one full terminal
@@ -539,7 +530,7 @@ fn build_item(
         NodeKind::Container(container) => {
             let children = build_children(tree, node.id, context, identifier_path);
             let icon = match &container.kind {
-                ContainerKind::Project { .. } => "🗂️",
+                ContainerKind::Project { .. } => context.icons.glyph(IconTarget::Project),
                 ContainerKind::Group => context.icons.glyph(IconTarget::Group),
                 ContainerKind::SplitView {
                     orientation: ilium_core::SplitOrientation::Vertical,
@@ -567,6 +558,7 @@ fn build_item(
         NodeKind::Pane {
             status,
             scheduled_input,
+            prompt_queue,
             ..
         } => {
             let editor_filename = context
@@ -578,11 +570,20 @@ fn build_item(
                 })
                 .and_then(|path| path.file_name())
                 .map(|name| name.to_string_lossy().into_owned());
+            let display_name = if prompt_queue.is_empty() {
+                display_title(node, context.panel_width).to_string()
+            } else {
+                format!(
+                    "{} [Queue: {}]",
+                    display_title(node, context.panel_width),
+                    prompt_queue.len()
+                )
+            };
             let label = scheduled_input.as_ref().map_or_else(
                 || {
                     pane_label_with_icons(
                         status,
-                        display_title(node, context.panel_width),
+                        &display_name,
                         context.elapsed_ms,
                         context.titles_loading.contains(&node.id),
                         context.agent_identifiers,
@@ -593,7 +594,7 @@ fn build_item(
                 |scheduled_input| {
                     scheduled_pane_label(
                         status,
-                        display_title(node, context.panel_width),
+                        &display_name,
                         context.elapsed_ms,
                         context.current_unix_millis,
                         scheduled_input,
@@ -1555,6 +1556,7 @@ pub fn render(
         .expect("top-level items have unique identifiers")
         .highlight_style(theme::selected_style());
     frame.render_stateful_widget(widget, list, state);
+    let flattened_items = state.flatten(&items);
 
     if let Some(presentation_tree) = options.transitions.presentation_tree(options.elapsed_ms) {
         let presentation_items = build_tree_items(
@@ -1579,10 +1581,11 @@ pub fn render(
             .expect("top-level presentation items have unique identifiers")
             .highlight_style(theme::selected_style());
         frame.render_stateful_widget(presentation_widget, list, &mut presentation_state);
+        let flattened_presentation_items = presentation_state.flatten(&presentation_items);
         apply_row_motions(
             frame,
             list,
-            &presentation_items,
+            &flattened_presentation_items,
             &presentation_state,
             options.transitions,
             options.elapsed_ms,
@@ -1591,14 +1594,14 @@ pub fn render(
         apply_row_motions(
             frame,
             list,
-            &items,
+            &flattened_items,
             state,
             options.transitions,
             options.elapsed_ms,
         );
     }
 
-    draw_scrollbar(frame, area, &items, state);
+    draw_scrollbar(frame, area, flattened_items.len(), state);
 
     if let Some(hit) = options.hover.node {
         if options
@@ -1611,12 +1614,13 @@ pub fn render(
                 area,
                 hit.row,
                 applicable_row_actions(tree, hit.id),
+                options.icons,
                 options.use_stable_glyphs,
             );
         }
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
-        draw_toolbar(frame, area, options.hover.toolbar_action);
+        draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
     }
 }
 
@@ -1639,12 +1643,12 @@ fn copy_tree_state_for_presentation(state: &TreeState<NodeId>) -> TreeState<Node
 fn apply_row_motions(
     frame: &mut Frame,
     list: Rect,
-    items: &[TreeItem<'static, NodeId>],
+    visible_items: &[Flattened<'_, NodeId>],
     state: &TreeState<NodeId>,
     transitions: &TreeTransitions,
     elapsed_ms: u128,
 ) {
-    let visible_items = state.flatten(items);
+    let mut row_cells = Vec::with_capacity(usize::from(list.width));
     for (visible_row, item) in visible_items
         .iter()
         .skip(state.get_offset())
@@ -1660,33 +1664,44 @@ fn apply_row_motions(
         let Ok(row_offset) = u16::try_from(visible_row) else {
             continue;
         };
-        translate_row_left(frame, list, list.y.saturating_add(row_offset), motion);
+        translate_row_left(
+            frame,
+            list,
+            list.y.saturating_add(row_offset),
+            motion,
+            &mut row_cells,
+        );
     }
 }
 
 /// Applies one already-sampled transform without re-rendering or flattening.
-fn translate_row_left(frame: &mut Frame, list: Rect, row: u16, motion: TreeRowMotion) {
+fn translate_row_left(
+    frame: &mut Frame,
+    list: Rect,
+    row: u16,
+    motion: TreeRowMotion,
+    cells: &mut Vec<ratatui::buffer::Cell>,
+) {
     if motion.left_offset == 0 && !motion.is_dimmed {
         return;
     }
 
     let buffer = frame.buffer_mut();
     // Collect cells once, in order, then rewrite in-place after transformation.
-    let cells: Vec<_> = (list.x..list.right())
-        .map(|column| {
-            let mut cell = buffer[(column, row)].clone();
-            if motion.is_dimmed {
-                cell.set_style(Style::new().add_modifier(Modifier::DIM));
-            }
-            cell
-        })
-        .collect();
+    cells.clear();
+    cells.extend((list.x..list.right()).map(|column| {
+        let mut cell = buffer[(column, row)].clone();
+        if motion.is_dimmed {
+            cell.set_style(Style::new().add_modifier(Modifier::DIM));
+        }
+        cell
+    }));
     // Clear the row first.
     for column in list.x..list.right() {
         buffer[(column, row)].reset();
     }
     // Write transformed cells back at offset position.
-    for (source_index, cell) in cells.into_iter().enumerate() {
+    for (source_index, cell) in cells.iter().cloned().enumerate() {
         let Ok(source_column_offset) = u16::try_from(source_index) else {
             break;
         };
@@ -1744,14 +1759,8 @@ mod project_title_tests {
 /// the tree actually has more rows than fit -- a tree that fits entirely on
 /// screen has nothing to scroll, so the track would just be a distracting,
 /// always-full bar.
-fn draw_scrollbar(
-    frame: &mut Frame,
-    area: Rect,
-    items: &[TreeItem<'static, NodeId>],
-    state: &TreeState<NodeId>,
-) {
+fn draw_scrollbar(frame: &mut Frame, area: Rect, total_rows: usize, state: &TreeState<NodeId>) {
     let list = list_area(area);
-    let total_rows = state.flatten(items).len();
     if total_rows <= usize::from(list.height) {
         return;
     }
@@ -1773,13 +1782,21 @@ fn draw_row_actions(
     area: Rect,
     row: u16,
     actions: &[TreeRowAction],
+    icons: &IconSettings,
     use_stable_glyphs: bool,
 ) {
     let Some(action_strip) = TreeRowActionStrip::from_tree_area(area) else {
         return;
     };
     let style = theme::selected_style().add_modifier(Modifier::BOLD);
-    action_strip.draw(frame.buffer_mut(), row, actions, style, use_stable_glyphs);
+    action_strip.draw(
+        frame.buffer_mut(),
+        row,
+        actions,
+        style,
+        icons,
+        use_stable_glyphs,
+    );
 }
 
 /// Draws the five creation buttons plus a caption row naming whichever one
@@ -1787,7 +1804,12 @@ fn draw_row_actions(
 /// at all times (so the five read as distinct actions on sight, not one
 /// repeated shape); the hovered button additionally brightens and bolds to
 /// confirm exactly what a click would do before it happens.
-fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction>) {
+fn draw_toolbar(
+    frame: &mut Frame,
+    area: Rect,
+    hovered: Option<TreeToolbarAction>,
+    icons: &IconSettings,
+) {
     let toolbar = toolbar_area(area);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
@@ -1802,7 +1824,7 @@ fn draw_toolbar(frame: &mut Frame, area: Rect, hovered: Option<TreeToolbarAction
             Style::new().fg(action.accent())
         };
         let button = Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", action.glyph()),
+            format!(" {} ", action.glyph(icons)),
             style,
         )));
         frame.render_widget(button, button_area);
@@ -1912,6 +1934,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 frame.render_widget(Paragraph::new("ABCDEFGHIJ"), area);
+                let mut cells = Vec::new();
                 translate_row_left(
                     frame,
                     Rect::new(0, 0, 10, 1),
@@ -1920,6 +1943,7 @@ mod tests {
                         left_offset: 3,
                         is_dimmed: true,
                     },
+                    &mut cells,
                 );
             })
             .unwrap();
@@ -2138,26 +2162,51 @@ mod tests {
 
     #[test]
     fn row_actions_default_to_normal_icons_and_offer_opt_in_stable_glyphs() {
-        assert_eq!(theme::PEN_ICON, "✏️");
-        assert_eq!(TreeToolbarAction::Shell.glyph(), TERMINAL_ICON);
-        assert_eq!(TreeToolbarAction::Editor.glyph(), TEXT_EDITOR_ICON);
-        assert_eq!(TreeToolbarAction::Settings.glyph(), SETTINGS_ICON);
-        assert_eq!(TreeRowAction::Rename.glyph(false), theme::PEN_ICON);
-        assert_eq!(TreeRowAction::MoveUp.glyph(false), "🔼");
-        assert_eq!(TreeRowAction::MoveDown.glyph(false), "🔽");
-        assert_eq!(TreeRowAction::Close.glyph(false), "🚫");
-        assert_eq!(TreeRowAction::Retitle.glyph(false), "♻️");
+        let icons = IconSettings::default();
+        assert_eq!(
+            TreeToolbarAction::Shell.glyph(&icons),
+            icons.glyph(IconTarget::Terminal)
+        );
+        assert_eq!(
+            TreeToolbarAction::Editor.glyph(&icons),
+            icons.glyph(IconTarget::Editor)
+        );
+        assert_eq!(
+            TreeToolbarAction::Settings.glyph(&icons),
+            icons.glyph(IconTarget::ToolbarSettings)
+        );
+        assert_eq!(
+            TreeRowAction::Rename.glyph(&icons, false),
+            icons.glyph(IconTarget::RowRename)
+        );
+        assert_eq!(
+            TreeRowAction::MoveUp.glyph(&icons, false),
+            icons.glyph(IconTarget::RowMoveUp)
+        );
+        assert_eq!(
+            TreeRowAction::MoveDown.glyph(&icons, false),
+            icons.glyph(IconTarget::RowMoveDown)
+        );
+        assert_eq!(
+            TreeRowAction::Close.glyph(&icons, false),
+            icons.glyph(IconTarget::RowClose)
+        );
+        assert_eq!(
+            TreeRowAction::Retitle.glyph(&icons, false),
+            icons.glyph(IconTarget::RowRetitle)
+        );
         for action in TreeRowAction::ALL {
-            let glyph = action.glyph(true);
+            let glyph = action.glyph(&icons, true);
             assert_eq!(
                 UnicodeWidthStr::width(glyph),
                 1,
                 "{action:?} stable glyph must remain one terminal cell wide"
             );
         }
-        assert!(UnicodeWidthStr::width(TERMINAL_ICON) < usize::from(TOOLBAR_BUTTON_WIDTH));
-        assert!(UnicodeWidthStr::width(TEXT_EDITOR_ICON) < usize::from(TOOLBAR_BUTTON_WIDTH));
-        assert!(UnicodeWidthStr::width(SETTINGS_ICON) < usize::from(TOOLBAR_BUTTON_WIDTH));
+        assert!(
+            UnicodeWidthStr::width(icons.glyph(IconTarget::Terminal))
+                < usize::from(TOOLBAR_BUTTON_WIDTH)
+        );
 
         let shell_label = pane_label(
             &PaneStatus::PlainShell,
@@ -2167,7 +2216,10 @@ mod tests {
             &AgentIdentifierSettings::default(),
             None,
         );
-        assert_eq!(shell_label.spans[0].content.trim_end(), TERMINAL_ICON);
+        assert_eq!(
+            shell_label.spans[0].content.trim_end(),
+            icons.glyph(IconTarget::Terminal)
+        );
 
         for is_dirty in [false, true] {
             let label = pane_label(
@@ -2178,12 +2230,87 @@ mod tests {
                 &AgentIdentifierSettings::default(),
                 None,
             );
-            assert_eq!(label.spans[0].content.trim_end(), TEXT_EDITOR_ICON);
+            assert_eq!(
+                label.spans[0].content.trim_end(),
+                icons.glyph(IconTarget::Editor)
+            );
             assert_eq!(
                 UnicodeWidthStr::width(label.spans[0].content.as_ref()),
                 NODE_ICON_COLUMN_WIDTH
             );
         }
+    }
+
+    #[test]
+    fn toolbar_and_row_controls_use_their_configured_icons() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::ToolbarSearch, "🔎".to_string());
+        icons.set(IconTarget::Project, "🧺".to_string());
+        icons.set(IconTarget::Claude, "🦞".to_string());
+        icons.set(IconTarget::Codex, "🧬".to_string());
+        icons.set(IconTarget::Antigravity, "🪐".to_string());
+        icons.set(IconTarget::ToolbarRestructure, "⟳".to_string());
+        icons.set(IconTarget::ToolbarSettings, "🔧".to_string());
+        icons.set(IconTarget::RowRename, "🖊️".to_string());
+        icons.set(IconTarget::RowMoveUp, "⬆️".to_string());
+        icons.set(IconTarget::RowMoveDown, "⬇️".to_string());
+        icons.set(IconTarget::RowClose, "⛔".to_string());
+        icons.set(IconTarget::RowRetitle, "↻".to_string());
+        icons.set(IconTarget::RowProjectRestructure, "✦".to_string());
+
+        assert_eq!(
+            TreeToolbarAction::Search.glyph(&icons),
+            icons.glyph(IconTarget::ToolbarSearch)
+        );
+        assert_eq!(
+            TreeToolbarAction::Project.glyph(&icons),
+            icons.glyph(IconTarget::Project)
+        );
+
+        assert_eq!(
+            TreeToolbarAction::Agent(BuiltinAgentProvider::Claude).glyph(&icons),
+            icons.glyph(IconTarget::Claude)
+        );
+        assert_eq!(
+            TreeToolbarAction::Agent(BuiltinAgentProvider::Codex).glyph(&icons),
+            icons.glyph(IconTarget::Codex)
+        );
+        assert_eq!(
+            TreeToolbarAction::Agent(BuiltinAgentProvider::Antigravity).glyph(&icons),
+            icons.glyph(IconTarget::Antigravity)
+        );
+        assert_eq!(
+            TreeToolbarAction::Restructure.glyph(&icons),
+            icons.glyph(IconTarget::ToolbarRestructure)
+        );
+        assert_eq!(
+            TreeToolbarAction::Settings.glyph(&icons),
+            icons.glyph(IconTarget::ToolbarSettings)
+        );
+        assert_eq!(
+            TreeRowAction::Rename.glyph(&icons, false),
+            icons.glyph(IconTarget::RowRename)
+        );
+        assert_eq!(
+            TreeRowAction::MoveUp.glyph(&icons, false),
+            icons.glyph(IconTarget::RowMoveUp)
+        );
+        assert_eq!(
+            TreeRowAction::MoveDown.glyph(&icons, false),
+            icons.glyph(IconTarget::RowMoveDown)
+        );
+        assert_eq!(
+            TreeRowAction::Close.glyph(&icons, false),
+            icons.glyph(IconTarget::RowClose)
+        );
+        assert_eq!(
+            TreeRowAction::Retitle.glyph(&icons, false),
+            icons.glyph(IconTarget::RowRetitle)
+        );
+        assert_eq!(
+            TreeRowAction::ProjectRestructure.glyph(&icons, false),
+            icons.glyph(IconTarget::RowProjectRestructure)
+        );
     }
 
     #[test]
@@ -2318,7 +2445,7 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(
             buffer[(action_strip.x, list.y)].symbol().trim_end(),
-            TreeRowAction::Rename.glyph(false)
+            TreeRowAction::Rename.glyph(&IconSettings::default(), false)
         );
         // `TestBackend` deliberately stores one multi-cell terminal print
         // in its origin cell rather than emulating the terminal cursor. The
@@ -2392,6 +2519,7 @@ mod tests {
             row,
             &TreeRowAction::ALL,
             theme::selected_style().add_modifier(Modifier::BOLD),
+            &IconSettings::default(),
             false,
         );
 
@@ -2411,7 +2539,7 @@ mod tests {
             let action_x = controls_start + action_index as u16 * ROW_ACTION_WIDTH;
             assert_eq!(
                 next[(action_x, row)].symbol().trim_end(),
-                action.glyph(false),
+                action.glyph(&IconSettings::default(), false),
                 "slot {action_index} did not retain its normal emoji glyph"
             );
             assert_eq!(
