@@ -452,11 +452,45 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "Settings closed after the opening click and maintenance ticks: {:?}",
         tui.screen_text()
     );
+
+    // Settings opens on User Interface. Eight real Tab key events reach the
+    // Voice control tab in the registry order, proving the feature is wired
+    // into the same navigable settings surface as every established tab.
+    tui.write(b"\t\t\t\t\t\t\t\t")
+        .expect("navigating to Voice control settings");
+    let voice_settings_shown = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("Voice control")
+                && screen.contains("OpenAI API key")
+                && screen.contains("Reasoning effort")
+                && screen.contains("VAD eagerness")
+                && screen.contains("Custom prompt")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        voice_settings_shown,
+        "expected the complete Voice control settings surface, got: {:?}",
+        tui.screen_text()
+    );
+    assert!(
+        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
+        "expected the global voice control over Settings, got: {:?}",
+        tui.screen_text()
+    );
+
     tui.write(b"\x1b")
         .expect("closing mouse-opened Settings with Esc");
     assert!(
         wait_until(|| !tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
         "expected mouse-opened Settings to close before continuing"
+    );
+    assert!(
+        tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
+        "expected the global voice control after Settings closed, got: {:?}",
+        tui.screen_text()
     );
 
     // Move the real terminal pointer over the terminal row. This verifies

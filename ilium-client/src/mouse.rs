@@ -63,6 +63,15 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
 
+    // The voice control is global and rendered above every full-screen view,
+    // so its hit-test must precede modal dispatch as well.
+    if app.layout.voice_control_area.contains(position)
+        && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
+    {
+        app.toggle_voice_control();
+        return;
+    }
+
     // Only actually take `app.mode` out when it's a variant this function
     // handles -- mirrors the pre-client/server design's own care here (see
     // its comment): swapping out any mode unconditionally and never putting
@@ -1019,6 +1028,21 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         }
                     }
                 }
+            } else if state.tab == crate::app::SettingsTab::VoiceControl {
+                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::voice_settings::VoiceRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = crate::voice_settings::VoiceRow::ALL.get(index).copied() {
+                        app.settings_adjust_voice_row(row, direction);
+                        if !matches!(app.mode, Mode::Normal) {
+                            return;
+                        }
+                    }
+                }
             } else if state.tab == crate::app::SettingsTab::Appearance {
                 if let Some((row, direction)) = crate::settings_ui::appearance_content_hit(
                     layout.content_area,
@@ -1633,6 +1657,30 @@ mod row_action_click_tests {
         let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
         app
+    }
+
+    #[test]
+    fn bottom_right_voice_control_toggles_before_full_screen_mode_dispatch() {
+        let mut app = test_app();
+        app.mode = Mode::Settings(crate::app::SettingsState::new());
+        let area = app.layout.voice_control_area;
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: area.x,
+                row: area.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(app.voice_settings.enabled);
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(
+            app.take_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Start)
+        );
     }
 
     #[test]

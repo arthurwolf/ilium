@@ -30,7 +30,7 @@ use crate::agent_from_line::{
 use crate::board::BoardPane;
 use crate::config::{
     EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings, TerminalSettings,
-    TreeOrder, UiSettings,
+    TreeOrder, UiSettings, VoiceSettings,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
@@ -53,6 +53,7 @@ use crate::text_prompt::TextPromptState;
 use crate::theme::{self, ColorScheme, Theme};
 use crate::tree_transitions::TreeTransitions;
 use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
+use crate::voice_settings::{VoicePromptEditorState, VoiceRow, VoiceSettingField};
 use ilium_inference::InferenceSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
@@ -85,6 +86,23 @@ fn normalize_path_lexically(path: &Path) -> PathBuf {
 fn normalize_board_path(path: PathBuf) -> PathBuf {
     path.canonicalize()
         .unwrap_or_else(|_| normalize_path_lexically(&path))
+}
+
+/// Cycles through system default plus every discovered CPAL device. A saved
+/// device that disappeared is treated as system default on the next step.
+fn stepped_optional_device(
+    current: Option<&str>,
+    devices: &[String],
+    direction: i32,
+) -> Option<String> {
+    let count = devices.len() + 1;
+    let current_index = current
+        .and_then(|name| devices.iter().position(|candidate| candidate == name))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let next = (current_index as i32 + direction.signum()).rem_euclid(count as i32) as usize;
+    next.checked_sub(1)
+        .and_then(|index| devices.get(index).cloned())
 }
 
 /// Upper bound on `App::pending_editor_opens` -- see that field's doc
@@ -143,6 +161,10 @@ pub enum Mode {
     CommandPrompt(TextPromptState),
     /// Edits one provider-specific inference setting from the settings tab.
     InferenceSettingPrompt(InferenceSettingField, TextPromptState),
+    /// Masked single-line OpenAI credential editor.
+    VoiceSettingPrompt(VoiceSettingField, TextPromptState),
+    /// Multiline additive prompt editor for the voice controller.
+    VoicePromptEditor(Box<VoicePromptEditorState>),
     /// In-progress "Save As" filename prompt for the editor pane `NodeId`.
     SaveAs(NodeId, TextPromptState),
     Help,
@@ -207,6 +229,23 @@ pub enum ClientExitReason {
     RestartRequested,
 }
 
+/// Lifecycle request proposed synchronously by `App` and fulfilled by the
+/// async event loop that owns `VoiceService`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceRuntimeRequest {
+    Start,
+    Stop,
+    Reconfigure,
+}
+
+/// Realtime interaction proposed by synchronous input handling and delivered
+/// by the async event-loop owner after lifecycle reconciliation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceInteractionRequest {
+    StartPushToTalk,
+    StopPushToTalk,
+}
+
 /// Which tab is selected in the full-screen settings view. Add a new
 /// variant here -- and a matching arm in every `match` over this type --
 /// before adding another tab; see `crate::settings_ui`'s module doc comment
@@ -222,6 +261,7 @@ pub enum SettingsTab {
     Keyboard,
     KanbanBoard,
     Sound,
+    VoiceControl,
     About,
 }
 
@@ -324,7 +364,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 10] = [
+    pub const ALL: [SettingsTab; 11] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -333,6 +373,7 @@ impl SettingsTab {
         Self::Session,
         Self::KanbanBoard,
         Self::Sound,
+        Self::VoiceControl,
         Self::Inference,
         Self::About,
     ];
@@ -348,6 +389,7 @@ impl SettingsTab {
             Self::Keyboard => "Keyboard",
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
+            Self::VoiceControl => "Voice control",
             Self::About => "About",
         }
     }
@@ -938,6 +980,17 @@ pub struct App {
     pub terminal_settings: TerminalSettings,
     pub editor_settings: EditorSettings,
     pub session_settings: SessionSettings,
+    /// Live voice settings and transport-neutral status. The actual service
+    /// actor remains owned by `crate::run`, following the same outbox pattern
+    /// used for IPC and background workers.
+    pub voice_settings: VoiceSettings,
+    pub voice_connection_state: ilium_voice::VoiceConnectionState,
+    pub voice_input_devices: Vec<String>,
+    pub voice_output_devices: Vec<String>,
+    pub voice_last_user_transcript: Option<String>,
+    pub voice_last_assistant_transcript: Option<String>,
+    pending_voice_runtime_request: Option<VoiceRuntimeRequest>,
+    pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
     pending_inference_test: bool,
     pending_ollama_model_refresh: bool,
     /// Semantic icon searches are decided by the picker state but spawned by
@@ -1128,6 +1181,14 @@ impl App {
             terminal_settings: TerminalSettings::default(),
             editor_settings: EditorSettings::default(),
             session_settings: SessionSettings::default(),
+            voice_settings: VoiceSettings::default(),
+            voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
+            voice_input_devices: Vec::new(),
+            voice_output_devices: Vec::new(),
+            voice_last_user_transcript: None,
+            voice_last_assistant_transcript: None,
+            pending_voice_runtime_request: None,
+            pending_voice_interaction_requests: Vec::new(),
             pending_inference_test: false,
             pending_ollama_model_refresh: false,
             pending_icon_semantic_search: None,
@@ -1551,6 +1612,148 @@ impl App {
     }
     pub fn apply_session_settings(&mut self, settings: SessionSettings) {
         self.session_settings = settings;
+    }
+
+    /// Installs startup voice settings without starting the actor. The event
+    /// loop decides startup after all dependencies and the control plane exist.
+    pub fn apply_voice_settings(&mut self, settings: VoiceSettings) {
+        self.voice_settings = settings;
+    }
+
+    /// Persists one live voice change and asks the async owner to reconcile
+    /// the actor. Multiple changes in one input turn intentionally coalesce.
+    pub fn apply_and_persist_voice_settings(&mut self, settings: VoiceSettings) {
+        let was_enabled = self.voice_settings.enabled;
+        self.voice_settings = settings;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_voice_settings(&config_dir, &self.voice_settings)
+            {
+                self.status_message = Some(format!("Could not save voice settings: {error}"));
+            }
+        }
+        self.pending_voice_runtime_request =
+            Some(match (was_enabled, self.voice_settings.enabled) {
+                (false, true) => VoiceRuntimeRequest::Start,
+                (true, false) => VoiceRuntimeRequest::Stop,
+                (true, true) => VoiceRuntimeRequest::Reconfigure,
+                (false, false) => return,
+            });
+    }
+
+    pub fn toggle_voice_control(&mut self) {
+        let mut settings = self.voice_settings.clone();
+        settings.enabled = !settings.enabled;
+        self.apply_and_persist_voice_settings(settings);
+    }
+
+    pub fn take_voice_runtime_request(&mut self) -> Option<VoiceRuntimeRequest> {
+        self.pending_voice_runtime_request.take()
+    }
+
+    /// Records a push-to-talk edge without performing async transport work in
+    /// the keyboard layer. A vector preserves a press/release pair received in
+    /// one input batch.
+    pub fn request_voice_interaction(&mut self, request: VoiceInteractionRequest) {
+        self.pending_voice_interaction_requests.push(request);
+    }
+
+    pub fn take_voice_interaction_requests(&mut self) -> Vec<VoiceInteractionRequest> {
+        std::mem::take(&mut self.pending_voice_interaction_requests)
+    }
+
+    pub fn update_voice_connection_state(&mut self, state: ilium_voice::VoiceConnectionState) {
+        if let ilium_voice::VoiceConnectionState::Failed(error) = &state {
+            self.status_message = Some(format!("Voice control failed: {error}"));
+        }
+        self.voice_connection_state = state;
+    }
+
+    pub fn settings_adjust_voice_row(&mut self, row: VoiceRow, direction: i32) {
+        match row {
+            VoiceRow::Enabled => self.toggle_voice_control(),
+            VoiceRow::ApiKey => {
+                self.mode =
+                    Mode::VoiceSettingPrompt(VoiceSettingField::ApiKey, TextPromptState::new(""));
+            }
+            VoiceRow::Model => {
+                let mut settings = self.voice_settings.clone();
+                settings.model = settings.model.stepped(direction);
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::Voice => {
+                let mut settings = self.voice_settings.clone();
+                settings.voice = settings.voice.stepped(direction);
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::ReasoningEffort => {
+                let mut settings = self.voice_settings.clone();
+                settings.reasoning_effort = settings.reasoning_effort.stepped(direction);
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::InputMode => {
+                let mut settings = self.voice_settings.clone();
+                settings.input_mode = settings.input_mode.stepped(direction);
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::VadEagerness => {
+                let mut settings = self.voice_settings.clone();
+                settings.vad_eagerness = settings.vad_eagerness.stepped(direction);
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::InputDevice => {
+                let mut settings = self.voice_settings.clone();
+                settings.input_device_name = stepped_optional_device(
+                    settings.input_device_name.as_deref(),
+                    &self.voice_input_devices,
+                    direction,
+                );
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::OutputDevice => {
+                let mut settings = self.voice_settings.clone();
+                settings.output_device_name = stepped_optional_device(
+                    settings.output_device_name.as_deref(),
+                    &self.voice_output_devices,
+                    direction,
+                );
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::OutputVolume => {
+                let mut settings = self.voice_settings.clone();
+                settings.output_volume_percent = (i32::from(settings.output_volume_percent)
+                    + direction.signum() * 5)
+                    .clamp(0, 100) as u8;
+                self.apply_and_persist_voice_settings(settings);
+            }
+            VoiceRow::CustomPrompt => {
+                self.mode = Mode::VoicePromptEditor(Box::new(VoicePromptEditorState::new(
+                    &self.voice_settings.custom_prompt,
+                )));
+            }
+            VoiceRow::Reconnect => {
+                if self.voice_settings.enabled {
+                    self.pending_voice_runtime_request = Some(VoiceRuntimeRequest::Reconfigure);
+                    self.status_message = Some("Reconnecting voice control".to_owned());
+                } else {
+                    self.status_message = Some("Voice control is disabled".to_owned());
+                }
+            }
+        }
+    }
+
+    pub fn settings_commit_voice_field(&mut self, field: VoiceSettingField, value: String) {
+        let mut settings = self.voice_settings.clone();
+        match field {
+            VoiceSettingField::ApiKey => settings.api_key = value.trim().to_owned(),
+        }
+        self.apply_and_persist_voice_settings(settings);
+    }
+
+    pub fn settings_commit_voice_prompt(&mut self, prompt: String) {
+        let mut settings = self.voice_settings.clone();
+        settings.custom_prompt = prompt;
+        self.apply_and_persist_voice_settings(settings);
     }
     fn persist_terminal_settings(&mut self) {
         if let Some(config_dir) = self.config_dir.clone() {
@@ -7006,7 +7209,8 @@ mod tests {
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
         assert_eq!(SettingsTab::Session.next(), SettingsTab::KanbanBoard);
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
-        assert_eq!(SettingsTab::Sound.next(), SettingsTab::Inference);
+        assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
+        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);

@@ -87,6 +87,6 @@ Use the `directories` crate, never hardcode `~`:
 - Never "fix" an icon rendering or width issue by replacing the normal UTF-8 icons with plain stable glyphs. Diagnose and correct the rendering, cell-width, or diff behavior while keeping normal icons as the default. A stable-glyph mode may exist only as an explicit, opt-in user preference.
 <!-- NEXUS:START -->
 ## Nexus Memory Substrate
-- Identity: [Soul](/ram/is.perf.Kc3Jbh/config/nexus/soul.md)
+- Identity: [Soul](/ram/ilium-voice-state.Qmwijf/config/nexus/soul.md)
 - Project Context: [Project Context](/home/developer/dev/ai/ilium/.nexus/context.md)
 <!-- NEXUS:END -->

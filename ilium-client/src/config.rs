@@ -16,8 +16,9 @@ use std::path::Path;
 
 use ilium_inference::InferenceSettings;
 use ilium_sound::SoundSettings;
+use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use ratatui::style::Color;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::ClientError;
 use crate::icon_settings::{IconSettings, IconTarget};
@@ -56,6 +57,9 @@ pub struct ClientConfig {
     pub editor: EditorSettings,
     /// Policy the detached server reads the next time it starts this session.
     pub session: SessionSettings,
+    /// OpenAI Realtime voice-controller settings. The API key remains on the
+    /// client side and is never included in semantic state snapshots.
+    pub voice: VoiceSettings,
 }
 
 impl Default for ClientConfig {
@@ -71,6 +75,43 @@ impl Default for ClientConfig {
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
+            voice: VoiceSettings::default(),
+        }
+    }
+}
+
+/// Durable `[voice]` settings. Runtime ownership lives in `crate::run`; this
+/// is a validated value object shared by persistence, Settings, and `App`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceSettings {
+    pub enabled: bool,
+    pub api_key: String,
+    pub model: VoiceModel,
+    pub voice: VoiceName,
+    pub reasoning_effort: ReasoningEffort,
+    pub input_mode: VoiceInputMode,
+    pub vad_eagerness: VadEagerness,
+    pub input_device_name: Option<String>,
+    pub output_device_name: Option<String>,
+    pub output_volume_percent: u8,
+    pub custom_prompt: String,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key: String::new(),
+            model: VoiceModel::default(),
+            voice: VoiceName::default(),
+            reasoning_effort: ReasoningEffort::default(),
+            input_mode: VoiceInputMode::default(),
+            vad_eagerness: VadEagerness::default(),
+            input_device_name: None,
+            output_device_name: None,
+            output_volume_percent: 80,
+            custom_prompt: String::new(),
         }
     }
 }
@@ -563,6 +604,8 @@ struct RawClientConfig {
     editor: RawEditorConfig,
     #[serde(default)]
     session: RawSessionConfig,
+    #[serde(default)]
+    voice: VoiceSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -702,6 +745,8 @@ pub enum ConfigLoadError {
         "kanban_board.minimum_column_width = {0} must be between {MIN_BOARD_COLUMN_WIDTH} and {MAX_BOARD_COLUMN_WIDTH}"
     )]
     InvalidBoardColumnWidth(u16),
+    #[error("voice.output_volume_percent = {0} must be between 0 and 100")]
+    InvalidVoiceOutputVolume(u8),
 }
 
 /// Why persisting a settings-screen change to `config.toml` failed -- see
@@ -767,6 +812,12 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
+    if raw.voice.output_volume_percent > 100 {
+        return Err(ClientError::ConfigLoad {
+            path: path.clone(),
+            source: ConfigLoadError::InvalidVoiceOutputVolume(raw.voice.output_volume_percent),
+        });
+    }
     let theme =
         merge_theme(raw.theme, ui.color_scheme).map_err(|source| ClientError::ConfigLoad {
             path: path.clone(),
@@ -784,6 +835,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         terminal,
         editor,
         session,
+        voice: raw.voice,
     })
 }
 
@@ -1380,6 +1432,23 @@ pub fn save_inference_settings(
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     table.insert("inference".to_string(), value);
+    write_toml_document(&path, &document)
+}
+
+/// Persists only `[voice]`, preserving every unrelated client and server
+/// table. API keys are stored with the same local-file policy as inference
+/// provider keys and are never written to logs or tool results.
+pub fn save_voice_settings(config_dir: &Path, voice: &VoiceSettings) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(voice).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("voice".to_owned(), value);
     write_toml_document(&path, &document)
 }
 
@@ -2192,5 +2261,48 @@ mod tests {
         let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(raw.contains("working_poll_seconds = 3"));
         assert!(raw.contains("enabled = false"));
+    }
+
+    #[test]
+    fn voice_settings_round_trip_and_reject_invalid_volume_without_replacing_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[notifications]\nenabled = false\n",
+        )
+        .unwrap();
+        let voice = VoiceSettings {
+            enabled: true,
+            api_key: "secret-test-key".to_owned(),
+            model: VoiceModel::GptRealtimeMini,
+            voice: VoiceName::Cedar,
+            reasoning_effort: ReasoningEffort::Medium,
+            input_mode: VoiceInputMode::PushToTalk,
+            vad_eagerness: VadEagerness::Low,
+            input_device_name: Some("Studio microphone".to_owned()),
+            output_device_name: Some("Desk speakers".to_owned()),
+            output_volume_percent: 65,
+            custom_prompt: "Prefer terse confirmations.\nNever guess targets.".to_owned(),
+        };
+
+        save_voice_settings(&dir, &voice).expect("voice settings should save");
+        let config = load(&dir).expect("saved voice settings should load");
+        assert_eq!(config.voice, voice);
+        let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(raw.contains("[notifications]"));
+        assert!(raw.contains("enabled = false"));
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[voice]\noutput_volume_percent = 101\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidVoiceOutputVolume(101),
+                ..
+            })
+        ));
     }
 }

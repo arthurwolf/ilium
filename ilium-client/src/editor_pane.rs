@@ -361,6 +361,38 @@ impl EditorPane {
         modified
     }
 
+    /// Inserts a semantic text payload in one operation. Voice and future
+    /// non-keyboard controllers use this instead of synthesizing hundreds of
+    /// terminal key events, while the same dirty/autosave invariants remain
+    /// owned by the editor.
+    pub fn insert_text(&mut self, text: &str) -> bool {
+        let modified = self.textarea.insert_str(text);
+        self.source_scroll_should_follow_cursor.set(true);
+        if modified {
+            self.mark_dirty();
+        }
+        modified
+    }
+
+    /// Replaces the complete buffer while preserving the editor's path and
+    /// presentation settings. The caller owns the explicit confirmation for
+    /// this destructive semantic operation; the editor owns dirty tracking.
+    pub fn replace_contents(&mut self, text: &str) {
+        let lines = if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.split('\n')
+                .map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned())
+                .collect()
+        };
+        self.textarea = TextArea::from(lines);
+        self.apply_line_number_style();
+        self.source_scroll_row.set(0);
+        self.source_scroll_col.set(0);
+        self.source_scroll_should_follow_cursor.set(true);
+        self.mark_dirty();
+    }
+
     /// Marks the buffer dirty and, if autosave is on, (re)starts its
     /// debounce window -- shared by every mutation path (`input`,
     /// `toggle_checkbox`) so none of them can forget to arm the timer.

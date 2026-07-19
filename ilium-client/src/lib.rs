@@ -36,6 +36,7 @@ pub mod board;
 pub mod board_ui;
 pub mod config;
 pub mod connection;
+pub mod control;
 pub mod editor_chrome;
 pub mod editor_highlight;
 pub mod editor_pane;
@@ -83,6 +84,7 @@ pub mod tree_ordering;
 pub mod tree_transitions;
 pub mod tree_ui;
 pub mod ui;
+pub mod voice_settings;
 pub mod workspace_file;
 
 use std::path::PathBuf;
@@ -181,11 +183,27 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     // persist a change (`crate::config::save_ui_settings`).
     let (config, config_dir) = init_config();
     let sound_discovery = ilium_sound::discover_system_sounds();
+    let voice_input_devices = ilium_voice::available_input_devices().unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to enumerate voice input devices");
+        Vec::new()
+    });
+    let voice_output_devices = ilium_voice::available_output_devices().unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to enumerate voice output devices");
+        Vec::new()
+    });
 
     // `TerminalGuard::drop` restores the terminal whether this function
     // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
     let guard = TerminalGuard::enter()?;
-    let result = run_inner(&options, config, config_dir, sound_discovery).await;
+    let result = run_inner(
+        &options,
+        config,
+        config_dir,
+        sound_discovery,
+        voice_input_devices,
+        voice_output_devices,
+    )
+    .await;
     drop(guard);
     result
 }
@@ -229,6 +247,8 @@ async fn run_inner(
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
     sound_discovery: ilium_sound::SoundDiscovery,
+    voice_input_devices: Vec<String>,
+    voice_output_devices: Vec<String>,
 ) -> Result<ClientExitReason, ClientError> {
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
@@ -243,7 +263,10 @@ async fn run_inner(
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
+    app.apply_voice_settings(config.voice);
     app.sound_discovery = sound_discovery;
+    app.voice_input_devices = voice_input_devices;
+    app.voice_output_devices = voice_output_devices;
     app.config_dir = config_dir;
     let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
     app.set_screen_area(Rect::new(0, 0, initial_size.width, initial_size.height));
@@ -258,6 +281,12 @@ async fn run_inner(
     let (icon_search_events_tx, mut icon_search_events_rx) =
         mpsc::channel(ICON_SEARCH_EVENTS_CHANNEL_CAPACITY);
     let mut icon_search_workers = IconSearchWorkers::new(icon_search_events_tx);
+    let mut control_plane = crate::control::ControlPlane::default();
+    let mut voice_service = if app.voice_settings.enabled {
+        start_voice_service(&mut app, &control_plane)
+    } else {
+        None
+    };
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
     // equivalent), rather than per pane -- `None` on a platform/environment
     // where it can't be resolved simply disables session-title inference
@@ -355,12 +384,46 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
+            voice_event = next_voice_event(&mut voice_service) => {
+                match voice_event {
+                    Some(event) => {
+                        handle_voice_event(
+                            &mut app,
+                            &mut control_plane,
+                            voice_service.as_ref(),
+                            event,
+                        ).await;
+                    }
+                    None if voice_service.is_some() => {
+                        voice_service = None;
+                        if app.voice_settings.enabled {
+                            app.update_voice_connection_state(
+                                ilium_voice::VoiceConnectionState::Failed(
+                                    "voice service stopped unexpectedly".to_owned(),
+                                ),
+                            );
+                        }
+                    }
+                    None => {}
+                }
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
             () = tokio::time::sleep(tick_delay) => {
                 if crate::tick::on_tick(&mut app, Instant::now(), &mut search_workers) {
                     needs_redraw = true;
                 }
             }
         }
+
+        dispatch_pending_app_work(
+            &mut app,
+            &mut naming_workers,
+            &mut icon_search_workers,
+            home_dir.as_deref(),
+        );
+        reconcile_voice_runtime(&mut app, &control_plane, &mut voice_service).await;
+        deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
 
         let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
         for request in outbound_requests {
@@ -383,9 +446,149 @@ async fn run_inner(
         }
     }
 
+    if let Some(service) = voice_service {
+        service.shutdown().await;
+    }
+
     // A dropped input/server channel remains an ordinary exit. Only the
     // explicit Restart menu action can request a process re-exec.
     Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
+}
+
+fn start_voice_service(
+    app: &mut App,
+    control_plane: &crate::control::ControlPlane,
+) -> Option<ilium_voice::VoiceService> {
+    let settings = &app.voice_settings;
+    let api_key = if settings.api_key.trim().is_empty() {
+        std::env::var("OPENAI_API_KEY").unwrap_or_default()
+    } else {
+        settings.api_key.clone()
+    };
+    let config = ilium_voice::VoiceRuntimeConfig {
+        api_key: api_key.into(),
+        model: settings.model,
+        voice: settings.voice,
+        reasoning_effort: settings.reasoning_effort,
+        input_mode: settings.input_mode,
+        vad_eagerness: settings.vad_eagerness,
+        input_device_name: settings.input_device_name.clone(),
+        output_device_name: settings.output_device_name.clone(),
+        output_volume_percent: settings.output_volume_percent,
+        instructions: crate::control::system_instructions(&settings.custom_prompt),
+    };
+    match ilium_voice::VoiceService::start(config, control_plane.tool_definitions()) {
+        Ok(service) => {
+            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Connecting);
+            Some(service)
+        }
+        Err(error) => {
+            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+                error.to_string(),
+            ));
+            None
+        }
+    }
+}
+
+async fn next_voice_event(
+    voice_service: &mut Option<ilium_voice::VoiceService>,
+) -> Option<ilium_voice::VoiceEvent> {
+    match voice_service {
+        Some(service) => service.next_event().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn handle_voice_event(
+    app: &mut App,
+    control_plane: &mut crate::control::ControlPlane,
+    voice_service: Option<&ilium_voice::VoiceService>,
+    event: ilium_voice::VoiceEvent,
+) {
+    match event {
+        ilium_voice::VoiceEvent::StateChanged(state) => {
+            app.update_voice_connection_state(state);
+        }
+        ilium_voice::VoiceEvent::ToolInvocations(invocations) => {
+            let outputs = invocations
+                .into_iter()
+                .map(|invocation| control_plane.execute_invocation(app, invocation))
+                .collect::<Vec<_>>();
+            if let Some(service) = voice_service {
+                if service
+                    .command_sender()
+                    .send(ilium_voice::VoiceCommand::SubmitToolOutputs(outputs))
+                    .await
+                    .is_err()
+                {
+                    app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+                        "could not return the tool result to the voice model".to_owned(),
+                    ));
+                }
+            }
+        }
+        ilium_voice::VoiceEvent::UserTranscript(transcript) => {
+            app.voice_last_user_transcript = Some(transcript);
+        }
+        ilium_voice::VoiceEvent::AssistantTranscript(delta) => {
+            app.voice_last_assistant_transcript
+                .get_or_insert_with(String::new)
+                .push_str(&delta);
+        }
+        ilium_voice::VoiceEvent::ProviderError(error) => {
+            app.status_message = Some(format!("Voice provider error: {error}"));
+        }
+    }
+}
+
+async fn reconcile_voice_runtime(
+    app: &mut App,
+    control_plane: &crate::control::ControlPlane,
+    voice_service: &mut Option<ilium_voice::VoiceService>,
+) {
+    let Some(request) = app.take_voice_runtime_request() else {
+        return;
+    };
+    if let Some(service) = voice_service.take() {
+        service.shutdown().await;
+    }
+    match request {
+        crate::app::VoiceRuntimeRequest::Stop => {
+            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Disabled);
+        }
+        crate::app::VoiceRuntimeRequest::Start | crate::app::VoiceRuntimeRequest::Reconfigure => {
+            *voice_service = start_voice_service(app, control_plane);
+        }
+    }
+}
+
+/// Delivers lossless push-to-talk edges only after start/stop/reconfigure has
+/// reconciled the actor for this input batch.
+async fn deliver_voice_interactions(
+    app: &mut App,
+    voice_service: Option<&ilium_voice::VoiceService>,
+) {
+    let requests = app.take_voice_interaction_requests();
+    let Some(service) = voice_service else {
+        return;
+    };
+    for request in requests {
+        let command = match request {
+            crate::app::VoiceInteractionRequest::StartPushToTalk => {
+                ilium_voice::VoiceCommand::StartPushToTalk
+            }
+            crate::app::VoiceInteractionRequest::StopPushToTalk => {
+                ilium_voice::VoiceCommand::StopPushToTalk
+            }
+        };
+        if service.command_sender().send(command).await.is_err() {
+            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+                "could not deliver push-to-talk input".to_owned(),
+            ));
+            break;
+        }
+    }
 }
 
 /// Applies `first` (already received) and then drains + applies a bounded
@@ -591,6 +794,19 @@ fn dispatch_input_event(
         return;
     }
     app.handle_event(event);
+    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+}
+
+/// Drains synchronous `App` outboxes into the async/background owners. This
+/// must run after every event-loop branch, not only keyboard input, because
+/// voice tool execution invokes the same semantic methods and can request
+/// tests, icon search, retitling, or restructuring too.
+fn dispatch_pending_app_work(
+    app: &mut App,
+    naming_workers: &mut NamingWorkers,
+    icon_search_workers: &mut IconSearchWorkers,
+    home_dir: Option<&std::path::Path>,
+) {
     if let Some(request) = app.take_pending_icon_semantic_search() {
         icon_search_workers.request(request);
     }

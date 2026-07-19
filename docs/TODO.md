@@ -1,12 +1,12 @@
 # Full OpenAI Realtime voice control
 
 - [x] Add a provider-neutral, owned voice runtime with OpenAI Realtime WebSocket transport, microphone capture, speaker playback, interruption, and clean shutdown.
-- [ ] Add a typed semantic control plane, redacted UI snapshots, complete tool registry, target resolution, deterministic confirmation policy, deduplication, and structured results for every ilium surface.
-- [ ] Integrate voice events into the client event loop without making `App` async or coupling the provider/audio layers to ratatui, IPC, or ilium domain types.
-- [ ] Add a live-persisted Voice control settings tab with masked OpenAI key editing, model/voice/reasoning/VAD/audio controls, and multiline custom prompt text.
-- [ ] Add the bottom-right voice switch beyond the purple status bar, with a large red enabled/recording dot and black disabled dot, plus keyboard and mouse interaction.
-- [ ] Cover the voice protocol, audio conversion, tool schemas, command execution, security boundaries, settings persistence, bottom control, and full UI capability surface with focused and PTY tests.
-- [ ] Run workspace tests, strict Clippy, formatting, release build/install, and verify the installed TUI plus a real OpenAI Realtime voice session.
+- [x] Add a typed semantic control plane, redacted UI snapshots, complete tool registry, target resolution, deterministic confirmation policy, deduplication, and structured results for every ilium surface.
+- [x] Integrate voice events into the client event loop without making `App` async or coupling the provider/audio layers to ratatui, IPC, or ilium domain types.
+- [x] Add a live-persisted Voice control settings tab with masked OpenAI key editing, model/voice/reasoning/VAD/audio controls, and multiline custom prompt text.
+- [x] Add the bottom-right voice switch beyond the purple status bar, with a large red enabled/recording dot and black disabled dot, plus keyboard and mouse interaction.
+- [x] Cover the voice protocol, audio conversion, tool schemas, command execution, security boundaries, settings persistence, bottom control, and full UI capability surface with focused and PTY tests.
+- [x] Run workspace tests, strict Clippy, formatting, release build/install, and verify the installed TUI plus a real OpenAI Realtime voice session, including a model-issued function call and accepted tool-result follow-up.
 
 # Performance and interaction responsiveness (20 improvements)
 

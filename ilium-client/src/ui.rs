@@ -35,6 +35,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     if let Mode::Search(state) = &app.mode {
         search_ui::render(frame, area, state, &app.ui_settings.icons);
+        draw_voice_control(frame, layout.voice_control_area, app);
         return;
     }
 
@@ -45,6 +46,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // like the popup overlays further down do.
     if let Mode::Settings(state) = &app.mode {
         crate::settings_ui::render(frame, area, app, state);
+        draw_voice_control(frame, layout.voice_control_area, app);
         return;
     }
 
@@ -92,6 +94,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
 
     draw_status_bar(frame, layout.status_area, app);
+    draw_voice_control(frame, layout.voice_control_area, app);
 
     // Overlays render last, on top of the layout above.
     if let Mode::Explorer(overlay, _)
@@ -184,6 +187,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
     if let Mode::InferenceSettingPrompt(field, state) = &app.mode {
         modal::render_text_prompt(frame, area, field.label(), state);
+    }
+    if let Mode::VoiceSettingPrompt(field, state) = &app.mode {
+        modal::render_masked_text_prompt(frame, area, field.label(), state);
+    }
+    if let Mode::VoicePromptEditor(state) = &app.mode {
+        modal::render_multiline_prompt(frame, area, "Voice control custom prompt", &state.textarea);
     }
     if let Mode::SaveAs(_, state) = &app.mode {
         modal::render_text_prompt(frame, area, "Save As", state);
@@ -1084,6 +1093,10 @@ fn agent_class_title(class: &AgentClass) -> &str {
 /// each side, with a powerline round-cap glyph closing off each end --
 /// rather than a bar that runs flush into the screen's edges.
 fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
+    if area.is_empty() {
+        return;
+    }
+
     // Every arm here is a compile-time-constant label -- borrowing a
     // `&'static str` instead of building a fresh owned `String` avoids a
     // needless heap allocation on every single render frame (this function
@@ -1097,6 +1110,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Rename(_) => "RENAME",
         Mode::CommandPrompt(_) => "RUN COMMAND",
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
+        Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
+        Mode::VoicePromptEditor(_) => "VOICE PROMPT",
         Mode::SaveAs(..) => "SAVE AS",
         Mode::Help => "HELP",
         Mode::Explorer(..) => "FILE PICKER",
@@ -1177,6 +1192,67 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+/// Draws the persistent voice affordance to the right of the purple status
+/// bar. The dot represents the persisted on/off state; the adjacent label
+/// exposes the live transport state without turning provider details into UI
+/// dependencies.
+fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
+    if area.is_empty() {
+        return;
+    }
+
+    let is_enabled = app.voice_settings.enabled;
+    let is_recording = matches!(
+        app.voice_connection_state,
+        ilium_voice::VoiceConnectionState::Recording
+    );
+    let dot_style = if is_enabled {
+        let style = Style::new().fg(Color::Red);
+        if is_recording {
+            style.add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK)
+        } else {
+            style.add_modifier(Modifier::BOLD)
+        }
+    } else {
+        Style::new().fg(Color::Black)
+    };
+    let state_label = if !is_enabled {
+        "OFF"
+    } else {
+        match &app.voice_connection_state {
+            ilium_voice::VoiceConnectionState::Disabled => "STARTING",
+            ilium_voice::VoiceConnectionState::Connecting => "CONNECTING",
+            ilium_voice::VoiceConnectionState::Listening => "LISTENING",
+            ilium_voice::VoiceConnectionState::Recording => "RECORDING",
+            ilium_voice::VoiceConnectionState::Thinking => "THINKING",
+            ilium_voice::VoiceConnectionState::Speaking => "SPEAKING",
+            ilium_voice::VoiceConnectionState::Failed(_) => "FAILED",
+        }
+    };
+    let shortcut = if matches!(
+        app.voice_settings.input_mode,
+        ilium_voice::VoiceInputMode::PushToTalk
+    ) {
+        "F8 hold"
+    } else {
+        "F8"
+    };
+    let content = Line::from(vec![
+        Span::styled(" ● ", dot_style),
+        Span::styled(
+            format!("VOICE {state_label}"),
+            Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!(" {shortcut}"), Style::new().fg(Color::DarkGray)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(content)
+            .alignment(Alignment::Center)
+            .style(Style::new().bg(Color::Rgb(24, 24, 28))),
+        area,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1187,6 +1263,40 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn voice_control_dot_is_black_when_disabled_and_red_when_enabled() {
+        let backend = TestBackend::new(22, 1);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+
+        terminal
+            .draw(|frame| draw_voice_control(frame, frame.area(), &app))
+            .expect("render disabled voice control");
+        let disabled_dot = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .find(|cell| cell.symbol() == "●")
+            .expect("disabled dot");
+        assert_eq!(disabled_dot.fg, Color::Black);
+
+        app.voice_settings.enabled = true;
+        app.voice_connection_state = ilium_voice::VoiceConnectionState::Recording;
+        terminal
+            .draw(|frame| draw_voice_control(frame, frame.area(), &app))
+            .expect("render enabled voice control");
+        let enabled_dot = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .find(|cell| cell.symbol() == "●")
+            .expect("enabled dot");
+        assert_eq!(enabled_dot.fg, Color::Red);
+        assert!(enabled_dot.modifier.contains(Modifier::BOLD));
+    }
 
     #[test]
     fn source_scrollbar_renders_only_for_overflowing_buffers() {

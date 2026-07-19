@@ -230,6 +230,68 @@ pub fn render_text_prompt(
     ));
 }
 
+/// Credential variant of [`render_text_prompt`]. The editable buffer stays
+/// real so normal cursor/edit semantics work, while no API-key character is
+/// ever painted into the terminal or its scrollback.
+pub fn render_masked_text_prompt(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    state: &TextPromptState,
+) {
+    let area = centered_fixed_rect(PROMPT_WIDTH, PROMPT_HEIGHT, screen_area);
+    frame.render_widget(Clear, area);
+    let block = theme::block(true).title(theme::chrome_title(title));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new("•".repeat(state.buf.chars().count())),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new("Enter to replace · Esc to keep the existing key")
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        rows[1],
+    );
+    let cursor_x = rows[0]
+        .x
+        .saturating_add(u16::try_from(state.cursor).unwrap_or(u16::MAX));
+    frame.set_cursor_position(Position::new(
+        cursor_x.min(rows[0].right().saturating_sub(1)),
+        rows[0].y,
+    ));
+}
+
+/// Large multiline text area used by the Voice control prompt editor.
+pub fn render_multiline_prompt(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    textarea: &ratatui_textarea::TextArea<'static>,
+) {
+    let width = screen_area.width.saturating_sub(8).clamp(40, 100);
+    let height = screen_area.height.saturating_sub(6).clamp(8, 28);
+    let area = centered_fixed_rect(width, height, screen_area);
+    frame.render_widget(Clear, area);
+    let block = theme::block(true).title(theme::chrome_title(title));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+    frame.render_widget(textarea, rows[0]);
+    frame.render_widget(
+        Paragraph::new("Ctrl+S to apply · Esc to cancel · Enter inserts a line")
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        rows[1],
+    );
+}
+
 /// Size of the confirmation popup: enough for a two-line message plus the
 /// Yes/No hint.
 const CONFIRM_WIDTH: u16 = 54;

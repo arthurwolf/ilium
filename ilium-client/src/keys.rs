@@ -34,6 +34,10 @@ fn is_escape(event: &Event) -> bool {
 /// Top-level per-mode dispatch, called for every non-mouse `Event` (key
 /// presses, resizes are handled by the caller before reaching here).
 pub fn handle_event(app: &mut App, event: Event) {
+    if handle_voice_shortcut(app, &event) {
+        return;
+    }
+
     // Enabling bracketed paste changes one clipboard operation from a stream
     // of ordinary key events into `Event::Paste`. The two multiline dialogs
     // already consume that event directly; every other non-terminal mode is
@@ -65,6 +69,10 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::InferenceSettingPrompt(field, state) => {
             handle_inference_setting_prompt(app, field, state, &event)
         }
+        Mode::VoiceSettingPrompt(field, state) => {
+            handle_voice_setting_prompt(app, field, state, &event)
+        }
+        Mode::VoicePromptEditor(state) => handle_voice_prompt_editor(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
@@ -117,6 +125,39 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_normal_or_leader(app, event);
         }
     }
+}
+
+/// F8 is global because voice control must remain reachable while any ilium
+/// panel or modal owns ordinary text input. Semantic VAD uses it as a toggle;
+/// push-to-talk preserves distinct press and release edges.
+fn handle_voice_shortcut(app: &mut App, event: &Event) -> bool {
+    let Event::Key(key) = event else {
+        return false;
+    };
+    if key.code != KeyCode::F(8) {
+        return false;
+    }
+
+    match app.voice_settings.input_mode {
+        ilium_voice::VoiceInputMode::SemanticVad => {
+            if matches!(key.kind, KeyEventKind::Press) {
+                app.toggle_voice_control();
+            }
+        }
+        ilium_voice::VoiceInputMode::PushToTalk => match key.kind {
+            KeyEventKind::Press => {
+                if !app.voice_settings.enabled {
+                    app.toggle_voice_control();
+                }
+                app.request_voice_interaction(crate::app::VoiceInteractionRequest::StartPushToTalk);
+            }
+            KeyEventKind::Release => {
+                app.request_voice_interaction(crate::app::VoiceInteractionRequest::StopPushToTalk)
+            }
+            KeyEventKind::Repeat => {}
+        },
+    }
+    true
 }
 
 /// Replays pasted text through modes that still own character-oriented input.
@@ -803,6 +844,65 @@ fn handle_inference_setting_prompt(
     }
 }
 
+fn voice_settings_return_state() -> crate::app::SettingsState {
+    crate::app::SettingsState {
+        tab: SettingsTab::VoiceControl,
+        selected_row: 0,
+        scroll: 0,
+        ..SettingsState::default()
+    }
+}
+
+fn handle_voice_setting_prompt(
+    app: &mut App,
+    field: crate::voice_settings::VoiceSettingField,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::VoiceSettingPrompt(field, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::VoiceSettingPrompt(field, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            app.settings_commit_voice_field(field, state.buf);
+            app.mode = Mode::Settings(voice_settings_return_state());
+        }
+        PromptOutcome::Cancel => app.mode = Mode::Settings(voice_settings_return_state()),
+        PromptOutcome::Continue => app.mode = Mode::VoiceSettingPrompt(field, state),
+    }
+}
+
+fn handle_voice_prompt_editor(
+    app: &mut App,
+    mut state: Box<crate::voice_settings::VoicePromptEditorState>,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::VoicePromptEditor(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::VoicePromptEditor(state);
+        return;
+    }
+    match (key.code, key.modifiers) {
+        (KeyCode::Esc, _) => app.mode = Mode::Settings(voice_settings_return_state()),
+        (KeyCode::Char('s'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.settings_commit_voice_prompt(state.text());
+            app.mode = Mode::Settings(voice_settings_return_state());
+        }
+        _ => {
+            state.textarea.input(*key);
+            app.mode = Mode::VoicePromptEditor(state);
+        }
+    }
+}
+
 /// While `Mode::SaveAs(id, state)` is active: `Enter` writes `id`'s
 /// editor pane to the typed path, `Esc` cancels without touching the file.
 fn handle_save_as_event(
@@ -1435,6 +1535,37 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 None => {}
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::VoiceControl => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::VoiceControl => {
+            state.selected_row = (state.selected_row + 1)
+                .min(crate::voice_settings::VoiceRow::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::VoiceControl => {
+            if let Some(row) = crate::voice_settings::VoiceRow::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                app.settings_adjust_voice_row(row, -1);
+                if !matches!(app.mode, Mode::Normal) {
+                    return;
+                }
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::VoiceControl =>
+        {
+            if let Some(row) = crate::voice_settings::VoiceRow::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                app.settings_adjust_voice_row(row, 1);
+                if !matches!(app.mode, Mode::Normal) {
+                    return;
+                }
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Appearance => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -1602,6 +1733,50 @@ mod indent_outdent_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
     use std::path::PathBuf;
+
+    #[test]
+    fn f8_toggles_semantic_vad_and_preserves_push_to_talk_edges() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new_with_kind(
+                KeyCode::F(8),
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+            )),
+        );
+        assert!(app.voice_settings.enabled);
+        assert_eq!(
+            app.take_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Start)
+        );
+
+        app.voice_settings.input_mode = ilium_voice::VoiceInputMode::PushToTalk;
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new_with_kind(
+                KeyCode::F(8),
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+            )),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new_with_kind(
+                KeyCode::F(8),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            )),
+        );
+        assert_eq!(
+            app.take_voice_interaction_requests(),
+            vec![
+                crate::app::VoiceInteractionRequest::StartPushToTalk,
+                crate::app::VoiceInteractionRequest::StopPushToTalk,
+            ]
+        );
+    }
 
     #[test]
     fn search_typing_updates_the_visible_prompt_without_running_a_scan() {

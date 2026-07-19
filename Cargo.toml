@@ -11,6 +11,7 @@ members = [
     "ilium-pty",
     "ilium-server",
     "ilium-sound",
+    "ilium-voice",
     "ilium",
 ]
 # The patched third-party crate remains a dependency, not an ilium workspace

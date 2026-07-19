@@ -26,6 +26,10 @@ pub const TREE_WIDTH_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(
 
 /// A bordered pane needs two border cells plus at least one content cell.
 const MINIMUM_PANE_WIDTH: u16 = 3;
+/// Width reserved for the always-visible voice control at the right edge of
+/// the footer. Keeping it in shared geometry makes rendering and mouse input
+/// use the exact same hit target.
+pub const VOICE_CONTROL_WIDTH: u16 = 22;
 
 /// Time-based presentation state for the tree panel's width. The state owns
 /// reversal as well as ordinary expansion/collapse, so input handlers only
@@ -182,6 +186,7 @@ pub struct UiLayout {
     pub pane_area: Rect,
     pub pane_content_area: Rect,
     pub status_area: Rect,
+    pub voice_control_area: Rect,
 }
 
 impl UiLayout {
@@ -199,7 +204,20 @@ impl UiLayout {
             .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(screen_area);
         let main_area = rows[0];
-        let status_area = rows[1];
+        let footer_area = rows[1];
+        let voice_control_width = VOICE_CONTROL_WIDTH.min(footer_area.width);
+        let status_area = Rect::new(
+            footer_area.x,
+            footer_area.y,
+            footer_area.width.saturating_sub(voice_control_width),
+            footer_area.height,
+        );
+        let voice_control_area = Rect::new(
+            status_area.right(),
+            footer_area.y,
+            voice_control_width,
+            footer_area.height,
+        );
         let maximum_tree_width = main_area.width.saturating_sub(MINIMUM_PANE_WIDTH);
         let constrained_tree_width = tree_width.min(maximum_tree_width);
 
@@ -239,6 +257,7 @@ impl UiLayout {
             pane_area,
             pane_content_area,
             status_area,
+            voice_control_area,
         }
     }
 
@@ -295,6 +314,21 @@ mod tests {
         );
         assert_eq!(layout.pane_area, Rect::new(DEFAULT_TREE_WIDTH, 0, 88, 39));
         assert_eq!(layout.pane_content_size(), (37, 86));
+        assert_eq!(layout.status_area, Rect::new(0, 39, 98, 1));
+        assert_eq!(layout.voice_control_area, Rect::new(98, 39, 22, 1));
+        assert_eq!(layout.status_area.right(), layout.voice_control_area.x);
+        assert_eq!(
+            layout.voice_control_area.right(),
+            layout.screen_area.right()
+        );
+    }
+
+    #[test]
+    fn voice_control_owns_the_complete_footer_on_extremely_narrow_screens() {
+        let layout = UiLayout::from_screen_area(Rect::new(0, 0, 12, 5));
+
+        assert_eq!(layout.status_area.width, 0);
+        assert_eq!(layout.voice_control_area, Rect::new(0, 4, 12, 1));
     }
 
     #[test]

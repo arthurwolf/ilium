@@ -384,6 +384,40 @@ impl BoardPane {
         self.persist_or_restore(previous)
     }
 
+    /// Replaces one card's semantic fields through the board's existing
+    /// atomic persistence boundary. Omitted fields preserve their current
+    /// value, making partial tool calls explicit and retry-safe.
+    pub fn update_card(
+        &mut self,
+        column_index: usize,
+        card_index: usize,
+        title: Option<String>,
+        body: Option<String>,
+    ) -> Result<(), String> {
+        let previous = self.clone();
+        let card = self
+            .columns
+            .get_mut(column_index)
+            .and_then(|column| column.cards.get_mut(card_index))
+            .ok_or_else(|| "No matching board card".to_owned())?;
+        if let Some(title) = title {
+            let title = title.trim();
+            if title.is_empty() {
+                return Err("A card needs a title".to_owned());
+            }
+            card.title = title.to_owned();
+        }
+        if let Some(body) = body {
+            card.body = body;
+        }
+        self.selected_column = column_index;
+        self.selected_card = Some(card_index);
+        if self.is_detail_panel_open {
+            self.sync_detail_editor();
+        }
+        self.persist_or_restore(previous)
+    }
+
     pub fn delete_selected_card(&mut self) -> Result<(), String> {
         let selected_card = self
             .selected_card
@@ -1045,9 +1079,13 @@ fn save_markdown_board(
         None => current_source.is_empty(),
     };
     if !revision_matches {
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| path.as_os_str().to_string_lossy());
         return Err(format!(
             "{} changed outside this board; press r to reload before editing",
-            path.display()
+            display_name
         ));
     }
     file.set_len(0)

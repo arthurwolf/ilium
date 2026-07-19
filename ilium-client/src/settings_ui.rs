@@ -256,6 +256,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::VoiceControl => render_scrollable(
+            frame,
+            layout.content_area,
+            voice_lines(app, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::About => {
             render_scrollable(frame, layout.content_area, about_lines(), state.scroll);
         }
@@ -393,6 +399,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Sound => {
             sound_lines(&app.sound_settings, &app.sound_discovery, selected_row).len() as u16
         }
+        SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
@@ -2263,6 +2270,105 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
         selected,
     )
 }
+
+fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
+    let settings = &app.voice_settings;
+    let state = match &app.voice_connection_state {
+        ilium_voice::VoiceConnectionState::Disabled => "Disabled".to_owned(),
+        ilium_voice::VoiceConnectionState::Connecting => "Connecting…".to_owned(),
+        ilium_voice::VoiceConnectionState::Listening => "Listening".to_owned(),
+        ilium_voice::VoiceConnectionState::Recording => "Recording".to_owned(),
+        ilium_voice::VoiceConnectionState::Thinking => "Thinking".to_owned(),
+        ilium_voice::VoiceConnectionState::Speaking => "Speaking".to_owned(),
+        ilium_voice::VoiceConnectionState::Failed(error) => format!("Failed: {error}"),
+    };
+    let input_device = settings
+        .input_device_name
+        .clone()
+        .unwrap_or_else(|| "System default".to_owned());
+    let output_device = settings
+        .output_device_name
+        .clone()
+        .unwrap_or_else(|| "System default".to_owned());
+    let prompt_summary = if settings.custom_prompt.trim().is_empty() {
+        "Default only".to_owned()
+    } else {
+        format!("Custom · {} lines", settings.custom_prompt.lines().count())
+    };
+    setting_lines(
+        &[
+            (
+                "Voice control",
+                if settings.enabled { state } else { "Off".to_owned() },
+                "Starts or stops the owned microphone, Realtime session, and speaker actor.",
+            ),
+            (
+                "OpenAI API key",
+                if settings.api_key.is_empty() {
+                    if std::env::var_os("OPENAI_API_KEY").is_some() {
+                        "Configured via OPENAI_API_KEY".to_owned()
+                    } else {
+                        "Not configured".to_owned()
+                    }
+                } else {
+                    "Configured ••••••••".to_owned()
+                },
+                "Enter or click to replace the key. The value is masked and never exposed to tools.",
+            ),
+            (
+                "Model",
+                settings.model.label().to_owned(),
+                "Use the most capable Realtime model or its faster, lower-cost mini variant.",
+            ),
+            (
+                "Voice",
+                settings.voice.label().to_owned(),
+                "OpenAI voice for this session; reconnecting is required once audio has begun.",
+            ),
+            (
+                "Reasoning effort",
+                settings.reasoning_effort.label().to_owned(),
+                "Higher effort can improve multi-step tool selection at the cost of latency.",
+            ),
+            (
+                "Input mode",
+                settings.input_mode.label().to_owned(),
+                "Semantic VAD is hands-free; push to talk commits only while its key is held.",
+            ),
+            (
+                "VAD eagerness",
+                settings.vad_eagerness.label().to_owned(),
+                "Controls how quickly semantic VAD decides that the user's turn is complete.",
+            ),
+            (
+                "Input device",
+                input_device,
+                "Microphone captured by CPAL. System default follows the operating-system choice.",
+            ),
+            (
+                "Output device",
+                output_device,
+                "Speaker used for streamed model audio.",
+            ),
+            (
+                "Output volume",
+                format!("{}%", settings.output_volume_percent),
+                "Local playback gain; this does not change microphone input.",
+            ),
+            (
+                "Custom prompt",
+                prompt_summary,
+                "Enter or click to edit additive instructions in a multiline text area.",
+            ),
+            (
+                "Connection",
+                "Reconnect now".to_owned(),
+                "Restart audio and the WebSocket with the current persisted settings.",
+            ),
+        ],
+        selected,
+    )
+}
 fn on_off(value: bool) -> String {
     if value {
         "On".into()
@@ -2420,7 +2526,7 @@ mod tests {
 
     #[test]
     fn tab_at_maps_each_row_to_its_tab() {
-        let area = Rect::new(0, 0, 30, 20);
+        let area = Rect::new(0, 0, 30, 22);
         assert_eq!(
             tab_at(area, Position::new(2, 1)),
             Some(SettingsTab::Appearance)
@@ -2446,9 +2552,13 @@ mod tests {
         assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Sound));
         assert_eq!(
             tab_at(area, Position::new(2, 17)),
+            Some(SettingsTab::VoiceControl)
+        );
+        assert_eq!(
+            tab_at(area, Position::new(2, 19)),
             Some(SettingsTab::Inference)
         );
-        assert_eq!(tab_at(area, Position::new(2, 19)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 21)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
         // Row 2 is the blank spacer after the first tab.
