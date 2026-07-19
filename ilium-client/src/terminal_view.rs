@@ -21,6 +21,7 @@
 //! (cursor hidden/adjusted as appropriate), so scrolling here is exactly
 //! `Screen::set_scrollback` plus a cached total (see `scrollback_total`).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// Starting geometry for a freshly created pane, before the first real
@@ -115,7 +116,7 @@ pub struct TerminalView {
     /// Recent OSC-8 label/target pairs observed in the byte stream. vt100
     /// renders the label but deliberately discards the metadata, so the
     /// client retains this narrow side-channel for click activation.
-    osc8_links: Vec<(String, String)>,
+    osc8_links: VecDeque<(String, String)>,
     /// Unconsumed raw output while an OSC-8 sequence spans IPC chunks.
     osc8_stream: Vec<u8>,
 }
@@ -137,7 +138,7 @@ impl TerminalView {
             history_bytes: Arc::new(Vec::new()),
             history_budget_bytes: history_budget_bytes(budget_mib),
             is_history_anchor: false,
-            osc8_links: Vec::new(),
+            osc8_links: VecDeque::new(),
             osc8_stream: Vec::new(),
         }
     }
@@ -267,9 +268,9 @@ impl TerminalView {
             self.osc8_stream
                 .drain(..close_after + close_end + close_terminator_width);
             if !target.is_empty() && !label.is_empty() {
-                self.osc8_links.push((label, target));
+                self.osc8_links.push_back((label, target));
                 if self.osc8_links.len() > 256 {
-                    self.osc8_links.remove(0);
+                    self.osc8_links.pop_front();
                 }
             }
         }
@@ -377,6 +378,14 @@ impl TerminalView {
         self.with_screen(|screen| screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None)
     }
 
+    /// Returns whether the foreground application asked its terminal for
+    /// bracketed paste. The client uses this negotiated mode to decide whether
+    /// one host paste needs inner `CSI 200~` / `CSI 201~` delimiters or should
+    /// remain one unadorned bulk write for a plain shell/readline consumer.
+    pub fn wants_bracketed_paste(&self) -> bool {
+        self.with_screen(vt100::Screen::bracketed_paste)
+    }
+
     /// Re-derives `scrollback_total` (see the field doc comment) and
     /// re-clamps the current scroll position against it in the same pass,
     /// since `set_scrollback` is the only operation that performs that
@@ -426,6 +435,24 @@ mod tests {
         assert_eq!(
             view.osc8_link_at("docs", 1),
             Some("https://example.test".to_string())
+        );
+    }
+
+    #[test]
+    fn osc8_link_history_evicts_the_oldest_entry_at_constant_time() {
+        let mut view = TerminalView::new(4, 40);
+        for index in 0..257 {
+            view.feed(
+                format!("\x1b]8;;https://example.test/{index}\x1b\\link-{index}\x1b]8;;\x1b\\")
+                    .as_bytes(),
+            );
+        }
+
+        assert_eq!(view.osc8_links.len(), 256);
+        assert_eq!(view.osc8_link_at("link-0", 1), None);
+        assert_eq!(
+            view.osc8_link_at("link-256", 1),
+            Some("https://example.test/256".to_string())
         );
     }
 
@@ -542,6 +569,18 @@ mod tests {
     fn a_fresh_view_reports_no_negotiated_mouse_protocol() {
         let view = TerminalView::new(4, 20);
         assert!(!view.wants_mouse_protocol());
+    }
+
+    #[test]
+    fn bracketed_paste_mode_tracks_the_foreground_applications_negotiation() {
+        let mut view = TerminalView::new(4, 20);
+        assert!(!view.wants_bracketed_paste());
+
+        view.feed(b"\x1b[?2004h");
+        assert!(view.wants_bracketed_paste());
+
+        view.feed(b"\x1b[?2004l");
+        assert!(!view.wants_bracketed_paste());
     }
 
     #[test]

@@ -10,8 +10,9 @@
 use std::io;
 
 use crossterm::event::{
-    DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -38,6 +39,7 @@ impl TerminalGuard {
         if let Err(source) = execute!(
             io::stdout(),
             EnterAlternateScreen,
+            EnableBracketedPaste,
             EnableMouseCapture,
             EnableFocusChange
         ) {
@@ -52,6 +54,7 @@ impl TerminalGuard {
                 io::stdout(),
                 DisableFocusChange,
                 DisableMouseCapture,
+                DisableBracketedPaste,
                 LeaveAlternateScreen
             );
             let _ = disable_raw_mode();
@@ -71,6 +74,7 @@ impl TerminalGuard {
                     io::stdout(),
                     DisableFocusChange,
                     DisableMouseCapture,
+                    DisableBracketedPaste,
                     LeaveAlternateScreen
                 );
                 let _ = disable_raw_mode();
@@ -96,6 +100,7 @@ impl Drop for TerminalGuard {
             io::stdout(),
             DisableFocusChange,
             DisableMouseCapture,
+            DisableBracketedPaste,
             LeaveAlternateScreen
         );
         let _ = disable_raw_mode();
