@@ -29,6 +29,8 @@
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
 
+pub mod agent_debug_export;
+pub mod agent_debug_ui;
 pub mod agent_from_line;
 pub mod app;
 pub mod background_priority;
@@ -368,6 +370,7 @@ async fn run_inner(
     app.apply_voice_settings(config.voice);
     app.apply_debug_settings(config.debug);
     app.request_debug_logging_reconciliation();
+    app.request_agent_debug_menu_reconciliation();
     app.sound_discovery = sound_discovery;
     app.voice_input_devices = voice_input_devices;
     app.voice_output_devices = voice_output_devices;
@@ -565,6 +568,7 @@ async fn run_inner(
             home_dir.as_deref(),
         );
         reconcile_debug_logging(&mut app);
+        reconcile_agent_debug_menu(&mut app);
         let is_voice_tool_shutdown = voice_tool_outputs_request_shutdown(&voice_tool_outputs);
         if is_voice_tool_shutdown {
             // A terminating result dominates any parallel tool call that may
@@ -658,6 +662,13 @@ fn reconcile_debug_logging(app: &mut App) {
             app.status_message = Some(format!("Could not apply debug logging: {error}"));
         }
     }
+}
+
+fn reconcile_agent_debug_menu(app: &mut App) {
+    let Some(enabled) = app.take_pending_agent_debug_menu_enabled() else {
+        return;
+    };
+    app.queue_request(ilium_ipc::ClientRequest::UpdateAgentDebugMenu { enabled });
 }
 
 fn start_voice_service(
@@ -1071,8 +1082,8 @@ fn dispatch_pending_app_work(
     if app.take_pending_inference_test() {
         naming_workers.spawn_inference_test_worker();
     }
-    if app.take_pending_ollama_model_refresh() {
-        naming_workers.spawn_ollama_models_worker();
+    if let Some(provider) = app.take_pending_model_refresh() {
+        naming_workers.spawn_model_discovery_worker(provider);
     }
 
     for request in app.take_pending_retitle_requests() {
@@ -1091,6 +1102,20 @@ fn dispatch_pending_app_work(
                     },
                 ),
                 None => {
+                    app.record_agent_debug_event(
+                        input.pane_id,
+                        ilium_ipc::AgentDebugEventDraft {
+                            severity: ilium_ipc::AgentDebugSeverity::Error,
+                            kind: ilium_ipc::AgentDebugEventKind::TitleInferenceFailed,
+                            summary: "Agent title inference could not start".to_string(),
+                            fields: vec![ilium_ipc::AgentDebugField::plain(
+                                "reason",
+                                "home directory unavailable",
+                            )],
+                            correlation_id: None,
+                            metadata: Default::default(),
+                        },
+                    );
                     app.titles_loading.remove(&input.pane_id);
                     app.status_message =
                         Some("Could not infer title: home directory unavailable".to_string());
@@ -1112,9 +1137,9 @@ fn dispatch_pending_app_work(
                 request.project_cwd,
             ),
             None => {
-                app.finish_project_restructure(
+                app.fail_project_restructure(
                     request.project_id,
-                    Err(anyhow::anyhow!("home directory unavailable")),
+                    anyhow::anyhow!("home directory unavailable"),
                 );
             }
         }

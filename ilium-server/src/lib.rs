@@ -14,6 +14,7 @@
 //! server at a tempdir without touching `~/.config`/`~/.local/share` (see
 //! `crate::paths` for how `main` resolves the real paths).
 
+mod agent_debug;
 pub mod config;
 mod detection;
 pub mod error;
@@ -73,6 +74,9 @@ pub struct ServerOptions {
     /// detection-loop tick's `identify_agent_with_extra` call.
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
+    /// Initial recorder policy loaded from `[ui]`. Live clients can update it
+    /// without restarting the detached server.
+    pub agent_debug_menu_enabled: bool,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -119,6 +123,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         sound_settings: options.sound_settings,
         sound_requests,
         custom_signatures: options.custom_signatures,
+        agent_debug_menu_enabled: options.agent_debug_menu_enabled,
     }));
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
@@ -265,6 +270,7 @@ pub(crate) async fn restore_snapshot(
     snapshot: persistence::SessionSnapshot,
 ) {
     let pane_count = snapshot.panes.len();
+    state.agent_debug.restore(snapshot.agent_debug_logs).await;
     {
         let mut tree = state.tree.write().await;
         *tree = snapshot.tree;
@@ -293,7 +299,18 @@ pub(crate) async fn restore_snapshot(
     for pane_snapshot in snapshot.panes {
         let node_id = pane_snapshot.node_id;
         match ipc::handlers::spawn_and_register_pane(state, node_id, pane_snapshot.kind).await {
-            Ok(()) => {}
+            Ok(()) => {
+                let _ = crate::agent_debug::record(
+                    state,
+                    node_id,
+                    ilium_agent_debug::AgentDebugSource::Persistence,
+                    ilium_agent_debug::AgentDebugEventDraft::information(
+                        ilium_agent_debug::AgentDebugEventKind::PaneRestored,
+                        "Pane restored from the project session snapshot",
+                    ),
+                )
+                .await;
+            }
             Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
                 // A concurrent request removed `node_id` from the tree
                 // (e.g. `ClosePane`) while this snapshot's own respawn loop
@@ -331,6 +348,11 @@ pub(crate) async fn restore_snapshot(
             state.session_name
         );
     } else {
+        // A journal belongs to the live pane lifecycle rather than merely
+        // to a numeric tree id. A pane that cannot be respawned must not
+        // leave sensitive history orphaned in every future snapshot.
+        state.agent_debug.remove(&failed_pane_ids).await;
+
         tracing::warn!(
             "restored {} of {pane_count} pane(s) from crash-recovery snapshot for session {:?}; \
              {} failed to respawn and were dropped: {failed_pane_ids:?}",
@@ -434,6 +456,20 @@ mod restore_tests {
         let editor_pane_id = tree
             .add_pane(group, "restored-notes.md", PaneContentKind::Editor)
             .unwrap();
+        let mut persisted_debug_log = ilium_agent_debug::PaneDebugLog::default();
+        let _ = persisted_debug_log.append(
+            1_700_000_000_000,
+            ilium_agent_debug::AgentDebugSource::Pty,
+            ilium_agent_debug::AgentDebugContext::default(),
+            ilium_agent_debug::AgentDebugEventDraft::information(
+                ilium_agent_debug::AgentDebugEventKind::PromptSubmitted,
+                "Prompt captured before restart",
+            )
+            .with_fields(vec![ilium_agent_debug::AgentDebugField::sensitive(
+                "submitted input",
+                "persist this exact prompt",
+            )]),
+        );
 
         let snapshot = SessionSnapshot {
             version: 1,
@@ -450,6 +486,10 @@ mod restore_tests {
                     },
                 },
             ],
+            agent_debug_logs: vec![crate::agent_debug::PaneDebugLogSnapshot {
+                pane_id: terminal_pane_id,
+                log: persisted_debug_log,
+            }],
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
         tokio::fs::write(&snapshot_path, &json)
@@ -469,6 +509,7 @@ mod restore_tests {
             sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
+            agent_debug_menu_enabled: true,
         };
         let server_task = tokio::spawn(run(options));
 
@@ -495,6 +536,38 @@ mod restore_tests {
             restored_tree, tree,
             "the tree the server attaches with should exactly match the saved snapshot's tree"
         );
+
+        write_frame(
+            &mut client,
+            &ClientRequest::GetPaneDebugLog {
+                pane_id: terminal_pane_id,
+                after_sequence: None,
+            },
+        )
+        .await
+        .expect("request restored agent debug history");
+        let debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(
+                event,
+                ServerEvent::PaneDebugLogSnapshot {
+                    pane_id,
+                    entries,
+                    ..
+                } if *pane_id == terminal_pane_id
+                    && entries.iter().any(|entry| {
+                        entry.summary == "Prompt captured before restart"
+                    })
+            )
+        })
+        .await;
+        let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
+            unreachable!("predicate only matches PaneDebugLogSnapshot");
+        };
+        assert!(entries.iter().any(|entry| {
+            entry.fields.iter().any(|field| {
+                field.label == "submitted input" && field.value == "persist this exact prompt"
+            })
+        }));
 
         // Prove the terminal pane is a live, respawned pty -- not just a
         // tree node -- by writing to it and reading its own bytes echoed
@@ -561,6 +634,7 @@ mod restore_tests {
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
         }));
 
         let orphan_pane_id = {
@@ -590,6 +664,7 @@ mod restore_tests {
             version: 1,
             tree: Tree::new(),
             panes: Vec::new(),
+            agent_debug_logs: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 
@@ -633,6 +708,7 @@ mod restore_tests {
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
         }));
 
         // Same shape as the plain orphan-teardown test above: one launch
@@ -685,6 +761,7 @@ mod restore_tests {
             version: 1,
             tree: snapshot_tree,
             panes: Vec::new(),
+            agent_debug_logs: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 
@@ -733,6 +810,7 @@ mod restore_tests {
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
         }));
 
         let pane_id = {
@@ -797,6 +875,7 @@ mod restore_tests {
             sound_player: Arc::new(NoopSoundPlayer),
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
+            agent_debug_menu_enabled: false,
         };
         let server_task = tokio::spawn(run(options));
 

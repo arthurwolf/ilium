@@ -162,11 +162,11 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SETTINGS_TOOL_NAME,
-            "Get, set, or adjust any persisted setting by dotted path, test inference, refresh Ollama models, or preview sound. Call get to inspect redacted values and the complete writable path catalog before changing an unfamiliar setting.",
+            "Get, set, or adjust any persisted setting by dotted path, test inference, refresh provider models, or preview sound. Call get to inspect redacted values and the complete writable path catalog before changing an unfamiliar setting.",
             json!({
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["get", "set", "adjust", "test_inference", "refresh_ollama_models", "preview_sound"] },
+                    "action": { "type": "string", "enum": ["get", "set", "adjust", "test_inference", "refresh_models", "preview_sound"] },
                     "path": { "type": "string" },
                     "value": {},
                     "direction": direction_schema(),

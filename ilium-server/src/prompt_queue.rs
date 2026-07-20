@@ -4,6 +4,10 @@
 //! then writes exactly one FIFO head plus Enter, and advances that head only
 //! after the PTY accepts the complete payload.
 
+use ilium_agent_debug::{
+    AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField, AgentDebugSeverity,
+    AgentDebugSource,
+};
 use ilium_core::{NodeId, QueuedPrompt};
 use ilium_ipc::PromptSubmissionSource;
 
@@ -40,6 +44,20 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     .await
     {
         tracing::error!("queued prompt delivery failed for pane {pane_id:?}: {error}");
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft {
+                severity: AgentDebugSeverity::Error,
+                kind: AgentDebugEventKind::Error,
+                summary: "Queued prompt delivery failed".to_string(),
+                fields: vec![AgentDebugField::multiline("error", error)],
+                correlation_id: None,
+                metadata: Default::default(),
+            },
+        )
+        .await;
         return;
     }
     let acknowledged = {
@@ -47,7 +65,23 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
         acknowledge_delivery(&mut tree, pane_id, &prompt)
     };
     match acknowledged {
-        Ok(true) => broadcast_and_persist(state).await,
+        Ok(true) => {
+            broadcast_and_persist(state).await;
+            let _ = crate::agent_debug::record(
+                state,
+                pane_id,
+                AgentDebugSource::Pty,
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::QueuedPromptDelivered,
+                    "Queued prompt delivered after agent completion",
+                )
+                .with_fields(vec![AgentDebugField::plain(
+                    "delivery policy",
+                    format!("{:?}", prompt.delivery),
+                )]),
+            )
+            .await;
+        }
         Ok(false) => {
             tracing::warn!("queued prompt head changed during delivery for pane {pane_id:?}")
         }

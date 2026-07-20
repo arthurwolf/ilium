@@ -15,7 +15,8 @@ use std::time::Duration;
 
 use ilium_core::{NodeId, SplitOrientation, ROOT_ID};
 use ilium_ipc::{
-    read_frame, write_frame, ClientRequest, NewPaneKind, PromptSubmissionSource, ServerEvent,
+    read_frame, write_frame, AgentDebugEventKind, ClientRequest, NewPaneKind, PaneResizeCause,
+    PromptSubmissionSource, ServerEvent,
 };
 
 mod common;
@@ -762,6 +763,7 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
             pane_id: NodeId(999),
             rows: 40,
             cols: 100,
+            cause: PaneResizeCause::HostTerminal,
         },
     )
     .await
@@ -789,6 +791,89 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
+async fn successful_resize_records_its_typed_client_cause_in_the_debug_journal() {
+    let mut server = TestServer::start_with_agent_debug(
+        "resize-debug-cause-test",
+        ilium_server::config::DetectionConfig::default(),
+    )
+    .await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "resize-debug-cause-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach debug-enabled client");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("create terminal pane");
+    let tree_event = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().next().is_some()),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = tree_event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    let pane_id = tree.panes().next().expect("created pane").id;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::ResizePane {
+            pane_id,
+            rows: 40,
+            cols: 100,
+            cause: PaneResizeCause::TreePanelAnimation,
+        },
+    )
+    .await
+    .expect("resize terminal pane");
+    write_frame(
+        &mut client,
+        &ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence: None,
+        },
+    )
+    .await
+    .expect("request debug journal");
+    let debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::PaneDebugLogSnapshot { pane_id: event_pane_id, .. } if *event_pane_id == pane_id)
+    })
+    .await;
+    let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
+        unreachable!("predicate only matches PaneDebugLogSnapshot");
+    };
+    let resize_entry = entries
+        .iter()
+        .find(|entry| entry.kind == AgentDebugEventKind::PaneResized)
+        .expect("successful resize should be journaled");
+    assert!(resize_entry.is_tree_panel_animation_resize());
+    assert!(resize_entry.fields.iter().any(|field| {
+        field.label == "cause" && field.value == PaneResizeCause::TreePanelAnimation.label()
+    }));
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("kill debug test session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 

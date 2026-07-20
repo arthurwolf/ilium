@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "ilium-agent-debug",
     "ilium-agent-session",
     "ilium-client",
     "ilium-core",

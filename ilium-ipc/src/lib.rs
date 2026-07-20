@@ -16,6 +16,11 @@ mod protocol;
 
 pub use error::IpcError;
 pub use framing::{read_frame, write_frame, MAX_FRAME_LEN};
+pub use ilium_agent_debug::{
+    AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
+    AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
+    AgentDebugSource, PaneDebugLog, PaneResizeCause,
+};
 pub use protocol::{
     ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
     NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
@@ -88,6 +93,7 @@ mod tests {
                 pane_id: NodeId(2),
                 rows: 40,
                 cols: 120,
+                cause: PaneResizeCause::HostTerminal,
             },
             ClientRequest::KeyInput {
                 pane_id: NodeId(2),
@@ -249,6 +255,20 @@ mod tests {
             },
             ClientRequest::ResolveSessionRecovery { restore: true },
             ClientRequest::UpdateDebugLogging { enabled: true },
+            ClientRequest::UpdateAgentDebugMenu { enabled: true },
+            ClientRequest::GetPaneDebugLog {
+                pane_id: NodeId(2),
+                after_sequence: Some(7),
+            },
+            ClientRequest::RecordAgentDebugEvent {
+                pane_id: NodeId(2),
+                expected_session_id: Some("95fd0645-3331-408b-a7e5-36e6007bfb78".to_string()),
+                expected_title_generation: 3,
+                event: AgentDebugEventDraft::information(
+                    AgentDebugEventKind::TitleInferenceRequested,
+                    "Automatic title requested",
+                ),
+            },
         ]
     }
 
@@ -324,7 +344,34 @@ mod tests {
                 source: PromptSubmissionSource::Keyboard,
             },
             ServerEvent::DebugLoggingChanged { enabled: true },
+            ServerEvent::AgentDebugMenuChanged { enabled: true },
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id: NodeId(2),
+                through_sequence: 1,
+                retained_from_sequence: 1,
+                dropped_entry_count: 0,
+                entries: vec![sample_debug_entry()],
+            },
+            ServerEvent::PaneDebugEntryAppended {
+                pane_id: NodeId(2),
+                entry: sample_debug_entry(),
+            },
         ]
+    }
+
+    fn sample_debug_entry() -> AgentDebugEntry {
+        let mut log = PaneDebugLog::default();
+        log.append(
+            1_700_000_000_000,
+            AgentDebugSource::Inference,
+            AgentDebugContext::default(),
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::TitleInferenceSucceeded,
+                "Title inference completed",
+            )
+            .with_fields(vec![AgentDebugField::plain("provider", "Kilo Gateway")]),
+        )
+        .expect("non-detection sample must append")
     }
 
     #[tokio::test]

@@ -2091,6 +2091,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-agent-debug"
+version = "0.1.0"
+dependencies = [
+ "ilium-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ilium-agent-session"
 version = "0.1.0"
 dependencies = [
@@ -2105,12 +2114,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "chrono",
  "cosmic-text",
  "crossterm",
  "directories",
  "emoji",
  "fastembed",
  "handlebars",
+ "ilium-agent-debug",
  "ilium-agent-session",
  "ilium-core",
  "ilium-inference",
@@ -2177,6 +2188,7 @@ name = "ilium-ipc"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "ilium-agent-debug",
  "ilium-core",
  "ilium-sound",
  "serde",
@@ -2227,6 +2239,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "directories",
+ "ilium-agent-debug",
  "ilium-agent-session",
  "ilium-core",
  "ilium-detect",

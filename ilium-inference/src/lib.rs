@@ -6,7 +6,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use ilium_kilo_gateway::{ChatMessage, CompletionRequest, KiloGatewayClient};
+use ilium_kilo_gateway::{
+    ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient,
+    DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL, DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
+    FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -16,6 +20,7 @@ pub const DEFAULT_ANTHROPIC_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+const MAXIMUM_PROVIDER_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +58,7 @@ impl InferenceProviderKind {
 #[serde(default)]
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
+    pub kilo_gateway: KiloGatewaySettings,
     pub ollama: OllamaSettings,
     pub openai: ApiKeyProviderSettings,
     pub anthropic: ApiKeyProviderSettings,
@@ -63,12 +69,53 @@ impl Default for InferenceSettings {
     fn default() -> Self {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
+            kilo_gateway: KiloGatewaySettings::default(),
             ollama: OllamaSettings::default(),
             openai: ApiKeyProviderSettings::new(DEFAULT_OPENAI_URL),
             anthropic: ApiKeyProviderSettings::new(DEFAULT_ANTHROPIC_URL),
             openrouter: OpenRouterSettings::default(),
         }
     }
+}
+
+impl InferenceSettings {
+    /// Returns the exact persisted model used by the selected provider.
+    pub fn selected_model(&self) -> &str {
+        match self.selected_provider {
+            InferenceProviderKind::KiloGateway => &self.kilo_gateway.model,
+            InferenceProviderKind::Ollama => &self.ollama.model,
+            InferenceProviderKind::OpenAi => &self.openai.model,
+            InferenceProviderKind::Anthropic => &self.anthropic.model,
+            InferenceProviderKind::OpenRouter => &self.openrouter.model,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KiloGatewaySettings {
+    pub model: String,
+}
+
+impl Default for KiloGatewaySettings {
+    fn default() -> Self {
+        Self {
+            model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
+        }
+    }
+}
+
+/// Returns the stable router IDs shown before the live Kilo catalog has been
+/// loaded, and retained when discovery fails.
+pub fn kilo_gateway_fallback_models() -> Vec<String> {
+    KILO_GATEWAY_FALLBACK_MODELS
+        .iter()
+        .map(|model| (*model).to_string())
+        .collect()
+}
+
+pub fn kilo_gateway_model_catalog_url() -> String {
+    format!("{DEFAULT_KILO_GATEWAY_URL}/models")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,7 +181,9 @@ impl InferenceRequest {
         Self {
             system_prompt: "Return concise, valid JSON only.".to_string(),
             user_prompt: user_prompt.into(),
-            max_tokens: 1536,
+            // Free routers may spend a large part of this allowance on
+            // invisible reasoning before emitting a tiny JSON object.
+            max_tokens: 4096,
         }
     }
 }
@@ -157,9 +206,12 @@ pub enum InferenceError {
 }
 
 /// Base polymorphic contract for all inference backends. Model discovery is
-/// optional because it is a specific capability of the locally running Ollama API.
+/// optional because only providers with a reliable catalog implement it.
 pub trait InferenceProvider: Send + Sync {
     fn kind(&self) -> InferenceProviderKind;
+    fn selected_model(&self) -> Option<&str> {
+        None
+    }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError>;
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
         Ok(Vec::new())
@@ -168,7 +220,9 @@ pub trait InferenceProvider: Send + Sync {
 
 pub fn provider_from_settings(settings: &InferenceSettings) -> Box<dyn InferenceProvider> {
     let inner: Box<dyn InferenceProvider> = match settings.selected_provider {
-        InferenceProviderKind::KiloGateway => Box::new(KiloGatewayProvider),
+        InferenceProviderKind::KiloGateway => {
+            Box::new(KiloGatewayProvider(Arc::new(settings.kilo_gateway.clone())))
+        }
         InferenceProviderKind::Ollama => {
             Box::new(OllamaProvider(Arc::new(settings.ollama.clone())))
         }
@@ -203,19 +257,32 @@ impl InferenceProvider for DiagnosticProvider {
         self.inner.kind()
     }
 
+    fn selected_model(&self) -> Option<&str> {
+        self.inner.selected_model()
+    }
+
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         let operation_id = next_operation_id();
         let provider = self.inner.kind();
+        let selected_model = self.inner.selected_model().unwrap_or("<not configured>");
         let started_at = Instant::now();
         let operation_span = tracing::info_span!("llm_inference", operation_id, ?provider);
         let _operation_guard = operation_span.enter();
         tracing::info!(
             operation_id,
             ?provider,
+            selected_model,
             max_tokens = request.max_tokens,
+            system_prompt_characters = request.system_prompt.chars().count(),
+            user_prompt_characters = request.user_prompt.chars().count(),
+            "LLM inference started"
+        );
+        tracing::debug!(
+            operation_id,
+            ?provider,
             system_prompt = %request.system_prompt,
             user_prompt = %request.user_prompt,
-            "LLM inference started"
+            "LLM inference prompt"
         );
         let result = self.inner.complete(request);
         match &result {
@@ -223,17 +290,22 @@ impl InferenceProvider for DiagnosticProvider {
                 operation_id,
                 ?provider,
                 elapsed_milliseconds = started_at.elapsed().as_millis(),
-                response_text = %response.text,
+                response_characters = response.text.chars().count(),
                 "LLM inference completed"
             ),
             Err(error) => tracing::error!(
                 operation_id,
                 ?provider,
                 elapsed_milliseconds = started_at.elapsed().as_millis(),
-                error = %error,
-                error_debug = ?error,
+                error_kind = inference_error_kind(error),
+                http_status = ?inference_http_status(error),
                 "LLM inference failed"
             ),
+        }
+        if let Ok(response) = &result {
+            tracing::debug!(operation_id, ?provider, response_text = %response.text, "LLM inference response");
+        } else if let Err(error) = &result {
+            tracing::debug!(operation_id, ?provider, error = %error, error_debug = ?error, "LLM inference failure details");
         }
         result
     }
@@ -251,36 +323,93 @@ impl InferenceProvider for DiagnosticProvider {
                 operation_id,
                 ?provider,
                 elapsed_milliseconds = started_at.elapsed().as_millis(),
-                ?models,
+                model_count = models.len(),
                 "LLM model discovery completed"
             ),
             Err(error) => tracing::error!(
                 operation_id,
                 ?provider,
                 elapsed_milliseconds = started_at.elapsed().as_millis(),
-                error = %error,
-                error_debug = ?error,
+                error_kind = inference_error_kind(error),
+                http_status = ?inference_http_status(error),
                 "LLM model discovery failed"
             ),
+        }
+        if let Ok(models) = &result {
+            tracing::debug!(
+                operation_id,
+                ?provider,
+                ?models,
+                "LLM model discovery result"
+            );
+        } else if let Err(error) = &result {
+            tracing::debug!(operation_id, ?provider, error = %error, error_debug = ?error, "LLM model discovery failure details");
         }
         result
     }
 }
 
-pub struct KiloGatewayProvider;
+pub struct KiloGatewayProvider(Arc<KiloGatewaySettings>);
 impl InferenceProvider for KiloGatewayProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::KiloGateway
     }
+    fn selected_model(&self) -> Option<&str> {
+        Some(&self.0.model)
+    }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        let request = CompletionRequest::with_default_free_model(vec![
-            ChatMessage::system(request.system_prompt.as_str()),
-            ChatMessage::user(request.user_prompt.as_str()),
-        ]);
+        require(
+            &self.0.model,
+            "Select a Kilo Gateway model before testing or using inference",
+        )?;
+        let request = CompletionRequest::new(
+            &self.0.model,
+            vec![
+                ChatMessage::system(request.system_prompt.as_str()),
+                ChatMessage::user(request.user_prompt.as_str()),
+            ],
+            request.max_tokens,
+        );
         KiloGatewayClient::default()
             .complete_text(&request)
             .map(|text| InferenceResponse { text })
-            .map_err(|error| InferenceError::Transport(error.to_string()))
+            .map_err(map_gateway_error)
+    }
+
+    fn list_models(&self) -> Result<Vec<String>, InferenceError> {
+        let models = KiloGatewayClient::default()
+            .list_free_models()
+            .map_err(map_gateway_error)?;
+        if models.is_empty() {
+            return Err(InferenceError::InvalidResponse(
+                "Kilo Gateway catalog contained no compatible free text models".to_string(),
+            ));
+        }
+        Ok(models)
+    }
+}
+
+fn map_gateway_error(error: GatewayError) -> InferenceError {
+    match error {
+        GatewayError::Http { status, message } => InferenceError::Http { status, message },
+        GatewayError::Transport(message) => InferenceError::Transport(message),
+        GatewayError::InvalidResponse(message) => InferenceError::InvalidResponse(message),
+    }
+}
+
+fn inference_error_kind(error: &InferenceError) -> &'static str {
+    match error {
+        InferenceError::Configuration(_) => "configuration",
+        InferenceError::Http { .. } => "http",
+        InferenceError::Transport(_) => "transport",
+        InferenceError::InvalidResponse(_) => "invalid_response",
+    }
+}
+
+fn inference_http_status(error: &InferenceError) -> Option<u16> {
+    match error {
+        InferenceError::Http { status, .. } => Some(*status),
+        _ => None,
     }
 }
 
@@ -288,6 +417,9 @@ struct OllamaProvider(Arc<OllamaSettings>);
 impl InferenceProvider for OllamaProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::Ollama
+    }
+    fn selected_model(&self) -> Option<&str> {
+        Some(&self.0.model)
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         require(
@@ -336,13 +468,16 @@ fn complete_openai_compatible(
         &[("Authorization", format!("Bearer {}", api_key))],
         serde_json::json!({"model":model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":false}),
     )?;
-    response_text(&response, &["choices", "0", "message", "content"])
+    openai_compatible_response_text(&response)
 }
 
 struct OpenAiProvider(Arc<ApiKeyProviderSettings>);
 impl InferenceProvider for OpenAiProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::OpenAi
+    }
+    fn selected_model(&self) -> Option<&str> {
+        Some(&self.0.model)
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         complete_openai_compatible(&self.0.base_url, &self.0.api_key, &self.0.model, request)
@@ -352,6 +487,9 @@ struct OpenRouterProvider(Arc<OpenRouterSettings>);
 impl InferenceProvider for OpenRouterProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::OpenRouter
+    }
+    fn selected_model(&self) -> Option<&str> {
+        Some(&self.0.model)
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         complete_openai_compatible(
@@ -366,6 +504,9 @@ struct AnthropicProvider(Arc<ApiKeyProviderSettings>);
 impl InferenceProvider for AnthropicProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::Anthropic
+    }
+    fn selected_model(&self) -> Option<&str> {
+        Some(&self.0.model)
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         require(
@@ -384,7 +525,7 @@ impl InferenceProvider for AnthropicProvider {
             ],
             serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0}),
         )?;
-        response_text(&response, &["content", "0", "text"])
+        anthropic_response_text(&response)
     }
 }
 
@@ -433,9 +574,10 @@ fn post_json(
         method = "POST",
         url = %diagnostic_url,
         headers = ?redacted_headers(headers),
-        request_body = %body,
+        request_characters = body.to_string().chars().count(),
         "HTTP request started"
     );
+    tracing::debug!(method = "POST", url = %diagnostic_url, request_body = %body, "HTTP request payload");
     let mut request = agent().post(url).header("Content-Type", "application/json");
     for (name, value) in headers {
         request = request.header(*name, value);
@@ -456,34 +598,41 @@ fn send(
             tracing::error!(
                 method,
                 url = %diagnostic_url,
-                request_body = ?request_body,
                 error = %error_message,
                 "HTTP transport failed"
             );
+            tracing::debug!(method, url = %diagnostic_url, request_body = ?request_body, "failed HTTP request payload");
             return Err(InferenceError::Transport(error_message));
         }
     };
     let status = response.status().as_u16();
     let response_headers = redacted_response_headers(response.headers());
-    let body = response.body_mut().read_to_string().map_err(|error| {
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(MAXIMUM_PROVIDER_RESPONSE_BYTES)
+        .read_to_string()
+        .map_err(|error| {
             tracing::error!(method, url = %diagnostic_url, status, ?response_headers, error = %error, "failed to read HTTP response body");
-        InferenceError::Transport(error.to_string())
-    })?;
+            InferenceError::Transport(error.to_string())
+        })?;
     if !(200..300).contains(&status) {
-        tracing::error!(method, url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request failed");
+        tracing::error!(method, url = %diagnostic_url, status, ?response_headers, response_characters = body.chars().count(), "HTTP request failed");
+        tracing::debug!(method, url = %diagnostic_url, status, response_body = %body, "HTTP error response body");
         return Err(InferenceError::Http {
             status,
             message: body,
         });
     }
-    tracing::info!(method, url = %diagnostic_url, status, ?response_headers, response_body = %body, "HTTP request completed");
+    tracing::info!(method, url = %diagnostic_url, status, ?response_headers, response_characters = body.chars().count(), "HTTP request completed");
+    tracing::debug!(method, url = %diagnostic_url, status, response_body = %body, "HTTP response body");
     serde_json::from_str(&body).map_err(|error| {
         tracing::error!(
             method,
             url = %diagnostic_url,
             status,
             ?response_headers,
-            response_body = %body,
+            response_characters = body.chars().count(),
             error = %error,
             "HTTP response was not valid JSON"
         );
@@ -508,6 +657,7 @@ fn redacted_headers(headers: &[(&str, String)]) -> Vec<(String, String)> {
 fn redacted_response_headers(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
+        .filter(|(name, _)| ilium_logging::is_diagnostic_response_header(name.as_str()))
         .map(|(name, value)| {
             let value = value.to_str().unwrap_or("<non-text header>");
             (
@@ -542,6 +692,46 @@ fn response_text(
     Ok(InferenceResponse {
         text: text.to_string(),
     })
+}
+
+fn openai_compatible_response_text(
+    value: &serde_json::Value,
+) -> Result<InferenceResponse, InferenceError> {
+    if let Some(error) = value.get("error") {
+        return Err(InferenceError::InvalidResponse(format!(
+            "provider returned an error envelope with HTTP 200: {error}"
+        )));
+    }
+    response_text(value, &["choices", "0", "message", "content"])
+}
+
+fn anthropic_response_text(value: &serde_json::Value) -> Result<InferenceResponse, InferenceError> {
+    if let Some(error) = value.get("error") {
+        return Err(InferenceError::InvalidResponse(format!(
+            "Anthropic returned an error envelope with HTTP 200: {error}"
+        )));
+    }
+    let text = value
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+        .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        let stop_reason = value
+            .get("stop_reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("not reported");
+        return Err(InferenceError::InvalidResponse(format!(
+            "Anthropic returned no non-empty text blocks (stop_reason: {stop_reason})"
+        )));
+    }
+    Ok(InferenceResponse { text })
 }
 
 #[cfg(test)]
@@ -612,7 +802,9 @@ mod tests {
             settings.selected_provider,
             InferenceProviderKind::KiloGateway
         );
+        assert_eq!(settings.kilo_gateway.model, "kilo-auto/free");
         assert_eq!(settings.openrouter.model, DEFAULT_OPENROUTER_MODEL);
+        assert_eq!(InferenceRequest::json_only("{}").max_tokens, 4096);
     }
     #[test]
     fn factory_selects_provider() {
@@ -624,6 +816,21 @@ mod tests {
             provider_from_settings(&settings).kind(),
             InferenceProviderKind::Anthropic
         );
+    }
+
+    #[test]
+    fn gateway_errors_keep_their_provider_neutral_category() {
+        assert!(matches!(
+            map_gateway_error(GatewayError::Http {
+                status: 429,
+                message: "rate limited".to_string(),
+            }),
+            InferenceError::Http { status: 429, .. }
+        ));
+        assert!(matches!(
+            map_gateway_error(GatewayError::InvalidResponse("content null".to_string())),
+            InferenceError::InvalidResponse(message) if message == "content null"
+        ));
     }
 
     #[test]
@@ -664,5 +871,32 @@ mod tests {
         assert_eq!(headers[1].1, "<redacted>");
         assert_eq!(headers[2].1, "2023-06-01");
         assert!(!format!("{headers:?}").contains("secret"));
+    }
+
+    #[test]
+    fn anthropic_response_concatenates_every_text_block() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "first"},
+                {"type": "tool_use", "id": "tool-1"},
+                {"type": "text", "text": "second"}
+            ],
+            "stop_reason": "end_turn"
+        });
+
+        assert_eq!(
+            anthropic_response_text(&response).unwrap().text,
+            "first\nsecond"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_response_rejects_success_status_error_envelopes() {
+        let response = serde_json::json!({"error": {"message": "upstream failed"}});
+
+        assert!(matches!(
+            openai_compatible_response_text(&response),
+            Err(InferenceError::InvalidResponse(message)) if message.contains("error envelope")
+        ));
     }
 }

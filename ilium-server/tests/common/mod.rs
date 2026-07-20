@@ -123,11 +123,29 @@ impl TestServer {
         session_name: &str,
         detection_config: DetectionConfig,
     ) -> Self {
-        Self::start_with_sound_player(
+        Self::start_with_sound_player_and_agent_debug(
             session_name,
             detection_config,
             ilium_sound::SoundSettings::default(),
             Arc::new(NoopSoundPlayer),
+            false,
+        )
+        .await
+    }
+
+    /// Starts the real server with durable semantic agent history enabled.
+    /// Session lifecycle integration tests use this to inspect the same
+    /// typed evidence the TUI and `/tmp` bridge consume.
+    pub async fn start_with_agent_debug(
+        session_name: &str,
+        detection_config: DetectionConfig,
+    ) -> Self {
+        Self::start_with_sound_player_and_agent_debug(
+            session_name,
+            detection_config,
+            ilium_sound::SoundSettings::default(),
+            Arc::new(NoopSoundPlayer),
+            true,
         )
         .await
     }
@@ -139,6 +157,23 @@ impl TestServer {
         detection_config: DetectionConfig,
         sound_settings: ilium_sound::SoundSettings,
         sound_player: Arc<dyn SoundPlayer>,
+    ) -> Self {
+        Self::start_with_sound_player_and_agent_debug(
+            session_name,
+            detection_config,
+            sound_settings,
+            sound_player,
+            false,
+        )
+        .await
+    }
+
+    async fn start_with_sound_player_and_agent_debug(
+        session_name: &str,
+        detection_config: DetectionConfig,
+        sound_settings: ilium_sound::SoundSettings,
+        sound_player: Arc<dyn SoundPlayer>,
+        agent_debug_menu_enabled: bool,
     ) -> Self {
         let dir = tempfile::tempdir().expect("create tempdir");
         let socket_path = dir.path().join(format!("{session_name}.sock"));
@@ -157,6 +192,7 @@ impl TestServer {
             sound_player,
             custom_signatures: Vec::new(),
             session_recovery: ilium_server::config::SessionRecoveryConfig::RestoreAutomatically,
+            agent_debug_menu_enabled,
         };
 
         let server_task = tokio::spawn(run(options));

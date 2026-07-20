@@ -14,6 +14,10 @@
 
 use std::time::{Duration, Instant};
 
+use ilium_agent_debug::{
+    AgentDebugContext, AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField,
+    AgentDebugSeverity, AgentDebugSource,
+};
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentActivity, NodeId, PaneStatus};
 use ilium_ipc::ServerEvent;
@@ -378,6 +382,12 @@ async fn run_due_panes(
         session_process_id: Option<u32>,
         pending_generated_session_id: Option<String>,
         needs_session_discovery: bool,
+        shell_pid: Option<u32>,
+        activity_evidence: Option<ilium_detect::ActivityEvidence>,
+        activity_evidence_line: Option<String>,
+        goal_evidence: Option<ilium_detect::GoalEvidence>,
+        goal_evidence_line: Option<String>,
+        goal_was_retained: bool,
     }
 
     let classifications: Vec<ClassifiedPane> = identified_panes
@@ -424,6 +434,12 @@ async fn run_due_panes(
                 session_process_id: due_pane.session_process_id,
                 pending_generated_session_id: due_pane.pending_generated_session_id,
                 needs_session_discovery,
+                shell_pid: due_pane.shell_pid,
+                activity_evidence: classified_identity.activity_evidence,
+                activity_evidence_line: classified_identity.activity_evidence_line,
+                goal_evidence: classified_identity.goal_evidence,
+                goal_evidence_line: classified_identity.goal_evidence_line,
+                goal_was_retained: classified_identity.goal_was_retained,
             }
         })
         .collect();
@@ -447,6 +463,12 @@ async fn run_due_panes(
     // misattribution, independent of which tier finds the answer.
     let mut discovered_session_ids: std::collections::HashMap<NodeId, String> =
         std::collections::HashMap::new();
+    let mut session_discovery_traces: std::collections::HashMap<
+        NodeId,
+        Vec<crate::session_id::SessionDiscoveryPhase>,
+    > = std::collections::HashMap::new();
+    let mut session_discovery_exclusions: std::collections::HashMap<NodeId, Vec<String>> =
+        std::collections::HashMap::new();
     let pane_project_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
         let tree = state.tree.read().await;
         classifications
@@ -465,6 +487,16 @@ async fn run_due_panes(
         let Some(identity) = pane.identity.as_ref() else {
             continue;
         };
+        let mut exclusion_details: Vec<String> = claimed_session_ids
+            .iter()
+            .filter(|(_, owner)| **owner != pane.pane_id)
+            .map(|(session_id, owner)| format!("{session_id} (already owned by pane {})", owner.0))
+            .collect();
+        exclusion_details.extend(
+            ambiguous_session_ids
+                .iter()
+                .map(|session_id| format!("{session_id} (claimed by multiple panes)")),
+        );
         let mut excluded_session_ids: std::collections::HashSet<String> = claimed_session_ids
             .iter()
             .filter(|(_, owner)| **owner != pane.pane_id)
@@ -484,8 +516,17 @@ async fn run_due_panes(
                 .is_some_and(|owner_pid| owner_pid == identity.pid)
         {
             excluded_session_ids.extend(pane.invalidated_session_id.iter().cloned());
+            exclusion_details.extend(pane.invalidated_session_id.iter().map(|session_id| {
+                format!(
+                    "{session_id} (invalidated for the still-running process {})",
+                    identity.pid
+                )
+            }));
         }
-        let generated_session = pane
+        exclusion_details.sort();
+        exclusion_details.dedup();
+        session_discovery_exclusions.insert(pane.pane_id, exclusion_details);
+        let generated_candidate = pane
             .pending_generated_session_id
             .as_ref()
             .filter(|session_id| {
@@ -502,20 +543,65 @@ async fn run_due_panes(
                 session_id: session_id.clone(),
                 source: crate::session_id::DiscoverySource::GeneratedAtLaunch,
             });
-        let discovered_session = generated_session.or_else(|| {
-            crate::session_id::discover(
-                system,
-                Pid::from_u32(identity.pid),
-                &identity.class,
-                &transcript_locator,
-                project_cwd,
-                pane.is_session_identity_invalidated
-                    && pane
-                        .session_process_id
-                        .is_none_or(|owner_pid| owner_pid == identity.pid),
-                &excluded_session_ids,
-            )
+        let (discovered_session, mut discovery_phases) =
+            if let Some(generated_session) = generated_candidate {
+                (
+                    Some(generated_session.clone()),
+                    vec![crate::session_id::SessionDiscoveryPhase {
+                        phase: "generated launch identity",
+                        outcome: "resolved",
+                        detail: format!(
+                            "ilium-supplied Claude session {} has a project-verified transcript",
+                            generated_session.session_id
+                        ),
+                    }],
+                )
+            } else {
+                let generated_detail = match &pane.pending_generated_session_id {
+                    None => "no ilium-generated launch identity was pending".to_string(),
+                    Some(session_id) if identity.class != ilium_core::AgentClass::Claude => {
+                        format!("pending identity {session_id} belongs to a non-Claude process")
+                    }
+                    Some(session_id) if excluded_session_ids.contains(session_id) => {
+                        format!("pending identity {session_id} is already claimed or invalidated")
+                    }
+                    Some(session_id) => format!(
+                        "pending identity {session_id} has no verified project transcript yet"
+                    ),
+                };
+                let attempt = crate::session_id::discover_with_trace(
+                    system,
+                    Pid::from_u32(identity.pid),
+                    &identity.class,
+                    &transcript_locator,
+                    project_cwd,
+                    pane.is_session_identity_invalidated
+                        && pane
+                            .session_process_id
+                            .is_none_or(|owner_pid| owner_pid == identity.pid),
+                    &excluded_session_ids,
+                );
+                let mut phases = vec![crate::session_id::SessionDiscoveryPhase {
+                    phase: "generated launch identity",
+                    outcome: "unresolved",
+                    detail: generated_detail,
+                }];
+                phases.extend(attempt.phases);
+                (attempt.discovered, phases)
+            };
+        discovery_phases.push(crate::session_id::SessionDiscoveryPhase {
+            phase: "overall result",
+            outcome: if discovered_session.is_some() {
+                "resolved"
+            } else {
+                "unresolved"
+            },
+            detail: discovered_session.as_ref().map_or_else(
+                || "no admissible ownership evidence resolved a session".to_string(),
+                |session| format!("selected {} from {:?}", session.session_id, session.source),
+            ),
         });
+        session_discovery_traces.insert(pane.pane_id, discovery_phases);
         let Some(discovered_session) = discovered_session else {
             continue;
         };
@@ -537,6 +623,7 @@ async fn run_due_panes(
     let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
     let mut tree_snapshot_changed = false;
+    let mut pending_debug_events = Vec::new();
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
         let mut tree = state.tree.write().await;
@@ -559,6 +646,17 @@ async fn run_due_panes(
                 continue;
             }
 
+            // Preserve the ownership state that discovery evaluated. Runtime
+            // fields may be cleared or replaced below before the diagnostic
+            // event is assembled, but the log must show both sides of the
+            // decision instead of reconstructing the old side afterward.
+            let session_id_before_check = runtime.session_id.clone();
+            let session_process_id_before_check = runtime.session_process_id;
+            let invalidated_session_id_before_check = runtime.invalidated_session_id.clone();
+            let identity_was_invalidated_before_check = runtime.is_session_identity_invalidated;
+            let transition_correlation_id_before_check =
+                runtime.pending_session_transition_correlation_id.clone();
+
             // PTY output can arrive continuously while an agent works. Applying
             // this coherent frame is safe, but it must not push the next check
             // to a slow tier when a newer frame already exists. The focused-tier
@@ -579,6 +677,7 @@ async fn run_due_panes(
             // doing a moment ago. `promote_to_done` is what actually turns
             // "just went idle" into "done" when nobody was watching; see its
             // doc comment.
+            let raw_status = classified_pane.status.clone();
             let new_status = match classified_pane.status {
                 PaneStatus::Agent(class, raw_activity) => PaneStatus::Agent(
                     class,
@@ -614,6 +713,10 @@ async fn run_due_panes(
                 .identity
                 .as_ref()
                 .map(|identity| identity.class.clone());
+            runtime.detected_agent_process_id = classified_pane
+                .identity
+                .as_ref()
+                .map(|identity| identity.pid);
             let became_fresh_agent_screen =
                 classified_pane.is_fresh_agent_screen && !runtime.is_showing_fresh_agent_screen;
             runtime.is_showing_fresh_agent_screen = classified_pane.is_fresh_agent_screen;
@@ -622,13 +725,13 @@ async fn run_due_panes(
                 pending_title_clears.push((pane_id, runtime.title_generation));
                 match tree.set_automatic_pane_title(
                     pane_id,
-                    runtime.origin.pane_name_without_stale_session(),
+                    crate::pane::FRESH_AGENT_TITLE,
                     None,
                     None,
                 ) {
                     Ok(changed) => tree_snapshot_changed |= changed,
                     Err(error) => tracing::warn!(
-                        "detection loop: failed to reset automatic title for fresh agent pane \
+                        "detection loop: failed to reset title for fresh agent pane \
                          {pane_id:?}: {error}"
                     ),
                 }
@@ -670,12 +773,16 @@ async fn run_due_panes(
                 owning_process_changed_without_reverification,
                 session_is_ambiguously_claimed,
             );
+            let mut session_was_cleared = false;
+            let mut cleared_session_id = None;
             if should_clear_session_id && runtime.session_id.is_some() {
+                cleared_session_id = runtime.session_id.clone();
                 if session_is_ambiguously_claimed {
                     runtime.invalidated_session_id = runtime.session_id.clone();
                     runtime.is_session_identity_invalidated = true;
                 }
                 runtime.session_id = None;
+                session_was_cleared = true;
                 runtime.title_generation = runtime.title_generation.wrapping_add(1);
                 runtime.session_agent_class = None;
                 if !runtime.is_session_identity_invalidated {
@@ -700,8 +807,11 @@ async fn run_due_panes(
                 }
             }
 
+            let mut newly_resolved_session = None;
             if let Some(session_id) = discovered_session_ids.get(&pane_id) {
                 if runtime.session_id.as_ref() != Some(session_id) {
+                    let invalidated_session_id = runtime.invalidated_session_id.clone();
+                    let correlation_id = runtime.pending_session_transition_correlation_id.take();
                     runtime.session_id = Some(session_id.clone());
                     runtime.session_agent_class = detected_agent_class.clone();
                     runtime.session_process_id = classified_pane
@@ -711,6 +821,8 @@ async fn run_due_panes(
                     runtime.is_session_identity_invalidated = false;
                     runtime.invalidated_session_id = None;
                     runtime.pending_generated_session_id = None;
+                    newly_resolved_session =
+                        Some((session_id.clone(), invalidated_session_id, correlation_id));
                     state.request_snapshot_save();
                     state.broadcast(ServerEvent::PaneSessionIdResolved {
                         pane_id,
@@ -734,6 +846,245 @@ async fn run_due_panes(
                         });
                     }
                 }
+            }
+
+            let debug_context = AgentDebugContext {
+                class: classified_pane
+                    .identity
+                    .as_ref()
+                    .map(|identity| identity.class.clone()),
+                activity: status_activity(&new_status),
+                process_id: classified_pane
+                    .identity
+                    .as_ref()
+                    .map(|identity| identity.pid),
+                session_id: runtime.session_id.clone(),
+                title_generation: runtime.title_generation,
+            };
+            if let Some(phases) = session_discovery_traces.get(&pane_id) {
+                let project_cwd = pane_project_cwds
+                    .get(&pane_id)
+                    .unwrap_or(&state.session_cwd);
+                let exclusion_details = session_discovery_exclusions
+                    .get(&pane_id)
+                    .filter(|details| !details.is_empty())
+                    .map_or_else(|| "none".to_string(), |details| details.join("\n"));
+                let mut discovery_fields = vec![
+                    AgentDebugField::plain(
+                        "Provider under check",
+                        classified_pane.identity.as_ref().map_or_else(
+                            || "none".to_string(),
+                            |identity| agent_class_name(&identity.class).to_string(),
+                        ),
+                    ),
+                    AgentDebugField::plain(
+                        "Agent PID under check",
+                        classified_pane.identity.as_ref().map_or_else(
+                            || "unavailable".to_string(),
+                            |identity| identity.pid.to_string(),
+                        ),
+                    ),
+                    AgentDebugField::plain(
+                        "Canonical project boundary",
+                        project_cwd.display().to_string(),
+                    ),
+                    AgentDebugField::sensitive(
+                        "Session ID before check",
+                        session_id_before_check
+                            .clone()
+                            .unwrap_or_else(|| "none".to_string()),
+                    ),
+                    AgentDebugField::plain(
+                        "Owning PID before check",
+                        session_process_id_before_check.map_or_else(
+                            || "none".to_string(),
+                            |process_id| process_id.to_string(),
+                        ),
+                    ),
+                    AgentDebugField::plain(
+                        "Identity invalidated before check",
+                        identity_was_invalidated_before_check.to_string(),
+                    ),
+                    AgentDebugField::sensitive(
+                        "Invalidated session ID",
+                        invalidated_session_id_before_check
+                            .clone()
+                            .unwrap_or_else(|| "none".to_string()),
+                    ),
+                    AgentDebugField::sensitive("Excluded session IDs", exclusion_details),
+                ];
+                discovery_fields.extend(phases.iter().map(|phase| {
+                    AgentDebugField::plain(
+                        format!("Phase: {}", sentence_case(phase.phase)),
+                        format!("{}: {}", sentence_case(phase.outcome), phase.detail),
+                    )
+                }));
+                discovery_fields.push(AgentDebugField::sensitive(
+                    "Session ID after check",
+                    runtime
+                        .session_id
+                        .clone()
+                        .unwrap_or_else(|| "none".to_string()),
+                ));
+                let did_resolve = discovered_session_ids.contains_key(&pane_id);
+                pending_debug_events.push((
+                    pane_id,
+                    AgentDebugSource::SessionDiscovery,
+                    debug_context.clone(),
+                    AgentDebugEventDraft {
+                        severity: if did_resolve {
+                            AgentDebugSeverity::Success
+                        } else {
+                            AgentDebugSeverity::Information
+                        },
+                        kind: AgentDebugEventKind::SessionDiscovery,
+                        summary: if did_resolve {
+                            "Session discovery selected a project-verified identity".to_string()
+                        } else {
+                            "Session discovery found no admissible identity".to_string()
+                        },
+                        fields: discovery_fields,
+                        correlation_id: transition_correlation_id_before_check,
+                        metadata: Default::default(),
+                    },
+                ));
+            }
+            let mut detection_fields = vec![
+                AgentDebugField::plain(
+                    "Agent identity decision",
+                    explain_identity_decision(
+                        classified_pane.identity.as_ref(),
+                        classified_pane.shell_pid,
+                    ),
+                ),
+                AgentDebugField::plain(
+                    "Activity decision",
+                    explain_activity_decision(
+                        &raw_status,
+                        &new_status,
+                        classified_pane.activity_evidence,
+                        runtime.detection_schedule.client_focused,
+                    ),
+                ),
+                AgentDebugField::plain(
+                    "Goal decision",
+                    explain_goal_decision(
+                        &new_status,
+                        classified_pane.goal_evidence,
+                        classified_pane.goal_was_retained,
+                    ),
+                ),
+                AgentDebugField::plain(
+                    "Session identity decision",
+                    explain_session_decision(
+                        classified_pane.identity.as_ref(),
+                        runtime.session_id.as_deref(),
+                    ),
+                ),
+                AgentDebugField::plain("Applied pane state", describe_pane_status(&new_status)),
+            ];
+            if let Some(line) = classified_pane.activity_evidence_line.as_deref() {
+                detection_fields.push(AgentDebugField::sensitive(
+                    "Matched activity evidence",
+                    normalize_dynamic_terminal_evidence(line),
+                ));
+            }
+            if let Some(line) = classified_pane.goal_evidence_line.as_deref() {
+                detection_fields.push(AgentDebugField::sensitive(
+                    "Matched goal evidence",
+                    normalize_dynamic_terminal_evidence(line),
+                ));
+            }
+            let was_agent = matches!(
+                previous_status.as_ref(),
+                Some(PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..))
+            );
+            if classified_pane.identity.is_some() || was_agent {
+                pending_debug_events.push((
+                    pane_id,
+                    AgentDebugSource::Detector,
+                    debug_context.clone(),
+                    AgentDebugEventDraft::information(
+                        AgentDebugEventKind::DetectionCycle,
+                        detection_summary(&new_status, classified_pane.identity.as_ref()),
+                    )
+                    .with_fields(detection_fields),
+                ));
+            }
+            if session_was_cleared {
+                let mut reasons = Vec::new();
+                if session_belongs_to_different_class {
+                    reasons.push("a different agent provider now owns the pane");
+                }
+                if owning_process_disappeared {
+                    reasons.push("the process that owned the session disappeared");
+                }
+                if owning_process_changed_without_reverification {
+                    reasons.push("the agent process changed without re-verifying the session");
+                }
+                if session_is_ambiguously_claimed {
+                    reasons.push("more than one pane claimed the same session");
+                }
+                pending_debug_events.push((
+                    pane_id,
+                    AgentDebugSource::SessionDiscovery,
+                    debug_context.clone(),
+                    AgentDebugEventDraft {
+                        severity: AgentDebugSeverity::Warning,
+                        kind: AgentDebugEventKind::SessionCleared,
+                        summary: "Stale agent session ownership was cleared".to_string(),
+                        fields: vec![
+                            AgentDebugField::plain(
+                                "Why it was cleared",
+                                format!(
+                                    "The session became unsafe to keep because {}.",
+                                    reasons.join(" and ")
+                                ),
+                            ),
+                            AgentDebugField::sensitive(
+                                "Session ID before clearing",
+                                cleared_session_id.unwrap_or_else(|| "unavailable".to_string()),
+                            ),
+                        ],
+                        correlation_id: None,
+                        metadata: Default::default(),
+                    },
+                ));
+            }
+            if let Some((session_id, invalidated_session_id, correlation_id)) =
+                newly_resolved_session
+            {
+                let acceptance_reason = session_discovery_traces
+                    .get(&pane_id)
+                    .and_then(|phases| {
+                        phases
+                            .iter()
+                            .find(|phase| phase.outcome == "resolved" && phase.phase != "overall result")
+                    })
+                    .map_or_else(
+                        || "provider, process, transcript, and project ownership checks all accepted it".to_string(),
+                        |phase| phase.detail.clone(),
+                    );
+                pending_debug_events.push((
+                    pane_id,
+                    AgentDebugSource::SessionDiscovery,
+                    debug_context.clone(),
+                    AgentDebugEventDraft {
+                        severity: AgentDebugSeverity::Success,
+                        kind: AgentDebugEventKind::SessionResolved,
+                        summary: "Project-verified agent session resolved".to_string(),
+                        fields: vec![
+                            AgentDebugField::sensitive("Accepted session ID", session_id),
+                            AgentDebugField::sensitive(
+                                "Replaced invalidated session ID",
+                                invalidated_session_id.unwrap_or_else(|| "none".to_string()),
+                            ),
+                            AgentDebugField::plain("Why it was accepted", acceptance_reason),
+                        ],
+                        correlation_id,
+                        metadata: Default::default(),
+                    },
+                ));
             }
 
             if previous_status.as_ref() == Some(&new_status) {
@@ -806,6 +1157,11 @@ async fn run_due_panes(
         }
     }
 
+    for (pane_id, source, context, event) in pending_debug_events {
+        let _ =
+            crate::agent_debug::record_with_context(state, pane_id, source, context, event).await;
+    }
+
     for (pane_id, title_generation) in pending_title_clears {
         state.broadcast(ServerEvent::PaneSessionTitleCleared {
             pane_id,
@@ -831,6 +1187,221 @@ async fn run_due_panes(
     }
 
     Ok(())
+}
+
+fn status_activity(status: &PaneStatus) -> Option<AgentActivity> {
+    match status {
+        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity) => Some(*activity),
+        PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
+    }
+}
+
+fn detection_summary(
+    status: &PaneStatus,
+    identity: Option<&ilium_detect::AgentIdentity>,
+) -> String {
+    let Some(identity) = identity else {
+        return "No supported agent process is currently detected".to_string();
+    };
+    let activity = status_activity(status)
+        .map(activity_name)
+        .unwrap_or("not evaluated");
+    let goal = if matches!(status, PaneStatus::AgentWithGoal(..)) {
+        " with an active goal"
+    } else {
+        ""
+    };
+    format!(
+        "Detected {} (process {}) and classified it as {activity}{goal}",
+        agent_class_name(&identity.class),
+        identity.pid,
+    )
+}
+
+fn explain_identity_decision(
+    identity: Option<&ilium_detect::AgentIdentity>,
+    shell_pid: Option<u32>,
+) -> String {
+    let shell_process = shell_pid.map_or_else(
+        || "an unavailable pane-shell process".to_string(),
+        |process_id| format!("pane-shell process {process_id}"),
+    );
+    let Some(identity) = identity else {
+        return format!(
+            "No known agent executable was found in the process tree below {shell_process}."
+        );
+    };
+    let process_position = if identity.process_tree_depth == 0 {
+        "the process launched directly by the pane".to_string()
+    } else {
+        format!(
+            "{} process-tree edge(s) below the pane shell",
+            identity.process_tree_depth
+        )
+    };
+    format!(
+        "{} was selected because executable \"{}\" at process {} matched registry signature \"{}\"; it is {process_position} below {shell_process}.",
+        agent_class_name(&identity.class),
+        identity.process_name,
+        identity.pid,
+        identity.matched_signature,
+    )
+}
+
+fn explain_activity_decision(
+    raw_status: &PaneStatus,
+    applied_status: &PaneStatus,
+    evidence: Option<ilium_detect::ActivityEvidence>,
+    client_focused: bool,
+) -> String {
+    let Some(applied_activity) = status_activity(applied_status) else {
+        return "Activity was not evaluated because no agent process was detected.".to_string();
+    };
+    let raw_activity = status_activity(raw_status).unwrap_or(applied_activity);
+    let evidence_explanation = match evidence {
+        Some(ilium_detect::ActivityEvidence::InterruptMarker) => {
+            "the visible terminal contains the agent's explicit interrupt hint"
+        }
+        Some(ilium_detect::ActivityEvidence::GenericLiveStatus) => {
+            "the visible terminal contains a live status line with an ellipsis and elapsed-time token"
+        }
+        Some(ilium_detect::ActivityEvidence::ClaudeLiveStatus) => {
+            "Claude Code's visible terminal contains its live ellipsis-and-elapsed-time status line"
+        }
+        Some(ilium_detect::ActivityEvidence::CodexLiveStatus) => {
+            "Codex's visible terminal contains a present-tense working status with an elapsed-time token"
+        }
+        Some(ilium_detect::ActivityEvidence::BackgroundWait) => {
+            "the visible terminal says the agent is waiting for background agents or tasks"
+        }
+        Some(ilium_detect::ActivityEvidence::ConfirmationPrompt) => {
+            "the visible terminal contains a yes/no confirmation question"
+        }
+        Some(ilium_detect::ActivityEvidence::SelectionPrompt) => {
+            "the visible terminal contains an interactive selection menu or select/cancel footer"
+        }
+        Some(ilium_detect::ActivityEvidence::NoActiveMarker) => {
+            "the visible terminal contains no working, background-wait, confirmation, or selection marker"
+        }
+        None => "activity evidence was unavailable",
+    };
+
+    if raw_activity == AgentActivity::Idle && applied_activity == AgentActivity::Done {
+        return format!(
+            "Done — {evidence_explanation}. The pane had previously been active and was not focused, so ilium marked that completed turn as unseen."
+        );
+    }
+    if raw_activity == AgentActivity::Idle && client_focused {
+        return format!(
+            "Idle — {evidence_explanation}. Because this pane is focused, ilium does not show an unseen-completion state."
+        );
+    }
+    format!(
+        "{} — {evidence_explanation}.",
+        sentence_case(activity_name(applied_activity))
+    )
+}
+
+fn explain_goal_decision(
+    status: &PaneStatus,
+    evidence: Option<ilium_detect::GoalEvidence>,
+    goal_was_retained: bool,
+) -> String {
+    if status_activity(status).is_none() {
+        return "Goal state was not evaluated because no agent process was detected.".to_string();
+    }
+    if goal_was_retained {
+        return "Kept active — this frame had no decisive goal footer, but the exact same agent process and provider previously confirmed the goal. Transient redraws therefore do not clear it.".to_string();
+    }
+    match evidence {
+        Some(ilium_detect::GoalEvidence::Active) => "Active — the newest provider-owned status line explicitly reports an active, paused, blocked, or usage-limited goal.".to_string(),
+        Some(ilium_detect::GoalEvidence::Inactive) => "Inactive — the newest provider-owned status line explicitly reports that the goal was achieved or cleared.".to_string(),
+        Some(ilium_detect::GoalEvidence::Unknown) => "Inactive — no provider-owned goal marker was visible and this exact agent process had no previously confirmed goal to retain.".to_string(),
+        None => "Goal evidence was unavailable.".to_string(),
+    }
+}
+
+fn explain_session_decision(
+    identity: Option<&ilium_detect::AgentIdentity>,
+    session_id: Option<&str>,
+) -> String {
+    let Some(identity) = identity else {
+        return "No session identity was evaluated because no agent process was detected."
+            .to_string();
+    };
+    match session_id {
+        Some(session_id) => format!(
+            "Verified session \"{session_id}\" belongs to the same {} process {} and canonical project.",
+            agent_class_name(&identity.class),
+            identity.pid,
+        ),
+        None => "No session ID was accepted. ilium requires exact process ownership plus a provider transcript that verifies this canonical project; the checks below show where resolution stopped.".to_string(),
+    }
+}
+
+fn describe_pane_status(status: &PaneStatus) -> String {
+    match status {
+        PaneStatus::PlainShell => "Plain shell; no agent badge is applied.".to_string(),
+        PaneStatus::Agent(class, activity) => format!(
+            "{} agent; activity is {}; no active goal badge.",
+            agent_class_name(class),
+            activity_name(*activity),
+        ),
+        PaneStatus::AgentWithGoal(class, activity) => format!(
+            "{} agent; activity is {}; active goal badge shown.",
+            agent_class_name(class),
+            activity_name(*activity),
+        ),
+        PaneStatus::Editor { .. } => "Editor pane; agent detection does not apply.".to_string(),
+        PaneStatus::Board => "Board pane; agent detection does not apply.".to_string(),
+    }
+}
+
+fn agent_class_name(class: &ilium_core::AgentClass) -> &str {
+    match class {
+        ilium_core::AgentClass::Claude => "Claude Code",
+        ilium_core::AgentClass::Codex => "Codex",
+        ilium_core::AgentClass::Antigravity => "Antigravity",
+        ilium_core::AgentClass::Other(name) => name.as_str(),
+    }
+}
+
+const fn activity_name(activity: AgentActivity) -> &'static str {
+    match activity {
+        AgentActivity::Working => "working",
+        AgentActivity::WaitingApproval => "waiting for your approval",
+        AgentActivity::WaitingBackground => "waiting for background work",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Done => "done",
+    }
+}
+
+/// Replaces volatile counters inside a matched terminal-chrome excerpt. The
+/// evidence shape remains visible, but an elapsed-time/token counter increasing
+/// alone cannot turn the next one-second poll into a new durable event.
+fn normalize_dynamic_terminal_evidence(line: &str) -> String {
+    let mut normalized = String::new();
+    let mut inside_number = false;
+    for character in line.chars() {
+        if character.is_ascii_digit() {
+            if !inside_number {
+                normalized.push_str("<number>");
+                inside_number = true;
+            }
+        } else {
+            inside_number = false;
+            normalized.push(character);
+        }
+    }
+    normalized
+}
+
+fn sentence_case(value: &str) -> String {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return String::new();
+    };
+    first.to_uppercase().chain(characters).collect()
 }
 
 /// Returns whether existing transcript ownership remains conclusive enough
@@ -925,6 +1496,11 @@ pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) 
 struct IdentityClassification {
     status: PaneStatus,
     confirmed_goal_owner: Option<ConfirmedGoalOwner>,
+    activity_evidence: Option<ilium_detect::ActivityEvidence>,
+    activity_evidence_line: Option<String>,
+    goal_evidence: Option<ilium_detect::GoalEvidence>,
+    goal_evidence_line: Option<String>,
+    goal_was_retained: bool,
 }
 
 /// Combines an already-resolved process identity with the screen snapshot
@@ -939,22 +1515,28 @@ fn classify_identity(
 ) -> IdentityClassification {
     match identity {
         Some(identity) => {
-            let activity = ilium_detect::classify_activity_for_agent(&identity.class, screen_text);
+            let activity_classification =
+                ilium_detect::classify_activity_for_agent_detailed(&identity.class, screen_text);
+            let activity = activity_classification.activity;
             let current_owner = ConfirmedGoalOwner {
                 process_id: identity.pid,
                 agent_class: identity.class.clone(),
             };
-            let confirmed_goal_owner =
-                match ilium_detect::goal_evidence_for_agent(&identity.class, screen_text) {
-                    ilium_detect::GoalEvidence::Active => Some(current_owner),
-                    ilium_detect::GoalEvidence::Inactive => None,
-                    ilium_detect::GoalEvidence::Unknown
-                        if previous_goal_owner == Some(&current_owner) =>
-                    {
-                        Some(current_owner)
-                    }
-                    ilium_detect::GoalEvidence::Unknown => None,
-                };
+            let goal_classification =
+                ilium_detect::goal_evidence_for_agent_detailed(&identity.class, screen_text);
+            let goal_was_retained = goal_classification.evidence
+                == ilium_detect::GoalEvidence::Unknown
+                && previous_goal_owner == Some(&current_owner);
+            let confirmed_goal_owner = match goal_classification.evidence {
+                ilium_detect::GoalEvidence::Active => Some(current_owner),
+                ilium_detect::GoalEvidence::Inactive => None,
+                ilium_detect::GoalEvidence::Unknown
+                    if previous_goal_owner == Some(&current_owner) =>
+                {
+                    Some(current_owner)
+                }
+                ilium_detect::GoalEvidence::Unknown => None,
+            };
             let status = if confirmed_goal_owner.is_some() {
                 PaneStatus::AgentWithGoal(identity.class.clone(), activity)
             } else {
@@ -963,11 +1545,21 @@ fn classify_identity(
             IdentityClassification {
                 status,
                 confirmed_goal_owner,
+                activity_evidence: Some(activity_classification.evidence),
+                activity_evidence_line: activity_classification.matched_line,
+                goal_evidence: Some(goal_classification.evidence),
+                goal_evidence_line: goal_classification.matched_line,
+                goal_was_retained,
             }
         }
         None => IdentityClassification {
             status: PaneStatus::PlainShell,
             confirmed_goal_owner: None,
+            activity_evidence: None,
+            activity_evidence_line: None,
+            goal_evidence: None,
+            goal_evidence_line: None,
+            goal_was_retained: false,
         },
     }
 }
@@ -1106,6 +1698,9 @@ mod tests {
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 1,
         };
         let mut ambiguous = std::collections::HashSet::new();
         assert!(session_owner_is_stable(
@@ -1150,6 +1745,9 @@ mod tests {
         let codex = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 1,
         };
         let active = classify_identity(
             Some(&codex),
@@ -1181,6 +1779,9 @@ mod tests {
         let replacement = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 43,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 1,
         };
         let replacement_without_evidence =
             classify_identity(Some(&replacement), "Send a message", Some(&owner));
@@ -1189,6 +1790,53 @@ mod tests {
             PaneStatus::Agent(AgentClass::Codex, _)
         ));
         assert_eq!(replacement_without_evidence.confirmed_goal_owner, None);
+    }
+
+    #[test]
+    fn volatile_terminal_counters_do_not_create_distinct_detection_evidence() {
+        let first =
+            normalize_dynamic_terminal_evidence("Moonwalking… 1/2 · 6s · 42 tokens · process 314");
+        let second =
+            normalize_dynamic_terminal_evidence("Moonwalking… 2/2 · 7s · 99 tokens · process 2718");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first,
+            "Moonwalking… <number>/<number> · <number>s · <number> tokens · process <number>"
+        );
+    }
+
+    #[test]
+    fn debug_explanations_state_why_goal_and_activity_decisions_were_applied() {
+        let status = PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done);
+
+        assert!(
+            explain_goal_decision(&status, Some(ilium_detect::GoalEvidence::Unknown), true,)
+                .contains("exact same agent process")
+        );
+        assert!(explain_activity_decision(
+            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            &status,
+            Some(ilium_detect::ActivityEvidence::NoActiveMarker),
+            false,
+        )
+        .contains("previously been active"));
+    }
+
+    #[test]
+    fn verified_session_explanation_is_stable_after_the_resolution_tick() {
+        let identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 42,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 1,
+        };
+
+        assert_eq!(
+            explain_session_decision(Some(&identity), Some("session-a")),
+            "Verified session \"session-a\" belongs to the same Codex process 42 and canonical project."
+        );
     }
 
     /// Regression test: `WaitingApproval` must poll on the fast tier, same

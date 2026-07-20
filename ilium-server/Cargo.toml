@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 crossterm = "0.29.0"
 directories = "6.0.0"
+ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-detect = { version = "0.1.0", path = "../ilium-detect" }

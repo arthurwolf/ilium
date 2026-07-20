@@ -98,6 +98,7 @@ pub struct ServerConfig {
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
     pub debug: DebugConfig,
+    pub agent_debug_menu_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -126,11 +127,18 @@ struct RawConfig {
     session: RawSessionConfig,
     #[serde(default)]
     debug: RawDebugConfig,
+    #[serde(default)]
+    ui: RawUiConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct RawDebugConfig {
     file_logging_enabled: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawUiConfig {
+    agent_debug_menu_enabled: Option<bool>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
@@ -289,6 +297,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         debug: DebugConfig {
             file_logging_enabled: raw.debug.file_logging_enabled.unwrap_or(false),
         },
+        agent_debug_menu_enabled: raw.ui.agent_debug_menu_enabled.unwrap_or(false),
     })
 }
 
@@ -317,6 +326,20 @@ mod tests {
         assert_eq!(config.sound, SoundSettings::default());
         assert!(config.custom_signatures.is_empty());
         assert!(!config.debug.file_logging_enabled);
+        assert!(!config.agent_debug_menu_enabled);
+    }
+
+    #[test]
+    fn agent_debug_capture_can_be_enabled_explicitly() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nagent_debug_menu_enabled = true\n",
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid UI config should load");
+        assert!(config.agent_debug_menu_enabled);
     }
 
     #[test]

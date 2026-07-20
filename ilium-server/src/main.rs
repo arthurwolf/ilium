@@ -115,6 +115,7 @@ async fn async_main(
         sound_player: std::sync::Arc::new(ilium_server::SystemSoundPlayer),
         custom_signatures: server_config.custom_signatures,
         session_recovery: server_config.session_recovery,
+        agent_debug_menu_enabled: server_config.agent_debug_menu_enabled,
     };
     match ilium_server::run(options).await {
         Ok(()) => ExitCode::SUCCESS,

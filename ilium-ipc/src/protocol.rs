@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 
+use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
     BoardStorage, NodeId, PaneStatus, PaneTitleSource, PromptQueueDelivery, RestructurePlan,
     SplitOrientation, Tree, TreeMoveDirection,
@@ -136,6 +137,7 @@ pub enum ClientRequest {
         pane_id: NodeId,
         rows: u16,
         cols: u16,
+        cause: PaneResizeCause,
     },
     /// Raw bytes already encoded for the terminal (arrow keys, control
     /// sequences, literal text) to write into a pane's PTY.
@@ -307,6 +309,25 @@ pub enum ClientRequest {
     /// detached server. The client persists the same value before sending it,
     /// so future server/client processes start with the identical policy.
     UpdateDebugLogging { enabled: bool },
+    /// Applies the User Interface tab's agent-debug toggle to the detached
+    /// server. Disabling capture retains existing history but stops new
+    /// entries until recording is enabled again.
+    UpdateAgentDebugMenu { enabled: bool },
+    /// Fetches one pane's retained history on demand. The optional sequence
+    /// supports a cheap delta when reopening an already-cached log.
+    GetPaneDebugLog {
+        pane_id: NodeId,
+        after_sequence: Option<u64>,
+    },
+    /// Records a client-owned observation such as an LLM title request or
+    /// result. The server rejects stale agent-session/title generations,
+    /// then stamps time, sequence, source, and current context itself.
+    RecordAgentDebugEvent {
+        pane_id: NodeId,
+        expected_session_id: Option<String>,
+        expected_title_generation: u64,
+        event: AgentDebugEventDraft,
+    },
 }
 
 impl ClientRequest {
@@ -347,6 +368,9 @@ impl ClientRequest {
             Self::RevertProjectRestructure { .. } => "revert_project_restructure",
             Self::ResolveSessionRecovery { .. } => "resolve_session_recovery",
             Self::UpdateDebugLogging { .. } => "update_debug_logging",
+            Self::UpdateAgentDebugMenu { .. } => "update_agent_debug_menu",
+            Self::GetPaneDebugLog { .. } => "get_pane_debug_log",
+            Self::RecordAgentDebugEvent { .. } => "record_agent_debug_event",
         }
     }
 
@@ -449,9 +473,9 @@ pub enum ServerEvent {
         bytes: Vec<u8>,
         is_complete: bool,
     },
-    /// An agent remains in the same process/session, but its visible
-    /// conversation was cleared. Clients discard local title-worker state;
-    /// the following tree snapshot restores the normal fresh-agent label.
+    /// An agent's visible conversation was cleared. Clients discard local
+    /// title-worker state; a separate `PaneSessionIdCleared` accompanies
+    /// Claude/Codex `/clear`, and the following tree snapshot shows `<new>`.
     /// Appended last to preserve every existing bincode discriminant.
     PaneSessionTitleCleared {
         pane_id: NodeId,
@@ -477,4 +501,22 @@ pub enum ServerEvent {
     /// setting without echoing another request back to the server. Appended
     /// last to preserve every existing bincode discriminant.
     DebugLoggingChanged { enabled: bool },
+    /// The server accepted a live agent-debug recording/menu update.
+    AgentDebugMenuChanged { enabled: bool },
+    /// One on-demand retained history response. `through_sequence` is the
+    /// newest server sequence known even when the requested delta is empty.
+    PaneDebugLogSnapshot {
+        pane_id: NodeId,
+        through_sequence: u64,
+        retained_from_sequence: u64,
+        dropped_entry_count: u64,
+        entries: Vec<AgentDebugEntry>,
+    },
+    /// One accepted live append. Unchanged detection polls never reach IPC;
+    /// clients still merge by authoritative `sequence` so replay/live races
+    /// cannot duplicate an event.
+    PaneDebugEntryAppended {
+        pane_id: NodeId,
+        entry: AgentDebugEntry,
+    },
 }

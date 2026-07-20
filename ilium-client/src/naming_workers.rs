@@ -14,7 +14,8 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use ilium_core::NodeId;
 use ilium_inference::InferenceSettings;
@@ -41,19 +42,20 @@ pub enum TitleTrigger {
 /// A finished background naming result, forwarded into the main event loop.
 pub enum NamingWorkerEvent {
     ProjectName(anyhow::Result<ProjectNameBootstrap>),
-    SessionTitle(NodeId, String, u64, anyhow::Result<DualTitle>, TitleTrigger),
+    SessionTitle(SessionTitleWorkerResult),
     TerminalTitle(NodeId, anyhow::Result<DualTitle>, TitleTrigger),
     InferenceTest {
         provider: ilium_inference::InferenceProviderKind,
         elapsed: Duration,
         result: anyhow::Result<crate::inference_test::InferenceTestResult>,
     },
-    OllamaModels {
+    ProviderModels {
+        provider: ilium_inference::InferenceProviderKind,
         endpoint: String,
         elapsed: Duration,
         result: anyhow::Result<Vec<String>>,
     },
-    Restructure(NodeId, anyhow::Result<ilium_core::RestructurePlan>),
+    Restructure(RestructureWorkerResult),
 }
 
 /// All immutable inputs captured when a session-title worker starts. Keeping
@@ -67,6 +69,31 @@ pub struct SessionTitleWorkerRequest {
     pub trigger: TitleTrigger,
 }
 
+/// Complete provider-boundary outcome forwarded to the event loop. Named
+/// fields keep session/generation fencing distinct from optional diagnostic
+/// request/response payloads as this event evolves.
+pub struct SessionTitleWorkerResult {
+    pub pane_id: NodeId,
+    pub session_id: String,
+    pub title_generation: u64,
+    pub provider: ilium_inference::InferenceProviderKind,
+    pub elapsed: Duration,
+    pub rendered_prompt: Option<String>,
+    pub raw_response: Option<String>,
+    pub result: anyhow::Result<DualTitle>,
+    pub trigger: TitleTrigger,
+}
+
+/// One restructure result plus the exact hierarchy snapshot it was inferred
+/// from. The main loop compares that snapshot with its current render-cache
+/// tree before applying the plan, so a slow model cannot overwrite manual
+/// organization performed while it was thinking.
+pub struct RestructureWorkerResult {
+    pub project_id: NodeId,
+    pub expected_structure: String,
+    pub result: anyhow::Result<ilium_core::RestructurePlan>,
+}
+
 /// Tracks which naming workers are currently in flight, so a caller never
 /// accidentally spawns a second one for the same target while the first is
 /// still running.
@@ -77,8 +104,62 @@ pub struct NamingWorkers {
     session_title_in_flight: HashSet<(NodeId, String)>,
     terminal_title_in_flight: HashSet<NodeId>,
     inference_test_in_flight: bool,
-    ollama_models_in_flight: bool,
+    model_discovery_in_flight: bool,
     restructure_in_flight: HashSet<NodeId>,
+    concurrency_limiter: Arc<InferenceConcurrencyLimiter>,
+}
+
+const MAX_CONCURRENT_INFERENCE_JOBS: usize = 2;
+
+/// One process-wide client boundary prevents startup/completion triggers from
+/// turning independent per-pane workers into an unbounded provider burst.
+struct InferenceConcurrencyLimiter {
+    active_jobs: Mutex<usize>,
+    available: Condvar,
+    maximum: usize,
+}
+
+impl InferenceConcurrencyLimiter {
+    fn new(maximum: usize) -> Self {
+        Self {
+            active_jobs: Mutex::new(0),
+            available: Condvar::new(),
+            maximum: maximum.max(1),
+        }
+    }
+
+    fn acquire(self: &Arc<Self>) -> InferencePermit {
+        let mut active_jobs = self
+            .active_jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while *active_jobs >= self.maximum {
+            active_jobs = self
+                .available
+                .wait(active_jobs)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        *active_jobs += 1;
+        InferencePermit {
+            limiter: Arc::clone(self),
+        }
+    }
+}
+
+struct InferencePermit {
+    limiter: Arc<InferenceConcurrencyLimiter>,
+}
+
+impl Drop for InferencePermit {
+    fn drop(&mut self) {
+        let mut active_jobs = self
+            .limiter
+            .active_jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *active_jobs = active_jobs.saturating_sub(1);
+        self.limiter.available.notify_one();
+    }
 }
 
 impl NamingWorkers {
@@ -93,8 +174,11 @@ impl NamingWorkers {
             session_title_in_flight: HashSet::new(),
             terminal_title_in_flight: HashSet::new(),
             inference_test_in_flight: false,
-            ollama_models_in_flight: false,
+            model_discovery_in_flight: false,
             restructure_in_flight: HashSet::new(),
+            concurrency_limiter: Arc::new(InferenceConcurrencyLimiter::new(
+                MAX_CONCURRENT_INFERENCE_JOBS,
+            )),
         }
     }
 
@@ -108,7 +192,9 @@ impl NamingWorkers {
         self.project_name_in_flight = true;
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            let _permit = concurrency_limiter.acquire();
             let result = crate::project_naming::bootstrap_project_name(&cwd, &inference_settings);
             // `blocking_send` (not the async `send`) since this closure
             // runs on a plain `std::thread`, not a tokio task -- exactly
@@ -142,17 +228,31 @@ impl NamingWorkers {
         }
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
+        let provider = inference_settings.selected_provider;
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
-            let result =
-                crate::session_naming::infer_pane_title(&inference_settings, &home, &input);
+            let _permit = concurrency_limiter.acquire();
+            let started_at = Instant::now();
+            let trace = crate::session_naming::infer_pane_title_with_trace(
+                &inference_settings,
+                &home,
+                &input,
+            );
+            let elapsed = started_at.elapsed();
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
             let _ = events_tx.blocking_send(NamingWorkerEvent::SessionTitle(
-                pane_id,
-                session_id,
-                title_generation,
-                result,
-                trigger,
+                SessionTitleWorkerResult {
+                    pane_id,
+                    session_id,
+                    title_generation,
+                    provider,
+                    elapsed,
+                    rendered_prompt: trace.rendered_prompt,
+                    raw_response: trace.raw_response,
+                    result: trace.result,
+                    trigger,
+                },
             ));
         });
     }
@@ -176,7 +276,9 @@ impl NamingWorkers {
         }
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            let _permit = concurrency_limiter.acquire();
             let result = crate::terminal_naming::infer_terminal_title(&inference_settings, &input);
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
@@ -200,7 +302,9 @@ impl NamingWorkers {
         self.inference_test_in_flight = true;
         let events_tx = self.events_tx.clone();
         let settings = self.inference_settings.clone();
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            let _permit = concurrency_limiter.acquire();
             let provider = settings.selected_provider;
             let started_at = std::time::Instant::now();
             let result = crate::inference_test::run(&settings);
@@ -216,28 +320,44 @@ impl NamingWorkers {
         self.inference_test_in_flight = false;
     }
 
-    pub fn spawn_ollama_models_worker(&mut self) {
-        if self.ollama_models_in_flight {
+    pub fn spawn_model_discovery_worker(
+        &mut self,
+        provider: ilium_inference::InferenceProviderKind,
+    ) {
+        if self.model_discovery_in_flight {
             return;
         }
-        self.ollama_models_in_flight = true;
+        self.model_discovery_in_flight = true;
         let events_tx = self.events_tx.clone();
-        let settings = self.inference_settings.clone();
+        let mut settings = self.inference_settings.clone();
+        settings.selected_provider = provider;
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
-            let endpoint = settings.ollama.base_url.clone();
+            let _permit = concurrency_limiter.acquire();
+            let endpoint = match provider {
+                ilium_inference::InferenceProviderKind::KiloGateway => {
+                    ilium_inference::kilo_gateway_model_catalog_url()
+                }
+                ilium_inference::InferenceProviderKind::Ollama => format!(
+                    "{}/api/tags",
+                    settings.ollama.base_url.trim_end_matches('/')
+                ),
+                _ => provider.label().to_string(),
+            };
             let started_at = std::time::Instant::now();
             let result = ilium_inference::provider_from_settings(&settings)
                 .list_models()
                 .map_err(anyhow::Error::from);
-            let _ = events_tx.blocking_send(NamingWorkerEvent::OllamaModels {
+            let _ = events_tx.blocking_send(NamingWorkerEvent::ProviderModels {
+                provider,
                 endpoint,
                 elapsed: started_at.elapsed(),
                 result,
             });
         });
     }
-    pub fn ollama_models_worker_finished(&mut self) {
-        self.ollama_models_in_flight = false;
+    pub fn model_discovery_worker_finished(&mut self) {
+        self.model_discovery_in_flight = false;
     }
 
     /// Spawns the whole-tree restructure worker, unless one is already
@@ -260,8 +380,10 @@ impl NamingWorkers {
         }
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
             crate::restructure::resolve_content_extracts(&mut contexts, &home, &cwd);
+            let _permit = concurrency_limiter.acquire();
             let result = crate::restructure::infer_restructure_plan_with_structure(
                 &inference_settings,
                 &contexts,
@@ -269,11 +391,61 @@ impl NamingWorkers {
             );
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::Restructure(project_id, result));
+            let _ =
+                events_tx.blocking_send(NamingWorkerEvent::Restructure(RestructureWorkerResult {
+                    project_id,
+                    expected_structure: current_structure,
+                    result,
+                }));
         });
     }
 
     pub fn restructure_worker_finished(&mut self, project_id: NodeId) {
         self.restructure_in_flight.remove(&project_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inference_concurrency_limiter_never_admits_more_than_its_capacity() {
+        let limiter = Arc::new(InferenceConcurrencyLimiter::new(2));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let mut handles = Vec::new();
+
+        for worker in 0..3 {
+            let limiter = Arc::clone(&limiter);
+            let release = Arc::clone(&release);
+            let entered_tx = entered_tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let _permit = limiter.acquire();
+                entered_tx.send(worker).expect("report admitted worker");
+                let (lock, available) = &*release;
+                let mut is_released = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                while !*is_released {
+                    is_released = available
+                        .wait(is_released)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+            }));
+        }
+        drop(entered_tx);
+
+        entered_rx.recv().expect("first worker admitted");
+        entered_rx.recv().expect("second worker admitted");
+        assert!(entered_rx.try_recv().is_err());
+
+        let (lock, available) = &*release;
+        *lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        available.notify_all();
+        entered_rx
+            .recv()
+            .expect("queued worker eventually admitted");
+        for handle in handles {
+            handle.join().expect("worker exits cleanly");
+        }
     }
 }

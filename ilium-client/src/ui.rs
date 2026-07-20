@@ -140,6 +140,21 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::ContextMenu(menu) => {
             draw_context_menu(frame, menu, app.ui_settings.tree_order);
         }
+        Mode::AgentPaneContextMenu(menu) => {
+            frame.render_widget(Clear, menu.area);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    " 🐞 Show debug log",
+                    Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD),
+                )))
+                .block(theme::block(true).title(theme::chrome_title("Agent actions"))),
+                menu.area,
+            );
+        }
+        Mode::AgentDebugLog(_) => {}
+        Mode::AgentDebugSavePath(_, state) => {
+            modal::render_text_prompt(frame, area, "Save agent debug log", state);
+        }
         Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
         Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu),
@@ -860,6 +875,11 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
 /// Draws the focused pane's live content (terminal screen or editor
 /// buffer), or a placeholder when nothing is focused.
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
+    let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
+    if let Mode::AgentDebugLog(state) = root_mode {
+        crate::agent_debug_ui::render(frame, area, app, state);
+        return;
+    }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         let (title, message) = match app.right_panel_target {
@@ -1113,6 +1133,9 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::FolderExplorer(..) => "FOLDER PICKER",
         Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
+        Mode::AgentPaneContextMenu(..) => "AGENT ACTIONS",
+        Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
+        Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
@@ -1317,6 +1340,70 @@ mod tests {
         assert!(rendered.contains("Voice control"));
         assert!(rendered.contains("OpenAI API key"));
         assert!(rendered.contains("Enter to replace · Esc to keep the existing key"));
+    }
+
+    #[test]
+    fn agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        let mut terminal_view = TerminalView::new(24, 80);
+        terminal_view.feed(b"NORMAL TERMINAL MUST BE HIDDEN");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal_view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
+            pane_id,
+            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+        });
+        app.agent_debug_logs.insert(
+            pane_id,
+            crate::app::AgentDebugLogCache {
+                through_sequence: 1,
+                retained_from_sequence: 1,
+                entries: vec![ilium_ipc::AgentDebugEntry {
+                    sequence: 1,
+                    occurred_at_unix_millis: 1_700_000_000_000,
+                    severity: ilium_ipc::AgentDebugSeverity::Success,
+                    source: ilium_ipc::AgentDebugSource::SessionDiscovery,
+                    kind: ilium_ipc::AgentDebugEventKind::SessionResolved,
+                    summary: "Project-verified agent session resolved".to_string(),
+                    fields: vec![ilium_ipc::AgentDebugField::sensitive(
+                        "session ID",
+                        "session-123",
+                    )],
+                    correlation_id: None,
+                    context: ilium_ipc::AgentDebugContext::default(),
+                    metadata: Default::default(),
+                }],
+                ..crate::app::AgentDebugLogCache::default()
+            },
+        );
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains('🐞'));
+        assert!(rendered.contains("Agent debug log"));
+        assert!(rendered.contains("SESSION"));
+        assert!(rendered.contains("Project-verified agent session resolved"));
+        assert!(rendered.contains('🔒'));
+        assert!(rendered.contains("session ID: session-123"));
+        assert!(rendered.contains("← Back to agent"));
+        assert!(rendered.contains("Save log"));
+        assert!(rendered.contains("Panel resizes hidden"));
+        assert!(!rendered.contains("NORMAL TERMINAL MUST BE HIDDEN"));
     }
 
     #[test]

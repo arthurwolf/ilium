@@ -9,9 +9,14 @@
 
 use std::sync::Arc;
 
+use ilium_agent_debug::{
+    AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField, AgentDebugSeverity,
+    AgentDebugSource, PaneResizeCause,
+};
 use ilium_core::{
     AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
-    PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput, Tree, TreeError,
+    PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput,
+    SessionIdentityTransitionRule, Tree, TreeError,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
@@ -23,6 +28,19 @@ use crate::mouse::to_crossterm_event;
 use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::ServerState;
+
+/// Immutable forensic facts captured before an input-driven transition clears
+/// the runtime's current owner fields. The debug event is emitted only after
+/// releasing the pane lock, so it must not reconstruct these facts afterward.
+struct SessionTransitionObservation {
+    previous_session_id: Option<String>,
+    previous_agent_class: Option<ilium_core::AgentClass>,
+    previous_process_id: Option<u32>,
+    previous_title_generation: u64,
+    next_title_generation: u64,
+    submitted_command: String,
+    rule: SessionIdentityTransitionRule,
+}
 
 /// Handles one request from an attached client. Returns `true` when the
 /// connection this request arrived on should close afterward (`Detach`,
@@ -160,8 +178,9 @@ pub async fn handle_request(
             pane_id,
             rows,
             cols,
+            cause,
         } => {
-            handle_resize_pane(state, pane_id, rows, cols, direct_tx).await;
+            handle_resize_pane(state, pane_id, rows, cols, cause, direct_tx).await;
             false
         }
         ClientRequest::KeyInput {
@@ -287,7 +306,129 @@ pub async fn handle_request(
             }
             false
         }
+        ClientRequest::UpdateAgentDebugMenu { enabled } => {
+            handle_update_agent_debug_menu(state, enabled).await;
+            false
+        }
+        ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence,
+        } => {
+            handle_get_pane_debug_log(state, pane_id, after_sequence, direct_tx).await;
+            false
+        }
+        ClientRequest::RecordAgentDebugEvent {
+            pane_id,
+            expected_session_id,
+            expected_title_generation,
+            event,
+        } => {
+            let outcome = crate::agent_debug::record_client_event(
+                state,
+                pane_id,
+                expected_session_id.as_deref(),
+                expected_title_generation,
+                event,
+            )
+            .await;
+            if outcome != crate::agent_debug::ClientEventRecordOutcome::Recorded {
+                tracing::debug!(
+                    pane_id = pane_id.0,
+                    ?outcome,
+                    "best-effort agent debug event was not recorded"
+                );
+            }
+            false
+        }
     }
+}
+
+async fn handle_update_agent_debug_menu(state: &ServerState, enabled: bool) {
+    if state.agent_debug.is_enabled() == enabled {
+        state.broadcast(ServerEvent::AgentDebugMenuChanged { enabled });
+        return;
+    }
+
+    if enabled {
+        state.agent_debug.set_enabled(true);
+    }
+    let pane_ids: Vec<NodeId> = {
+        let tree = state.tree.read().await;
+        tree.all_ids()
+            .filter(|pane_id| {
+                tree.get(*pane_id).is_some_and(|node| {
+                    matches!(
+                        &node.kind,
+                        NodeKind::Pane {
+                            status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                            ..
+                        }
+                    )
+                })
+            })
+            .collect()
+    };
+    let event_kind = if enabled {
+        AgentDebugEventKind::RecordingEnabled
+    } else {
+        AgentDebugEventKind::RecordingDisabled
+    };
+    let summary = if enabled {
+        "Agent debug recording enabled"
+    } else {
+        "Agent debug recording disabled"
+    };
+    for pane_id in pane_ids {
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Server,
+            AgentDebugEventDraft::information(event_kind.clone(), summary),
+        )
+        .await;
+    }
+    if !enabled {
+        state.agent_debug.set_enabled(false);
+    }
+    state.broadcast(ServerEvent::AgentDebugMenuChanged { enabled });
+}
+
+async fn handle_get_pane_debug_log(
+    state: &ServerState,
+    pane_id: NodeId,
+    after_sequence: Option<u64>,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let is_terminal_pane = state.tree.read().await.get(pane_id).is_some_and(|node| {
+        matches!(
+            node.kind,
+            NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                ..
+            }
+        )
+    });
+    if !is_terminal_pane {
+        send_direct_error(direct_tx, format!("no terminal pane found for {pane_id:?}")).await;
+        return;
+    }
+
+    let (through_sequence, retained_from_sequence, dropped_entry_count, entries) = state
+        .agent_debug
+        .replay(pane_id, after_sequence)
+        .await
+        .unwrap_or((0, 1, 0, Vec::new()));
+    send_direct(
+        direct_tx,
+        ServerEvent::PaneDebugLogSnapshot {
+            pane_id,
+            through_sequence,
+            retained_from_sequence,
+            dropped_entry_count,
+            entries,
+        },
+    )
+    .await;
 }
 
 /// Awaits capacity on this connection's bounded direct-reply queue before
@@ -353,8 +494,12 @@ async fn handle_schedule_pane_input(
     // Replacement and the executor's final check/write are one transaction,
     // so accepting this schedule guarantees an older action cannot fire later.
     let transaction = state.scheduled_input_transaction.lock().await;
+    let event_text = text.clone();
     let result = {
         let mut tree = state.tree.write().await;
+        let was_replacement = tree
+            .scheduled_pane_inputs()
+            .any(|(candidate_id, _)| candidate_id == pane_id);
         tree.schedule_pane_input(
             pane_id,
             ScheduledPaneInput {
@@ -363,15 +508,43 @@ async fn handle_schedule_pane_input(
                 send_enter,
             },
         )
+        .map(|()| was_replacement)
     };
     // The authoritative replacement is now visible; snapshots and client
     // broadcasts do not need to delay the executor's next freshness check.
     drop(transaction);
-    if let Err(error) = result {
-        send_direct_error(direct_tx, format!("failed to schedule pane input: {error}")).await;
-        return;
-    }
+    let was_replacement = match result {
+        Ok(was_replacement) => was_replacement,
+        Err(error) => {
+            send_direct_error(direct_tx, format!("failed to schedule pane input: {error}")).await;
+            return;
+        }
+    };
     broadcast_and_persist(state).await;
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            if was_replacement {
+                AgentDebugEventKind::ScheduledInputReplaced
+            } else {
+                AgentDebugEventKind::ScheduledInputCreated
+            },
+            if was_replacement {
+                "Scheduled input replaced"
+            } else {
+                "Scheduled input created"
+            },
+        )
+        .with_fields(vec![
+            AgentDebugField::plain("delay seconds", delay_seconds.to_string()),
+            AgentDebugField::plain("execute at", execute_at_unix_millis.to_string()),
+            AgentDebugField::plain("sends Enter", send_enter.to_string()),
+            AgentDebugField::sensitive("input", event_text),
+        ]),
+    )
+    .await;
     state.scheduled_input_changed.notify_one();
 }
 
@@ -382,6 +555,8 @@ async fn handle_enqueue_prompt(
     delivery: PromptQueueDelivery,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
+    let event_text = text.clone();
+    let event_delivery = format!("{delivery:?}");
     let _transaction = state.prompt_queue_transaction.lock().await;
     let result = state
         .tree
@@ -394,6 +569,20 @@ async fn handle_enqueue_prompt(
         return;
     }
     broadcast_and_persist(state).await;
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PromptQueued,
+            "Prompt added to the completion queue",
+        )
+        .with_fields(vec![
+            AgentDebugField::plain("delivery", event_delivery),
+            AgentDebugField::sensitive("prompt", event_text),
+        ]),
+    )
+    .await;
 }
 
 async fn handle_clear_prompt_queue(
@@ -402,13 +591,40 @@ async fn handle_clear_prompt_queue(
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let _transaction = state.prompt_queue_transaction.lock().await;
-    let result = state.tree.write().await.clear_prompt_queue(pane_id);
+    let result = {
+        let mut tree = state.tree.write().await;
+        let cleared_count = tree
+            .get(pane_id)
+            .and_then(|node| match &node.kind {
+                NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
+                _ => None,
+            })
+            .unwrap_or(0);
+        tree.clear_prompt_queue(pane_id).map(|()| cleared_count)
+    };
     drop(_transaction);
-    if let Err(error) = result {
-        send_direct_error(direct_tx, format!("failed to clear prompt queue: {error}")).await;
-        return;
-    }
+    let cleared_count = match result {
+        Ok(cleared_count) => cleared_count,
+        Err(error) => {
+            send_direct_error(direct_tx, format!("failed to clear prompt queue: {error}")).await;
+            return;
+        }
+    };
     broadcast_and_persist(state).await;
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PromptQueueCleared,
+            "Prompt queue cleared",
+        )
+        .with_fields(vec![AgentDebugField::plain(
+            "removed prompts",
+            cleared_count.to_string(),
+        )]),
+    )
+    .await;
 }
 
 async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sender<ServerEvent>) {
@@ -777,6 +993,9 @@ struct SessionPaneTitleUpdate<'a> {
 }
 
 async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPaneTitleUpdate<'_>) {
+    let proposed_title = update.title.clone();
+    let expected_session_id = update.expected_session_id.to_string();
+    let expected_title_generation = update.expected_title_generation;
     // Lock ordering is tree before panes throughout the server. Both remain
     // held through the identity check and title write so `/resume` cannot
     // invalidate the session between those two operations.
@@ -789,6 +1008,29 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
         || runtime.session_id.as_deref() != Some(update.expected_session_id)
         || runtime.title_generation != update.expected_title_generation
     {
+        drop(panes);
+        drop(tree);
+        let _ = crate::agent_debug::record(
+            state,
+            update.pane_id,
+            AgentDebugSource::Inference,
+            AgentDebugEventDraft {
+                severity: AgentDebugSeverity::Warning,
+                kind: AgentDebugEventKind::TitleInferenceDiscarded,
+                summary: "Stale title result rejected by the server".to_string(),
+                fields: vec![
+                    AgentDebugField::plain("expected session", expected_session_id),
+                    AgentDebugField::plain(
+                        "expected title generation",
+                        expected_title_generation.to_string(),
+                    ),
+                    AgentDebugField::plain("proposed title", proposed_title),
+                ],
+                correlation_id: None,
+                metadata: Default::default(),
+            },
+        )
+        .await;
         return;
     }
     let changed = match update.title_source {
@@ -828,6 +1070,27 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
     drop(tree);
     if changed {
         broadcast_and_persist(state).await;
+        let _ = crate::agent_debug::record(
+            state,
+            update.pane_id,
+            AgentDebugSource::Inference,
+            AgentDebugEventDraft {
+                severity: AgentDebugSeverity::Success,
+                kind: AgentDebugEventKind::TitleApplied,
+                summary: "Agent pane title applied".to_string(),
+                fields: vec![
+                    AgentDebugField::plain("title", proposed_title),
+                    AgentDebugField::plain("session", expected_session_id),
+                    AgentDebugField::plain(
+                        "title generation",
+                        expected_title_generation.to_string(),
+                    ),
+                ],
+                correlation_id: None,
+                metadata: Default::default(),
+            },
+        )
+        .await;
     }
 }
 
@@ -896,6 +1159,21 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
     if let Some(status) = cleared_status {
         state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
     }
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PaneFocused,
+            if focused {
+                "Agent pane focused"
+            } else {
+                "Agent pane unfocused"
+            },
+        )
+        .with_fields(vec![AgentDebugField::plain("focused", focused.to_string())]),
+    )
+    .await;
 }
 
 /// Resolves where a `NewPane` request should actually land: `requested`
@@ -1011,6 +1289,7 @@ async fn handle_new_pane(
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let plan = new_pane_plan(kind);
+    let spawn_description = format!("{:?}", plan.spawn_kind);
 
     let mut tree = state.tree.write().await;
     let parent_group = if parent_group == ilium_core::ROOT_ID {
@@ -1068,6 +1347,20 @@ async fn handle_new_pane(
     // Make the pane addressable on every attached client before a semantic
     // initial-prompt event can arrive for it.
     broadcast_and_persist(state).await;
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PaneCreated,
+            "Pane created and resource registered",
+        )
+        .with_fields(vec![
+            AgentDebugField::plain("origin", spawn_description),
+            AgentDebugField::plain("working directory", project_cwd.display().to_string()),
+        ]),
+    )
+    .await;
 
     if let Some(initial_input) = plan.initial_input {
         let bytes = initial_input_bytes(&initial_input);
@@ -1316,13 +1609,14 @@ async fn handle_close_pane(
     // afterward, still before the eventual broadcast snapshot's O(n) clone
     // -- see `broadcast_and_persist`.
     let mut panes = state.panes.write().await;
-    for id in descendant_pane_ids {
-        if let Some(resource) = panes.remove(&id) {
-            teardown_pane_resource(id, resource);
+    for id in &descendant_pane_ids {
+        if let Some(resource) = panes.remove(id) {
+            teardown_pane_resource(*id, resource);
         }
     }
     drop(panes);
     drop(tree);
+    state.agent_debug.remove(&descendant_pane_ids).await;
 
     broadcast_and_persist(state).await;
     state.scheduled_input_changed.notify_one();
@@ -1333,6 +1627,7 @@ async fn handle_resize_pane(
     pane_id: NodeId,
     rows: u16,
     cols: u16,
+    cause: PaneResizeCause,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     // Compute the outcome under the read lock, then drop it before awaiting
@@ -1355,6 +1650,23 @@ async fn handle_resize_pane(
 
     if let Some(message) = error_message {
         send_direct_error(direct_tx, message).await;
+    } else {
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::PaneResized,
+                "Agent PTY resized",
+            )
+            .with_fields(vec![
+                AgentDebugField::plain("rows", rows.to_string()),
+                AgentDebugField::plain("columns", cols.to_string()),
+                AgentDebugField::plain("cause", cause.label()),
+            ])
+            .with_pane_resize_cause(cause),
+        )
+        .await;
     }
 }
 
@@ -1366,6 +1678,20 @@ async fn handle_key_input(
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     if let Err(message) = write_key_input(state, pane_id, bytes, submission).await {
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft {
+                severity: AgentDebugSeverity::Error,
+                kind: AgentDebugEventKind::Error,
+                summary: "PTY input write failed".to_string(),
+                fields: vec![AgentDebugField::multiline("error", message.clone())],
+                correlation_id: None,
+                metadata: Default::default(),
+            },
+        )
+        .await;
         send_direct_error(direct_tx, message).await;
     }
 }
@@ -1384,25 +1710,37 @@ pub(crate) async fn write_key_input(
         return Err("prompt submission metadata requires a trailing Enter".to_owned());
     }
 
-    // A cheap read-lock check up front: only an automatic-title
-    // plain-shell pane can ever need this keystroke to touch the tree at
-    // all. Escalating straight to `tree.write()` on every keystroke (as
-    // this used to) held the same lock every structural mutation
-    // (`handle_tree_mutation`, `handle_new_pane`, ...) needs, for far
-    // longer than necessary -- see this crate's CLAUDE.md ISSUE notes.
-    // The write lock only actually gets taken below, and only on the rare
-    // keystroke that completes a shell command line worth naming the pane
-    // after.
-    let is_automatic_plain_shell = {
+    // The tracker below decides whether these bytes actually completed a
+    // semantic line. Looking for CR/LF here would misclassify newlines inside
+    // a bracketed paste as submissions.
+    let mut submission_correlation_id = None;
+
+    // One cheap tree read supplies both title-tracking eligibility and the
+    // currently detected provider. Session discovery can temporarily have no
+    // accepted ID, but `/clear` must still honor a verified Claude/Codex pane.
+    let (is_automatic_plain_shell, detected_agent_class) = {
         let tree = state.tree.read().await;
-        matches!(
-            tree.get(pane_id).map(|node| &node.kind),
-            Some(NodeKind::Pane {
-                status: PaneStatus::PlainShell,
-                title_source: PaneTitleSource::Automatic,
+        tree.get(pane_id).map_or((false, None), |node| {
+            let NodeKind::Pane {
+                status,
+                title_source,
                 ..
-            })
-        )
+            } = &node.kind
+            else {
+                return (false, None);
+            };
+            let agent_class = match status {
+                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => {
+                    Some(class.clone())
+                }
+                PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
+            };
+            (
+                matches!(status, PaneStatus::PlainShell)
+                    && *title_source == PaneTitleSource::Automatic,
+                agent_class,
+            )
+        })
     };
 
     // Write lock (not read) on `panes`: a `KeyInput` always targets the
@@ -1422,9 +1760,12 @@ pub(crate) async fn write_key_input(
     let mut observed_title = None;
     let mut cleared_session_origin_name = None;
     let mut cleared_session_title_generation = None;
-    let mut cleared_conversation_origin_name = None;
     let mut cleared_conversation_title_generation = None;
     let mut detection_was_forced = false;
+    let mut tracked_submission = None;
+    let mut goal_was_cleared = false;
+    let mut session_transition_observation = None;
+    let mut conversation_title_generation_before = None;
     let error_message = match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
@@ -1447,7 +1788,18 @@ pub(crate) async fn write_key_input(
                         tracker.reset_pending_line();
                     }
                 }
-                let submitted_line = runtime.session_command_tracker.observe(bytes);
+                let submitted_input = runtime.session_command_tracker.observe_submission(bytes);
+                let did_submit_line = submitted_input.is_some();
+                if did_submit_line {
+                    // One identifier follows the tracker-confirmed line
+                    // through prompt observation, command-driven invalidation,
+                    // and the later verified replacement identity.
+                    submission_correlation_id = Some(uuid::Uuid::new_v4().to_string());
+                }
+                let submitted_line = submitted_input
+                    .as_ref()
+                    .and_then(|submission| submission.exact_text().map(str::to_owned));
+                tracked_submission = submitted_input;
                 if submitted_line
                     .as_deref()
                     .is_some_and(crate::pane::clears_agent_goal)
@@ -1456,37 +1808,69 @@ pub(crate) async fn write_key_input(
                     // Clear retained ownership immediately so a footer-hidden
                     // `/goal clear` cannot leave a sticky sidebar flag.
                     runtime.confirmed_goal_owner = None;
+                    goal_was_cleared = true;
                 }
-                let session_identity_invalidated = submitted_line
+                let active_agent_class = runtime
+                    .session_agent_class
+                    .clone()
+                    .or_else(|| detected_agent_class.clone());
+                let session_transition_rule =
+                    submitted_line.as_deref().and_then(|submitted_line| {
+                        crate::pane::agent_session_identity_transition_rule(
+                            active_agent_class.as_ref(),
+                            submitted_line,
+                        )
+                    });
+                let session_identity_invalidated = session_transition_rule.is_some();
+                let conversation_cleared = submitted_line
                     .as_deref()
-                    .is_some_and(crate::pane::invalidates_agent_session_identity);
-                if session_identity_invalidated {
+                    .is_some_and(crate::pane::clears_agent_conversation)
+                    && matches!(
+                        session_transition_rule,
+                        Some(SessionIdentityTransitionRule::ClaudeOrCodexClearStartsFreshSession)
+                    );
+                if let Some(rule) = session_transition_rule {
+                    let previous_title_generation = runtime.title_generation;
+                    let previous_session_id = runtime.session_id.clone();
+                    let previous_agent_class = active_agent_class.clone();
+                    let previous_process_id = runtime.session_process_id;
                     runtime.is_session_identity_invalidated = true;
                     runtime.pending_generated_session_id = None;
                     runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    runtime.pending_session_transition_correlation_id =
+                        submission_correlation_id.clone();
                     cleared_session_title_generation = Some(runtime.title_generation);
                     if let Some(invalidated_session_id) = runtime.session_id.take() {
                         runtime.invalidated_session_id = Some(invalidated_session_id);
-                        runtime.session_agent_class = None;
                         cleared_session_origin_name =
                             Some(runtime.origin.pane_name_without_stale_session().to_string());
                     }
-                } else if submitted_line
-                    .as_deref()
-                    .is_some_and(crate::pane::clears_agent_conversation)
-                    && runtime.session_agent_class.is_some()
-                {
-                    // `/clear` can retain the same live agent process and
-                    // transcript identity. Its title lifecycle is separate
-                    // from session discovery, so invalidate only the
-                    // LLM-title generation and retain the verified ID.
-                    runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    runtime.session_agent_class = None;
+                    session_transition_observation = Some(SessionTransitionObservation {
+                        previous_session_id,
+                        previous_agent_class,
+                        previous_process_id,
+                        previous_title_generation,
+                        next_title_generation: runtime.title_generation,
+                        submitted_command: submitted_line.clone().unwrap_or_default(),
+                        rule,
+                    });
+                }
+                if conversation_cleared {
+                    // A provider may replace its persisted identity while
+                    // retaining the same process. Both transitions share one
+                    // generation so stale title workers have one atomic fence.
+                    if !session_identity_invalidated {
+                        conversation_title_generation_before = Some(runtime.title_generation);
+                        runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    } else {
+                        conversation_title_generation_before =
+                            Some(runtime.title_generation.wrapping_sub(1));
+                    }
                     runtime.is_showing_fresh_agent_screen = true;
                     cleared_conversation_title_generation = Some(runtime.title_generation);
-                    cleared_conversation_origin_name =
-                        Some(runtime.origin.pane_name_without_stale_session().to_string());
                 }
-                if bytes.contains(&b'\r') {
+                if did_submit_line {
                     detection_was_forced = crate::detection::force_check(
                         &mut runtime.detection_schedule,
                         std::time::Instant::now(),
@@ -1510,8 +1894,83 @@ pub(crate) async fn write_key_input(
         return Err(message);
     }
 
-    if let Some(source) = submission {
-        state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
+    if submission.is_some() || tracked_submission.is_some() {
+        let (text, exactness, opaque_reason) = match tracked_submission.as_ref() {
+            Some(submission) if submission.was_truncated => (
+                submission.text.clone().unwrap_or_default(),
+                "truncated",
+                "input exceeded the 4096-character reconstruction limit",
+            ),
+            Some(submission) if submission.opaque_reason.is_some() => (
+                "Input unavailable because terminal editing state was opaque".to_string(),
+                "unavailable",
+                submission
+                    .opaque_reason
+                    .map_or("unknown terminal editing state", |reason| {
+                        reason.explanation()
+                    }),
+            ),
+            Some(submission) => (
+                submission.text.clone().unwrap_or_default(),
+                "exact",
+                "none; the submitted line was reconstructed exactly",
+            ),
+            None => (
+                "Input unavailable because no semantic line was reconstructed".to_string(),
+                "unavailable",
+                "no submission boundary was reconstructed from the written bytes",
+            ),
+        };
+        let lifecycle_decision = if let Some(transition) = &session_transition_observation {
+            transition.rule.explanation()
+        } else if exactness == "exact" {
+            "the exact input matched no persisted-session invalidation rule"
+        } else {
+            "session transition classification was skipped because the submitted line was not exact"
+        };
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::PromptSubmitted,
+                "Prompt accepted by the agent PTY",
+            )
+            .with_fields(vec![
+                AgentDebugField::plain(
+                    "source",
+                    submission.map_or_else(
+                        || "raw PTY input without semantic source metadata".to_string(),
+                        |source| format!("{source:?}"),
+                    ),
+                ),
+                AgentDebugField::plain("exactness", exactness),
+                AgentDebugField::plain("reconstruction evidence", opaque_reason),
+                AgentDebugField::plain("session lifecycle decision", lifecycle_decision),
+                AgentDebugField::plain(
+                    "forced immediate detection",
+                    detection_was_forced.to_string(),
+                ),
+                AgentDebugField::plain("written bytes", bytes.len().to_string()),
+                AgentDebugField::sensitive("submitted input", text),
+            ])
+            .with_correlation_id(submission_correlation_id.clone()),
+        )
+        .await;
+    }
+
+    if goal_was_cleared {
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::GoalCleared,
+                "Persistent agent goal cleared by user input",
+            )
+            .with_correlation_id(submission_correlation_id.clone()),
+        )
+        .await;
     }
 
     if let Some(title_generation) = cleared_session_title_generation {
@@ -1520,35 +1979,138 @@ pub(crate) async fn write_key_input(
             pane_id,
             title_generation,
         });
+        if let Some(transition) = session_transition_observation.as_ref() {
+            let _ = crate::agent_debug::record(
+                state,
+                pane_id,
+                AgentDebugSource::SessionDiscovery,
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::SessionCleared,
+                    "Agent session identity invalidated by submitted command",
+                )
+                .with_fields(vec![
+                    AgentDebugField::plain(
+                        "provider before invalidation",
+                        transition
+                            .previous_agent_class
+                            .as_ref()
+                            .map_or("unverified".to_string(), |class| class.label().to_string()),
+                    ),
+                    AgentDebugField::plain(
+                        "agent process before invalidation",
+                        transition.previous_process_id.map_or(
+                            "unavailable".to_string(),
+                            |process_id| process_id.to_string(),
+                        ),
+                    ),
+                    AgentDebugField::sensitive(
+                        "session ID before invalidation",
+                        transition
+                            .previous_session_id
+                            .clone()
+                            .unwrap_or_else(|| "none".to_string()),
+                    ),
+                    AgentDebugField::sensitive(
+                        "submitted transition command",
+                        transition.submitted_command.clone(),
+                    ),
+                    AgentDebugField::plain("invalidation rule", transition.rule.explanation()),
+                    AgentDebugField::plain(
+                        "title generation before",
+                        transition.previous_title_generation.to_string(),
+                    ),
+                    AgentDebugField::plain(
+                        "title generation after",
+                        transition.next_title_generation.to_string(),
+                    ),
+                    AgentDebugField::plain(
+                        "next session check",
+                        "the old ID is quarantined; only a different project-verified identity from the exact agent process can be accepted",
+                    ),
+                ])
+                .with_correlation_id(submission_correlation_id.clone()),
+            )
+            .await;
+        } else {
+            tracing::error!(
+                pane_id = pane_id.0,
+                title_generation,
+                "session identity cleared without captured transition evidence"
+            );
+        }
     }
     if let Some(title_generation) = cleared_conversation_title_generation {
         state.broadcast(ServerEvent::PaneSessionTitleCleared {
             pane_id,
             title_generation,
         });
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Pty,
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::ConversationCleared,
+                "Agent conversation cleared",
+            )
+            .with_fields(vec![
+                AgentDebugField::plain(
+                    "title generation before",
+                    conversation_title_generation_before
+                        .unwrap_or_else(|| title_generation.wrapping_sub(1))
+                        .to_string(),
+                ),
+                AgentDebugField::plain("title generation after", title_generation.to_string()),
+                AgentDebugField::plain(
+                    "persisted session identity",
+                    if session_transition_observation.is_some() {
+                        "invalidated by the provider rule recorded in the correlated session event"
+                    } else {
+                        "retained; this provider's /clear resets only visible conversation state"
+                    },
+                ),
+            ])
+            .with_correlation_id(submission_correlation_id),
+        )
+        .await;
+    }
+
+    // Identity/generation invalidations must reach clients before the prompt
+    // trigger they fence. Otherwise that trigger queues debug and inference
+    // work against the old generation and creates deterministic stale noise.
+    if let Some(source) = submission {
+        state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
     }
 
     // A session-transition reset takes precedence over a shell title from
     // the same byte batch. In practice they are mutually exclusive, but the
     // ordering makes the stale LLM title impossible to retain if input and
     // foreground detection race.
-    let automatic_title = cleared_session_origin_name
-        .or(cleared_conversation_origin_name)
-        .or(observed_title);
-    let Some(title) = automatic_title else {
-        return Ok(());
-    };
     let title_changed = {
         let mut tree = state.tree.write().await;
-        // The typed-command echo has no distinct short form, unlike an LLM
-        // inference -- `None` clears any stale short title left over from
-        // an earlier automatic inference for this same pane.
-        match tree.set_automatic_pane_title(pane_id, title, None, None) {
-            Ok(changed) => changed,
-            Err(error) => {
-                tracing::error!("automatic title update rejected for pane {pane_id:?}: {error}");
-                false
+        if cleared_conversation_title_generation.is_some() {
+            match tree.reset_terminal_pane_title(pane_id, crate::pane::FRESH_AGENT_TITLE) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    tracing::error!(
+                        "fresh-agent title reset rejected for pane {pane_id:?}: {error}"
+                    );
+                    false
+                }
             }
+        } else if let Some(title) = cleared_session_origin_name.or(observed_title) {
+            // A typed shell command or non-clear session transition has no
+            // distinct short form, so remove any stale inferred alternative.
+            match tree.set_automatic_pane_title(pane_id, title, None, None) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    tracing::error!(
+                        "automatic title update rejected for pane {pane_id:?}: {error}"
+                    );
+                    false
+                }
+            }
+        } else {
+            false
         }
     };
     if title_changed {
@@ -1605,6 +2167,7 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     }
     drop(panes);
     drop(tree);
+    state.agent_debug.clear().await;
 
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
 

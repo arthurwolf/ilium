@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 bincode = "1.3.3"
+ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
 serde = { version = "1.0.228", features = ["derive"] }

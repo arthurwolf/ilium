@@ -50,11 +50,9 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
                 "Started the inference provider test",
             ))
         }
-        SettingsAction::RefreshOllamaModels => {
-            app.request_ollama_model_refresh();
-            Ok(ExecutionReceipt::immediate(
-                "Started Ollama model discovery",
-            ))
+        SettingsAction::RefreshModels => {
+            app.request_model_refresh();
+            Ok(ExecutionReceipt::immediate("Started model discovery"))
         }
         SettingsAction::PreviewSound => {
             app.settings_preview_sound();
@@ -123,6 +121,11 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "ui.stable_glyphs" => {
             if app.ui_settings.use_stable_glyphs != boolean(&value)? {
                 app.settings_toggle_stable_glyphs();
+            }
+        }
+        "ui.agent_debug_menu_enabled" => {
+            if app.ui_settings.agent_debug_menu_enabled != boolean(&value)? {
+                app.settings_toggle_agent_debug_menu();
             }
         }
         path if path.starts_with("ui.icons.") => {
@@ -328,6 +331,23 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let provider = parse_inference_provider(string(&value)?)?;
             app.settings_select_inference_provider(provider);
         }
+        "inference.kilo_gateway.model" => {
+            let model = string(&value)?.trim();
+            if !app
+                .kilo_gateway_models
+                .iter()
+                .any(|candidate| candidate == model)
+            {
+                return Err(format!(
+                    "Kilo Gateway model {model:?} is not in the current free-model catalog"
+                ));
+            }
+            update_inference(
+                app,
+                |settings, value| settings.kilo_gateway.model = value,
+                model,
+            )
+        }
         "inference.ollama.url" => update_inference(
             app,
             |settings, value| settings.ollama.base_url = value,
@@ -464,6 +484,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "kanban_board.card_preview_lines" => app.settings_adjust_card_preview_lines(direction),
         "kanban_board.minimum_column_width" => app.settings_adjust_board_column_width(direction),
         "sound.file" => app.settings_adjust_sound_row(SoundRow::File, direction),
+        "inference.kilo_gateway.model" => app.settings_adjust_kilo_gateway_model(direction),
         "voice.model" => {
             app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::Model, direction)
         }
@@ -710,5 +731,32 @@ mod tests {
             set_setting(&mut app, "triggers.agent_finished_work", json!(["made_up"]),).is_err()
         );
         assert!(set_setting(&mut app, "ui.made_up", json!(true)).is_err());
+    }
+
+    #[test]
+    fn kilo_model_setting_accepts_only_discovered_free_choices() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        app.kilo_gateway_models
+            .push("stepfun/step-3.7-flash:free".to_string());
+
+        set_setting(
+            &mut app,
+            "inference.kilo_gateway.model",
+            json!("stepfun/step-3.7-flash:free"),
+        )
+        .unwrap();
+        assert_eq!(
+            app.inference_settings.kilo_gateway.model,
+            "stepfun/step-3.7-flash:free"
+        );
+        assert!(set_setting(
+            &mut app,
+            "inference.kilo_gateway.model",
+            json!("provider/paid")
+        )
+        .is_err());
+
+        adjust_setting(&mut app, "inference.kilo_gateway.model", 1).unwrap();
+        assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
     }
 }

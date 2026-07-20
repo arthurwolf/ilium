@@ -254,6 +254,59 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.debug_settings.file_logging_enabled = enabled;
             None
         }
+        ServerEvent::AgentDebugMenuChanged { enabled } => {
+            app.ui_settings.agent_debug_menu_enabled = enabled;
+            let is_agent_debug_flow = matches!(
+                app.mode,
+                crate::app::Mode::AgentPaneContextMenu(_)
+                    | crate::app::Mode::AgentDebugLog(_)
+                    | crate::app::Mode::AgentDebugSavePath(..)
+            ) || app
+                .modal_stack
+                .iter()
+                .any(|mode| matches!(mode, crate::app::Mode::AgentDebugLog(_)));
+            if !enabled && is_agent_debug_flow {
+                app.close_modal_flow();
+            }
+            None
+        }
+        ServerEvent::PaneDebugLogSnapshot {
+            pane_id,
+            through_sequence,
+            retained_from_sequence,
+            dropped_entry_count,
+            entries,
+        } => {
+            let cache = app.agent_debug_logs.entry(pane_id).or_default();
+            for entry in entries {
+                merge_debug_entry(&mut cache.entries, entry);
+            }
+            cache
+                .entries
+                .retain(|entry| entry.sequence >= retained_from_sequence);
+            cache.through_sequence = cache.through_sequence.max(through_sequence);
+            cache.retained_from_sequence = retained_from_sequence;
+            cache.dropped_entry_count = dropped_entry_count;
+            cache.has_loaded_retained_history = true;
+            cache.is_loading = false;
+            None
+        }
+        ServerEvent::PaneDebugEntryAppended { pane_id, entry } => {
+            let cache = app.agent_debug_logs.entry(pane_id).or_default();
+            cache.through_sequence = cache.through_sequence.max(entry.sequence);
+            merge_debug_entry(&mut cache.entries, entry);
+            None
+        }
+    }
+}
+
+fn merge_debug_entry(
+    entries: &mut Vec<ilium_ipc::AgentDebugEntry>,
+    entry: ilium_ipc::AgentDebugEntry,
+) {
+    match entries.binary_search_by_key(&entry.sequence, |candidate| candidate.sequence) {
+        Ok(index) => entries[index] = entry,
+        Err(index) => entries.insert(index, entry),
     }
 }
 
@@ -314,6 +367,22 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.titles_loading
         .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.agent_debug_logs
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    let debug_target_closed = match &app.mode {
+        crate::app::Mode::AgentPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
+        crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
+        crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
+        _ => false,
+    } || app.modal_stack.iter().any(|mode| match mode {
+        crate::app::Mode::AgentPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
+        crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
+        crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
+        _ => false,
+    });
+    if debug_target_closed {
+        app.close_modal_flow();
+    }
     if app
         .hovered_tree_node
         .is_some_and(|hit| app.tree.get(hit.id).is_none())
@@ -412,7 +481,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
             app.leave_pane_focus();
         }
     }
-    app.resize_displayed_panes();
+    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
 }
 
 /// Chooses the next surviving visible row below a removed selection, falling
@@ -484,12 +553,31 @@ fn load_restored_editor(app: &mut App, pane_id: NodeId) {
 #[cfg(test)]
 mod tests {
     use ilium_core::{AgentActivity, AgentClass, PaneContentKind, ROOT_ID};
+    use ilium_ipc::{
+        AgentDebugContext, AgentDebugEntry, AgentDebugEventKind, AgentDebugSeverity,
+        AgentDebugSource,
+    };
     use ratatui::layout::{Position, Rect};
 
     use super::*;
 
     fn app() -> App {
         App::new("test".to_string(), std::env::temp_dir())
+    }
+
+    fn debug_entry(sequence: u64, summary: &str) -> AgentDebugEntry {
+        AgentDebugEntry {
+            sequence,
+            occurred_at_unix_millis: 1_700_000_000_000 + sequence as i64,
+            severity: AgentDebugSeverity::Information,
+            source: AgentDebugSource::Detector,
+            kind: AgentDebugEventKind::DetectionCycle,
+            summary: summary.to_string(),
+            fields: Vec::new(),
+            correlation_id: None,
+            context: AgentDebugContext::default(),
+            metadata: Default::default(),
+        }
     }
 
     #[test]
@@ -506,6 +594,99 @@ mod tests {
             app.panes.get(&pane_id),
             Some(PaneRuntime::Terminal(_))
         ));
+    }
+
+    #[test]
+    fn debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates() {
+        let mut app = app();
+        let pane_id = ilium_core::NodeId(7);
+
+        apply(
+            &mut app,
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id,
+                through_sequence: 3,
+                retained_from_sequence: 1,
+                dropped_entry_count: 0,
+                entries: vec![debug_entry(1, "first"), debug_entry(3, "third")],
+            },
+        );
+        apply(
+            &mut app,
+            ServerEvent::PaneDebugEntryAppended {
+                pane_id,
+                entry: debug_entry(2, "second"),
+            },
+        );
+        apply(
+            &mut app,
+            ServerEvent::PaneDebugEntryAppended {
+                pane_id,
+                entry: debug_entry(3, "third replay copy"),
+            },
+        );
+
+        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
+        assert_eq!(
+            cache
+                .entries
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(cache.entries[2].summary, "third replay copy");
+        assert_eq!(cache.through_sequence, 3);
+        assert!(!cache.is_loading);
+
+        apply(
+            &mut app,
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id,
+                through_sequence: 3,
+                retained_from_sequence: 3,
+                dropped_entry_count: 2,
+                entries: Vec::new(),
+            },
+        );
+        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
+        assert_eq!(
+            cache
+                .entries
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![3]
+        );
+        assert_eq!(cache.dropped_entry_count, 2);
+    }
+
+    #[test]
+    fn closing_a_pane_closes_its_nested_debug_save_flow_and_cache() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        app.agent_debug_logs.insert(pane_id, Default::default());
+        app.modal_stack.push(crate::app::Mode::AgentDebugLog(
+            crate::app::AgentDebugLogViewState {
+                pane_id,
+                scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+            },
+        ));
+        app.mode = crate::app::Mode::AgentDebugSavePath(
+            pane_id,
+            crate::text_prompt::TextPromptState::new("/tmp/agent.log"),
+        );
+
+        apply(&mut app, ServerEvent::TreeSnapshot(ilium_core::Tree::new()));
+
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
+        assert!(app.modal_stack.is_empty());
+        assert!(!app.agent_debug_logs.contains_key(&pane_id));
     }
 
     #[test]

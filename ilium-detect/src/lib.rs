@@ -97,6 +97,37 @@ const GENERIC_AGENT_SIGNATURES: &[AgentSignature] = &[
 pub struct AgentIdentity {
     pub class: AgentClass,
     pub pid: u32,
+    /// Exact executable/process name that matched the registry, retained so
+    /// diagnostics can explain the identity decision without re-reading the
+    /// live process table later.
+    pub process_name: String,
+    /// Registry substring that matched `process_name`.
+    pub matched_signature: String,
+    /// Number of process-tree edges between the pane shell and the matched
+    /// agent process (`0` when the directly spawned child is the agent).
+    pub process_tree_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityEvidence {
+    InterruptMarker,
+    GenericLiveStatus,
+    ClaudeLiveStatus,
+    CodexLiveStatus,
+    BackgroundWait,
+    ConfirmationPrompt,
+    SelectionPrompt,
+    NoActiveMarker,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityClassification {
+    pub activity: AgentActivity,
+    pub evidence: ActivityEvidence,
+    /// One bounded, control-character-free terminal-chrome line that produced
+    /// the positive classification. `None` for the negative `NoActiveMarker`
+    /// conclusion, which is explained by the checked marker families instead.
+    pub matched_line: Option<String>,
 }
 
 /// Substring some agent CLIs render continuously while a turn is in
@@ -123,19 +154,37 @@ const WORKING_MARKER: &str = "esc to interrupt";
 /// means the agent is blocked waiting on the user. Anything else is
 /// `Idle`.
 pub fn classify_activity(screen_text: &str) -> AgentActivity {
-    if screen_text.contains(WORKING_MARKER) || looks_like_live_status_line(screen_text) {
-        return AgentActivity::Working;
-    }
+    classify_activity_detailed(screen_text).activity
+}
 
-    if looks_like_background_wait_line(screen_text) {
-        return AgentActivity::WaitingBackground;
+pub fn classify_activity_detailed(screen_text: &str) -> ActivityClassification {
+    let (activity, evidence) = if screen_text.contains(WORKING_MARKER) {
+        (AgentActivity::Working, ActivityEvidence::InterruptMarker)
+    } else if looks_like_live_status_line(screen_text) {
+        (AgentActivity::Working, ActivityEvidence::GenericLiveStatus)
+    } else if looks_like_background_wait_line(screen_text) {
+        (
+            AgentActivity::WaitingBackground,
+            ActivityEvidence::BackgroundWait,
+        )
+    } else if looks_like_confirmation_prompt(screen_text) {
+        (
+            AgentActivity::WaitingApproval,
+            ActivityEvidence::ConfirmationPrompt,
+        )
+    } else if looks_like_selection_prompt(screen_text) {
+        (
+            AgentActivity::WaitingApproval,
+            ActivityEvidence::SelectionPrompt,
+        )
+    } else {
+        (AgentActivity::Idle, ActivityEvidence::NoActiveMarker)
+    };
+    ActivityClassification {
+        activity,
+        evidence,
+        matched_line: activity_evidence_line(evidence, screen_text),
     }
-
-    if looks_like_confirmation_prompt(screen_text) || looks_like_selection_prompt(screen_text) {
-        return AgentActivity::WaitingApproval;
-    }
-
-    AgentActivity::Idle
 }
 
 /// Classifies activity with the detected provider's status-line vocabulary.
@@ -146,22 +195,99 @@ pub fn classify_activity(screen_text: &str) -> AgentActivity {
 /// Codex panes back into `Working`. Provider-specific status recognition keeps
 /// the shared activity contract while isolating each CLI's volatile UI text.
 pub fn classify_activity_for_agent(class: &AgentClass, screen_text: &str) -> AgentActivity {
-    if screen_text.contains(WORKING_MARKER)
-        || (matches!(class, AgentClass::Claude) && looks_like_live_status_line(screen_text))
-        || (matches!(class, AgentClass::Codex) && looks_like_codex_live_status_line(screen_text))
-    {
-        return AgentActivity::Working;
-    }
+    classify_activity_for_agent_detailed(class, screen_text).activity
+}
 
-    if looks_like_background_wait_line(screen_text) {
-        return AgentActivity::WaitingBackground;
+pub fn classify_activity_for_agent_detailed(
+    class: &AgentClass,
+    screen_text: &str,
+) -> ActivityClassification {
+    let (activity, evidence) = if screen_text.contains(WORKING_MARKER) {
+        (AgentActivity::Working, ActivityEvidence::InterruptMarker)
+    } else if matches!(class, AgentClass::Claude) && looks_like_live_status_line(screen_text) {
+        (AgentActivity::Working, ActivityEvidence::ClaudeLiveStatus)
+    } else if matches!(class, AgentClass::Codex) && looks_like_codex_live_status_line(screen_text) {
+        (AgentActivity::Working, ActivityEvidence::CodexLiveStatus)
+    } else if looks_like_background_wait_line(screen_text) {
+        (
+            AgentActivity::WaitingBackground,
+            ActivityEvidence::BackgroundWait,
+        )
+    } else if looks_like_confirmation_prompt(screen_text) {
+        (
+            AgentActivity::WaitingApproval,
+            ActivityEvidence::ConfirmationPrompt,
+        )
+    } else if looks_like_selection_prompt(screen_text) {
+        (
+            AgentActivity::WaitingApproval,
+            ActivityEvidence::SelectionPrompt,
+        )
+    } else {
+        (AgentActivity::Idle, ActivityEvidence::NoActiveMarker)
+    };
+    ActivityClassification {
+        activity,
+        evidence,
+        matched_line: activity_evidence_line(evidence, screen_text),
     }
+}
 
-    if looks_like_confirmation_prompt(screen_text) || looks_like_selection_prompt(screen_text) {
-        return AgentActivity::WaitingApproval;
+/// Recovers the exact short terminal-chrome line behind a positive evidence
+/// code. This intentionally runs after the cheap classifier has selected one
+/// rule, keeping the public evidence complete without making every predicate
+/// allocate while it searches.
+fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Option<String> {
+    let matched_line = match evidence {
+        ActivityEvidence::InterruptMarker => screen_text
+            .lines()
+            .find(|line| line.contains(WORKING_MARKER)),
+        ActivityEvidence::GenericLiveStatus | ActivityEvidence::ClaudeLiveStatus => screen_text
+            .lines()
+            .find(|line| looks_like_live_status_line(line)),
+        ActivityEvidence::CodexLiveStatus => screen_text
+            .lines()
+            .find(|line| looks_like_codex_live_status_line(line)),
+        ActivityEvidence::BackgroundWait => screen_text.lines().find(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("waiting for")
+                && lower.contains("background")
+                && (lower.contains("agent") || lower.contains("task"))
+        }),
+        ActivityEvidence::ConfirmationPrompt => screen_text
+            .lines()
+            .find(|line| looks_like_confirmation_prompt(line)),
+        ActivityEvidence::SelectionPrompt => screen_text.lines().find(|line| {
+            let lower = line.to_ascii_lowercase();
+            let is_footer = (lower.contains("to select")
+                || lower.contains("to confirm")
+                || lower.contains("to choose"))
+                && lower.contains("cancel");
+            is_footer
+                || (line.trim_start().starts_with('\u{276f}') && is_numbered_option_line(line))
+        }),
+        ActivityEvidence::NoActiveMarker => None,
+    }?;
+    Some(bounded_terminal_evidence(matched_line))
+}
+
+/// Keeps durable diagnostic excerpts useful and safe for terminal rendering.
+/// The excerpt is evidence, not a transcript dump.
+fn bounded_terminal_evidence(line: &str) -> String {
+    const MAXIMUM_EVIDENCE_CHARACTERS: usize = 240;
+
+    let mut evidence = String::new();
+    for character in line.trim().chars().take(MAXIMUM_EVIDENCE_CHARACTERS) {
+        evidence.push(if character.is_control() {
+            '\u{fffd}'
+        } else {
+            character
+        });
     }
-
-    AgentActivity::Idle
+    if line.trim().chars().count() > MAXIMUM_EVIDENCE_CHARACTERS {
+        evidence.push('…');
+    }
+    evidence
 }
 
 /// Returns whether a detected first-party agent is visibly at the start of
@@ -223,6 +349,12 @@ pub enum GoalEvidence {
     Unknown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalClassification {
+    pub evidence: GoalEvidence,
+    pub matched_line: Option<String>,
+}
+
 /// Extracts provider-owned goal evidence from the current visible screen.
 ///
 /// Goal status may be a standalone row or the final segment of a shared footer.
@@ -231,17 +363,31 @@ pub enum GoalEvidence {
 /// width-dependent. Lines are inspected newest-first: a current `Goal achieved`
 /// footer must override an older positive row that is still visible above it.
 pub fn goal_evidence_for_agent(class: &AgentClass, screen_text: &str) -> GoalEvidence {
-    for line in screen_text.lines().rev().map(normalize_goal_status_line) {
+    goal_evidence_for_agent_detailed(class, screen_text).evidence
+}
+
+pub fn goal_evidence_for_agent_detailed(
+    class: &AgentClass,
+    screen_text: &str,
+) -> GoalClassification {
+    for original_line in screen_text.lines().rev() {
+        let line = normalize_goal_status_line(original_line);
         let evidence = match class {
             AgentClass::Codex => codex_goal_evidence(&line),
             AgentClass::Claude => claude_goal_evidence(&line),
             AgentClass::Antigravity | AgentClass::Other(_) => GoalEvidence::Unknown,
         };
         if evidence != GoalEvidence::Unknown {
-            return evidence;
+            return GoalClassification {
+                evidence,
+                matched_line: Some(bounded_terminal_evidence(original_line)),
+            };
         }
     }
-    GoalEvidence::Unknown
+    GoalClassification {
+        evidence: GoalEvidence::Unknown,
+        matched_line: None,
+    }
 }
 
 /// Recognizes Codex's active, paused, blocked, limited, and completed footer
@@ -539,6 +685,12 @@ pub fn refresh(system: &mut System) {
 /// table.
 pub struct ProcessChildrenIndex(HashMap<Pid, Vec<Pid>>);
 
+/// One registry match with the exact signature retained for diagnostics.
+struct AgentProcessMatch {
+    class: AgentClass,
+    matched_signature: String,
+}
+
 impl ProcessChildrenIndex {
     /// Builds the index from `system`'s current process snapshot. `system`
     /// must already have been [`refresh`]ed -- this reads whatever
@@ -607,14 +759,14 @@ pub fn identify_agent_with_extra(
     // processes (for example Codex's code-mode host), so lower depth (and,
     // tie-broken, lower pid) wins, matching the old `min_by_key((depth,
     // pid))` semantics exactly.
-    let mut best: Option<((usize, u32), Pid, AgentClass)> = None;
+    let mut best: Option<((usize, u32), Pid, String, AgentProcessMatch)> = None;
     let mut queue: VecDeque<(Pid, usize)> = VecDeque::new();
     let mut visited: HashSet<Pid> = HashSet::new();
     queue.push_back((shell_pid, 0));
     visited.insert(shell_pid);
 
     while let Some((pid, depth)) = queue.pop_front() {
-        if let Some(((best_depth, _), _, _)) = &best {
+        if let Some(((best_depth, _), _, _, _)) = &best {
             if depth > *best_depth {
                 break;
             }
@@ -622,14 +774,16 @@ pub fn identify_agent_with_extra(
         if let Some(process) = system.process(pid) {
             // Cache lowercase name once per process (avoids repeated allocation per classification attempt)
             let lowercased = process.name().to_string_lossy().to_lowercase();
-            if let Some(class) = classify_process_name_with_extra(&lowercased, extra_signatures) {
+            if let Some(process_match) =
+                match_process_name_with_extra(&lowercased, extra_signatures)
+            {
                 let key = (depth, pid.as_u32());
                 let is_better = match &best {
                     None => true,
-                    Some((existing_key, _, _)) => key < *existing_key,
+                    Some((existing_key, _, _, _)) => key < *existing_key,
                 };
                 if is_better {
-                    best = Some((key, pid, class));
+                    best = Some((key, pid, lowercased, process_match));
                 }
             }
         }
@@ -643,40 +797,58 @@ pub fn identify_agent_with_extra(
         }
     }
 
-    best.map(|(_, pid, class)| AgentIdentity {
-        pid: pid.as_u32(),
-        class,
-    })
+    best.map(
+        |((depth, _), pid, process_name, process_match)| AgentIdentity {
+            pid: pid.as_u32(),
+            class: process_match.class,
+            process_name,
+            matched_signature: process_match.matched_signature,
+            process_tree_depth: depth,
+        },
+    )
 }
 
 /// Classifies a single (already-lowercased) process name against the shared
 /// first-party provider registry, generic built-ins, then `extra_signatures`.
 /// That order lets configuration add coverage without silently shadowing an
 /// agent whose launch/resume semantics ilium already knows.
+#[cfg(test)]
 fn classify_process_name_with_extra(
     lowercase_name: &str,
     extra_signatures: &[AgentSignature],
 ) -> Option<AgentClass> {
-    BuiltinAgentProvider::ALL
-        .into_iter()
-        .find(|provider| {
+    match_process_name_with_extra(lowercase_name, extra_signatures).map(|matched| matched.class)
+}
+
+/// Matches one process while retaining which registry signature justified the
+/// class. Built-ins keep priority over generic/custom entries so configuration
+/// cannot shadow first-party provider behavior.
+fn match_process_name_with_extra(
+    lowercase_name: &str,
+    extra_signatures: &[AgentSignature],
+) -> Option<AgentProcessMatch> {
+    if let Some((provider, signature)) =
+        BuiltinAgentProvider::ALL.into_iter().find_map(|provider| {
             provider
                 .process_name_substrings()
                 .iter()
-                .any(|substring| lowercase_name.contains(substring))
+                .find(|substring| lowercase_name.contains(**substring))
+                .map(|signature| (provider, *signature))
         })
-        .map(AgentProvider::class)
-        .or_else(|| {
-            GENERIC_AGENT_SIGNATURES
-                .iter()
-                .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
-                .map(|signature| (signature.class_of)(lowercase_name))
-        })
-        .or_else(|| {
-            extra_signatures
-                .iter()
-                .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
-                .map(|signature| (signature.class_of)(lowercase_name))
+    {
+        return Some(AgentProcessMatch {
+            class: provider.class(),
+            matched_signature: signature.to_string(),
+        });
+    }
+
+    GENERIC_AGENT_SIGNATURES
+        .iter()
+        .chain(extra_signatures)
+        .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
+        .map(|signature| AgentProcessMatch {
+            class: (signature.class_of)(lowercase_name),
+            matched_signature: signature.name_substring.to_string(),
         })
 }
 
@@ -982,6 +1154,51 @@ mod tests {
             Some(AgentClass::Other("aider".to_string()))
         );
         assert_eq!(classify_process_name_with_extra("bash", &[]), None);
+    }
+
+    #[test]
+    fn detailed_classification_retains_the_bounded_line_that_justified_it() {
+        let classification = classify_activity_for_agent_detailed(
+            &AgentClass::Codex,
+            "older transcript\nWorking (esc to interrupt)\u{7}\nSend a message",
+        );
+
+        assert_eq!(classification.activity, AgentActivity::Working);
+        assert_eq!(classification.evidence, ActivityEvidence::InterruptMarker);
+        assert_eq!(
+            classification.matched_line.as_deref(),
+            Some("Working (esc to interrupt)�")
+        );
+
+        let idle = classify_activity_for_agent_detailed(
+            &AgentClass::Codex,
+            "completed transcript\nSend a message",
+        );
+        assert_eq!(idle.evidence, ActivityEvidence::NoActiveMarker);
+        assert_eq!(idle.matched_line, None);
+    }
+
+    #[test]
+    fn detailed_goal_classification_retains_the_provider_status_line() {
+        let classification = goal_evidence_for_agent_detailed(
+            &AgentClass::Codex,
+            "old output\nmodel · workspace · Pursuing goal (16m)",
+        );
+
+        assert_eq!(classification.evidence, GoalEvidence::Active);
+        assert_eq!(
+            classification.matched_line.as_deref(),
+            Some("model · workspace · Pursuing goal (16m)")
+        );
+    }
+
+    #[test]
+    fn process_matches_retain_the_exact_registry_signature() {
+        let matched = match_process_name_with_extra("codex-host", &[])
+            .expect("the built-in Codex substring should match");
+
+        assert_eq!(matched.class, AgentClass::Codex);
+        assert_eq!(matched.matched_signature, "codex");
     }
 
     /// `identify_agent` walks a *real* process tree (sysinfo has no fake

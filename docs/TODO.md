@@ -1,3 +1,35 @@
+# Claude and Codex `/clear` identity reset
+
+- [x] Define one provider-owned `/clear` transition contract for Claude and Codex, while leaving unrelated agents and non-exact input unchanged.
+- [x] Atomically discard the detected session ID and every existing pane-title field, then show `<new>` from the detached server's authoritative input path.
+- [x] Cover exact input reconstruction, manual-title replacement, stale title-worker rejection, and both provider lifecycles with focused regressions.
+- [x] Run workspace gates, rebuild/install, and verify the cleared identity and `<new>` title through the real installed TUI.
+
+# Agent debug log resize-noise filter
+
+- [x] Carry an explicit resize cause from every client layout mutation through IPC into the persisted per-agent event contract.
+- [x] Add a default-enabled top-toolbar filter that hides only left-panel focus/hover animation resize events while preserving genuine terminal, split, and settings resize evidence.
+- [x] Apply the same active filter to saved human-readable debug logs and keep the unfiltered retained journal available when the filter is disabled.
+- [x] Add focused model, protocol, server, client, rendering, keyboard, mouse, and export regressions for provenance and default filtering.
+- [x] Run workspace gates, rebuild/install, and verify the filter against a real installed TUI while the left panel expands and contracts.
+
+# Agent debug log signal and export
+
+- [x] Record detection decisions only when their meaningful identity, activity, goal, or session evidence changes; never mutate a retained entry merely because another poll ran.
+- [x] Replace detector internals and counters with plain-language conclusions that explain what ilium decided and which stable process/screen/session evidence justified it.
+- [x] Add a top-of-log Save action, editable destination-path prompt, and complete human-readable file export with keyboard and mouse coverage.
+- [x] Run focused and workspace gates, rebuild/install, and verify change-only logging plus saved-file output in an isolated real TUI.
+
+# Persisted per-agent debug history
+
+- [x] Define the typed, extensible per-pane event contract in a pure shared crate, including ordered timestamps, levels, categories, summaries, and structured detail fields.
+- [x] Persist each agent pane's complete debug history inside the canonical project session snapshot, restore it across restarts, mirror it over IPC, and clean it up with the owning pane.
+- [x] Instrument agent detection and session-identity discovery with phase-by-phase evidence plus status, goal, execution, prompt, scheduled-input, queue, focus, resize, trigger, LLM-title, persistence, and error events.
+- [x] Add a disabled-by-default User Interface setting, synchronize it with the detached server, and enable it for the current user without changing the default for new installations.
+- [x] Add the detected-agent-only right-click menu and an aerated full-right-panel debug timeline with icons, European timestamps, structured details, scrolling, and exact return navigation.
+- [x] Add focused core, IPC, server, persistence, client configuration, rendering, keyboard, and mouse regressions, including old-snapshot compatibility and disabled-capture behavior.
+- [x] Run focused and workspace gates, rebuild/install, prove installed-binary parity, and verify capture, menu visibility, full-panel rendering, and restart persistence in an isolated tmux-controlled runtime.
+
 # Voice-mode self-stop tool
 
 - [x] Add a dedicated typed `ilium_stop_voice_mode` function tool and explicit model instructions for stop, disable, turn-off, and end-voice requests.
@@ -16,7 +48,7 @@
 
 - [x] Make immediate voice text delivery a typed submission that always appends Enter, with no model-controlled opt-out.
 - [x] Keep explicit type-without-submitting behavior behind its own tool while scheduled and queued delivery preserve the submission invariant and confirmation can stage internally.
-- [ ] Add focused regressions, run workspace gates, rebuild/install, and prove the updated voice path against the real runtime boundary.
+- [x] Add focused regressions, run workspace gates, rebuild/install, and prove the updated voice path against the real runtime boundary.
 
 # Automatic LLM title and structure triggers
 

@@ -170,7 +170,7 @@ fn settings_snapshot(app: &App) -> Value {
         "writable_path_patterns": [
             "ui.auto_resize_tree", "ui.tree_width", "ui.tree_order",
             "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
-            "ui.sidebar_density", "ui.stable_glyphs", "ui.icons.<icon_key>",
+            "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
@@ -180,7 +180,8 @@ fn settings_snapshot(app: &App) -> Value {
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
             "triggers.<event_key>",
-            "inference.provider", "inference.ollama.url", "inference.ollama.model",
+            "inference.provider", "inference.kilo_gateway.model",
+            "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
             "inference.openrouter.api_key", "inference.openrouter.model",
@@ -199,6 +200,7 @@ fn settings_snapshot(app: &App) -> Value {
             "agent_identifier_mode": app.ui_settings.agent_identifiers.mode.label(),
             "motion_level": app.ui_settings.motion_level.label(),
             "sidebar_density": app.ui_settings.sidebar_density.label(),
+            "agent_debug_menu_enabled": app.ui_settings.agent_debug_menu_enabled,
             "icons": icons,
         },
         "terminal": {
@@ -235,6 +237,16 @@ fn settings_snapshot(app: &App) -> Value {
         },
         "inference": {
             "provider": app.inference_settings.selected_provider.label(),
+            "selected_model": app.inference_settings.selected_model(),
+            "kilo_gateway": {
+                "model": app.inference_settings.kilo_gateway.model,
+                "available_free_models": app.kilo_gateway_models,
+            },
+            "ollama": {
+                "url": app.inference_settings.ollama.base_url,
+                "model": app.inference_settings.ollama.model,
+                "available_models": app.ollama_models,
+            },
             "credentials": "redacted",
         },
         "triggers": &app.trigger_settings,
@@ -294,6 +306,9 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::FolderExplorer(..) => "folder_picker",
         Mode::ProjectFolderExplorer(..) => "project_folder_picker",
         Mode::ContextMenu(_) => "context_menu",
+        Mode::AgentPaneContextMenu(_) => "agent_pane_context_menu",
+        Mode::AgentDebugLog(_) => "agent_debug_log",
+        Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",
         Mode::QueuePrompt(_) => "queue_prompt",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",

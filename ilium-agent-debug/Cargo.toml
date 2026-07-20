@@ -1,0 +1,9 @@
+[package]
+name = "ilium-agent-debug"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ilium-core = { version = "0.1.0", path = "../ilium-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

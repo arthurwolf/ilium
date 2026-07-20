@@ -593,6 +593,10 @@ pub struct UiSettings {
     pub use_stable_glyphs: bool,
     /// Shows LLM-suggested per-title icons before node names in the left tree.
     pub show_inferred_title_icons: bool,
+    /// Exposes a pane-scoped right-click debug history for detected agents.
+    /// Capture is deliberately opt-in because prompts and provider details
+    /// are persisted in the project session snapshot.
+    pub agent_debug_menu_enabled: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -609,6 +613,7 @@ impl Default for UiSettings {
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
             show_inferred_title_icons: false,
+            agent_debug_menu_enabled: false,
             icons: IconSettings::default(),
         }
     }
@@ -684,6 +689,7 @@ struct RawUiConfig {
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
     show_inferred_title_icons: Option<bool>,
+    agent_debug_menu_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -988,6 +994,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_inferred_title_icons: raw
             .show_inferred_title_icons
             .unwrap_or(defaults.show_inferred_title_icons),
+        agent_debug_menu_enabled: raw
+            .agent_debug_menu_enabled
+            .unwrap_or(defaults.agent_debug_menu_enabled),
         icons,
     })
 }
@@ -1645,6 +1654,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "show_inferred_title_icons".to_string(),
         toml::Value::Boolean(ui.show_inferred_title_icons),
     );
+    table.insert(
+        "agent_debug_menu_enabled".to_string(),
+        toml::Value::Boolean(ui.agent_debug_menu_enabled),
+    );
     let icons = IconTarget::ALL
         .into_iter()
         .map(|target| {
@@ -1766,6 +1779,7 @@ mod tests {
             config.inference.selected_provider,
             ilium_inference::InferenceProviderKind::KiloGateway
         );
+        assert_eq!(config.inference.kilo_gateway.model, "kilo-auto/free");
     }
 
     #[test]
@@ -1777,7 +1791,10 @@ mod tests {
         )
         .unwrap();
         let inference = InferenceSettings {
-            selected_provider: ilium_inference::InferenceProviderKind::OpenRouter,
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            kilo_gateway: ilium_inference::KiloGatewaySettings {
+                model: "stepfun/step-3.7-flash:free".to_string(),
+            },
             openrouter: ilium_inference::OpenRouterSettings {
                 api_key: "test-key".to_string(),
                 model: "openrouter/free".to_string(),
@@ -1790,6 +1807,20 @@ mod tests {
         assert!(saved.contains("[detection]"));
         let loaded = load(&dir).unwrap();
         assert_eq!(loaded.inference, inference);
+    }
+
+    #[test]
+    fn legacy_inference_table_without_kilo_settings_uses_the_safe_default() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[inference]\nselected_provider = \"kilo_gateway\"\n[inference.ollama]\nbase_url = \"http://127.0.0.1:11434\"\nmodel = \"\"\n",
+        )
+        .unwrap();
+
+        let loaded = load(&dir).expect("load legacy inference settings");
+
+        assert_eq!(loaded.inference.kilo_gateway.model, "kilo-auto/free");
     }
 
     #[test]
@@ -1980,6 +2011,7 @@ mod tests {
         let dir = scratch_dir();
         let config = load(&dir).expect("missing file is not an error");
         assert_eq!(config.ui, UiSettings::default());
+        assert!(!config.ui.agent_debug_menu_enabled);
     }
 
     #[test]
@@ -2205,6 +2237,7 @@ mod tests {
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
             show_inferred_title_icons: true,
+            agent_debug_menu_enabled: true,
             use_stable_glyphs: true,
             icons: IconSettings::default(),
         };

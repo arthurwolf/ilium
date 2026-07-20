@@ -107,6 +107,29 @@ pub enum BuiltinAgentProvider {
     Antigravity,
 }
 
+/// Provider-owned reason that a submitted command invalidates the current
+/// externally persisted session identity. This is returned alongside the
+/// decision so diagnostics cannot drift from the rule that changed state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionIdentityTransitionRule {
+    SharedNewSessionCommand,
+    ClaudeOrCodexClearStartsFreshSession,
+}
+
+impl SessionIdentityTransitionRule {
+    /// Plain-language evidence suitable for the persisted agent event log.
+    pub const fn explanation(self) -> &'static str {
+        match self {
+            Self::SharedNewSessionCommand => {
+                "the first command word was /resume, /branch, or /new, which replaces the persisted session for every built-in provider"
+            }
+            Self::ClaudeOrCodexClearStartsFreshSession => {
+                "the verified provider was Claude or Codex, whose exact /clear command starts a fresh ilium session identity"
+            }
+        }
+    }
+}
+
 /// Provider-specific behavior that is pure and safe to share across every
 /// layer. Filesystem transcript formats remain in `ilium-agent-session`, and
 /// process polling remains in `ilium-server`; this trait owns only the stable
@@ -124,6 +147,21 @@ pub trait AgentProvider {
     fn resume_command(self, quoted_session_id: &str) -> String;
     /// Parses one current process command line into a provider session id.
     fn session_id_from_arguments(self, arguments: &[String]) -> Option<String>;
+    /// Returns why one submitted interactive command replaces the provider's
+    /// externally persisted session inside the current process.
+    fn session_identity_transition_rule(
+        self,
+        submitted_line: &str,
+    ) -> Option<SessionIdentityTransitionRule>;
+
+    /// Convenience predicate derived from the diagnostic-bearing rule.
+    fn invalidates_session_identity(self, submitted_line: &str) -> bool
+    where
+        Self: Sized,
+    {
+        self.session_identity_transition_rule(submitted_line)
+            .is_some()
+    }
 }
 
 impl BuiltinAgentProvider {
@@ -234,6 +272,22 @@ impl AgentProvider for BuiltinAgentProvider {
             Self::Codex => codex_session_id_from_arguments(arguments),
             Self::Antigravity => antigravity_session_id_from_arguments(arguments),
         }
+    }
+
+    fn session_identity_transition_rule(
+        self,
+        submitted_line: &str,
+    ) -> Option<SessionIdentityTransitionRule> {
+        let first_word = submitted_line.split_whitespace().next();
+        if matches!(first_word, Some("/resume" | "/branch" | "/new")) {
+            return Some(SessionIdentityTransitionRule::SharedNewSessionCommand);
+        }
+
+        // Claude and Codex both present `/clear` as a fresh conversation.
+        // Treat that user-visible boundary as a fresh ilium session even when
+        // the provider process temporarily retains its old transcript handle.
+        (matches!(self, Self::Claude | Self::Codex) && submitted_line.trim() == "/clear")
+            .then_some(SessionIdentityTransitionRule::ClaudeOrCodexClearStartsFreshSession)
     }
 }
 
@@ -1608,6 +1662,40 @@ impl Tree {
         Ok(true)
     }
 
+    /// Replaces every title field for a terminal whose agent conversation
+    /// started over. Unlike ordinary automatic inference, this deliberately
+    /// discards a user-specified title: that title described the cleared
+    /// conversation and must not block naming the next detected session.
+    pub fn reset_terminal_pane_title(
+        &mut self,
+        id: NodeId,
+        title: impl Into<String>,
+    ) -> Result<bool, TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            title_source,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+
+        let title = title.into();
+        let changed = node.name != title
+            || node.short_name.is_some()
+            || node.inferred_icon.is_some()
+            || title_source.is_user_specified();
+        node.name = title;
+        node.short_name = None;
+        node.inferred_icon = None;
+        *title_source = PaneTitleSource::Automatic;
+        Ok(changed)
+    }
+
     pub fn toggle_expanded(&mut self, id: NodeId) -> Result<(), TreeError> {
         match &mut self.get_mut(id)?.kind {
             NodeKind::Container(container) => {
@@ -2975,6 +3063,61 @@ mod tests {
             BuiltinAgentProvider::resume_binding(&format!("agy --conversation {session_id}")),
             Some((provider, session_id.to_string()))
         );
+    }
+
+    #[test]
+    fn provider_registry_owns_interactive_session_transition_syntax() {
+        for provider in BuiltinAgentProvider::ALL {
+            for command in ["/resume", "/resume another", "/branch release", "/new"] {
+                assert!(provider.invalidates_session_identity(command));
+                assert_eq!(
+                    provider.session_identity_transition_rule(command),
+                    Some(SessionIdentityTransitionRule::SharedNewSessionCommand)
+                );
+            }
+            for input in ["please run /resume", "/fork investigate", "resume"] {
+                assert!(!provider.invalidates_session_identity(input));
+            }
+        }
+
+        for provider in [BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex] {
+            assert!(provider.invalidates_session_identity("  /clear  "));
+            assert_eq!(
+                provider.session_identity_transition_rule("  /clear  "),
+                Some(SessionIdentityTransitionRule::ClaudeOrCodexClearStartsFreshSession)
+            );
+        }
+        assert!(!BuiltinAgentProvider::Codex.invalidates_session_identity("/clear later"));
+        assert!(!BuiltinAgentProvider::Antigravity.invalidates_session_identity("/clear"));
+    }
+
+    #[test]
+    fn fresh_agent_session_reset_discards_every_old_terminal_title_field() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(PathBuf::from("/tmp/project"))
+            .unwrap();
+        let pane_id = tree
+            .add_pane(project, "Old inferred title", PaneContentKind::Terminal)
+            .unwrap();
+        tree.rename_node(
+            pane_id,
+            "User title for old work",
+            Some("Old work".to_string()),
+            Some("📜".to_string()),
+        )
+        .unwrap();
+
+        assert!(tree.reset_terminal_pane_title(pane_id, "<new>").unwrap());
+        let pane = tree.get(pane_id).unwrap();
+        assert_eq!(pane.name, "<new>");
+        assert_eq!(pane.short_name, None);
+        assert_eq!(pane.inferred_icon, None);
+        let NodeKind::Pane { title_source, .. } = &pane.kind else {
+            panic!("expected terminal pane");
+        };
+        assert_eq!(*title_source, PaneTitleSource::Automatic);
+        assert!(!tree.reset_terminal_pane_title(pane_id, "<new>").unwrap());
     }
 
     #[test]

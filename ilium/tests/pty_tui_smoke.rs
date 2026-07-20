@@ -47,7 +47,7 @@
 //! is kept only as a defensive fallback in case that ever hangs, so this
 //! test itself cannot hang the suite even if the graceful path regresses.
 
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -306,6 +306,71 @@ fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
         "[keyboard]\nshortcut_base = \"b\"\n",
     )
     .expect("write isolated keyboard config");
+}
+
+/// Enables the otherwise opt-in agent-debug surface for an isolated client
+/// and detached server without touching the developer's real config.
+fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
+    let ilium_config_dir = xdg.config_home.join("ilium");
+    std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
+    std::fs::write(
+        ilium_config_dir.join("config.toml"),
+        "[debug]\nfile_logging_enabled = true\n\n[detection]\nworking_poll_seconds = 1\n\n[ui]\nagent_debug_menu_enabled = true\n",
+    )
+    .expect("write isolated agent-debug config");
+}
+
+/// Finds the timestamped private process log that contains this test's exact
+/// canonical project path. Session directory names are intentionally hashed,
+/// so the active-log metadata is the authoritative path boundary.
+fn process_log_for_project(project_dir: &Path) -> Option<(PathBuf, String)> {
+    let project_path = project_dir
+        .canonicalize()
+        .ok()?
+        .to_string_lossy()
+        .into_owned();
+    let log_root = std::fs::read_dir("/tmp/.ilium").ok()?;
+    for session_entry in log_root.filter_map(Result::ok) {
+        let Ok(file_type) = session_entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let active_path = session_entry.path().join(".active-log-path");
+        let Ok(log_path) = std::fs::read_to_string(active_path) else {
+            continue;
+        };
+        let log_path = PathBuf::from(log_path);
+        let Ok(contents) = std::fs::read_to_string(&log_path) else {
+            continue;
+        };
+        if contents.contains(&project_path) {
+            return Some((log_path, contents));
+        }
+    }
+    None
+}
+
+/// Produces a deterministic process literally named `codex` whose visible
+/// status changes only in volatile counters. The detector must keep polling
+/// it while the journal retains one semantic conclusion.
+fn write_change_only_fake_codex(directory: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = directory.join("codex");
+    let script = "#!/bin/sh\n\
+        counter=1\n\
+        while :; do\n\
+          printf '\\033[Hmodel · workspace · Working · Pursuing goal (%sm)\\033[K\\n' \"$counter\"\n\
+          printf 'Cogitating (esc to interrupt) · %ss · %s tokens\\033[K' \"$counter\" \"$counter\"\n\
+          counter=$((counter + 1))\n\
+          sleep 1\n\
+        done\n";
+    std::fs::write(&path, script).expect("write change-only fake Codex");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+        .expect("make change-only fake Codex executable");
+    path
 }
 
 #[tokio::test]
@@ -1454,6 +1519,27 @@ fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
         .enumerate()
         .filter(|(_, text)| text.contains(needle))
         .map(|(index, _)| index as u16)
+        .collect()
+}
+
+/// Finds text only inside the leftmost rendered cells. A full terminal row
+/// also contains the right pane, whose title may repeat an agent label and
+/// must never be mistaken for the corresponding tree row during mouse tests.
+fn rows_containing_before_column(
+    screen: &vt100::Screen,
+    needle: &str,
+    column_limit: u16,
+) -> Vec<u16> {
+    let (rows, columns) = screen.size();
+    let column_limit = column_limit.min(columns);
+    (0..rows)
+        .filter(|row| {
+            let left_cells: String = (0..column_limit)
+                .filter_map(|column| screen.cell(*row, column))
+                .map(vt100::Cell::contents)
+                .collect();
+            left_cells.contains(needle)
+        })
         .collect()
 }
 
@@ -2918,4 +3004,340 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.kill().expect("force-kill folder-browser TUI");
     }
     assert!(exited, "folder-browser TUI did not exit after cleanup");
+}
+
+/// Proves the user-facing debug workflow against the real client, detached
+/// server, process detector, mouse hit testing, path prompt, and filesystem.
+/// The fake agent changes only counters between polls, so two exports several
+/// ticks apart must retain exactly the same number of detection decisions.
+/// Focusing and unfocusing the left panel also produces real PTY resizes; the
+/// default toolbar filter hides them until the operator explicitly reveals
+/// them, and Save follows the same active policy.
+#[tokio::test]
+async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_agent_debug_config(&xdg);
+    let project_dir = temp_root.path().join("agent-debug-project");
+    let fixture_directory = temp_root.path().join("fixture-bin");
+    std::fs::create_dir_all(&project_dir).expect("create project directory");
+    std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
+    seed_project_config(&project_dir);
+    let fake_codex = write_change_only_fake_codex(&fixture_directory);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fake_codex_argument = fake_codex.to_string_lossy().to_string();
+    let new_pane_output = run_one_shot(
+        &xdg,
+        &project_dir,
+        &["new-pane", "--", &fake_codex_argument],
+    )
+    .await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating fake Codex pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 140)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn agent-debug TUI");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected a detected working Codex row, got: {:?}",
+        tui.screen_text()
+    );
+    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
+    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
+    let agent_row = agent_rows[0];
+
+    tui.write(&sgr_mouse_down(0, 8, agent_row))
+        .expect("focus detected Codex row");
+    tui.write(&sgr_mouse_up(8, agent_row))
+        .expect("release detected Codex row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Cogitating (esc to interrupt)"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected focused fake Codex terminal, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Selecting the tree row reveals the pane; a click inside the terminal
+    // moves keyboard focus from the tree to the PTY before typing.
+    tui.write(&sgr_mouse_down(0, 80, 10))
+        .expect("focus the fake Codex PTY");
+    tui.write(&sgr_mouse_up(80, 10))
+        .expect("release the fake Codex PTY focus click");
+    tui.write(b"diagnostic-prompt\r")
+        .expect("submit an exact prompt to the fake Codex pane");
+    assert!(
+        wait_until(
+            || {
+                process_log_for_project(&project_dir).is_some_and(|(_, contents)| {
+                    contents.contains("event_kind=PromptSubmitted")
+                        && contents.contains(
+                            "\"label\":\"submitted input\",\"value\":\"diagnostic-prompt\"",
+                        )
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected exact submitted input in the private process log"
+    );
+
+    // Exercise focus-owned expansion and contraction explicitly instead of
+    // relying on pointer hover duration. Waiting past the 180 ms transition
+    // ensures both endpoints reached the PTY/server journal before opening it.
+    tui.write(b"\x01t")
+        .expect("focus the left tree panel for resize provenance");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tui.write(b"\x01p")
+        .expect("return focus to the active pane for resize provenance");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let menu_column = 80;
+    let menu_row = 10;
+    tui.write(&sgr_mouse_down(2, menu_column, menu_row))
+        .expect("right-click detected Codex terminal");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Show debug log"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected detected-agent context action, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_down(0, menu_column + 1, menu_row + 1))
+        .expect("open agent debug log");
+    tui.write(b"\x1b[H")
+        .expect("jump to the oldest retained debug events");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Agent debug log")
+                    && screen.contains("Save log")
+                    && screen.contains("Panel resizes hidden")
+                    && screen.contains("panel resize events hid")
+                    && screen.contains("DETECTION")
+                    && screen.contains("Agent identity decision")
+                    && screen.contains("Activity decision")
+                    && screen.contains("Goal decision")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected readable retained detection history, got: {:?}",
+        tui.screen_text()
+    );
+
+    tokio::time::sleep(Duration::from_millis(2200)).await;
+    let (save_column, save_row) = tui
+        .with_screen(|screen| first_cell_containing(screen, "💾"))
+        .expect("find top Save button");
+    tui.write(&sgr_mouse_down(0, save_column, save_row))
+        .expect("click top Save button");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Save agent debug log")
+                    && screen.contains("Enter to confirm · Esc to cancel")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected editable destination path prompt, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("accept first default export path");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Saved agent debug log to"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected successful first save status, got: {:?}",
+        tui.screen_text()
+    );
+
+    let exported_logs = || {
+        let mut paths: Vec<_> = std::fs::read_dir(&project_dir)
+            .expect("read project exports")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name().is_some_and(|name| {
+                    let name = name.to_string_lossy();
+                    name.starts_with("ilium-") && name.contains("-debug-") && name.ends_with(".log")
+                })
+            })
+            .collect();
+        paths.sort();
+        paths
+    };
+    let first_paths = exported_logs();
+    assert_eq!(first_paths.len(), 1, "expected one first export");
+    let first_report = std::fs::read_to_string(&first_paths[0]).expect("read first export");
+    let first_detection_count = first_report.matches("[DETECTION]").count();
+    assert!(
+        first_detection_count > 0,
+        "first report needs a detection decision"
+    );
+    assert!(
+        first_report.contains("Filter: left-panel focus/hover animation resize events excluded")
+    );
+    assert!(!first_report.contains("Left panel focus/hover animation"));
+
+    tokio::time::sleep(Duration::from_millis(2200)).await;
+    tui.write(b"r\x1b[H")
+        .expect("reveal panel animation resizes and jump to oldest history");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Panel resizes shown"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected disabled resize filter switch, got: {:?}",
+        tui.screen_text()
+    );
+    let mut panel_resize_evidence_visible = tui
+        .screen_text()
+        .contains("Left panel focus/hover animation");
+    for _ in 0..20 {
+        if panel_resize_evidence_visible {
+            break;
+        }
+        tui.write(b"\x1b[6~")
+            .expect("page toward newer resize evidence");
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        panel_resize_evidence_visible = tui
+            .screen_text()
+            .contains("Left panel focus/hover animation");
+    }
+    assert!(
+        panel_resize_evidence_visible,
+        "revealing the filter should expose typed panel-resize evidence: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"s").expect("open second export path prompt");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Save agent debug log"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected second destination prompt, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("accept second default export path");
+    assert!(
+        wait_until(|| exported_logs().len() == 2, WAIT_TIMEOUT).await,
+        "expected a second timestamped export"
+    );
+    let second_paths = exported_logs();
+    let second_report = std::fs::read_to_string(&second_paths[1]).expect("read second export");
+    assert!(
+        second_report.contains("Filter: left-panel focus/hover animation resize events included")
+    );
+    assert!(second_report.contains("Left panel focus/hover animation"));
+    assert_eq!(
+        second_report.matches("[DETECTION]").count(),
+        first_detection_count,
+        "counter-only polls must not add detection entries between exports"
+    );
+    for expected in [
+        "Agent identity decision",
+        "Activity decision",
+        "Goal decision",
+        "Matched activity evidence",
+        "<number>",
+    ] {
+        assert!(
+            second_report.contains(expected),
+            "saved report should contain {expected:?}: {second_report}"
+        );
+    }
+    for forbidden in ["phase 1", "request generation", "repetition_count"] {
+        assert!(
+            !second_report.contains(forbidden),
+            "saved report should not expose {forbidden:?}: {second_report}"
+        );
+    }
+
+    let (process_log_path, process_log) =
+        process_log_for_project(&project_dir).expect("find this session's process log");
+    assert_eq!(
+        std::fs::metadata(&process_log_path)
+            .expect("process log metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(process_log_path.parent().expect("process log parent"))
+            .expect("process log directory metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    for expected in [
+        "event_kind=SessionDiscovery",
+        "Canonical project boundary",
+        "Phase: Open transcript descriptors",
+        "event_kind=PromptSubmitted",
+        "diagnostic-prompt",
+    ] {
+        assert!(
+            process_log.contains(expected),
+            "private process log should contain {expected:?}: {process_log}"
+        );
+    }
+    let prompt_line = process_log
+        .lines()
+        .find(|line| line.contains("event_kind=PromptSubmitted"))
+        .expect("prompt event line");
+    assert!(
+        !prompt_line.contains("\"process_id\":null"),
+        "prompt event should identify the detected agent PID: {prompt_line}"
+    );
+    assert!(!process_log.contains("[redacted: available in Agent debug journal]"));
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill agent-debug TUI");
+    }
+    assert!(exited, "agent-debug TUI did not exit after cleanup");
 }

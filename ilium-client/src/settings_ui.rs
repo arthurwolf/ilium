@@ -36,8 +36,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
     App, AppearanceRow, IconPickerColumnMode, IconPickerSearchStatus, InferenceRow,
-    InferenceSettingField, InferenceTestState, KanbanBoardRow, OllamaModelDiscoveryState,
-    SettingsState, SettingsTab, SoundRow,
+    InferenceSettingField, InferenceTestState, KanbanBoardRow, ModelDiscoveryState, SettingsState,
+    SettingsTab, SoundRow,
 };
 use crate::config::{
     DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
@@ -85,6 +85,8 @@ const DECREMENT_ZONE_WIDTH: u16 = 2;
 /// The icon table uses fixed terminal-cell columns rather than Rust string
 /// formatting widths. Emoji and bracketed selected choices have different
 /// UTF-8 byte lengths, but must never move a later column or its hit target.
+/// The compact fallback preserves the existing table at widths where every
+/// title cannot fit. Wider tables replace this with the longest title width.
 const ICON_TABLE_LABEL_WIDTH: usize = 18;
 const ICON_TABLE_CURRENT_WIDTH: usize = 7;
 const ICON_TABLE_CHOICE_WIDTH: usize = 4;
@@ -106,6 +108,44 @@ const ICON_TABLE_PICKER_COLUMN: usize = ICON_TABLE_LEFT_INSET
 const ICON_TABLE_MIN_OUTER_WIDTH: u16 =
     (ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.len() + 2) as u16;
 const ICON_TABLE_COMFORTABLE_OUTER_WIDTH: u16 = ICON_TABLE_MIN_OUTER_WIDTH + 3;
+
+/// Column geometry shared by icon-table rendering and pointer hit-testing.
+/// Keeping the responsive label width here prevents the visible `[+]` button
+/// from drifting away from the column that receives its clicks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IconTableGeometry {
+    label_width: usize,
+    column_gap: usize,
+}
+
+impl IconTableGeometry {
+    fn for_outer_width(table_outer_width: u16) -> Self {
+        let column_gap = icon_table_column_gap(table_outer_width);
+        let widest_label = IconTarget::ALL
+            .into_iter()
+            .map(|target| UnicodeWidthStr::width(target.label()))
+            .max()
+            .unwrap_or(ICON_TABLE_LABEL_WIDTH)
+            .max(ICON_TABLE_LABEL_WIDTH);
+        let expanded_outer_width = icon_table_picker_column(widest_label, column_gap)
+            + ICON_TABLE_PICKER_LABEL.width()
+            + 2;
+        let label_width = if usize::from(table_outer_width) >= expanded_outer_width {
+            widest_label
+        } else {
+            ICON_TABLE_LABEL_WIDTH
+        };
+
+        Self {
+            label_width,
+            column_gap,
+        }
+    }
+
+    fn picker_column(self) -> usize {
+        icon_table_picker_column(self.label_width, self.column_gap)
+    }
+}
 
 /// Result of a click on one visible row in the icon assignment table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,8 +256,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 &app.inference_settings,
                 app.inference_test_result.as_ref(),
                 &app.inference_test_state,
-                &app.ollama_model_discovery,
+                &app.model_discovery,
                 &app.ollama_models,
+                &app.kilo_gateway_models,
                 state.selected_row,
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -416,8 +457,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             &app.inference_settings,
             app.inference_test_result.as_ref(),
             &app.inference_test_state,
-            &app.ollama_model_discovery,
+            &app.model_discovery,
             &app.ollama_models,
+            &app.kilo_gateway_models,
             selected_row,
         )
         .len() as u16,
@@ -458,10 +500,10 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
 fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let (left, right) = icon_tab_columns(area);
     let table_height = left.height.saturating_sub(2) as usize;
-    let column_gap = icon_table_column_gap(left.width);
+    let table_geometry = IconTableGeometry::for_outer_width(left.width);
     let start = usize::from(state.scroll).min(IconTarget::ALL.len());
     let mut lines = vec![Line::from(Span::styled(
-        format_icon_table_header(column_gap),
+        format_icon_table_header(table_geometry),
         Style::new().add_modifier(Modifier::BOLD),
     ))];
     for (index, target) in IconTarget::ALL
@@ -487,7 +529,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 target.label(),
                 app.ui_settings.icons.glyph(target),
                 &suggestions,
-                column_gap,
+                table_geometry,
             ),
             style,
         )));
@@ -645,11 +687,11 @@ fn icon_choice_slot(glyph: &str, is_selected: bool) -> String {
 
 /// Builds a row with stable display-cell columns for label, current glyph,
 /// suggestions, and the catalogue action.
-fn format_icon_table_header(column_gap: usize) -> String {
-    let gap = " ".repeat(column_gap);
+fn format_icon_table_header(geometry: IconTableGeometry) -> String {
+    let gap = " ".repeat(geometry.column_gap);
     format!(
         " {}{}{}{gap}Choices",
-        pad_icon_text("Type", ICON_TABLE_LABEL_WIDTH),
+        pad_icon_text("Type", geometry.label_width),
         gap,
         pad_icon_text("Now", ICON_TABLE_CURRENT_WIDTH),
     )
@@ -659,12 +701,12 @@ fn format_icon_assignment_row(
     label: &str,
     current_glyph: &str,
     suggestions: &str,
-    column_gap: usize,
+    geometry: IconTableGeometry,
 ) -> String {
-    let gap = " ".repeat(column_gap);
+    let gap = " ".repeat(geometry.column_gap);
     format!(
         " {}{}{}{}{}{}{}",
-        pad_icon_text(label, ICON_TABLE_LABEL_WIDTH),
+        pad_icon_text(label, geometry.label_width),
         gap,
         pad_icon_text(current_glyph, ICON_TABLE_CURRENT_WIDTH),
         gap,
@@ -682,9 +724,9 @@ fn icon_table_column_gap(table_outer_width: u16) -> usize {
     }
 }
 
-fn icon_table_picker_column(column_gap: usize) -> usize {
+fn icon_table_picker_column(label_width: usize, column_gap: usize) -> usize {
     ICON_TABLE_LEFT_INSET
-        + ICON_TABLE_LABEL_WIDTH
+        + label_width
         + column_gap
         + ICON_TABLE_CURRENT_WIDTH
         + column_gap
@@ -1095,6 +1137,7 @@ pub fn icon_picker_hit(
 
 pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<IconTableHit> {
     let (table, _) = icon_tab_columns(area);
+    let table_geometry = IconTableGeometry::for_outer_width(table.width);
     let table_inner = table.inner(ratatui::layout::Margin::new(1, 1));
     if !table_inner.contains(position) || position.y <= table_inner.y {
         return None;
@@ -1108,7 +1151,7 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     let target = IconTarget::ALL.get(target_index).copied()?;
     let picker_start = table_inner
         .x
-        .saturating_add(icon_table_picker_column(icon_table_column_gap(table.width)) as u16);
+        .saturating_add(table_geometry.picker_column() as u16);
     let picker_end = picker_start.saturating_add(ICON_TABLE_PICKER_LABEL.width() as u16);
     let action = if position.x >= picker_start && position.x < picker_end {
         IconTableAction::OpenCatalogue
@@ -1130,10 +1173,12 @@ pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<Infe
     use ilium_inference::InferenceProviderKind;
     let mut rows = vec![InferenceRow::Provider];
     match settings.selected_provider {
-        InferenceProviderKind::KiloGateway => {}
+        InferenceProviderKind::KiloGateway => {
+            rows.extend([InferenceRow::RefreshModels, InferenceRow::KiloGatewayModel])
+        }
         InferenceProviderKind::Ollama => rows.extend([
             InferenceRow::Field(InferenceSettingField::OllamaUrl),
-            InferenceRow::RefreshOllamaModels,
+            InferenceRow::RefreshModels,
             InferenceRow::Field(InferenceSettingField::OllamaModel),
         ]),
         InferenceProviderKind::OpenAi => rows.extend([
@@ -1158,12 +1203,16 @@ pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<Infe
 fn inference_value(
     row: InferenceRow,
     settings: &ilium_inference::InferenceSettings,
-    ollama_model_discovery: &OllamaModelDiscoveryState,
+    model_discovery: &ModelDiscoveryState,
 ) -> String {
     match row {
         InferenceRow::Provider => format!("‹ {} ›", settings.selected_provider.label()),
-        InferenceRow::RefreshOllamaModels => match ollama_model_discovery {
-            OllamaModelDiscoveryState::Loading { started_at, .. } => {
+        InferenceRow::RefreshModels => match model_discovery {
+            ModelDiscoveryState::Loading {
+                provider,
+                started_at,
+                ..
+            } if *provider == settings.selected_provider => {
                 let frame_index = (started_at.elapsed().as_millis()
                     / crate::tree_ui::SPINNER_FRAME_MS) as usize
                     % crate::tree_ui::SPINNER_FRAMES.len();
@@ -1172,11 +1221,14 @@ fn inference_value(
                     crate::tree_ui::SPINNER_FRAMES[frame_index]
                 )
             }
-            OllamaModelDiscoveryState::Failed { .. } => "[ Retry model discovery ]".to_string(),
-            OllamaModelDiscoveryState::Idle | OllamaModelDiscoveryState::Loaded { .. } => {
-                "[ Load models from Ollama ]".to_string()
+            ModelDiscoveryState::Failed { provider, .. }
+                if *provider == settings.selected_provider =>
+            {
+                "[ Retry model discovery ]".to_string()
             }
+            _ => "[ Load available models ]".to_string(),
         },
+        InferenceRow::KiloGatewayModel => format!("‹ {} ›", settings.kilo_gateway.model),
         InferenceRow::Test => "[ Test provider ]".to_string(),
         InferenceRow::Field(field) => match field {
             InferenceSettingField::OllamaUrl => settings.ollama.base_url.clone(),
@@ -1206,7 +1258,8 @@ fn inference_label(row: InferenceRow) -> &'static str {
     match row {
         InferenceRow::Provider => "Provider",
         InferenceRow::Field(field) => field.label(),
-        InferenceRow::RefreshOllamaModels => "Available models",
+        InferenceRow::RefreshModels => "Available models",
+        InferenceRow::KiloGatewayModel => "Kilo model",
         InferenceRow::Test => "Test",
     }
 }
@@ -1214,8 +1267,9 @@ fn inference_lines(
     settings: &ilium_inference::InferenceSettings,
     test_result: Option<&crate::inference_test::InferenceTestResult>,
     test_state: &InferenceTestState,
-    ollama_model_discovery: &OllamaModelDiscoveryState,
+    model_discovery: &ModelDiscoveryState,
     ollama_models: &[String],
+    kilo_gateway_models: &[String],
     selected_row: usize,
 ) -> Vec<Line<'static>> {
     let rows = inference_rows(settings);
@@ -1241,10 +1295,7 @@ fn inference_lines(
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled(label, label_style),
             Span::raw(" ".repeat(padding)),
-            Span::styled(
-                inference_value(row, settings, ollama_model_discovery),
-                value_style,
-            ),
+            Span::styled(inference_value(row, settings, model_discovery), value_style),
         ]));
         let description = match row {
             InferenceRow::Provider => {
@@ -1253,11 +1304,14 @@ fn inference_lines(
             InferenceRow::Field(InferenceSettingField::OllamaModel) => {
                 "Use left/right to select a loaded local model, or Enter to type a model name."
             }
+            InferenceRow::KiloGatewayModel => {
+                "Use left/right to choose a free model from Kilo Gateway's live catalog."
+            }
             InferenceRow::Field(_) => {
                 "Press Enter to edit this value. API keys remain masked in this view."
             }
-            InferenceRow::RefreshOllamaModels => {
-                "Fetch the selectable model list from this Ollama API URL."
+            InferenceRow::RefreshModels => {
+                "Fetch the current selectable models from this provider's catalog."
             }
             InferenceRow::Test => {
                 "Send a harmless title-and-organize prompt and preview the returned tree structure."
@@ -1269,12 +1323,18 @@ fn inference_lines(
         )));
         lines.push(Line::from(""));
     }
-    if settings.selected_provider == ilium_inference::InferenceProviderKind::Ollama {
-        lines.extend(ollama_discovery_lines(
-            settings,
-            ollama_model_discovery,
-            ollama_models,
-        ));
+    if matches!(
+        settings.selected_provider,
+        ilium_inference::InferenceProviderKind::KiloGateway
+            | ilium_inference::InferenceProviderKind::Ollama
+    ) {
+        let models =
+            if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway {
+                kilo_gateway_models
+            } else {
+                ollama_models
+            };
+        lines.extend(model_discovery_lines(settings, model_discovery, models));
     }
     lines.extend(inference_test_log_lines(test_state));
     if let Some(result) = test_result {
@@ -1424,64 +1484,77 @@ fn inference_test_log_lines(test_state: &InferenceTestState) -> Vec<Line<'static
 /// normal status bar is intentionally not visible while Settings replaces the
 /// whole screen, so an async operation must report its progress and outcome
 /// here rather than only through `App::status_message`.
-fn ollama_discovery_lines(
+fn model_discovery_lines(
     settings: &ilium_inference::InferenceSettings,
-    discovery: &OllamaModelDiscoveryState,
+    discovery: &ModelDiscoveryState,
     models: &[String],
 ) -> Vec<Line<'static>> {
-    let endpoint = settings.ollama.base_url.trim_end_matches('/');
-    let tags_url = format!("{endpoint}/api/tags");
+    let provider = settings.selected_provider;
+    let provider_label = provider.label();
+    let endpoint = match provider {
+        ilium_inference::InferenceProviderKind::KiloGateway => {
+            ilium_inference::kilo_gateway_model_catalog_url()
+        }
+        ilium_inference::InferenceProviderKind::Ollama => format!(
+            "{}/api/tags",
+            settings.ollama.base_url.trim_end_matches('/')
+        ),
+        _ => String::new(),
+    };
+    let selected_model = settings.selected_model();
     let mut lines = vec![Line::from("")];
     match discovery {
-        OllamaModelDiscoveryState::Idle => {
+        ModelDiscoveryState::Idle => {
             lines.push(Line::from(Span::styled(
                 "  Model discovery has not run in this client session.",
                 Style::new().add_modifier(Modifier::DIM),
             )));
             lines.push(Line::from(Span::styled(
-                format!("  Load models calls GET {tags_url}, then extracts each model name."),
+                format!("  Load models calls GET {endpoint}, then extracts compatible names."),
                 Style::new().add_modifier(Modifier::DIM),
             )));
         }
-        OllamaModelDiscoveryState::Loading {
+        ModelDiscoveryState::Loading {
+            provider: active_provider,
             endpoint,
             started_at,
-        } => {
+        } if *active_provider == provider => {
             let frame_index = (started_at.elapsed().as_millis() / crate::tree_ui::SPINNER_FRAME_MS)
                 as usize
                 % crate::tree_ui::SPINNER_FRAMES.len();
             let elapsed = started_at.elapsed().as_secs_f64();
             lines.extend(boxed_operation_log(
-                "Ollama model discovery log",
+                &format!("{provider_label} model discovery log"),
                 format!(
-                    "{} Discovering local models from {endpoint} · {elapsed:.1}s elapsed",
+                    "{} Discovering models from {endpoint} · {elapsed:.1}s elapsed",
                     crate::tree_ui::SPINNER_FRAMES[frame_index],
                 ),
                 theme::selected_style().add_modifier(Modifier::BOLD),
                 vec![
                     (
-                        format!("1. Connect to the configured Ollama API at {endpoint}."),
+                        format!("1. Connect to {provider_label} at {endpoint}."),
                         Style::new().add_modifier(Modifier::DIM),
                     ),
                     (
-                        format!("2. Request GET {endpoint}/api/tags."),
+                        format!("2. Request GET {endpoint}."),
                         Style::new().add_modifier(Modifier::DIM),
                     ),
                     (
-                        "3. Validate the JSON response and extract model names.".to_string(),
+                        "3. Validate the catalog and extract selectable model names.".to_string(),
                         Style::new().add_modifier(Modifier::DIM),
                     ),
                 ],
             ));
         }
-        OllamaModelDiscoveryState::Loaded {
+        ModelDiscoveryState::Loaded {
+            provider: active_provider,
             endpoint,
             model_count,
             elapsed,
-        } => {
+        } if *active_provider == provider => {
             lines.extend(boxed_operation_log(
-                "Ollama model discovery log",
-                format!("✓ GET /api/tags completed in {:.2}s", elapsed.as_secs_f64()),
+                &format!("{provider_label} model discovery log"),
+                format!("✓ Catalog loaded in {:.2}s", elapsed.as_secs_f64()),
                 theme::selected_style().add_modifier(Modifier::BOLD),
                 vec![
                     (format!("1. Connected to {endpoint}."), Style::new()),
@@ -1490,19 +1563,21 @@ fn ollama_discovery_lines(
                         Style::new(),
                     ),
                     (
-                        "3. Updated the selected model when needed.".to_string(),
+                        "3. Kept the saved selection unless the local Ollama model disappeared."
+                            .to_string(),
                         Style::new(),
                     ),
                 ],
             ));
         }
-        OllamaModelDiscoveryState::Failed {
+        ModelDiscoveryState::Failed {
+            provider: active_provider,
             endpoint,
             error,
             elapsed,
-        } => {
+        } if *active_provider == provider => {
             lines.extend(boxed_operation_log(
-                "Ollama model discovery log",
+                &format!("{provider_label} model discovery log"),
                 format!(
                     "✗ Model discovery failed after {:.2}s",
                     elapsed.as_secs_f64()
@@ -1511,25 +1586,38 @@ fn ollama_discovery_lines(
                 vec![
                     (format!("Endpoint: {endpoint}"), Style::new().fg(Color::Red)),
                     (
-                        format!("Ollama reported: {error}"),
+                        format!("{provider_label} reported: {error}"),
                         Style::new().fg(Color::Red),
                     ),
                     (
-                        format!("Retry calls GET {tags_url} after Ollama is available."),
+                        "The last known model list remains available; retry refresh when ready."
+                            .to_string(),
                         Style::new().add_modifier(Modifier::DIM),
                     ),
                 ],
             ));
         }
+        _ => {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  Model discovery has not run for {provider_label} in this client session."
+                ),
+                Style::new().add_modifier(Modifier::DIM),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Load models calls GET {endpoint}."),
+                Style::new().add_modifier(Modifier::DIM),
+            )));
+        }
     }
     if !models.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  Models returned by Ollama (use left/right on Ollama model to select)",
+            format!("  Models available from {provider_label} (use left/right to select)"),
             Style::new().add_modifier(Modifier::BOLD),
         )));
         for model in models {
-            let marker = if model == &settings.ollama.model {
+            let marker = if model == selected_model {
                 "[x]"
             } else {
                 "[ ]"
@@ -1542,6 +1630,12 @@ fn ollama_discovery_lines(
             lines.push(Line::from(Span::styled(
                 format!("    {marker} {model}"),
                 style,
+            )));
+        }
+        if !models.iter().any(|model| model == selected_model) {
+            lines.push(Line::from(Span::styled(
+                format!("    [!] Saved model is not in this catalog: {selected_model}"),
+                Style::new().fg(Color::Yellow),
             )));
         }
     }
@@ -2174,6 +2268,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::SidebarDensity => "Sidebar density",
         AppearanceRow::UseStableGlyphs => "Use stable glyphs",
         AppearanceRow::ShowInferredTitleIcons => "Show inferred title icons",
+        AppearanceRow::AgentDebugMenu => "Agent debug menu",
     }
 }
 
@@ -2199,6 +2294,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ShowInferredTitleIcons => {
             "Show the LLM-provided UTF-8 icon before short and long inferred titles in the left panel."
+        }
+        AppearanceRow::AgentDebugMenu => {
+            "Show a detected-agent right-click history action and persist prompts, detection evidence, session phases, LLM work, and errors in this project's private session snapshot."
         }
     }
 }
@@ -2230,6 +2328,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         }
         AppearanceRow::ShowInferredTitleIcons => {
             if ui.show_inferred_title_icons {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AgentDebugMenu => {
+            if ui.agent_debug_menu_enabled {
                 "On".to_string()
             } else {
                 "Off".to_string()
@@ -2822,6 +2927,7 @@ mod tests {
     fn icon_table_hit_uses_the_rendered_data_row_and_exact_catalogue_button() {
         let area = Rect::new(0, 0, 120, 30);
         let (table, _) = icon_tab_columns(area);
+        let table_geometry = IconTableGeometry::for_outer_width(table.width);
         let inner = table.inner(ratatui::layout::Margin::new(1, 1));
 
         // The first inner line is the table heading. The first target starts
@@ -2849,10 +2955,7 @@ mod tests {
             icons_table_hit(
                 area,
                 0,
-                Position::new(
-                    inner.x + icon_table_picker_column(icon_table_column_gap(table.width)) as u16,
-                    inner.y + 1,
-                ),
+                Position::new(inner.x + table_geometry.picker_column() as u16, inner.y + 1),
             ),
             Some(IconTableHit {
                 target: IconTarget::Group,
@@ -2888,10 +2991,84 @@ mod tests {
             .map(|glyph| icon_choice_slot(glyph, *glyph == "🗂️"))
             .collect::<Vec<_>>()
             .join(" ");
-        let row = format_icon_assignment_row("Folder", "🗂️", &choices, ICON_TABLE_COMPACT_GAP);
+        let compact_geometry = IconTableGeometry::for_outer_width(ICON_TABLE_MIN_OUTER_WIDTH);
+        let row = format_icon_assignment_row("Folder", "🗂️", &choices, compact_geometry);
         assert_eq!(
             UnicodeWidthStr::width(row.as_str()),
             ICON_TABLE_PICKER_COLUMN + ICON_TABLE_PICKER_LABEL.width()
+        );
+    }
+
+    #[test]
+    fn icon_table_expands_the_title_column_only_when_every_title_fits() {
+        let widest_label = IconTarget::ALL
+            .into_iter()
+            .map(|target| UnicodeWidthStr::width(target.label()))
+            .max()
+            .unwrap();
+        let expanded_outer_width =
+            icon_table_picker_column(widest_label, ICON_TABLE_COMFORTABLE_GAP)
+                + ICON_TABLE_PICKER_LABEL.width()
+                + 2;
+
+        let compact_geometry = IconTableGeometry::for_outer_width(ICON_TABLE_MIN_OUTER_WIDTH);
+        assert_eq!(compact_geometry.label_width, ICON_TABLE_LABEL_WIDTH);
+
+        let almost_wide_enough =
+            IconTableGeometry::for_outer_width((expanded_outer_width - 1) as u16);
+        assert_eq!(almost_wide_enough.label_width, ICON_TABLE_LABEL_WIDTH);
+
+        let expanded_geometry = IconTableGeometry::for_outer_width(expanded_outer_width as u16);
+        assert_eq!(expanded_geometry.label_width, widest_label);
+    }
+
+    #[test]
+    fn roomy_icons_table_aligns_later_columns_after_short_and_long_titles() {
+        let content_area = compute_layout(Rect::new(0, 0, 160, 45)).content_area;
+        let (table, _) = icon_tab_columns(content_area);
+        let geometry = IconTableGeometry::for_outer_width(table.width);
+        let choices = IconTarget::Folder
+            .suggestions()
+            .iter()
+            .map(|glyph| icon_choice_slot(glyph, false))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let short_row = format_icon_assignment_row("Folder", "📂", &choices, geometry);
+        let long_row = format_icon_assignment_row(
+            IconTarget::RowProjectRestructure.label(),
+            "♻️",
+            &choices,
+            geometry,
+        );
+        let short_picker_column = UnicodeWidthStr::width(
+            short_row
+                .strip_suffix(ICON_TABLE_PICKER_LABEL)
+                .expect("assignment row ends with its catalogue button"),
+        );
+        let long_picker_column = UnicodeWidthStr::width(
+            long_row
+                .strip_suffix(ICON_TABLE_PICKER_LABEL)
+                .expect("assignment row ends with its catalogue button"),
+        );
+
+        assert!(geometry.label_width > ICON_TABLE_LABEL_WIDTH);
+        assert_eq!(short_picker_column, geometry.picker_column());
+        assert_eq!(long_picker_column, geometry.picker_column());
+
+        let table_inner = table.inner(ratatui::layout::Margin::new(1, 1));
+        assert_eq!(
+            icons_table_hit(
+                content_area,
+                0,
+                Position::new(
+                    table_inner.x + geometry.picker_column() as u16,
+                    table_inner.y + 1,
+                ),
+            ),
+            Some(IconTableHit {
+                target: IconTarget::Group,
+                action: IconTableAction::OpenCatalogue,
+            })
         );
     }
 
@@ -2912,14 +3089,21 @@ mod tests {
         let settings = ilium_inference::InferenceSettings::default();
         assert_eq!(
             inference_rows(&settings),
-            vec![InferenceRow::Provider, InferenceRow::Test]
+            vec![
+                InferenceRow::Provider,
+                InferenceRow::RefreshModels,
+                InferenceRow::KiloGatewayModel,
+                InferenceRow::Test
+            ]
         );
+        let kilo_models = ilium_inference::kilo_gateway_fallback_models();
         let text = inference_lines(
             &settings,
             None,
             &InferenceTestState::Idle,
-            &OllamaModelDiscoveryState::Idle,
+            &ModelDiscoveryState::Idle,
             &[],
+            &kilo_models,
             0,
         )
         .into_iter()
@@ -2927,29 +3111,32 @@ mod tests {
         .collect::<String>();
         assert!(text.contains("Do not send secrets"));
         assert!(text.contains("LLM training"));
+        assert!(text.contains("kilo-auto/free"));
 
         let mut ollama = settings;
         ollama.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
-        assert!(inference_rows(&ollama).contains(&InferenceRow::RefreshOllamaModels));
+        assert!(inference_rows(&ollama).contains(&InferenceRow::RefreshModels));
 
         let discovered_models = vec!["qwen3.6:latest".to_string(), "gemma4:12b".to_string()];
         let loading_text = inference_lines(
             &ollama,
             None,
             &InferenceTestState::Idle,
-            &OllamaModelDiscoveryState::Loading {
-                endpoint: "http://127.0.0.1:11434".to_string(),
+            &ModelDiscoveryState::Loading {
+                provider: ilium_inference::InferenceProviderKind::Ollama,
+                endpoint: "http://127.0.0.1:11434/api/tags".to_string(),
                 started_at: std::time::Instant::now(),
             },
             &discovered_models,
+            &[],
             0,
         )
         .into_iter()
         .map(|line| line.to_string())
         .collect::<String>();
-        assert!(loading_text.contains("Discovering local models"));
-        assert!(loading_text.contains("Ollama model discovery log"));
-        assert!(loading_text.contains("GET http://127.0.0.1:11434/api/tags"));
+        assert!(loading_text.contains("Discovering models"));
+        assert!(loading_text.contains("Ollama (local) model discovery log"));
+        assert!(loading_text.contains("Request GET http://127.0.0.1:11434/api/tags"));
         assert!(loading_text.contains("qwen3.6:latest"));
     }
 
@@ -2963,7 +3150,8 @@ mod tests {
                 provider: ilium_inference::InferenceProviderKind::Ollama,
                 started_at: std::time::Instant::now(),
             },
-            &OllamaModelDiscoveryState::Idle,
+            &ModelDiscoveryState::Idle,
+            &[],
             &[],
             0,
         )
@@ -3022,7 +3210,7 @@ mod tests {
     fn running_ollama_discovery_is_visibly_boxed_in_the_rendered_settings_screen() {
         let mut app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
         app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
-        app.request_ollama_model_refresh();
+        app.request_model_refresh();
         let state = SettingsState {
             tab: SettingsTab::Inference,
             selected_row: 1,
@@ -3042,8 +3230,8 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(rendered.contains("Ollama model discovery log"));
-        assert!(rendered.contains("Discovering local models"));
+        assert!(rendered.contains("Ollama (local) model discovery log"));
+        assert!(rendered.contains("Discovering models"));
         assert!(rendered.contains("Request GET"));
         assert!(rendered.contains("┌"));
         assert!(rendered.contains("│"));
@@ -3092,7 +3280,7 @@ mod tests {
     }
 
     #[test]
-    fn appearance_lines_expose_agent_mode_and_stable_glyph_opt_in() {
+    fn appearance_lines_expose_agent_mode_stable_glyphs_and_private_debug_history() {
         let ui = UiSettings {
             tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
@@ -3118,6 +3306,8 @@ mod tests {
         assert!(!rendered.contains("Antigravity icon"));
         assert!(rendered.contains("Use stable glyphs"));
         assert!(rendered.contains("Off (normal icons)"));
+        assert!(rendered.contains("Agent debug menu"));
+        assert!(rendered.contains("persist prompts, detection evidence, session phases"));
     }
 
     #[test]

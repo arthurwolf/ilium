@@ -294,7 +294,7 @@ pub enum SettingsAction {
     Set,
     Adjust,
     TestInference,
-    RefreshOllamaModels,
+    RefreshModels,
     PreviewSound,
 }
 

@@ -8,6 +8,10 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ilium_agent_debug::{
+    AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField, AgentDebugSeverity,
+    AgentDebugSource,
+};
 use ilium_core::{NodeId, ScheduledPaneInput, Tree};
 use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 use tokio::task::JoinHandle;
@@ -99,11 +103,46 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
         if !is_current_schedule(state, pane_id, &scheduled_input).await {
             continue;
         }
-        if let Err(message) = write_scheduled_input(state, pane_id, &scheduled_input).await {
+        let delivery_error = write_scheduled_input(state, pane_id, &scheduled_input)
+            .await
+            .err();
+        if let Some(message) = &delivery_error {
             tracing::error!("scheduled input failed for pane {pane_id:?}: {message}");
             state.broadcast(ServerEvent::Error {
                 message: format!("Scheduled input failed for pane {pane_id:?}: {message}"),
             });
+            let _ = crate::agent_debug::record(
+                state,
+                pane_id,
+                AgentDebugSource::Pty,
+                AgentDebugEventDraft {
+                    severity: AgentDebugSeverity::Error,
+                    kind: AgentDebugEventKind::Error,
+                    summary: "Scheduled input delivery failed".to_string(),
+                    fields: vec![AgentDebugField::multiline("error", message.clone())],
+                    correlation_id: None,
+                    metadata: Default::default(),
+                },
+            )
+            .await;
+        } else {
+            let _ = crate::agent_debug::record(
+                state,
+                pane_id,
+                AgentDebugSource::Pty,
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::ScheduledInputDelivered,
+                    "Scheduled input delivered",
+                )
+                .with_fields(vec![
+                    AgentDebugField::plain(
+                        "scheduled for",
+                        scheduled_input.execute_at_unix_millis.to_string(),
+                    ),
+                    AgentDebugField::plain("sent Enter", scheduled_input.send_enter.to_string()),
+                ]),
+            )
+            .await;
         }
         let cleared = {
             let mut tree = state.tree.write().await;

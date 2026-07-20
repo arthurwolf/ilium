@@ -50,7 +50,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ilium_core::{NodeId, PaneStatus, ROOT_ID};
-use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
+use ilium_ipc::{
+    read_frame, write_frame, AgentDebugEventKind, ClientRequest, NewPaneKind, ServerEvent,
+};
 use ilium_server::config::DetectionConfig;
 use ilium_server::SoundPlayer;
 
@@ -64,12 +66,12 @@ use common::{expect_event, TestServer};
 /// `DetectionConfig`, which only controls how *often a due pane is
 /// rechecked*, not the loop's own wake cadence) even under test-runner
 /// load.
-const WORKING_PHASE_SECONDS: u32 = 4;
+const WORKING_PHASE_SECONDS: u32 = 12;
 
 /// Generous relative to the fixed ~1s tick granularity above -- covers a
 /// slow CI runner without ever being so long a genuine regression would
 /// make this test slow to fail.
-const WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct RecordingSoundPlayer {
     calls: Arc<Mutex<Vec<ilium_sound::SoundSettings>>>,
@@ -182,6 +184,16 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     .expect("write Attach request");
     let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
         matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::UpdateAgentDebugMenu { enabled: true },
+    )
+    .await
+    .expect("enable live per-agent debug capture");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::AgentDebugMenuChanged { enabled: true })
     })
     .await;
     write_frame(
@@ -336,6 +348,110 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         ilium_sound::SoundSourceKind::SystemBeep
     );
 
+    write_frame(
+        &mut client,
+        &ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence: None,
+        },
+    )
+    .await
+    .expect("request the complete live debug history");
+    let debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id: changed_id,
+                ..
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
+        unreachable!("predicate only matches PaneDebugLogSnapshot");
+    };
+    for expected_kind in [
+        AgentDebugEventKind::DetectionCycle,
+        AgentDebugEventKind::PromptQueued,
+        AgentDebugEventKind::PromptSubmitted,
+        AgentDebugEventKind::QueuedPromptDelivered,
+    ] {
+        assert!(
+            entries.iter().any(|entry| entry.kind == expected_kind),
+            "live history should contain {expected_kind:?}: {entries:#?}"
+        );
+    }
+    let detection_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.kind == AgentDebugEventKind::DetectionCycle)
+        .collect();
+    assert_eq!(
+        detection_entries.len(),
+        2,
+        "four identical working polls and repeated done polls must produce only the Working and Done decisions: {detection_entries:#?}"
+    );
+    assert!(detection_entries.iter().all(|entry| {
+        [
+            "Agent identity decision",
+            "Activity decision",
+            "Goal decision",
+            "Session identity decision",
+            "Applied pane state",
+        ]
+        .iter()
+        .all(|label| entry.fields.iter().any(|field| field.label == *label))
+    }));
+    assert!(detection_entries.iter().all(|entry| {
+        entry.fields.iter().all(|field| {
+            !field.label.contains("phase ")
+                && !field.label.contains("generation")
+                && !field.value.contains("NoActiveMarker")
+                && !field.value.contains("AgentWithGoal")
+        })
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry.kind == AgentDebugEventKind::PromptSubmitted
+            && entry.fields.iter().any(|field| {
+                field.label == "submitted input" && field.value == "queued-live-marker"
+            })
+    }));
+
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence: None,
+        },
+    )
+    .await
+    .expect("request history after several unchanged done-state polls");
+    let later_debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id: changed_id,
+                ..
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneDebugLogSnapshot {
+        entries: later_entries,
+        ..
+    } = later_debug_event
+    else {
+        unreachable!("predicate only matches PaneDebugLogSnapshot");
+    };
+    let later_detection_entries: Vec<_> = later_entries
+        .iter()
+        .filter(|entry| entry.kind == AgentDebugEventKind::DetectionCycle)
+        .collect();
+    assert_eq!(
+        later_detection_entries, detection_entries,
+        "unchanged polls must not mutate timestamps, counts, fields, or sequences"
+    );
+
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
@@ -395,6 +511,34 @@ fn write_transcript_holding_fake_agent_binary(
     script_path
 }
 
+/// Writes a Codex-shaped process that reproduces 0.144.6's `/clear`
+/// descriptor lifecycle: the old rollout stays open, `/clear` resets the
+/// conversation in place, and the next submitted prompt opens a new rollout
+/// without replacing the process.
+fn write_clear_transitioning_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = bin_dir.join("codex");
+    let script = "#!/bin/sh\n\
+                  exec 3<\"$1\"\n\
+                  cleared=0\n\
+                  printf 'Done. Ready for the next instruction.\\n'\n\
+                  while IFS= read -r submitted_line; do\n\
+                  \x20\x20if [ \"$submitted_line\" = \"/clear\" ]; then\n\
+                  \x20\x20\x20\x20cleared=1\n\
+                  \x20\x20\x20\x20printf '\\033[2J\\033[Hnew conversation started\\n'\n\
+                  \x20\x20elif [ \"$cleared\" -eq 1 ]; then\n\
+                  \x20\x20\x20\x20exec 4<\"$2\"\n\
+                  \x20\x20\x20\x20cleared=0\n\
+                  \x20\x20\x20\x20printf '23\\n'\n\
+                  \x20\x20fi\n\
+                  done\n";
+    let mut file = std::fs::File::create(&script_path).expect("create fake clearing Codex script");
+    file.write_all(script.as_bytes())
+        .expect("write fake clearing Codex script");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("chmod fake clearing Codex script executable");
+    script_path
+}
+
 fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> std::path::PathBuf {
     let slug: String = server
         .project_cwd
@@ -446,9 +590,9 @@ fn write_verified_codex_transcript(server: &TestServer, session_id: &str) -> std
 /// [`a_real_process_named_claude_drives_working_to_idle_through_the_whole_pipeline`])
 /// invoked with a `--resume <uuid>` argument and holding that transcript open
 /// must broadcast that exact uuid as a real `ServerEvent::PaneSessionIdResolved`
-/// to a real connected IPC client. It then proves the old descriptor is
-/// quarantined after `/resume`, covering both admissible process-bound sources
-/// and the in-process transition lifecycle end to end.
+/// to a real connected IPC client. It then proves `/clear` discards that ID,
+/// every old title field, and the old descriptor before `/resume` repeats the
+/// same invalidation contract.
 #[tokio::test]
 async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
@@ -541,7 +685,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             title: "Title From The Old Session".to_string(),
             short_title: Some("Old Session".to_string()),
             inferred_icon: Some("📜".to_string()),
-            title_source: ilium_core::PaneTitleSource::Automatic,
+            title_source: ilium_core::PaneTitleSource::UserSpecified,
         },
     )
     .await
@@ -555,10 +699,9 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     })
     .await;
 
-    // `/clear` preserves this fake process's resolved session ID, exactly
-    // the case where an ID-only title compare-and-set would let an old LLM
-    // worker put the stale title back. The real input path must reset both
-    // displayed title forms and advance the independent title generation.
+    // `/clear` must be an ilium identity boundary even while this fake Claude
+    // process keeps its old transcript descriptor open. A user title belongs
+    // to that old conversation too, so every title field must be discarded.
     write_frame(
         &mut client,
         &ClientRequest::KeyInput {
@@ -569,26 +712,43 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("submit /clear to the live fake agent");
-    let clear_event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::PaneSessionTitleCleared {
-                pane_id: changed_id,
-                title_generation: 1,
-            } if *changed_id == pane_id
-        )
+    let mut saw_session_clear = false;
+    let mut saw_title_clear = false;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !saw_session_clear || !saw_title_clear {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read a Claude clear transition event");
+            match event {
+                ServerEvent::PaneSessionIdCleared {
+                    pane_id: changed_id,
+                    title_generation: 1,
+                } if changed_id == pane_id => saw_session_clear = true,
+                ServerEvent::PaneSessionTitleCleared {
+                    pane_id: changed_id,
+                    title_generation: 1,
+                } if changed_id == pane_id => saw_title_clear = true,
+                _ => {}
+            }
+        }
     })
-    .await;
-    assert!(matches!(
-        clear_event,
-        ServerEvent::PaneSessionTitleCleared { .. }
-    ));
+    .await
+    .expect("timed out waiting for both Claude /clear transitions");
     let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
         matches!(
             event,
             ServerEvent::TreeSnapshot(tree)
                 if tree.get(pane_id).is_some_and(|node| {
-                    node.name == command_line && node.short_name.is_none()
+                    node.name == "<new>"
+                        && node.short_name.is_none()
+                        && node.inferred_icon.is_none()
+                        && matches!(
+                            &node.kind,
+                            ilium_core::NodeKind::Pane {
+                                title_source: ilium_core::PaneTitleSource::Automatic,
+                                ..
+                            }
+                        )
                 })
         )
     })
@@ -624,10 +784,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let ServerEvent::TreeSnapshot(tree_after_stale_clear) = tree_after_stale_clear else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    assert_eq!(
-        tree_after_stale_clear.get(pane_id).unwrap().name,
-        command_line
-    );
+    assert_eq!(tree_after_stale_clear.get(pane_id).unwrap().name, "<new>");
     assert_eq!(
         tree_after_stale_clear.get(pane_id).unwrap().short_name,
         None
@@ -705,7 +862,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let ServerEvent::TreeSnapshot(authoritative_tree) = authoritative_tree else {
         unreachable!("predicate only matches TreeSnapshot");
     };
-    assert_eq!(authoritative_tree.get(pane_id).unwrap().name, command_line);
+    assert_eq!(authoritative_tree.get(pane_id).unwrap().name, "<new>");
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -867,6 +1024,341 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
         unreachable!("predicate only matches PaneSessionIdResolved");
     };
     assert_eq!(resolved_session_id, session_id);
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+/// Reproduces the real Codex 0.144.6 failure mode end to end. `/clear` keeps
+/// one process alive and its old transcript open, while the next prompt opens
+/// a different rollout. The server must clear the old identity immediately,
+/// quarantine it during the empty transition window, then bind the new ID from
+/// the same PID even though both descriptors remain open.
+#[tokio::test]
+async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake codex binary");
+    let fake_codex_path = write_clear_transitioning_fake_codex_binary(fake_bin_dir.path());
+    let old_session_id = "7a111111-1111-4111-8111-111111111111";
+    let new_session_id = "7a222222-2222-4222-8222-222222222222";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(200),
+        idle_poll_interval: Duration::from_millis(200),
+    };
+    let mut server = TestServer::start_with_agent_debug(
+        "live-codex-clear-session-transition-test",
+        detection_config,
+    )
+    .await;
+    let old_transcript_path = write_verified_codex_transcript(&server, old_session_id);
+    let new_transcript_path = write_verified_codex_transcript(&server, new_session_id);
+    let mut client = server.connect().await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "live-codex-clear-session-transition-test".to_string(),
+        },
+    )
+    .await
+    .expect("write Attach request");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(format!(
+                "{} {} {}",
+                fake_codex_path.display(),
+                old_transcript_path.display(),
+                new_transcript_path.display()
+            )),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("write NewPane request");
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    let initial_resolution = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id: changed_id,
+                session_id,
+                ..
+            } if *changed_id == pane_id && session_id == old_session_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneSessionIdResolved {
+        process_id: initial_process_id,
+        title_generation: initial_title_generation,
+        ..
+    } = initial_resolution
+    else {
+        unreachable!("predicate only matches PaneSessionIdResolved");
+    };
+    assert!(initial_process_id.is_some());
+    assert_eq!(initial_title_generation, 0);
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"/clear\r".to_vec(),
+            submission: None,
+        },
+    )
+    .await
+    .expect("submit /clear to the live fake Codex process");
+
+    let mut saw_session_clear = false;
+    let mut saw_title_clear = false;
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        while !saw_session_clear || !saw_title_clear {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read a clear transition event");
+            match event {
+                ServerEvent::PaneSessionIdCleared {
+                    pane_id: changed_id,
+                    title_generation,
+                } if changed_id == pane_id => {
+                    assert_eq!(title_generation, 1);
+                    saw_session_clear = true;
+                }
+                ServerEvent::PaneSessionTitleCleared {
+                    pane_id: changed_id,
+                    title_generation,
+                } if changed_id == pane_id => {
+                    assert_eq!(title_generation, 1);
+                    saw_title_clear = true;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for both /clear state transitions");
+
+    let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::TreeSnapshot(tree)
+                if tree.get(pane_id).is_some_and(|node| node.name == "<new>")
+        )
+    })
+    .await;
+    assert!(matches!(reset_after_clear, ServerEvent::TreeSnapshot(_)));
+
+    // The fake process still holds only the invalidated old transcript until
+    // its next prompt, matching the real Codex transition window exactly.
+    let rebound_old_session = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read event while checking the /clear quarantine");
+            if matches!(
+                event,
+                ServerEvent::PaneSessionIdResolved {
+                    pane_id: changed_id,
+                    session_id,
+                    ..
+                } if changed_id == pane_id && session_id == old_session_id
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        rebound_old_session.is_err(),
+        "the old rollout must stay quarantined while Codex waits for its next prompt"
+    );
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"What is 9 + 14?\r".to_vec(),
+            submission: None,
+        },
+    )
+    .await
+    .expect("submit the first prompt in the new Codex rollout");
+    let replacement_resolution = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id: changed_id,
+                session_id,
+                ..
+            } if *changed_id == pane_id && session_id == new_session_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneSessionIdResolved {
+        process_id: replacement_process_id,
+        title_generation: replacement_title_generation,
+        ..
+    } = replacement_resolution
+    else {
+        unreachable!("predicate only matches PaneSessionIdResolved");
+    };
+    assert_eq!(replacement_process_id, initial_process_id);
+    assert_eq!(replacement_title_generation, 1);
+
+    write_frame(
+        &mut client,
+        &ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence: None,
+        },
+    )
+    .await
+    .expect("request the complete Codex transition history");
+    let debug_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneDebugLogSnapshot {
+                pane_id: changed_id,
+                ..
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+    let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
+        unreachable!("predicate only matches PaneDebugLogSnapshot");
+    };
+    let session_clear = entries
+        .iter()
+        .find(|entry| {
+            entry.kind == AgentDebugEventKind::SessionCleared
+                && entry.summary.contains("submitted command")
+        })
+        .expect("history contains the command-driven identity invalidation");
+    let replacement = entries
+        .iter()
+        .find(|entry| {
+            entry.kind == AgentDebugEventKind::SessionResolved
+                && entry.fields.iter().any(|field| {
+                    field.label == "Accepted session ID" && field.value == new_session_id
+                })
+        })
+        .expect("history contains the project-verified replacement identity");
+    let unresolved_transition_discovery = entries
+        .iter()
+        .find(|entry| {
+            entry.kind == AgentDebugEventKind::SessionDiscovery
+                && entry.summary.contains("no admissible identity")
+                && entry.correlation_id == session_clear.correlation_id
+        })
+        .expect("history contains the unresolved post-clear discovery window");
+    let replacement_discovery = entries
+        .iter()
+        .find(|entry| {
+            entry.kind == AgentDebugEventKind::SessionDiscovery
+                && entry.summary.contains("project-verified identity")
+                && entry.fields.iter().any(|field| {
+                    field.label == "Session ID after check" && field.value == new_session_id
+                })
+        })
+        .expect("history contains the complete replacement discovery trace");
+    assert!(session_clear.fields.iter().any(|field| {
+        field.label == "session ID before invalidation" && field.value == old_session_id
+    }));
+    assert!(session_clear
+        .fields
+        .iter()
+        .any(|field| { field.label == "submitted transition command" && field.value == "/clear" }));
+    assert!(session_clear.fields.iter().any(|field| {
+        field.label == "invalidation rule"
+            && field.value.contains("Claude or Codex")
+            && field.value.contains("fresh ilium session identity")
+    }));
+    assert!(replacement.fields.iter().any(|field| {
+        field.label == "Replaced invalidated session ID" && field.value == old_session_id
+    }));
+    assert!(unresolved_transition_discovery.fields.iter().any(|field| {
+        field.label == "Excluded session IDs"
+            && field.value.contains(old_session_id)
+            && field.value.contains("invalidated")
+    }));
+    assert!(unresolved_transition_discovery
+        .fields
+        .iter()
+        .any(|field| { field.label == "Session ID after check" && field.value == "none" }));
+    assert!(replacement_discovery
+        .fields
+        .iter()
+        .any(|field| { field.label == "Provider under check" && field.value == "Codex" }));
+    assert!(replacement_discovery.fields.iter().any(|field| {
+        field.label == "Agent PID under check"
+            && initial_process_id.is_some_and(|process_id| field.value == process_id.to_string())
+    }));
+    assert!(replacement_discovery.fields.iter().any(|field| {
+        field.label == "Canonical project boundary"
+            && field.value == server.project_cwd.to_string_lossy()
+    }));
+    assert!(replacement_discovery.fields.iter().any(|field| {
+        field.label == "Phase: Open transcript descriptors"
+            && field.value.contains(old_session_id)
+            && field.value.contains(new_session_id)
+    }));
+    assert!(session_clear.correlation_id.is_some());
+    assert_eq!(replacement.correlation_id, session_clear.correlation_id);
+    assert_eq!(
+        replacement_discovery.correlation_id,
+        session_clear.correlation_id
+    );
+    assert!(entries.iter().any(|entry| {
+        entry.kind == AgentDebugEventKind::PromptSubmitted
+            && entry.correlation_id == session_clear.correlation_id
+            && entry.fields.iter().any(|field| {
+                field.label == "session lifecycle decision" && field.value.contains("Codex")
+            })
+    }));
+
+    let mut reattached_client = server.connect().await;
+    write_frame(
+        &mut reattached_client,
+        &ClientRequest::Attach {
+            session: "live-codex-clear-session-transition-test".to_string(),
+        },
+    )
+    .await
+    .expect("reattach after the Codex session transition");
+    let replayed_resolution = expect_event(&mut reattached_client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id: changed_id,
+                session_id,
+                process_id,
+                title_generation: 1,
+            } if *changed_id == pane_id
+                && session_id == new_session_id
+                && *process_id == initial_process_id
+        )
+    })
+    .await;
+    assert!(matches!(
+        replayed_resolution,
+        ServerEvent::PaneSessionIdResolved { .. }
+    ));
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

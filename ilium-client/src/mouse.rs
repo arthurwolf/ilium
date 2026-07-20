@@ -84,6 +84,18 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_context_menu_mouse(app, menu, mouse);
         return;
     }
+    if matches!(app.mode, Mode::AgentPaneContextMenu(_)) {
+        let Mode::AgentPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::AgentPaneContextMenu above");
+        };
+        handle_agent_pane_context_menu_mouse(app, menu, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::AgentDebugLog(_)) {
+        handle_agent_debug_log_mouse(app, mouse, position);
+        return;
+    }
     if matches!(app.mode, Mode::Search(_)) {
         let Mode::Search(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Search above");
@@ -205,6 +217,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
+            | Mode::AgentDebugSavePath(..)
             | Mode::ConfirmClose(_)
             | Mode::BoardCardPrompt(_, _)
             | Mode::BoardColumnPrompt(_, _)
@@ -232,6 +245,55 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     // A drag released outside the tree is a cancelled tree move.
     if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.set_drag_source(None);
+    }
+}
+
+fn handle_agent_pane_context_menu_mouse(
+    app: &mut App,
+    menu: crate::app::AgentPaneContextMenu,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::AgentPaneContextMenu(menu);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let action_row = menu.area.y.saturating_add(1);
+    if menu.area.contains(position) && position.y == action_row {
+        app.open_agent_debug_log(menu.pane_id);
+    } else {
+        app.mode = Mode::Normal;
+    }
+}
+
+fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && crate::agent_debug_ui::resize_filter_button_area(app.layout.pane_area).contains(position)
+    {
+        app.toggle_agent_debug_tree_resize_filter();
+        return;
+    }
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && crate::agent_debug_ui::save_button_area(app.layout.pane_area).contains(position)
+    {
+        let Mode::AgentDebugLog(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            return;
+        };
+        app.open_agent_debug_save_path(state);
+        return;
+    }
+    let Mode::AgentDebugLog(state) = &mut app.mode else {
+        return;
+    };
+    match mouse.kind {
+        MouseEventKind::ScrollUp => state.scroll_older(3),
+        MouseEventKind::ScrollDown => state.scroll_newer(3),
+        MouseEventKind::Down(MouseButton::Left)
+            if crate::agent_debug_ui::back_button_area(app.layout.pane_area).contains(position) =>
+        {
+            app.mode = Mode::Normal;
+        }
+        _ => {}
     }
 }
 
@@ -993,8 +1055,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         crate::app::InferenceRow::Provider => {
                             app.settings_adjust_inference_provider(direction)
                         }
-                        crate::app::InferenceRow::RefreshOllamaModels => {
-                            app.request_ollama_model_refresh()
+                        crate::app::InferenceRow::RefreshModels => app.request_model_refresh(),
+                        crate::app::InferenceRow::KiloGatewayModel => {
+                            app.settings_adjust_kilo_gateway_model(direction)
                         }
                         crate::app::InferenceRow::Field(
                             crate::app::InferenceSettingField::OllamaModel,
@@ -1492,6 +1555,84 @@ mod scheduled_input_mouse_tests {
                 text: "status".to_string(),
                 send_enter: false,
             }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_debug_mouse_tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
+
+    #[test]
+    fn clicking_the_top_save_button_opens_the_destination_path_prompt() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.agent_debug_logs.insert(
+            pane_id,
+            crate::app::AgentDebugLogCache {
+                has_loaded_retained_history: true,
+                ..crate::app::AgentDebugLogCache::default()
+            },
+        );
+        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
+            pane_id,
+            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+        });
+        let button = crate::agent_debug_ui::save_button_area(app.layout.pane_area);
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: button.x,
+                row: button.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(
+            app.mode,
+            Mode::AgentDebugSavePath(target, _) if target == pane_id
+        ));
+        assert!(matches!(
+            app.modal_stack.as_slice(),
+            [Mode::AgentDebugLog(crate::app::AgentDebugLogViewState { pane_id: parent, .. })]
+                if *parent == pane_id
+        ));
+    }
+
+    #[test]
+    fn clicking_the_top_resize_filter_switch_reveals_animation_resizes() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let pane_id = ilium_core::NodeId(7);
+        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
+            pane_id,
+            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+        });
+        let button = crate::agent_debug_ui::resize_filter_button_area(app.layout.pane_area);
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: button.x,
+                row: button.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
+        assert!(
+            !app.agent_debug_log_filter
+                .is_tree_panel_animation_resize_hidden
         );
     }
 }

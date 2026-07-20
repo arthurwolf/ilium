@@ -225,6 +225,15 @@ pub fn set_enabled(enabled: bool) -> Result<(), LoggingError> {
         .set_enabled(enabled)
 }
 
+/// Reports whether this process currently accepts diagnostic events. Runtime
+/// producers use this to avoid collecting expensive structured evidence when
+/// neither the file sink nor another opt-in diagnostics surface needs it.
+pub fn is_enabled() -> bool {
+    PROCESS_LOGGER
+        .get()
+        .is_some_and(|logger| logger.enabled.load(Ordering::Acquire))
+}
+
 /// Returns the exact file selected for this server lifetime.
 pub fn log_path() -> Option<&'static Path> {
     PROCESS_LOGGER.get().map(|logger| logger.path.as_path())
@@ -277,6 +286,23 @@ pub fn redacted_header_value(name: &str, value: &str) -> String {
     }
 }
 
+/// Keeps only response headers that help diagnose payload shape, request
+/// correlation, throttling, or retry behavior. Browser-security policy
+/// headers can be many kilobytes long and add no value to an API-call log.
+pub fn is_diagnostic_response_header(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "content-type"
+            | "content-length"
+            | "retry-after"
+            | "request-id"
+            | "x-request-id"
+            | "openai-request-id"
+            | "cf-ray"
+    ) || normalized.starts_with("x-ratelimit-")
+}
+
 /// Reads only the simple `[debug] file_logging_enabled = <bool>` contract
 /// before either process parses the complete configuration. This lets an
 /// enabled diagnostic file capture errors in unrelated malformed sections.
@@ -319,6 +345,18 @@ pub fn redacted_json_credentials(value: &serde_json::Value) -> serde_json::Value
     let mut redacted = value.clone();
     redact_json_credentials_in_place(&mut redacted);
     redacted
+}
+
+/// Redacts one structured diagnostic field only when its label is itself a
+/// credential name. Agent lifecycle fields use a label/value representation,
+/// so passing the enclosing JSON through [`redacted_json_credentials`] cannot
+/// infer that a generic `value` belongs to an `api_key` label.
+pub fn redacted_diagnostic_field_value(label: &str, value: &str) -> String {
+    if is_credential_field(label) {
+        "<redacted>".to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 /// Applies [`redacted_json_credentials`] to a stringified JSON value. Invalid
@@ -383,7 +421,7 @@ fn is_credential_path(path: &str) -> bool {
 }
 
 fn is_credential_field(field: &str) -> bool {
-    let normalized = field.to_ascii_lowercase().replace('-', "_");
+    let normalized = field.to_ascii_lowercase().replace(['-', ' '], "_");
     matches!(
         normalized.as_str(),
         "api_key"
@@ -546,6 +584,17 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_response_headers_keep_correlation_and_rate_limit_data_only() {
+        assert!(is_diagnostic_response_header("Content-Type"));
+        assert!(is_diagnostic_response_header("X-Request-ID"));
+        assert!(is_diagnostic_response_header(
+            "x-ratelimit-remaining-requests"
+        ));
+        assert!(!is_diagnostic_response_header("Content-Security-Policy"));
+        assert!(!is_diagnostic_response_header("Permissions-Policy"));
+    }
+
+    #[test]
     fn debug_setting_hint_survives_an_unrelated_malformed_section() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("config.toml");
@@ -581,6 +630,22 @@ mod tests {
         assert!(diagnostic.contains("<redacted>"));
         assert!(diagnostic.contains("kept"));
         assert!(diagnostic.contains("complete text"));
+    }
+
+    #[test]
+    fn labelled_diagnostic_fields_redact_credentials_but_keep_lifecycle_evidence() {
+        assert_eq!(
+            redacted_diagnostic_field_value("API key", "field-secret"),
+            "<redacted>"
+        );
+        assert_eq!(
+            redacted_diagnostic_field_value("submitted input", "/clear"),
+            "/clear"
+        );
+        assert_eq!(
+            redacted_diagnostic_field_value("session ID before invalidation", "session-old"),
+            "session-old"
+        );
     }
 
     #[test]

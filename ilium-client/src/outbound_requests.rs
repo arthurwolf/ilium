@@ -17,15 +17,18 @@ pub fn coalesce(requests: Vec<ClientRequest>) -> Vec<ClientRequest> {
                     pane_id: previous_pane_id,
                     rows: previous_rows,
                     cols: previous_cols,
+                    cause: previous_cause,
                 }),
                 ClientRequest::ResizePane {
                     pane_id,
                     rows,
                     cols,
+                    cause,
                 },
             ) if *previous_pane_id == pane_id => {
                 *previous_rows = rows;
                 *previous_cols = cols;
+                *previous_cause = cause;
             }
             (
                 Some(ClientRequest::SetPaneFocus {
@@ -44,6 +47,7 @@ pub fn coalesce(requests: Vec<ClientRequest>) -> Vec<ClientRequest> {
 mod tests {
     use super::*;
     use ilium_core::NodeId;
+    use ilium_ipc::PaneResizeCause;
 
     #[test]
     fn adjacent_resizes_keep_only_the_latest_geometry() {
@@ -53,11 +57,13 @@ mod tests {
                 pane_id,
                 rows: 20,
                 cols: 80,
+                cause: PaneResizeCause::HostTerminal,
             },
             ClientRequest::ResizePane {
                 pane_id,
                 rows: 30,
                 cols: 120,
+                cause: PaneResizeCause::TreePanelAnimation,
             },
         ]);
         assert!(matches!(
@@ -65,7 +71,8 @@ mod tests {
             [ClientRequest::ResizePane {
                 pane_id: NodeId(7),
                 rows: 30,
-                cols: 120
+                cols: 120,
+                cause: PaneResizeCause::TreePanelAnimation,
             }]
         ));
     }
@@ -106,6 +113,7 @@ mod tests {
                 pane_id,
                 rows: 20,
                 cols: 80,
+                cause: PaneResizeCause::HostTerminal,
             },
             ClientRequest::KeyInput {
                 pane_id,
@@ -116,6 +124,7 @@ mod tests {
                 pane_id,
                 rows: 21,
                 cols: 81,
+                cause: PaneResizeCause::TreePanelAnimation,
             },
         ]);
         assert_eq!(requests.len(), 3);

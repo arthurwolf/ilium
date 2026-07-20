@@ -232,6 +232,7 @@ mod tests {
             sound_settings: SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
         }));
         let watcher = spawn_config_watcher_with_interval(
             Arc::clone(&state),

@@ -41,8 +41,10 @@ use std::time::Duration;
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, Tree};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
+use crate::agent_debug::PaneDebugLogSnapshot;
 use crate::error::{ServerError, SnapshotError};
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::ServerState;
@@ -112,6 +114,10 @@ pub struct SessionSnapshot {
     /// this list is small (one entry per pane) and read/written as a
     /// whole, never looked up by key.
     pub panes: Vec<PaneSnapshot>,
+    /// Pane histories are persisted in the same atomic project snapshot but
+    /// stay outside the hot `TreeSnapshot` IPC path.
+    #[serde(default)]
+    pub agent_debug_logs: Vec<PaneDebugLogSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -268,6 +274,7 @@ impl LegacyWorkspace {
             version: CURRENT_SNAPSHOT_VERSION,
             tree,
             panes,
+            agent_debug_logs: Vec::new(),
         })
     }
 }
@@ -355,10 +362,12 @@ async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
             },
         })
         .collect();
+    let agent_debug_logs = state.agent_debug.snapshot().await;
     SessionSnapshot {
         version: CURRENT_SNAPSHOT_VERSION,
         tree: tree.clone(),
         panes: pane_snapshots,
+        agent_debug_logs,
     }
 }
 
@@ -485,6 +494,10 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
     tokio::fs::create_dir_all(parent)
         .await
         .map_err(|source| to_snapshot_io_error("create directory for", source))?;
+    #[cfg(unix)]
+    tokio::fs::set_permissions(parent, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+        .await
+        .map_err(|source| to_snapshot_io_error("secure directory for", source))?;
     let temp_path = parent.join(format!(
         ".{}.tmp-{}",
         path.file_name()
@@ -492,7 +505,27 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
             .unwrap_or_else(|| "snapshot".to_string()),
         std::process::id()
     ));
-    if let Err(error) = tokio::fs::write(&temp_path, &json).await {
+    let _ = tokio::fs::remove_file(&temp_path).await;
+    #[cfg(unix)]
+    let open_result = {
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp_path)
+            .await
+    };
+    #[cfg(not(unix))]
+    let open_result = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .await;
+    let mut temp_file = match open_result {
+        Ok(file) => file,
+        Err(error) => return Err(to_snapshot_io_error("create", error)),
+    };
+    if let Err(error) = temp_file.write_all(&json).await {
         // A write that fails partway (e.g. disk full, permission change
         // mid-write) can still have created the temp file. This writer
         // loops for the server's entire lifetime (`spawn_snapshot_writer`),
@@ -502,12 +535,21 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         let _ = tokio::fs::remove_file(&temp_path).await;
         return Err(to_snapshot_io_error("write", error));
     }
+    if let Err(error) = temp_file.sync_all().await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(to_snapshot_io_error("sync", error));
+    }
+    drop(temp_file);
     if let Err(error) = tokio::fs::rename(&temp_path, path).await {
         // Same reasoning: don't leave the temp file behind if the rename
         // itself fails.
         let _ = tokio::fs::remove_file(&temp_path).await;
         return Err(to_snapshot_io_error("rename", error));
     }
+    #[cfg(unix)]
+    tokio::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+        .await
+        .map_err(|source| to_snapshot_io_error("secure", source))?;
     Ok(())
 }
 
@@ -551,6 +593,10 @@ mod tests {
 
     use super::*;
     use crate::pane::TerminalOrigin;
+    use ilium_agent_debug::{
+        AgentDebugContext, AgentDebugEventDraft, AgentDebugEventKind, AgentDebugSource,
+        PaneDebugLog,
+    };
     use ilium_core::{PaneContentKind, ROOT_ID};
 
     fn scratch_snapshot_path() -> PathBuf {
@@ -594,6 +640,7 @@ mod tests {
                     },
                 },
             ],
+            agent_debug_logs: Vec::new(),
         }
     }
 
@@ -606,12 +653,59 @@ mod tests {
     #[tokio::test]
     async fn save_then_load_round_trips_the_full_snapshot() {
         let path = scratch_snapshot_path();
-        let snapshot = sample_snapshot();
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        let mut log = PaneDebugLog::default();
+        let _ = log.append(
+            1_700_000_000_000,
+            AgentDebugSource::Pty,
+            AgentDebugContext::default(),
+            AgentDebugEventDraft::information(
+                AgentDebugEventKind::PromptSubmitted,
+                "Prompt submitted",
+            ),
+        );
+        snapshot
+            .agent_debug_logs
+            .push(PaneDebugLogSnapshot { pane_id, log });
 
         write_snapshot_to(&path, &snapshot).await.unwrap();
         let loaded = load_snapshot(&path).await.unwrap().expect("just wrote it");
 
         assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn snapshots_from_before_agent_debug_history_default_to_empty_logs() {
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        old_shape
+            .as_object_mut()
+            .expect("snapshot serializes as an object")
+            .remove("agent_debug_logs");
+
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert!(loaded.agent_debug_logs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn snapshot_directory_and_file_are_private_when_debug_history_is_persisted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = scratch_snapshot_path();
+        write_snapshot_to(&path, &sample_snapshot()).await.unwrap();
+
+        let directory_mode = std::fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+
+        assert_eq!(directory_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
     }
 
     #[tokio::test]

@@ -20,7 +20,7 @@ use ilium_core::{
     AgentActivity, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId, NodeKind,
     PaneContentKind, PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
 };
-use ilium_ipc::{ClientRequest, PromptSubmissionSource};
+use ilium_ipc::{ClientRequest, PaneResizeCause, PromptSubmissionSource};
 use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
@@ -80,6 +80,42 @@ fn normalize_path_lexically(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+/// Produces a readable, filesystem-safe default without changing the user's
+/// eventual path: the Save prompt remains fully editable before any write.
+fn agent_debug_log_file_name(
+    pane_name: &str,
+    timestamp: chrono::DateTime<chrono::Local>,
+) -> String {
+    let mut slug = String::new();
+    let mut previous_was_separator = false;
+    for character in pane_name.chars() {
+        if character.is_alphanumeric() {
+            slug.extend(character.to_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator && !slug.is_empty() {
+            slug.push('-');
+            previous_was_separator = true;
+        }
+        if slug.chars().count() >= 48 {
+            break;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        slug.push_str("agent");
+    }
+    format!(
+        "ilium-{slug}-debug-{}.log",
+        timestamp.format("%Y-%m-%d-%H%M%S")
+    )
+}
+
+fn selected_inference_model(settings: &InferenceSettings) -> String {
+    settings.selected_model().to_string()
 }
 
 /// Gives an existing board path one stable lexical identity without using a
@@ -186,6 +222,12 @@ pub enum Mode {
     ProjectFolderExplorer(Box<ExplorerOverlay>, ProjectFolderSelection),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
+    /// A pane-scoped right-click menu exposed only for a detected agent.
+    AgentPaneContextMenu(AgentPaneContextMenu),
+    /// Full right-panel semantic history for one exact agent pane.
+    AgentDebugLog(AgentDebugLogViewState),
+    /// Destination path prompt layered over its exact debug-log view state.
+    AgentDebugSavePath(NodeId, TextPromptState),
     /// Form for one server-owned terminal input countdown.
     SchedulePaneInput(Box<ScheduledInputDialogState>),
     /// Multiline prompt collected for the server-owned completion queue.
@@ -306,34 +348,37 @@ impl InferenceSettingField {
 pub enum InferenceRow {
     Provider,
     Field(InferenceSettingField),
-    RefreshOllamaModels,
+    RefreshModels,
+    KiloGatewayModel,
     Test,
 }
 
-/// Presentation state for the explicitly user-requested Ollama model
-/// discovery operation. It belongs to `App`, not `NamingWorkers`, because the
-/// worker only owns execution while this state is rendered and animated by the
-/// Settings screen.
+/// Presentation state for one explicitly user-requested provider model
+/// discovery. Execution stays in `NamingWorkers`; this durable state belongs
+/// to `App` because Settings renders and animates it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OllamaModelDiscoveryState {
+pub enum ModelDiscoveryState {
     Idle,
     Loading {
+        provider: ilium_inference::InferenceProviderKind,
         endpoint: String,
         started_at: Instant,
     },
     Loaded {
+        provider: ilium_inference::InferenceProviderKind,
         endpoint: String,
         model_count: usize,
         elapsed: Duration,
     },
     Failed {
+        provider: ilium_inference::InferenceProviderKind,
         endpoint: String,
         error: String,
         elapsed: Duration,
     },
 }
 
-impl OllamaModelDiscoveryState {
+impl ModelDiscoveryState {
     pub const fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
     }
@@ -436,10 +481,11 @@ pub enum AppearanceRow {
     SidebarDensity,
     UseStableGlyphs,
     ShowInferredTitleIcons,
+    AgentDebugMenu,
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 9] = [
+    pub const ALL: [AppearanceRow; 10] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
@@ -449,6 +495,7 @@ impl AppearanceRow {
         Self::SidebarDensity,
         Self::UseStableGlyphs,
         Self::ShowInferredTitleIcons,
+        Self::AgentDebugMenu,
     ];
 }
 
@@ -811,6 +858,106 @@ pub struct ContextMenu {
     pub tree_order_submenu: Option<TreeOrderSubmenu>,
 }
 
+pub struct AgentPaneContextMenu {
+    pub pane_id: NodeId,
+    pub area: Rect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDebugLogViewState {
+    pub pane_id: NodeId,
+    /// Explicit anchoring keeps Home/PageDown navigable without encoding the
+    /// oldest position as an oversized offset from the newest event.
+    pub scroll_position: AgentDebugLogScrollPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentDebugLogScrollPosition {
+    FromNewest(usize),
+    FromOldest(usize),
+}
+
+impl AgentDebugLogViewState {
+    pub fn scroll_older(&mut self, line_count: usize) {
+        self.scroll_position = match self.scroll_position {
+            AgentDebugLogScrollPosition::FromNewest(offset) => {
+                AgentDebugLogScrollPosition::FromNewest(offset.saturating_add(line_count))
+            }
+            AgentDebugLogScrollPosition::FromOldest(offset) => {
+                AgentDebugLogScrollPosition::FromOldest(offset.saturating_sub(line_count))
+            }
+        };
+    }
+
+    pub fn scroll_newer(&mut self, line_count: usize) {
+        self.scroll_position = match self.scroll_position {
+            AgentDebugLogScrollPosition::FromNewest(offset) => {
+                AgentDebugLogScrollPosition::FromNewest(offset.saturating_sub(line_count))
+            }
+            AgentDebugLogScrollPosition::FromOldest(offset) => {
+                AgentDebugLogScrollPosition::FromOldest(offset.saturating_add(line_count))
+            }
+        };
+    }
+
+    pub fn show_oldest(&mut self) {
+        self.scroll_position = AgentDebugLogScrollPosition::FromOldest(0);
+    }
+
+    pub fn follow_newest(&mut self) {
+        self.scroll_position = AgentDebugLogScrollPosition::FromNewest(0);
+    }
+}
+
+/// Ephemeral viewer/export policy. The retained server journal stays complete;
+/// operators can reveal animation evidence without restarting or recapturing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentDebugLogFilter {
+    pub is_tree_panel_animation_resize_hidden: bool,
+}
+
+impl Default for AgentDebugLogFilter {
+    fn default() -> Self {
+        Self {
+            is_tree_panel_animation_resize_hidden: true,
+        }
+    }
+}
+
+impl AgentDebugLogFilter {
+    pub fn includes(self, entry: &ilium_ipc::AgentDebugEntry) -> bool {
+        !self.is_tree_panel_animation_resize_hidden || !entry.is_tree_panel_animation_resize()
+    }
+
+    pub fn visible_entry_count(self, cache: &AgentDebugLogCache) -> usize {
+        cache
+            .entries
+            .iter()
+            .filter(|entry| self.includes(entry))
+            .count()
+    }
+
+    pub fn hidden_entry_count(self, cache: &AgentDebugLogCache) -> usize {
+        cache
+            .entries
+            .len()
+            .saturating_sub(self.visible_entry_count(cache))
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentDebugLogCache {
+    pub entries: Vec<ilium_ipc::AgentDebugEntry>,
+    pub through_sequence: u64,
+    pub retained_from_sequence: u64,
+    pub dropped_entry_count: u64,
+    /// Live broadcasts may populate the cache before the operator first opens
+    /// the log. Only a replay snapshot proves that the retained prefix was
+    /// fetched, so those broadcasts must not be mistaken for complete history.
+    pub has_loaded_retained_history: bool,
+    pub is_loading: bool,
+}
+
 pub struct ExplorerFileMenu {
     pub target_group: NodeId,
     pub file_path: PathBuf,
@@ -962,6 +1109,12 @@ pub struct App {
     /// Read-only mirror of the server's tree -- see the module docs.
     pub tree: Tree,
     pub panes: HashMap<NodeId, PaneRuntime>,
+    /// On-demand history caches are separate from the render tree so normal
+    /// structural snapshots never carry or clone the retained journal.
+    pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
+    /// One client-wide toolbar policy keeps display and export consistent
+    /// across panes while defaulting every newly attached client to low noise.
+    pub agent_debug_log_filter: AgentDebugLogFilter,
     /// `ClientRequest`s produced by input handling this tick, drained and
     /// sent by the connection task after each event is dispatched (see
     /// `crate::run`). Keeping this a plain outbox instead of giving `App`
@@ -1034,15 +1187,19 @@ pub struct App {
     pending_voice_runtime_request: Option<VoiceRuntimeRequest>,
     pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
     pending_debug_logging_enabled: Option<bool>,
+    pending_agent_debug_menu_enabled: Option<bool>,
     pending_inference_test: bool,
-    pending_ollama_model_refresh: bool,
+    pending_model_refresh: Option<ilium_inference::InferenceProviderKind>,
     /// Semantic icon searches are decided by the picker state but spawned by
     /// `crate::run`, which is the only layer that owns background workers.
     pending_icon_semantic_search: Option<IconSearchRequest>,
     pub ollama_models: Vec<String>,
+    /// Free Kilo models begin with stable documented router fallbacks and are
+    /// replaced by the latest compatible live catalog after a refresh.
+    pub kilo_gateway_models: Vec<String>,
     /// Visible lifecycle and outcome of the latest explicit model-discovery
     /// request. Unlike `status_message`, this remains visible in Settings.
-    pub ollama_model_discovery: OllamaModelDiscoveryState,
+    pub model_discovery: ModelDiscoveryState,
     /// Visible lifecycle of the latest explicit provider test. Unlike the
     /// status bar, this remains readable while Settings owns the full screen.
     pub inference_test_state: InferenceTestState,
@@ -1126,7 +1283,8 @@ pub struct App {
     /// so a completed title must not suppress inference for the new one.
     pub inferred_title_session_ids: HashMap<NodeId, String>,
     /// Current server-owned title generation per agent pane. It is distinct
-    /// from the agent session ID because `/clear` can retain the same ID.
+    /// from session identity so fresh-screen detection can fence stale title
+    /// workers even before a replacement ID has been verified.
     pub agent_title_generations: HashMap<NodeId, u64>,
     /// How many completed Enter presses have been observed in a plain
     /// terminal pane since its last activity-checkpoint trigger.
@@ -1202,6 +1360,8 @@ impl App {
             session_name,
             tree: Tree::new(),
             panes: HashMap::new(),
+            agent_debug_logs: HashMap::new(),
+            agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
             tree_state: TreeState::default(),
             right_panel_target: RightPanelTarget::Empty,
@@ -1240,11 +1400,13 @@ impl App {
             pending_voice_runtime_request: None,
             pending_voice_interaction_requests: Vec::new(),
             pending_debug_logging_enabled: None,
+            pending_agent_debug_menu_enabled: None,
             pending_inference_test: false,
-            pending_ollama_model_refresh: false,
+            pending_model_refresh: None,
             pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
-            ollama_model_discovery: OllamaModelDiscoveryState::Idle,
+            kilo_gateway_models: ilium_inference::kilo_gateway_fallback_models(),
+            model_discovery: ModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
             inference_test_result: None,
             config_dir: None,
@@ -1614,12 +1776,12 @@ impl App {
     /// Updates the geometry shared by rendering, hit-testing, and pane
     /// sizing, and queues a `ResizePane` request for every terminal pane
     /// whose size actually changed.
-    pub fn set_layout(&mut self, layout: UiLayout) {
+    pub fn set_layout(&mut self, layout: UiLayout, resize_cause: PaneResizeCause) {
         if self.layout == layout {
             return;
         }
         self.layout = layout;
-        self.resize_displayed_panes();
+        self.resize_displayed_panes(resize_cause);
 
         // Markdown parsing and rasterization can be materially more
         // expensive than terminal sizing.  A sidebar-width animation emits
@@ -1646,7 +1808,7 @@ impl App {
             screen_area,
             self.tree_width_animation.current_width(),
         );
-        self.set_layout(layout);
+        self.set_layout(layout, PaneResizeCause::HostTerminal);
     }
 
     /// Applies `ui` as this session's live settings: threads the change
@@ -1658,6 +1820,14 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
+        if !ui.agent_debug_menu_enabled
+            && matches!(
+                self.mode,
+                Mode::AgentPaneContextMenu(_) | Mode::AgentDebugLog(_)
+            )
+        {
+            self.mode = Mode::Normal;
+        }
         self.ui_settings = ui.clone();
         let now = Instant::now();
         self.tree_width_animation.set_motion_enabled(
@@ -1673,7 +1843,7 @@ impl App {
             self.layout.screen_area,
             self.tree_width_animation.current_width(),
         );
-        self.set_layout(layout);
+        self.set_layout(layout, PaneResizeCause::UserInterfaceSettings);
     }
 
     pub fn apply_terminal_settings(&mut self, settings: TerminalSettings) {
@@ -1717,6 +1887,14 @@ impl App {
 
     pub fn take_pending_debug_logging_enabled(&mut self) -> Option<bool> {
         self.pending_debug_logging_enabled.take()
+    }
+
+    pub fn request_agent_debug_menu_reconciliation(&mut self) {
+        self.pending_agent_debug_menu_enabled = Some(self.ui_settings.agent_debug_menu_enabled);
+    }
+
+    pub fn take_pending_agent_debug_menu_enabled(&mut self) -> Option<bool> {
+        self.pending_agent_debug_menu_enabled.take()
     }
 
     /// Toggles complete session diagnostics immediately and persists the
@@ -1943,7 +2121,12 @@ impl App {
     /// every other "config write is a nice-to-have, not a gate" policy in
     /// this crate (see `ConfigLoadError`'s doc comments).
     fn apply_and_persist_ui_settings(&mut self, ui: UiSettings) {
+        let debug_menu_changed =
+            self.ui_settings.agent_debug_menu_enabled != ui.agent_debug_menu_enabled;
         self.apply_ui_settings(ui);
+        if debug_menu_changed {
+            self.request_agent_debug_menu_reconciliation();
+        }
         if let Some(config_dir) = self.config_dir.clone() {
             if let Err(error) = crate::config::save_ui_settings(&config_dir, &self.ui_settings) {
                 self.status_message = Some(format!("Could not save settings: {error}"));
@@ -2245,68 +2428,110 @@ impl App {
         }
     }
 
-    pub fn request_ollama_model_refresh(&mut self) {
-        if self.ollama_model_discovery.is_loading() {
-            self.status_message = Some("Ollama model discovery is already in progress".to_string());
+    pub fn request_model_refresh(&mut self) {
+        if self.model_discovery.is_loading() {
+            self.status_message = Some("Model discovery is already in progress".to_string());
             return;
         }
-        self.pending_ollama_model_refresh = true;
-        self.ollama_model_discovery = OllamaModelDiscoveryState::Loading {
-            endpoint: self.inference_settings.ollama.base_url.clone(),
+        let provider = self.inference_settings.selected_provider;
+        let endpoint = match provider {
+            ilium_inference::InferenceProviderKind::KiloGateway => {
+                ilium_inference::kilo_gateway_model_catalog_url()
+            }
+            ilium_inference::InferenceProviderKind::Ollama => format!(
+                "{}/api/tags",
+                self.inference_settings
+                    .ollama
+                    .base_url
+                    .trim_end_matches('/')
+            ),
+            _ => {
+                self.status_message = Some(format!(
+                    "{} does not expose model discovery",
+                    provider.label()
+                ));
+                return;
+            }
+        };
+        self.pending_model_refresh = Some(provider);
+        self.model_discovery = ModelDiscoveryState::Loading {
+            provider,
+            endpoint,
             started_at: Instant::now(),
         };
-        self.status_message = Some("Starting Ollama model discovery…".to_string());
+        self.status_message = Some(format!("Starting {} model discovery…", provider.label()));
     }
 
-    /// Records the terminal result of an Ollama `/api/tags` discovery call.
-    /// Selecting the first returned model when the current selection is empty
-    /// or stale makes a successful refresh immediately useful rather than
-    /// leaving the user on an apparently unchanged empty field.
-    pub fn finish_ollama_model_discovery(
+    /// Records a provider catalog without discarding the last known-good list
+    /// on failure. Ollama selects the first live local model when its previous
+    /// choice disappeared; Kilo deliberately preserves a saved choice so a
+    /// transient catalog omission cannot silently change future LLM calls.
+    pub fn finish_model_discovery(
         &mut self,
+        provider: ilium_inference::InferenceProviderKind,
         endpoint: String,
         elapsed: Duration,
         result: Result<Vec<String>, String>,
     ) {
         match result {
             Ok(models) => {
-                let should_select_first = self.inference_settings.ollama.model.is_empty()
-                    || !models.contains(&self.inference_settings.ollama.model);
-                self.ollama_models = models;
-                if should_select_first {
-                    if let Some(model) = self.ollama_models.first() {
-                        let mut settings = self.inference_settings.clone();
-                        settings.ollama.model = model.clone();
-                        self.apply_and_persist_inference_settings(settings);
+                let model_count = match provider {
+                    ilium_inference::InferenceProviderKind::KiloGateway => {
+                        let mut merged = ilium_inference::kilo_gateway_fallback_models();
+                        merged.extend(models);
+                        let mut seen = HashSet::new();
+                        merged.retain(|model| seen.insert(model.clone()));
+                        self.kilo_gateway_models = merged;
+                        self.kilo_gateway_models.len()
                     }
-                }
-                self.ollama_model_discovery = OllamaModelDiscoveryState::Loaded {
+                    ilium_inference::InferenceProviderKind::Ollama => {
+                        let should_select_first = self.inference_settings.ollama.model.is_empty()
+                            || !models.contains(&self.inference_settings.ollama.model);
+                        self.ollama_models = models;
+                        if should_select_first {
+                            if let Some(model) = self.ollama_models.first() {
+                                let mut settings = self.inference_settings.clone();
+                                settings.ollama.model = model.clone();
+                                self.apply_and_persist_inference_settings(settings);
+                            }
+                        }
+                        self.ollama_models.len()
+                    }
+                    _ => 0,
+                };
+                self.model_discovery = ModelDiscoveryState::Loaded {
+                    provider,
                     endpoint,
-                    model_count: self.ollama_models.len(),
+                    model_count,
                     elapsed,
                 };
                 self.status_message = Some(format!(
-                    "Loaded {} Ollama model(s)",
-                    self.ollama_models.len()
+                    "Loaded {model_count} {} model(s)",
+                    provider.label()
                 ));
             }
             Err(error) => {
-                self.ollama_model_discovery = OllamaModelDiscoveryState::Failed {
+                self.model_discovery = ModelDiscoveryState::Failed {
+                    provider,
                     endpoint,
                     error: error.clone(),
                     elapsed,
                 };
-                self.status_message = Some(format!("Could not load Ollama models: {error}"));
+                self.status_message = Some(format!(
+                    "Could not load {} models: {error}",
+                    provider.label()
+                ));
             }
         }
     }
 
-    pub fn take_pending_ollama_model_refresh(&mut self) -> bool {
-        std::mem::take(&mut self.pending_ollama_model_refresh)
+    pub fn take_pending_model_refresh(&mut self) -> Option<ilium_inference::InferenceProviderKind> {
+        self.pending_model_refresh.take()
     }
+
     pub fn settings_adjust_ollama_model(&mut self, direction: i32) {
         if self.ollama_models.is_empty() {
-            self.request_ollama_model_refresh();
+            self.request_model_refresh();
             return;
         }
         let index = self
@@ -2318,6 +2543,27 @@ impl App {
             as usize;
         let mut settings = self.inference_settings.clone();
         settings.ollama.model = self.ollama_models[next].clone();
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    pub fn settings_adjust_kilo_gateway_model(&mut self, direction: i32) {
+        if self.kilo_gateway_models.is_empty() {
+            self.kilo_gateway_models = ilium_inference::kilo_gateway_fallback_models();
+        }
+        let selected = &self.inference_settings.kilo_gateway.model;
+        let next = match self
+            .kilo_gateway_models
+            .iter()
+            .position(|model| model == selected)
+        {
+            Some(index) => (index as i32 + direction.signum())
+                .rem_euclid(self.kilo_gateway_models.len() as i32)
+                as usize,
+            None if direction < 0 => self.kilo_gateway_models.len() - 1,
+            None => 0,
+        };
+        let mut settings = self.inference_settings.clone();
+        settings.kilo_gateway.model = self.kilo_gateway_models[next].clone();
         self.apply_and_persist_inference_settings(settings);
     }
 
@@ -2688,6 +2934,14 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles both discoverability and server-side capture of the persisted
+    /// per-agent semantic history.
+    pub fn settings_toggle_agent_debug_menu(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.agent_debug_menu_enabled = !ui.agent_debug_menu_enabled;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
@@ -2758,6 +3012,7 @@ impl App {
             }
             AppearanceRow::UseStableGlyphs => self.settings_toggle_stable_glyphs(),
             AppearanceRow::ShowInferredTitleIcons => self.settings_toggle_inferred_title_icons(),
+            AppearanceRow::AgentDebugMenu => self.settings_toggle_agent_debug_menu(),
         }
     }
 
@@ -2862,7 +3117,7 @@ impl App {
         let tree_width = self.tree_width_animation.update(is_tree_active, now);
         let layout =
             UiLayout::from_screen_area_with_tree_width(self.layout.screen_area, tree_width);
-        self.set_layout(layout);
+        self.set_layout(layout, PaneResizeCause::TreePanelAnimation);
     }
 
     pub const fn is_layout_animating(&self) -> bool {
@@ -2917,7 +3172,7 @@ impl App {
         if self.is_project_name_loading
             || !self.titles_loading.is_empty()
             || self.structure_loading
-            || self.ollama_model_discovery.is_loading()
+            || self.model_discovery.is_loading()
             || self.inference_test_state.is_loading()
         {
             return true;
@@ -2973,7 +3228,7 @@ impl App {
 
     /// Resizes only the terminal panes currently visible in the right panel,
     /// using the exact content rectangle allocated to each slot.
-    pub fn resize_displayed_panes(&mut self) {
+    pub fn resize_displayed_panes(&mut self, cause: PaneResizeCause) {
         let viewports = self.pane_viewports();
         if let Some(active_pane_id) = self.active_pane_id() {
             if let Some(active_viewport) = viewports
@@ -3003,6 +3258,7 @@ impl App {
                     pane_id,
                     rows,
                     cols,
+                    cause,
                 });
             }
         }
@@ -3099,7 +3355,7 @@ impl App {
         };
         self.focus = FocusTarget::Pane;
         self.mark_seen(id);
-        self.resize_displayed_panes();
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     pub fn show_split_view(&mut self, split_id: NodeId) {
@@ -3120,7 +3376,7 @@ impl App {
         if self.displayed_pane_ids().is_empty() {
             self.status_message = Some("Split view is empty; add up to four panes".to_string());
         }
-        self.resize_displayed_panes();
+        self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
     /// Leaves pane focus for the tree panel, notifying the server
@@ -4080,6 +4336,147 @@ impl App {
         });
     }
 
+    pub fn is_detected_agent_pane(&self, pane_id: NodeId) -> bool {
+        self.tree.get(pane_id).is_some_and(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                    ..
+                }
+            )
+        })
+    }
+
+    /// Opens the one-action pane menu at the exact split viewport that was
+    /// right-clicked. Eligibility is rechecked again on activation.
+    pub fn open_agent_pane_context_menu(&mut self, pane_id: NodeId, column: u16, row: u16) {
+        if !self.ui_settings.agent_debug_menu_enabled || !self.is_detected_agent_pane(pane_id) {
+            return;
+        }
+        let width = 28.min(self.layout.screen_area.width.max(1));
+        let height = 3.min(self.layout.screen_area.height.max(1));
+        let max_x = self.layout.screen_area.right().saturating_sub(width);
+        let max_y = self.layout.screen_area.bottom().saturating_sub(height);
+        self.mode = Mode::AgentPaneContextMenu(AgentPaneContextMenu {
+            pane_id,
+            area: Rect::new(column.min(max_x), row.min(max_y), width, height),
+        });
+    }
+
+    pub fn open_agent_debug_log(&mut self, pane_id: NodeId) {
+        if !self.ui_settings.agent_debug_menu_enabled || !self.is_detected_agent_pane(pane_id) {
+            self.mode = Mode::Normal;
+            self.status_message =
+                Some("Debug history is available only for detected agents".to_string());
+            return;
+        }
+        let after_sequence = self
+            .agent_debug_logs
+            .get(&pane_id)
+            .filter(|cache| cache.has_loaded_retained_history)
+            .map(|cache| cache.through_sequence)
+            .filter(|sequence| *sequence > 0);
+        self.agent_debug_logs.entry(pane_id).or_default().is_loading = true;
+        self.queue_request(ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence,
+        });
+        self.mode = Mode::AgentDebugLog(AgentDebugLogViewState {
+            pane_id,
+            scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
+        });
+    }
+
+    pub fn toggle_agent_debug_tree_resize_filter(&mut self) {
+        let is_hidden = &mut self
+            .agent_debug_log_filter
+            .is_tree_panel_animation_resize_hidden;
+        *is_hidden = !*is_hidden;
+    }
+
+    /// Opens an editable absolute-path prompt only after the initial retained
+    /// replay completed, so Save can never silently export a partial cache.
+    pub fn open_agent_debug_save_path(&mut self, state: AgentDebugLogViewState) {
+        let is_complete = self
+            .agent_debug_logs
+            .get(&state.pane_id)
+            .is_some_and(|cache| cache.has_loaded_retained_history && !cache.is_loading);
+        if !is_complete {
+            self.mode = Mode::AgentDebugLog(state);
+            self.status_message =
+                Some("Wait for the complete retained debug history before saving".to_string());
+            return;
+        }
+
+        let pane_name = self
+            .tree
+            .get(state.pane_id)
+            .map_or("agent", |node| node.name.as_str());
+        let default_path = self
+            .session_cwd
+            .join(agent_debug_log_file_name(pane_name, chrono::Local::now()));
+        let pane_id = state.pane_id;
+        self.push_modal_over(
+            Mode::AgentDebugLog(state),
+            Mode::AgentDebugSavePath(
+                pane_id,
+                TextPromptState::new(default_path.display().to_string()),
+            ),
+        );
+    }
+
+    /// Writes the exact complete cache selected by the prompt. Relative paths
+    /// are resolved against the canonical launch directory, matching editor
+    /// Save As behavior elsewhere in the client.
+    pub fn save_agent_debug_log(&mut self, pane_id: NodeId, destination: &str) -> bool {
+        let destination = destination.trim();
+        if destination.is_empty() {
+            self.status_message = Some("Save debug log: no destination path given".to_string());
+            return false;
+        }
+        let path = PathBuf::from(destination);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.session_cwd.join(path)
+        };
+        let Some(cache) = self.agent_debug_logs.get(&pane_id) else {
+            self.status_message = Some("Save debug log failed: history is unavailable".to_string());
+            return false;
+        };
+        if cache.is_loading || !cache.has_loaded_retained_history {
+            self.status_message =
+                Some("Save debug log failed: retained history is still loading".to_string());
+            return false;
+        }
+        let pane_name = self
+            .tree
+            .get(pane_id)
+            .map_or("closed pane", |node| node.name.as_str());
+        let report = crate::agent_debug_export::render_report(
+            pane_name,
+            pane_id,
+            cache,
+            self.agent_debug_log_filter,
+            chrono::Local::now().timestamp_millis(),
+        );
+        match crate::agent_debug_export::write_report(&path, &report) {
+            Ok(()) => {
+                self.status_message = Some(format!("Saved agent debug log to {}", path.display()));
+                true
+            }
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "Save agent debug log failed for {}: {error}",
+                    path.display()
+                ));
+                false
+            }
+        }
+    }
+
     /// Opens the Order by submenu beside its parent row, flipping it to the
     /// left only when the terminal has no room on the right.
     pub fn open_context_tree_order_submenu(&self, menu: &mut ContextMenu) {
@@ -5022,6 +5419,19 @@ impl App {
     /// and the existing pending-work outboxes retain async worker ownership.
     pub fn handle_trigger_occurrence(&mut self, occurrence: TriggerOccurrence) {
         let actions = self.trigger_settings.actions_for(occurrence.event).to_vec();
+        if let Some(pane_id) = occurrence.pane_id {
+            self.record_agent_debug_event(
+                pane_id,
+                ilium_ipc::AgentDebugEventDraft::information(
+                    ilium_ipc::AgentDebugEventKind::TriggerEvaluated,
+                    "Automatic-work trigger evaluated",
+                )
+                .with_fields(vec![
+                    ilium_ipc::AgentDebugField::plain("event", format!("{:?}", occurrence.event)),
+                    ilium_ipc::AgentDebugField::plain("actions", format!("{actions:?}")),
+                ]),
+            );
+        }
         for action in actions {
             match action {
                 TriggerAction::RetitleElement => {
@@ -5060,6 +5470,11 @@ impl App {
         ) {
             if let Some(input) = crate::title_inference::session_title_input(self, id, false) {
                 let title_generation = self.agent_title_generations.get(&id).copied().unwrap_or(0);
+                self.record_title_inference_request(
+                    &input,
+                    title_generation,
+                    TitleTrigger::Automatic,
+                );
                 self.titles_loading.insert(id);
                 self.pending_retitle_requests
                     .push(PendingRetitleRequest::Session {
@@ -5129,6 +5544,7 @@ impl App {
                     return;
                 };
                 let title_generation = self.agent_title_generations.get(&id).copied().unwrap_or(0);
+                self.record_title_inference_request(&input, title_generation, TitleTrigger::Manual);
                 self.titles_loading.insert(id);
                 self.pending_retitle_requests
                     .push(PendingRetitleRequest::Session {
@@ -5165,6 +5581,64 @@ impl App {
                     Some("This item doesn't support automatic titling".to_string());
             }
         }
+    }
+
+    /// Queues one client-owned observation with the same session/generation
+    /// compare-and-set fence used by title application.
+    pub fn record_agent_debug_event(
+        &mut self,
+        pane_id: NodeId,
+        event: ilium_ipc::AgentDebugEventDraft,
+    ) {
+        if !self.ui_settings.agent_debug_menu_enabled && !self.debug_settings.file_logging_enabled {
+            return;
+        }
+        self.queue_request(ClientRequest::RecordAgentDebugEvent {
+            pane_id,
+            expected_session_id: self.agent_session_ids.get(&pane_id).cloned(),
+            expected_title_generation: self
+                .agent_title_generations
+                .get(&pane_id)
+                .copied()
+                .unwrap_or(0),
+            event,
+        });
+    }
+
+    fn record_title_inference_request(
+        &mut self,
+        input: &crate::session_naming::SessionTitleInput,
+        title_generation: u64,
+        trigger: TitleTrigger,
+    ) {
+        let model = selected_inference_model(&self.inference_settings);
+        self.record_agent_debug_event(
+            input.pane_id,
+            ilium_ipc::AgentDebugEventDraft::information(
+                ilium_ipc::AgentDebugEventKind::TitleInferenceRequested,
+                "Agent title inference requested",
+            )
+            .with_fields(vec![
+                ilium_ipc::AgentDebugField::plain("trigger", format!("{trigger:?}")),
+                ilium_ipc::AgentDebugField::plain(
+                    "provider",
+                    self.inference_settings.selected_provider.label(),
+                ),
+                ilium_ipc::AgentDebugField::plain("model", model),
+                ilium_ipc::AgentDebugField::sensitive("session ID", input.session_id.clone()),
+                ilium_ipc::AgentDebugField::plain("title generation", title_generation.to_string()),
+                ilium_ipc::AgentDebugField::plain("current title", input.current_title.clone()),
+                ilium_ipc::AgentDebugField::plain("activity", format!("{:?}", input.activity)),
+                ilium_ipc::AgentDebugField::plain(
+                    "persistent goal",
+                    input.has_persistent_goal.to_string(),
+                ),
+                ilium_ipc::AgentDebugField::sensitive(
+                    "terminal context",
+                    input.terminal_screen.clone(),
+                ),
+            ]),
+        );
     }
 
     /// Starts one independent restructure request for every top-level
@@ -5272,6 +5746,7 @@ impl App {
     pub fn finish_project_restructure(
         &mut self,
         project_id: NodeId,
+        expected_structure: &str,
         result: anyhow::Result<ilium_core::RestructurePlan>,
     ) {
         let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
@@ -5279,11 +5754,33 @@ impl App {
         };
         match result {
             Ok(plan) => {
-                job.state = ProjectRestructureState::Complete;
-                self.request_apply_project_restructure_plan(project_id, plan);
+                let current_structure =
+                    crate::restructure::render_project_structure(&self.tree, project_id);
+                if current_structure
+                    .as_deref()
+                    .is_ok_and(|current_structure| current_structure == expected_structure)
+                {
+                    job.state = ProjectRestructureState::Complete;
+                    self.request_apply_project_restructure_plan(project_id, plan);
+                } else {
+                    job.state = ProjectRestructureState::Failed(
+                        "project changed while inference was running; stale plan discarded"
+                            .to_string(),
+                    );
+                }
             }
             Err(error) => job.state = ProjectRestructureState::Failed(error.to_string()),
         }
+        self.refresh_structure_loading();
+    }
+
+    /// Records a failure that happened before a restructure worker could be
+    /// started, where no inference-time hierarchy snapshot exists to compare.
+    pub fn fail_project_restructure(&mut self, project_id: NodeId, error: anyhow::Error) {
+        let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
+            return;
+        };
+        job.state = ProjectRestructureState::Failed(error.to_string());
         self.refresh_structure_loading();
     }
 
@@ -5382,6 +5879,15 @@ impl App {
             )
         ) {
             self.focus_pane(id);
+        }
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right)
+        ) && self.ui_settings.agent_debug_menu_enabled
+            && self.is_detected_agent_pane(id)
+        {
+            self.open_agent_pane_context_menu(id, position.x, position.y);
+            return;
         }
         if !viewport.content_area.contains(position) {
             return;
@@ -6061,6 +6567,44 @@ mod tests {
     }
 
     #[test]
+    fn completed_restructure_discards_a_plan_when_the_project_changed_in_flight() {
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/changing-project"))
+            .unwrap();
+        let group_id = app.tree.add_group(project_id, "initial work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.action_request_project_restructure(project_id);
+        let pending = app.take_pending_restructure_requests().remove(0);
+
+        app.tree
+            .rename_node(group_id, "manual organization", None, None)
+            .unwrap();
+        app.finish_project_restructure(
+            project_id,
+            &pending.current_structure,
+            Ok(ilium_core::RestructurePlan {
+                children: vec![ilium_core::RestructureNode::Pane {
+                    id: pane_id,
+                    title: "stale inferred shell".to_string(),
+                    short_title: None,
+                    icon: None,
+                }],
+            }),
+        );
+
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(matches!(
+            &app.project_restructure_jobs[&project_id].state,
+            ProjectRestructureState::Failed(message) if message.contains("stale plan discarded")
+        ));
+    }
+
+    #[test]
     fn waiting_background_keeps_wall_clock_animation_redraws_active() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
@@ -6115,16 +6659,50 @@ mod tests {
     }
 
     #[test]
+    fn tree_width_animation_labels_its_pty_resize_request() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.take_outbound_requests();
+        app.focus = FocusTarget::Tree;
+
+        let transition_started_at = Instant::now();
+        app.tick_layout_animation(transition_started_at);
+        app.tick_layout_animation(transition_started_at + Duration::from_millis(100));
+
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::ResizePane {
+                    pane_id: resized_pane_id,
+                    cause: PaneResizeCause::TreePanelAnimation,
+                    ..
+                } if resized_pane_id == pane_id
+            )
+        }));
+    }
+
+    #[test]
     fn ollama_discovery_selects_a_returned_model_and_keeps_the_spinner_active() {
         let mut app = app();
         app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
-        app.request_ollama_model_refresh();
+        app.request_model_refresh();
 
-        assert!(app.ollama_model_discovery.is_loading());
+        assert!(app.model_discovery.is_loading());
         assert!(app.has_active_animation());
 
-        app.finish_ollama_model_discovery(
-            "http://127.0.0.1:11434".to_string(),
+        app.finish_model_discovery(
+            ilium_inference::InferenceProviderKind::Ollama,
+            "http://127.0.0.1:11434/api/tags".to_string(),
             Duration::from_millis(125),
             Ok(vec!["qwen3.6:latest".to_string(), "gemma4:12b".to_string()]),
         );
@@ -6132,32 +6710,57 @@ mod tests {
         assert_eq!(app.ollama_models, ["qwen3.6:latest", "gemma4:12b"]);
         assert_eq!(app.inference_settings.ollama.model, "qwen3.6:latest");
         assert!(matches!(
-            app.ollama_model_discovery,
-            OllamaModelDiscoveryState::Loaded { model_count: 2, .. }
+            app.model_discovery,
+            ModelDiscoveryState::Loaded { model_count: 2, .. }
         ));
     }
 
     #[test]
     fn ollama_discovery_keeps_existing_models_and_exposes_the_transport_error() {
         let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
         app.ollama_models = vec!["qwen3.6:latest".to_string()];
-        app.request_ollama_model_refresh();
+        app.request_model_refresh();
 
-        app.finish_ollama_model_discovery(
-            "http://127.0.0.1:11434".to_string(),
+        app.finish_model_discovery(
+            ilium_inference::InferenceProviderKind::Ollama,
+            "http://127.0.0.1:11434/api/tags".to_string(),
             Duration::from_millis(250),
             Err("connection refused".to_string()),
         );
 
         assert_eq!(app.ollama_models, ["qwen3.6:latest"]);
         assert!(matches!(
-            app.ollama_model_discovery,
-            OllamaModelDiscoveryState::Failed { ref error, .. } if error == "connection refused"
+            app.model_discovery,
+            ModelDiscoveryState::Failed { ref error, .. } if error == "connection refused"
         ));
         assert_eq!(
             app.status_message.as_deref(),
-            Some("Could not load Ollama models: connection refused")
+            Some("Could not load Ollama (local) models: connection refused")
         );
+    }
+
+    #[test]
+    fn kilo_discovery_preserves_saved_selection_and_cycles_live_free_models() {
+        let mut app = app();
+        app.inference_settings.kilo_gateway.model = "saved/model:free".to_string();
+
+        app.finish_model_discovery(
+            ilium_inference::InferenceProviderKind::KiloGateway,
+            ilium_inference::kilo_gateway_model_catalog_url(),
+            Duration::from_millis(100),
+            Ok(vec!["stepfun/step-3.7-flash:free".to_string()]),
+        );
+
+        assert_eq!(
+            app.inference_settings.kilo_gateway.model,
+            "saved/model:free"
+        );
+        assert!(app
+            .kilo_gateway_models
+            .contains(&"stepfun/step-3.7-flash:free".to_string()));
+        app.settings_adjust_kilo_gateway_model(1);
+        assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
     }
 
     #[test]
@@ -7056,7 +7659,8 @@ mod tests {
             vec![ClientRequest::ResizePane {
                 pane_id,
                 rows: viewport.content_area.height,
-                cols: viewport.content_area.width
+                cols: viewport.content_area.width,
+                cause: PaneResizeCause::HostTerminal,
             }]
         );
     }
@@ -7431,17 +8035,20 @@ mod tests {
                     pane_id,
                     rows,
                     cols,
-                } => Some((pane_id, rows, cols)),
+                    cause,
+                } => Some((pane_id, rows, cols, cause)),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(resize_requests.len(), 2);
         assert!(resize_requests
             .iter()
-            .all(|(_, rows, cols)| *rows == 37 && *cols == 42));
+            .all(|(_, rows, cols, cause)| *rows == 37
+                && *cols == 42
+                && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
             .iter()
-            .any(|(pane_id, _, _)| *pane_id == hidden));
+            .any(|(pane_id, _, _, _)| *pane_id == hidden));
     }
 
     #[test]
@@ -7508,6 +8115,253 @@ mod tests {
                 } if *pane_id == second
             )
         }));
+    }
+
+    #[test]
+    fn right_click_opens_debug_menu_only_for_detected_agents_when_enabled() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 2);
+        let right_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_pane_mouse(right_click, position);
+        assert!(!matches!(app.mode, Mode::AgentPaneContextMenu(_)));
+
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+        app.handle_pane_mouse(right_click, position);
+        assert!(!matches!(app.mode, Mode::AgentPaneContextMenu(_)));
+
+        app.ui_settings.agent_debug_menu_enabled = true;
+        app.handle_pane_mouse(right_click, position);
+        let Mode::AgentPaneContextMenu(menu) = &app.mode else {
+            panic!("enabled detected-agent right click should open its menu");
+        };
+        assert_eq!(menu.pane_id, pane_id);
+    }
+
+    #[test]
+    fn opening_debug_log_fetches_retained_history_before_using_incremental_replay() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval),
+            )
+            .unwrap();
+        app.ui_settings.agent_debug_menu_enabled = true;
+        app.agent_debug_logs.insert(
+            pane_id,
+            AgentDebugLogCache {
+                through_sequence: 41,
+                ..AgentDebugLogCache::default()
+            },
+        );
+
+        app.open_agent_debug_log(pane_id);
+
+        assert!(matches!(
+            app.mode,
+            Mode::AgentDebugLog(AgentDebugLogViewState {
+                pane_id: target,
+                scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
+            }) if target == pane_id
+        ));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::GetPaneDebugLog {
+                pane_id,
+                after_sequence: None,
+            }]
+        );
+
+        app.agent_debug_logs
+            .get_mut(&pane_id)
+            .unwrap()
+            .has_loaded_retained_history = true;
+        app.open_agent_debug_log(pane_id);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::GetPaneDebugLog {
+                pane_id,
+                after_sequence: Some(41),
+            }]
+        );
+    }
+
+    #[test]
+    fn debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Codex: payment audit", PaneContentKind::Terminal)
+            .unwrap();
+        let view = AgentDebugLogViewState {
+            pane_id,
+            scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
+        };
+        app.agent_debug_logs.insert(
+            pane_id,
+            AgentDebugLogCache {
+                has_loaded_retained_history: true,
+                ..AgentDebugLogCache::default()
+            },
+        );
+
+        app.open_agent_debug_save_path(view);
+
+        let Mode::AgentDebugSavePath(target, prompt) = &app.mode else {
+            panic!("complete history should open the destination prompt");
+        };
+        assert_eq!(*target, pane_id);
+        assert!(Path::new(&prompt.buf).is_absolute());
+        assert!(prompt.buf.contains("ilium-codex-payment-audit-debug-"));
+        assert!(prompt.buf.ends_with(".log"));
+        assert!(matches!(
+            app.modal_stack.as_slice(),
+            [Mode::AgentDebugLog(AgentDebugLogViewState { pane_id: parent, .. })]
+                if *parent == pane_id
+        ));
+    }
+
+    #[test]
+    fn saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Codex audit", PaneContentKind::Terminal)
+            .unwrap();
+        app.agent_debug_logs.insert(
+            pane_id,
+            AgentDebugLogCache {
+                entries: vec![ilium_ipc::AgentDebugEntry {
+                    sequence: 1,
+                    occurred_at_unix_millis: 1_700_000_000_000,
+                    severity: ilium_ipc::AgentDebugSeverity::Information,
+                    source: ilium_ipc::AgentDebugSource::Detector,
+                    kind: ilium_ipc::AgentDebugEventKind::DetectionCycle,
+                    summary: "Detected Codex and classified it as working".to_string(),
+                    fields: vec![ilium_ipc::AgentDebugField::plain(
+                        "Activity decision",
+                        "Working because a live status marker was visible.",
+                    )],
+                    correlation_id: None,
+                    context: ilium_ipc::AgentDebugContext::default(),
+                    metadata: Default::default(),
+                }],
+                through_sequence: 1,
+                retained_from_sequence: 1,
+                dropped_entry_count: 0,
+                is_loading: false,
+                has_loaded_retained_history: true,
+            },
+        );
+
+        assert!(!app.save_agent_debug_log(pane_id, "exports/codex.log"));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("No such file or directory")));
+
+        std::fs::create_dir(directory.path().join("exports")).unwrap();
+        assert!(app.save_agent_debug_log(pane_id, "exports/codex.log"));
+        let saved = std::fs::read_to_string(directory.path().join("exports/codex.log")).unwrap();
+        assert!(saved.contains("ILIUM AGENT DEBUG LOG"));
+        assert!(saved.contains("Pane: Codex audit"));
+        assert!(saved.contains("Activity decision: Working because"));
+    }
+
+    #[test]
+    fn file_logging_alone_forwards_client_owned_agent_events() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let pane_id = NodeId(31);
+        app.ui_settings.agent_debug_menu_enabled = false;
+        app.debug_settings.file_logging_enabled = true;
+
+        app.record_agent_debug_event(
+            pane_id,
+            ilium_ipc::AgentDebugEventDraft::information(
+                ilium_ipc::AgentDebugEventKind::TriggerEvaluated,
+                "Automatic-work trigger evaluated",
+            ),
+        );
+
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::RecordAgentDebugEvent {
+                    pane_id: recorded_pane_id,
+                    event,
+                    ..
+                } if recorded_pane_id == pane_id
+                    && event.kind == ilium_ipc::AgentDebugEventKind::TriggerEvaluated
+            )
+        }));
+    }
+
+    #[test]
+    fn client_owned_agent_events_are_suppressed_when_both_debug_sinks_are_disabled() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.ui_settings.agent_debug_menu_enabled = false;
+        app.debug_settings.file_logging_enabled = false;
+
+        app.record_agent_debug_event(
+            NodeId(31),
+            ilium_ipc::AgentDebugEventDraft::information(
+                ilium_ipc::AgentDebugEventKind::TriggerEvaluated,
+                "Automatic-work trigger evaluated",
+            ),
+        );
+
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn oldest_debug_log_anchor_can_page_toward_newer_events() {
+        let mut state = AgentDebugLogViewState {
+            pane_id: NodeId(7),
+            scroll_position: AgentDebugLogScrollPosition::FromNewest(28),
+        };
+
+        state.show_oldest();
+        state.scroll_newer(10);
+
+        assert_eq!(
+            state.scroll_position,
+            AgentDebugLogScrollPosition::FromOldest(10)
+        );
     }
 
     #[test]

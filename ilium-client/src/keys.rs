@@ -75,6 +75,11 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::VoicePromptEditor(state) => handle_voice_prompt_editor(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
+        Mode::AgentPaneContextMenu(menu) => handle_agent_pane_context_menu_event(app, menu, &event),
+        Mode::AgentDebugLog(state) => handle_agent_debug_log_event(app, state, &event),
+        Mode::AgentDebugSavePath(pane_id, state) => {
+            handle_agent_debug_save_path_event(app, pane_id, state, &event)
+        }
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
         Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
         Mode::EditorLineContextMenu(menu) => {
@@ -122,6 +127,99 @@ pub fn handle_event(app: &mut App, event: Event) {
             app.mode = Mode::LeaderPending;
             handle_normal_or_leader(app, event);
         }
+    }
+}
+
+fn handle_agent_pane_context_menu_event(
+    app: &mut App,
+    menu: crate::app::AgentPaneContextMenu,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentPaneContextMenu(menu);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentPaneContextMenu(menu);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => app.mode = Mode::Normal,
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            app.open_agent_debug_log(menu.pane_id)
+        }
+        _ => app.mode = Mode::AgentPaneContextMenu(menu),
+    }
+}
+
+fn handle_agent_debug_log_event(
+    app: &mut App,
+    mut state: crate::app::AgentDebugLogViewState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentDebugLog(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentDebugLog(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q') => app.mode = Mode::Normal,
+        KeyCode::Char('s' | 'S') => app.open_agent_debug_save_path(state),
+        KeyCode::Char('r' | 'R') => {
+            app.toggle_agent_debug_tree_resize_filter();
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.scroll_older(1);
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.scroll_newer(1);
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::PageUp => {
+            state.scroll_older(10);
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::PageDown => {
+            state.scroll_newer(10);
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::Home => {
+            state.show_oldest();
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        KeyCode::End => {
+            state.follow_newest();
+            app.mode = Mode::AgentDebugLog(state);
+        }
+        _ => app.mode = Mode::AgentDebugLog(state),
+    }
+}
+
+fn handle_agent_debug_save_path_event(
+    app: &mut App,
+    pane_id: ilium_core::NodeId,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentDebugSavePath(pane_id, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentDebugSavePath(pane_id, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit if app.save_agent_debug_log(pane_id, &state.buf) => app.pop_modal(),
+        PromptOutcome::Commit | PromptOutcome::Continue => {
+            app.mode = Mode::AgentDebugSavePath(pane_id, state)
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
     }
 }
 
@@ -1480,6 +1578,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Field(
                     crate::app::InferenceSettingField::OllamaModel,
                 )) => app.settings_adjust_ollama_model(-1),
+                Some(crate::app::InferenceRow::KiloGatewayModel) => {
+                    app.settings_adjust_kilo_gateway_model(-1)
+                }
                 _ => {}
             }
         }
@@ -1493,8 +1594,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Provider) => {
                     app.settings_adjust_inference_provider(1)
                 }
-                Some(crate::app::InferenceRow::RefreshOllamaModels) => {
-                    app.request_ollama_model_refresh()
+                Some(crate::app::InferenceRow::RefreshModels) => app.request_model_refresh(),
+                Some(crate::app::InferenceRow::KiloGatewayModel) => {
+                    app.settings_adjust_kilo_gateway_model(1)
                 }
                 Some(crate::app::InferenceRow::Field(
                     crate::app::InferenceSettingField::OllamaModel,
@@ -1815,6 +1917,82 @@ mod indent_outdent_tests {
                 crate::app::VoiceInteractionRequest::StartPushToTalk,
                 crate::app::VoiceInteractionRequest::StopPushToTalk,
             ]
+        );
+    }
+
+    #[test]
+    fn debug_log_s_key_opens_path_prompt_and_enter_saves_complete_report() {
+        let directory = tempfile::tempdir().expect("temporary project");
+        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.agent_debug_logs.insert(
+            pane_id,
+            crate::app::AgentDebugLogCache {
+                has_loaded_retained_history: true,
+                ..crate::app::AgentDebugLogCache::default()
+            },
+        );
+        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
+            pane_id,
+            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+        );
+
+        let Mode::AgentDebugSavePath(target, prompt) = &app.mode else {
+            panic!("S should open the editable debug-log destination prompt");
+        };
+        assert_eq!(*target, pane_id);
+        assert!(prompt
+            .buf
+            .starts_with(&directory.path().display().to_string()));
+        assert!(prompt.buf.ends_with(".log"));
+
+        let export_path = directory.path().join("keyboard-export.log");
+        app.mode = Mode::AgentDebugSavePath(
+            pane_id,
+            TextPromptState::new(export_path.display().to_string()),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
+        assert!(std::fs::read_to_string(export_path)
+            .unwrap()
+            .starts_with("ILIUM AGENT DEBUG LOG\n"));
+    }
+
+    #[test]
+    fn debug_log_r_key_reveals_panel_animation_resize_events() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let pane_id = ilium_core::NodeId(7);
+        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
+            pane_id,
+            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
+        });
+        assert!(
+            app.agent_debug_log_filter
+                .is_tree_panel_animation_resize_hidden
+        );
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+        );
+
+        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
+        assert!(
+            !app.agent_debug_log_filter
+                .is_tree_panel_animation_resize_hidden
         );
     }
 

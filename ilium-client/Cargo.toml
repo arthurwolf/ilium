@@ -10,12 +10,14 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0.103"
 arboard = "3.6.1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 crossterm = "0.29.0"
 cosmic-text = "0.14"
 directories = "6.0.0"
 emoji = "0.2.1"
 fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 handlebars = "6.3.2"
+ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }

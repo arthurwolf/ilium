@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ilium_core::AgentClass;
+use ilium_core::{AgentClass, AgentProvider, BuiltinAgentProvider, SessionIdentityTransitionRule};
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -23,6 +23,9 @@ use crate::shell_title::ShellCommandTracker;
 /// yet.
 pub const DEFAULT_PANE_ROWS: u16 = 24;
 pub const DEFAULT_PANE_COLS: u16 = 80;
+/// Deliberately neutral title shown after an agent discards its conversation.
+/// The next verified session may replace it through normal title inference.
+pub const FRESH_AGENT_TITLE: &str = "<new>";
 
 /// What a terminal pane was spawned to run -- kept separate from
 /// `ilium_ipc::NewPaneKind` (which also has an `Editor` variant that can
@@ -85,6 +88,10 @@ pub struct TerminalPaneRuntime {
     /// sessions, so this ID stays inadmissible until a different verified ID
     /// is found or a replacement process takes ownership.
     pub invalidated_session_id: Option<String>,
+    /// Connects the input event that invalidated a session to the later
+    /// verified replacement identity, even when discovery needs several
+    /// asynchronous ticks to observe the provider's new transcript.
+    pub pending_session_transition_correlation_id: Option<String>,
     /// UUID supplied by ilium to an exact fresh `claude` launch. It is not
     /// published or persisted as an active session until detection confirms
     /// that this pane actually owns a live Claude process.
@@ -109,6 +116,11 @@ pub struct TerminalPaneRuntime {
     /// Agent class that owned `session_id`; prevents a later different CLI in
     /// the same terminal from inheriting stale identity.
     pub session_agent_class: Option<AgentClass>,
+    /// Most recently detected live agent process, independent of whether
+    /// transcript discovery has accepted a session identity for it. Agent
+    /// input and lifecycle diagnostics need this PID even during unresolved
+    /// or invalidated session windows.
+    pub detected_agent_process_id: Option<u32>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -136,6 +148,7 @@ impl TerminalPaneRuntime {
             session_command_tracker: ShellCommandTracker::default(),
             is_session_identity_invalidated: false,
             invalidated_session_id: None,
+            pending_session_transition_correlation_id: None,
             pending_generated_session_id,
             title_generation: 0,
             is_showing_fresh_agent_screen: false,
@@ -154,6 +167,7 @@ impl TerminalPaneRuntime {
             },
             session_id: None,
             session_agent_class: None,
+            detected_agent_process_id: None,
             session_process_id: None,
             forward_task,
         }
@@ -176,15 +190,25 @@ pub struct ConfirmedGoalOwner {
     pub agent_class: AgentClass,
 }
 
-/// Returns true only for interactive commands known to replace the active
-/// conversation within an already-running agent process. Invalidating on a
-/// false positive would suppress a correct ID, so ordinary prompt content and
-/// commands that keep the current conversation are deliberately excluded.
-pub fn invalidates_agent_session_identity(submitted_line: &str) -> bool {
-    matches!(
-        submitted_line.split_whitespace().next(),
-        Some("/resume" | "/branch" | "/new")
-    )
+/// Returns the exact provider rule that invalidates a persisted identity.
+/// Unknown/custom agents are accepted only when every built-in provider
+/// reports the same rule, preserving the existing fail-closed consensus.
+pub fn agent_session_identity_transition_rule(
+    agent_class: Option<&AgentClass>,
+    submitted_line: &str,
+) -> Option<SessionIdentityTransitionRule> {
+    if let Some(provider) = agent_class.and_then(AgentClass::provider) {
+        return provider.session_identity_transition_rule(submitted_line);
+    }
+
+    let shared_rule =
+        BuiltinAgentProvider::ALL[0].session_identity_transition_rule(submitted_line)?;
+    BuiltinAgentProvider::ALL
+        .into_iter()
+        .all(|provider| {
+            provider.session_identity_transition_rule(submitted_line) == Some(shared_rule)
+        })
+        .then_some(shared_rule)
 }
 
 /// Returns true only for the shared interactive command that starts a fresh
@@ -360,18 +384,35 @@ mod tests {
     }
 
     #[test]
-    fn only_session_replacing_slash_commands_invalidate_identity() {
+    fn provider_specific_and_consensus_session_transitions_invalidate_identity() {
         for command in ["/resume", "/resume abc", "/branch release", "/new"] {
-            assert!(invalidates_agent_session_identity(command));
+            assert!(
+                agent_session_identity_transition_rule(Some(&AgentClass::Claude), command)
+                    .is_some()
+            );
+            assert!(agent_session_identity_transition_rule(None, command).is_some());
         }
-        for input in [
-            "please run /resume",
-            "/clear",
-            "/fork investigate",
-            "resume",
-        ] {
-            assert!(!invalidates_agent_session_identity(input));
+        for input in ["please run /resume", "/fork investigate", "resume"] {
+            assert!(
+                agent_session_identity_transition_rule(Some(&AgentClass::Codex), input).is_none()
+            );
         }
+        assert!(
+            agent_session_identity_transition_rule(Some(&AgentClass::Codex), "/clear").is_some()
+        );
+        assert_eq!(
+            agent_session_identity_transition_rule(Some(&AgentClass::Codex), "/clear"),
+            Some(SessionIdentityTransitionRule::ClaudeOrCodexClearStartsFreshSession)
+        );
+        assert_eq!(
+            agent_session_identity_transition_rule(Some(&AgentClass::Claude), "/clear"),
+            Some(SessionIdentityTransitionRule::ClaudeOrCodexClearStartsFreshSession)
+        );
+        assert_eq!(
+            agent_session_identity_transition_rule(None, "/resume another"),
+            Some(SessionIdentityTransitionRule::SharedNewSessionCommand)
+        );
+        assert!(agent_session_identity_transition_rule(None, "/clear").is_none());
     }
 
     #[test]

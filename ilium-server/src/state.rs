@@ -19,6 +19,7 @@ use ilium_ipc::ServerEvent;
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 
+use crate::agent_debug::AgentDebugRecorder;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
 use crate::persistence::SessionSnapshot;
@@ -48,6 +49,7 @@ pub struct ServerStateOptions {
     pub sound_settings: ilium_sound::SoundSettings,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
     pub custom_signatures: Vec<AgentSignature>,
+    pub agent_debug_menu_enabled: bool,
 }
 
 pub struct ServerState {
@@ -68,6 +70,9 @@ pub struct ServerState {
     pub custom_signatures: Vec<AgentSignature>,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
+    /// Server-owned, pane-keyed semantic debug history. It is separate from
+    /// the hot tree snapshot transported after structural changes.
+    pub agent_debug: AgentDebugRecorder,
     /// Most recently selected terminal launch directory in this session.
     pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
     pub pending_session_recovery: Mutex<Option<SessionSnapshot>>,
@@ -143,6 +148,7 @@ impl ServerState {
             custom_signatures: options.custom_signatures,
             tree: RwLock::new(tree),
             panes: RwLock::new(HashMap::new()),
+            agent_debug: AgentDebugRecorder::new(options.agent_debug_menu_enabled),
             last_terminal_working_directory: Mutex::new(None),
             pending_session_recovery: Mutex::new(None),
             restructure_undo: Mutex::new(HashMap::new()),
