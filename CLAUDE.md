@@ -69,6 +69,8 @@ Use the `directories` crate, never hardcode `~`:
 
 ## Controlled tmux session
 
+- GUI automation must run only through tmux sessions we create and control. Do not use `xdotool` or screenshot-driven desktop automation.
+
 - `PROJECT=/absolute/project; STATE=$(mktemp -d /ram/is.XXXXXX); RUNTIME=$(mktemp -d /ram/ir.XXXXXX); TMUX_SERVER=ilium-ctl; TMUX_SESSION=ilium-ctl`
 - Launch an isolated server/session: `tmux -L "$TMUX_SERVER" new-session -d -s "$TMUX_SESSION" "env XDG_DATA_HOME=$STATE/data XDG_CONFIG_HOME=$STATE/config XDG_RUNTIME_DIR=$RUNTIME $HOME/.local/bin/ilium --cwd $PROJECT"`.
 - Remotely control the live TUI: `tmux -L "$TMUX_SERVER" attach-session -t "$TMUX_SESSION"`; use normal ilium keys, then detach with tmux `Ctrl+B d`.
