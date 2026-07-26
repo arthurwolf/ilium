@@ -162,14 +162,14 @@ fn settings_snapshot(app: &App) -> Value {
         .map(|binding| {
             (
                 crate::keymap::action_name(binding.action).to_owned(),
-                json!(crate::keymap::key_label(binding.letter)),
+                json!(crate::keymap::key_label(binding.key)),
             )
         })
         .collect::<serde_json::Map<_, _>>();
     json!({
         "writable_path_patterns": [
             "ui.auto_resize_tree", "ui.tree_width", "ui.tree_order",
-            "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
+            "ui.tree_row_management_controls", "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
             "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
@@ -195,6 +195,7 @@ fn settings_snapshot(app: &App) -> Value {
             "auto_resize_tree": app.ui_settings.auto_resize_tree_on_focus,
             "tree_width": app.ui_settings.tree_width,
             "tree_order": format!("{:?}", app.ui_settings.tree_order).to_ascii_lowercase(),
+            "tree_row_management_controls": app.ui_settings.show_tree_row_management_controls,
             "color_scheme": format!("{:?}", app.ui_settings.color_scheme).to_ascii_lowercase(),
             "stable_glyphs": app.ui_settings.use_stable_glyphs,
             "agent_identifier_mode": app.ui_settings.agent_identifiers.mode.label(),
@@ -275,6 +276,9 @@ fn settings_snapshot(app: &App) -> Value {
 fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
     match target {
         RightPanelTarget::Empty => json!({ "kind": "empty" }),
+        RightPanelTarget::Chatroom { project_id } => {
+            json!({ "kind": "chatroom", "project_id": project_id.0 })
+        }
         RightPanelTarget::Pane { pane_id } => {
             json!({ "kind": "pane", "active_pane_id": pane_id.0 })
         }
@@ -293,6 +297,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
     match mode {
         Mode::Normal => "normal",
         Mode::LeaderPending => "leader_pending",
+        Mode::NavigationLeaderPending => "navigation_leader_pending",
         Mode::Move => "move",
         Mode::Rename(_) => "rename",
         Mode::CommandPrompt(_) => "command_prompt",
@@ -306,7 +311,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::FolderExplorer(..) => "folder_picker",
         Mode::ProjectFolderExplorer(..) => "project_folder_picker",
         Mode::ContextMenu(_) => "context_menu",
-        Mode::AgentPaneContextMenu(_) => "agent_pane_context_menu",
+        Mode::TerminalPaneContextMenu(_) => "terminal_pane_context_menu",
         Mode::AgentDebugLog(_) => "agent_debug_log",
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",

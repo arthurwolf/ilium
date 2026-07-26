@@ -19,6 +19,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     shortcut_base: keymap::ShortcutBase,
+    navigation_shortcut_base: keymap::ShortcutBase,
     bindings: &[keymap::KeyBinding],
 ) {
     let popup_area = centered_rect(94, 94, area);
@@ -43,8 +44,12 @@ pub fn render(
             spans.push(Span::styled(
                 format!(
                     "{} {}",
-                    shortcut_base.label(),
-                    keymap::key_label(binding.letter)
+                    keymap::action_prefix_label(
+                        binding.action,
+                        shortcut_base,
+                        navigation_shortcut_base,
+                    ),
+                    keymap::key_label(binding.key)
                 ),
                 Style::new().add_modifier(Modifier::BOLD),
             ));
@@ -68,8 +73,8 @@ pub fn render(
             bindings
                 .iter()
                 .find(|binding| binding.action == keymap::Action::Help)
-                .map(|binding| binding.letter)
-                .unwrap_or('?'),
+                .map(|binding| keymap::key_label(binding.key))
+                .unwrap_or_else(|| "?".to_string()),
         ),
         Style::new().add_modifier(Modifier::ITALIC),
     )));
@@ -95,6 +100,7 @@ mod tests {
                     frame,
                     frame.area(),
                     keymap::ShortcutBase::B,
+                    keymap::DEFAULT_NAVIGATION_SHORTCUT_BASE,
                     keymap::LEADER_BINDINGS,
                 )
             })
@@ -114,12 +120,24 @@ mod tests {
     #[test]
     fn help_renders_a_live_remapped_action_table() {
         let mut bindings = keymap::LEADER_BINDINGS.to_vec();
-        keymap::assign_key(&mut bindings, keymap::Action::NewGroup, 'z')
-            .expect("z is free in the default map");
+        keymap::assign_key(
+            &mut bindings,
+            keymap::Action::NewGroup,
+            keymap::BindingKey::Character('z'),
+        )
+        .expect("z is free in the default map");
         let backend = TestBackend::new(140, 60);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render(frame, frame.area(), keymap::ShortcutBase::A, &bindings))
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    keymap::ShortcutBase::A,
+                    keymap::DEFAULT_NAVIGATION_SHORTCUT_BASE,
+                    &bindings,
+                )
+            })
             .unwrap();
         let rendered = terminal
             .backend()

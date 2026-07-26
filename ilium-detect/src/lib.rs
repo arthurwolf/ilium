@@ -321,6 +321,44 @@ pub fn is_fresh_agent_screen(class: &AgentClass, screen_text: &str) -> bool {
         && screen_has_only_empty_composer_chrome(screen_text, "send a message")
 }
 
+/// Returns whether a detected agent visibly exposes its normal free-form
+/// composer. This is deliberately a narrower contract than `Idle`: an agent
+/// can be idle while still rendering an onboarding step, a permission choice,
+/// or another modal that would consume an injected task as the wrong input.
+///
+/// The server uses this only for the one-shot initial prompt attached to a
+/// newly-created agent pane. Unknown/custom agents fail closed because their
+/// prompt chrome is not a stable contract ilium can safely infer.
+pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
+    let normalized = screen_text.to_ascii_lowercase();
+    match class {
+        AgentClass::Codex => normalized.contains("send a message"),
+        AgentClass::Claude => {
+            !matches!(
+                classify_activity_for_agent(class, screen_text),
+                AgentActivity::Working
+                    | AgentActivity::WaitingBackground
+                    | AgentActivity::WaitingApproval
+            ) && screen_has_claude_composer_cursor(screen_text)
+        }
+        AgentClass::Antigravity => normalized.contains("type a message"),
+        AgentClass::Other(_) => false,
+    }
+}
+
+/// Claude's empty composer is a bordered terminal field whose content row is
+/// just `>` (older builds) or `❯` (current builds). Requiring that isolated
+/// row avoids confusing a prose quote or a numbered selector with a composer.
+fn screen_has_claude_composer_cursor(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        let content = line
+            .trim()
+            .trim_matches(|character| matches!(character, '│' | '|' | ' '))
+            .trim();
+        matches!(content, ">" | "❯")
+    })
+}
+
 /// Ignores the box drawing around a known empty composer, then rejects any
 /// remaining user/agent text. A completed Codex turn keeps transcript text
 /// above its composer, so it cannot satisfy this deliberately narrow rule.
@@ -1008,6 +1046,34 @@ mod tests {
         assert!(!is_fresh_agent_screen(
             &AgentClass::Antigravity,
             "Finished the requested task\nType a message"
+        ));
+    }
+
+    #[test]
+    fn prompt_readiness_requires_each_provider_visible_composer() {
+        assert!(is_agent_prompt_ready(
+            &AgentClass::Codex,
+            &fixture("codex_idle.txt")
+        ));
+        assert!(is_agent_prompt_ready(
+            &AgentClass::Claude,
+            &fixture("claude_code_idle.txt")
+        ));
+        assert!(is_agent_prompt_ready(
+            &AgentClass::Antigravity,
+            "Welcome to Antigravity\nType a message"
+        ));
+        assert!(!is_agent_prompt_ready(
+            &AgentClass::Codex,
+            &fixture("codex_awaiting_approval.txt")
+        ));
+        assert!(!is_agent_prompt_ready(
+            &AgentClass::Claude,
+            &fixture("claude_code_awaiting_approval.txt")
+        ));
+        assert!(!is_agent_prompt_ready(
+            &AgentClass::Other("opencode".to_owned()),
+            "Type a message"
         ));
     }
 

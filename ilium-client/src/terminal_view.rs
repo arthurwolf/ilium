@@ -165,29 +165,66 @@ impl TerminalView {
         self.refresh_scrollback_total();
     }
 
-    /// Replaces this freshly-attached view with the server-owned retained
-    /// output history. The server supplies a sequence watermark so any live
-    /// event queued before the replay is applied can be rejected later.
+    /// Replaces this view with the server-owned retained output history.
+    /// Attach starts from a blank view; live lag repair preserves the user's
+    /// historical/search viewport and ignores stale replays so recovery
+    /// cannot move a pane or roll its screen backward.
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
+        if through_sequence <= self.last_output_sequence {
+            return;
+        }
+
+        let previous_scrollback_position = self.scrollback_position();
+        let previous_scrollback_total = self.scrollback_total;
+        let was_history_anchor = self.is_history_anchor;
         let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
-        self.scrollback_total = 0;
         Arc::make_mut(&mut self.history_bytes).clear();
         self.osc8_links.clear();
         self.osc8_stream.clear();
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
+        self.last_output_sequence = through_sequence;
+
+        // A workspace-search anchor intentionally renders an older prefix.
+        // Repair the authoritative raw history and sequence without replacing
+        // the evidence the user explicitly opened.
+        if was_history_anchor {
+            return;
+        }
+
+        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        self.scrollback_total = 0;
         self.parser.process(bytes);
         self.refresh_scrollback_total();
-        self.last_output_sequence = through_sequence;
-        self.is_history_anchor = false;
+
+        // vt100 normally advances a historical offset as new rows arrive.
+        // Rebuilding from replay must reproduce that behavior explicitly so
+        // the same old top row remains visible rather than jumping to tail.
+        if previous_scrollback_position > 0 {
+            let appended_rows = self
+                .scrollback_total
+                .saturating_sub(previous_scrollback_total);
+            self.parser
+                .screen_mut()
+                .set_scrollback(previous_scrollback_position.saturating_add(appended_rows));
+        }
     }
 
     /// Applies a live output chunk only when it was not already included in
     /// the attach replay. Output sequence numbers are pane-local and
     /// monotonic for one server lifetime.
-    pub fn apply_live_output(&mut self, sequence: u64, bytes: &[u8]) {
+    pub fn apply_live_output(&mut self, first_sequence: u64, sequence: u64, bytes: &[u8]) {
         if sequence <= self.last_output_sequence {
+            return;
+        }
+        let expected_first_sequence = self.last_output_sequence.saturating_add(1);
+        if first_sequence != expected_first_sequence {
+            tracing::error!(
+                first_sequence,
+                sequence,
+                last_output_sequence = self.last_output_sequence,
+                "ignoring non-contiguous terminal output"
+            );
             return;
         }
         self.append_history(bytes);
@@ -343,6 +380,15 @@ impl TerminalView {
         self.history_bytes.as_slice()
     }
 
+    /// Returns all retained terminal output as clipboard-safe plain text.
+    /// Escape sequences control the terminal display rather than representing
+    /// user-visible history, so copying them would leak cursor and color
+    /// commands into the destination application.
+    pub fn copyable_history(&self) -> String {
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(self.history_bytes.as_slice()))
+            .into_owned()
+    }
+
     /// Produces an O(1) immutable view of retained output for the search
     /// worker. Later PTY output uses `Arc::make_mut`, so a worker can scan a
     /// stable history snapshot without blocking the interactive event loop.
@@ -466,6 +512,14 @@ mod tests {
             view.osc8_stream.is_empty(),
             "ordinary output must not allocate OSC parsing scratch state"
         );
+    }
+
+    #[test]
+    fn copyable_history_omits_terminal_escape_sequences() {
+        let mut view = TerminalView::new(4, 20);
+        view.feed(b"\x1b[32mgreen\x1b[0m\r\nplain");
+
+        assert_eq!(view.copyable_history(), "green\nplain");
     }
 
     #[test]
@@ -596,15 +650,103 @@ mod tests {
         let total_after_replay = reattached.scrollback_total();
         assert!(total_after_replay > 0);
 
-        reattached.apply_live_output(12, b"duplicate\r\n");
+        reattached.apply_live_output(12, 12, b"duplicate\r\n");
         assert_eq!(reattached.scrollback_total(), total_after_replay);
         assert_eq!(reattached.last_output_sequence(), 12);
 
-        reattached.apply_live_output(13, b"new live output\r\n");
+        reattached.apply_live_output(13, 13, b"new live output\r\n");
         assert_eq!(reattached.last_output_sequence(), 13);
         assert!(reattached
             .with_screen(|screen| screen.contents())
             .contains("new live output"));
+    }
+
+    #[test]
+    fn stale_replay_cannot_roll_a_live_terminal_backward() {
+        let mut view = TerminalView::new(4, 30);
+        view.apply_replay(b"authoritative replay\r\n", 10, true);
+        view.apply_live_output(11, 11, b"newer live output\r\n");
+        let screen_before_stale_replay = view.with_screen(|screen| screen.contents());
+
+        view.apply_replay(b"obsolete screen\r\n", 10, true);
+
+        assert_eq!(
+            view.with_screen(|screen| screen.contents()),
+            screen_before_stale_replay
+        );
+        assert_eq!(view.last_output_sequence(), 11);
+        assert!(!view
+            .with_screen(|screen| screen.contents())
+            .contains("obsolete screen"));
+    }
+
+    #[test]
+    fn non_contiguous_live_output_cannot_corrupt_terminal_history() {
+        let mut view = TerminalView::new(4, 30);
+        view.apply_replay(b"authoritative replay\r\n", 10, true);
+        let history_before_gap = view.history_bytes.as_ref().clone();
+
+        view.apply_live_output(12, 12, b"output after a gap\r\n");
+
+        assert_eq!(view.last_output_sequence(), 10);
+        assert_eq!(view.history_bytes.as_ref(), &history_before_gap);
+        assert!(!view
+            .with_screen(|screen| screen.contents())
+            .contains("output after a gap"));
+    }
+
+    #[test]
+    fn live_replay_preserves_a_scrolled_historical_viewport() {
+        let original_replay = (0..12)
+            .map(|line| format!("line {line}\r\n"))
+            .collect::<String>();
+        let repaired_replay = (0..15)
+            .map(|line| format!("line {line}\r\n"))
+            .collect::<String>();
+        let mut view = TerminalView::new(4, 20);
+        view.apply_replay(original_replay.as_bytes(), 12, true);
+        view.scroll_up(4);
+        let historical_screen = view.with_screen(|screen| screen.contents());
+
+        view.apply_replay(repaired_replay.as_bytes(), 15, true);
+
+        assert_eq!(
+            view.with_screen(|screen| screen.contents()),
+            historical_screen,
+            "lag repair must retain the same historical rows"
+        );
+        assert_eq!(view.last_output_sequence(), 15);
+        assert!(view.is_scrolled_back());
+    }
+
+    #[test]
+    fn live_replay_updates_history_without_discarding_a_search_anchor() {
+        let mut view = TerminalView::new(3, 30);
+        let initial = b"first\r\nneedle lives here\r\nlast\r\n";
+        view.apply_replay(initial, 4, true);
+        let needle_end = initial
+            .windows(b"needle".len())
+            .position(|window| window == b"needle")
+            .unwrap()
+            + b"needle".len();
+        view.jump_to_history_byte(needle_end);
+        let anchored_screen = view.with_screen(|screen| screen.contents());
+
+        view.apply_replay(
+            b"first\r\nneedle lives here\r\nlast\r\nnew live output\r\n",
+            5,
+            true,
+        );
+
+        assert_eq!(
+            view.with_screen(|screen| screen.contents()),
+            anchored_screen
+        );
+        assert!(view
+            .searchable_history()
+            .windows(b"new live output".len())
+            .any(|window| window == b"new live output"));
+        assert_eq!(view.last_output_sequence(), 5);
     }
 
     #[test]

@@ -12,9 +12,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ratatui::style::{Color, Style};
-use ratatui_textarea::{CursorMove, Input, TextArea};
+use ratatui_textarea::{CursorMove, Input, TextArea, WrapMode};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
-use crate::markdown::render::RenderedDocument;
+use crate::markdown::render::{HeadingRendering, RenderedDocument};
 
 /// How long an editor pane waits after the last edit before autosaving,
 /// when `show_autosave` is on -- long enough that a burst of keystrokes
@@ -60,6 +62,20 @@ struct HighlightCache {
     lines: Vec<crate::syntax::LineTokens>,
 }
 
+/// One terminal row in the Source view. In Clip mode each source line maps
+/// to one row; in Wrap mode a source line can contribute several rows while
+/// retaining its exact source-coordinate range for mouse interactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceVisualRow {
+    pub source_row: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub start_column: usize,
+    pub end_column: usize,
+    pub first_in_source_row: bool,
+    pub last_in_source_row: bool,
+}
+
 /// A single editor pane: a `TextArea` plus the file it is backed by (if
 /// any), a dirty flag tracking unsaved edits, and the toolbar-controlled
 /// display state (view mode, line numbers, minimap).
@@ -68,6 +84,12 @@ pub struct EditorPane {
     pub path: Option<PathBuf>,
     pub dirty: bool,
     pub view_mode: EditorViewMode,
+    /// Source-mode overflow policy shared by global editor defaults and the
+    /// per-editor toolbar. It changes presentation only, never file content.
+    pub line_display: crate::config::LineDisplay,
+    /// Per rendered editor-pane preference for terminals that cannot show
+    /// graphics protocols. The toolbar exposes this only in Rendered mode.
+    pub heading_rendering: HeadingRendering,
     pub show_line_numbers: bool,
     pub show_minimap: bool,
     /// When on, an edit schedules a debounced write-to-disk instead of
@@ -133,6 +155,8 @@ impl EditorPane {
             path: None,
             dirty: false,
             view_mode: EditorViewMode::Source,
+            line_display: crate::config::LineDisplay::default(),
+            heading_rendering: HeadingRendering::Rasterized,
             show_line_numbers: true,
             show_minimap: true,
             show_autosave: false,
@@ -175,6 +199,8 @@ impl EditorPane {
             path: Some(path),
             dirty: false,
             view_mode: EditorViewMode::Source,
+            line_display: crate::config::LineDisplay::default(),
+            heading_rendering: HeadingRendering::Rasterized,
             show_line_numbers: true,
             show_minimap: true,
             show_autosave: false,
@@ -194,6 +220,7 @@ impl EditorPane {
     }
 
     pub fn apply_defaults(&mut self, settings: &crate::config::EditorSettings) {
+        self.set_line_display(settings.line_display);
         self.show_line_numbers = settings.show_line_numbers;
         self.show_minimap = settings.show_minimap;
         self.show_autosave = settings.autosave_enabled;
@@ -225,9 +252,55 @@ impl EditorPane {
         };
     }
 
+    /// Flips the rendered-heading representation without changing the
+    /// document source or whether the pane is in Rendered mode.
+    pub fn toggle_heading_rendering(&mut self) {
+        self.heading_rendering = match self.heading_rendering {
+            HeadingRendering::Rasterized => HeadingRendering::PlainText,
+            HeadingRendering::PlainText => HeadingRendering::Rasterized,
+        };
+    }
+
     pub fn toggle_line_numbers(&mut self) {
         self.show_line_numbers = !self.show_line_numbers;
         self.apply_line_number_style();
+    }
+
+    /// Switches Source view between horizontally clipped logical lines and
+    /// soft-wrapped visual lines. `TextArea` owns cursor geometry for plain
+    /// files; the highlighted renderer reads this same value.
+    pub fn toggle_line_display(&mut self) {
+        self.set_line_display(self.line_display.toggled());
+    }
+
+    /// Clamps rendered Markdown's independent row offset after a viewport
+    /// resize or an overflow-policy change. Switching Wrap to Clip can make
+    /// the document shorter without changing its source, so retaining an
+    /// old offset would otherwise leave the rendered viewport blank.
+    pub fn clamp_rendered_scroll(&mut self, viewport_width: u16, viewport_height: u16) {
+        let max_scroll = self
+            .rendered
+            .as_ref()
+            .map(|document| {
+                crate::markdown::view::max_scroll(
+                    document,
+                    viewport_width,
+                    viewport_height,
+                    self.line_display,
+                )
+            })
+            .unwrap_or(0);
+        self.rendered_scroll = self.rendered_scroll.min(max_scroll);
+    }
+
+    fn set_line_display(&mut self, line_display: crate::config::LineDisplay) {
+        self.line_display = line_display;
+        self.textarea.set_wrap_mode(match line_display {
+            crate::config::LineDisplay::Clip => WrapMode::None,
+            crate::config::LineDisplay::Wrap => WrapMode::Glyph,
+        });
+        self.source_scroll_col.set(0);
+        self.source_scroll_should_follow_cursor.set(true);
     }
 
     pub fn toggle_minimap(&mut self) {
@@ -407,10 +480,22 @@ impl EditorPane {
     /// Keeps the Source viewport valid for this render. Keyboard navigation
     /// follows the insertion point, while wheel navigation remains an
     /// independent reading position until the next keyboard action.
-    pub fn update_source_scroll_mirror(&self, viewport_height: u16) {
-        let cursor_row = saturating_u16(self.textarea.cursor().0);
+    pub fn update_source_scroll_mirror(&self, viewport_height: u16, viewport_width: u16) {
+        let visual_rows = self.source_visual_rows(viewport_width);
+        let cursor = self.textarea.cursor();
+        let cursor_row = saturating_u16(
+            visual_rows
+                .iter()
+                .position(|visual_row| {
+                    visual_row.source_row == cursor.0
+                        && visual_row.start_column <= cursor.1
+                        && (cursor.1 < visual_row.end_column
+                            || (visual_row.last_in_source_row && cursor.1 == visual_row.end_column))
+                })
+                .unwrap_or(cursor.0),
+        );
         let previous_top = self.source_scroll_row.get();
-        let max_top = saturating_u16(self.textarea.lines().len()).saturating_sub(viewport_height);
+        let max_top = saturating_u16(visual_rows.len()).saturating_sub(viewport_height);
         let next_top = if self.source_scroll_should_follow_cursor.replace(false) {
             if cursor_row < previous_top {
                 cursor_row
@@ -444,6 +529,10 @@ impl EditorPane {
     /// scroll shifts the line-number gutter along with the text rather
     /// than keeping it pinned.
     pub fn update_source_scroll_col_mirror(&self, viewport_width: u16) {
+        if matches!(self.line_display, crate::config::LineDisplay::Wrap) {
+            self.source_scroll_col.set(0);
+            return;
+        }
         let mut cursor_col = saturating_u16(self.textarea.screen_cursor().col);
         if self.show_line_numbers {
             let gutter =
@@ -517,13 +606,14 @@ impl EditorPane {
     /// explicit source position used by highlighted rendering and
     /// `TextArea`'s native viewport used by plain files, then clamps the
     /// shared position so the final page remains aligned with the bottom.
-    pub fn scroll_source_view(&mut self, delta: i16, viewport_height: u16) {
+    pub fn scroll_source_view(&mut self, delta: i16, viewport_height: u16, viewport_width: u16) {
         // Keep `TextArea`'s native renderer in sync for unhighlighted files;
         // highlighted files use the explicit mirror below because they render
         // through `editor_highlight` instead of the widget itself.
         self.textarea.scroll((delta, 0));
 
-        let max_top = saturating_u16(self.textarea.lines().len()).saturating_sub(viewport_height);
+        let max_top = saturating_u16(self.source_visual_rows(viewport_width).len())
+            .saturating_sub(viewport_height);
         let current = self.source_scroll_row.get();
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
@@ -532,6 +622,99 @@ impl EditorPane {
         };
         self.source_scroll_row.set(next.min(max_top));
         self.source_scroll_should_follow_cursor.set(false);
+    }
+
+    /// Returns the visual Source rows for the current width. The same map is
+    /// used by the highlighter, scrollbar, wheel handling, checkbox hit test,
+    /// and source-line context menu so wrap mode never turns a screen row
+    /// into the wrong physical line.
+    pub fn source_visual_rows(&self, viewport_width: u16) -> Vec<SourceVisualRow> {
+        let width = self.source_wrap_width(viewport_width);
+        self.textarea
+            .lines()
+            .iter()
+            .enumerate()
+            .flat_map(|(source_row, line)| self.visual_rows_for_line(source_row, line, width))
+            .collect()
+    }
+
+    /// Resolves one visible Source row back to its source coordinates.
+    pub fn source_visual_row_at(
+        &self,
+        viewport_width: u16,
+        visual_row: usize,
+    ) -> Option<SourceVisualRow> {
+        self.source_visual_rows(viewport_width)
+            .get(visual_row)
+            .copied()
+    }
+
+    fn source_wrap_width(&self, viewport_width: u16) -> usize {
+        let gutter_width = if self.show_line_numbers {
+            crate::editor_highlight::line_number_gutter_width(self.textarea.lines().len())
+        } else {
+            0
+        };
+        usize::from(viewport_width.saturating_sub(gutter_width).max(1))
+    }
+
+    fn visual_rows_for_line(
+        &self,
+        source_row: usize,
+        line: &str,
+        width: usize,
+    ) -> Vec<SourceVisualRow> {
+        if matches!(self.line_display, crate::config::LineDisplay::Clip) {
+            return vec![SourceVisualRow {
+                source_row,
+                start_byte: 0,
+                end_byte: line.len(),
+                start_column: 0,
+                end_column: line.chars().count(),
+                first_in_source_row: true,
+                last_in_source_row: true,
+            }];
+        }
+
+        let mut rows = Vec::new();
+        let mut segment_start_byte = 0;
+        let mut segment_start_column = 0;
+        let mut segment_width = 0;
+        let tab_width = usize::from(self.textarea.tab_length()).max(1);
+        let mut column = 0;
+        for (byte, grapheme) in line.grapheme_indices(true) {
+            let grapheme_width = if grapheme == "\t" {
+                tab_width - segment_width % tab_width
+            } else {
+                UnicodeWidthStr::width(grapheme).max(1)
+            };
+            if segment_width > 0 && segment_width + grapheme_width > width {
+                rows.push(SourceVisualRow {
+                    source_row,
+                    start_byte: segment_start_byte,
+                    end_byte: byte,
+                    start_column: segment_start_column,
+                    end_column: column,
+                    first_in_source_row: rows.is_empty(),
+                    last_in_source_row: false,
+                });
+                segment_start_byte = byte;
+                segment_start_column = column;
+                segment_width = 0;
+            }
+            segment_width += grapheme_width;
+            column += grapheme.chars().count();
+        }
+        rows.push(SourceVisualRow {
+            source_row,
+            start_byte: segment_start_byte,
+            end_byte: line.len(),
+            start_column: segment_start_column,
+            end_column: column,
+            first_in_source_row: rows.is_empty(),
+            last_in_source_row: true,
+        });
+        rows
     }
 
     /// Flips the checked state of the task-list checkbox at `bracket_col`
@@ -660,22 +843,52 @@ mod tests {
     }
 
     #[test]
+    fn heading_rendering_switches_between_graphics_and_plain_text() {
+        let mut pane = EditorPane::empty();
+        assert_eq!(pane.heading_rendering, HeadingRendering::Rasterized);
+
+        pane.toggle_heading_rendering();
+        assert_eq!(pane.heading_rendering, HeadingRendering::PlainText);
+
+        pane.toggle_heading_rendering();
+        assert_eq!(pane.heading_rendering, HeadingRendering::Rasterized);
+    }
+
+    #[test]
+    fn wrapping_tracks_visual_rows_without_changing_the_buffer() {
+        let mut pane = EditorPane::empty();
+        pane.textarea = TextArea::from(["abcdefgh"]);
+        let settings = crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        };
+
+        pane.apply_defaults(&settings);
+
+        assert_eq!(pane.textarea.wrap_mode(), WrapMode::Glyph);
+        assert_eq!(pane.source_visual_rows(3).len(), 3);
+        assert_eq!(pane.source_visual_rows(3)[1].start_column, 3);
+        assert_eq!(pane.textarea.lines(), &["abcdefgh".to_string()]);
+    }
+
+    #[test]
     fn source_wheel_scroll_moves_and_clamps_the_independent_viewport() {
         let mut pane = EditorPane::empty();
         pane.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
 
-        pane.scroll_source_view(3, 4);
+        pane.scroll_source_view(3, 4, 20);
         assert_eq!(pane.source_scroll_row(), 3);
 
         // Rendering preserves a wheel-selected reading position instead of
         // snapping to the insertion point on the first line.
-        pane.update_source_scroll_mirror(4);
+        pane.update_source_scroll_mirror(4, 20);
         assert_eq!(pane.source_scroll_row(), 3);
 
-        pane.scroll_source_view(100, 4);
+        pane.scroll_source_view(100, 4, 20);
         assert_eq!(pane.source_scroll_row(), 6);
 
-        pane.scroll_source_view(-100, 4);
+        pane.scroll_source_view(-100, 4, 20);
         assert_eq!(pane.source_scroll_row(), 0);
     }
 
@@ -683,10 +896,10 @@ mod tests {
     fn cursor_navigation_reveals_cursor_after_source_wheel_scroll() {
         let mut pane = EditorPane::empty();
         pane.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
-        pane.scroll_source_view(6, 4);
+        pane.scroll_source_view(6, 4, 20);
 
         pane.jump_to_line(0);
-        pane.update_source_scroll_mirror(4);
+        pane.update_source_scroll_mirror(4, 20);
 
         assert_eq!(pane.source_scroll_row(), 0);
     }

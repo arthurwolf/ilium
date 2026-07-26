@@ -11,6 +11,8 @@
 //! `tests/common/mod.rs`, alongside `live_agent_detection.rs`'s own use of
 //! the same `TestServer`.
 
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use ilium_core::{NodeId, SplitOrientation, ROOT_ID};
@@ -21,6 +23,21 @@ use ilium_ipc::{
 
 mod common;
 use common::{expect_event, TestServer};
+
+/// Creates an absolute-path fake Codex process which has no readable composer
+/// for one second, then shows Codex's real `send a message` prompt before it
+/// reads stdin. This proves initial input waits for visible readiness instead
+/// of merely racing the PTY spawn.
+fn write_delayed_ready_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = bin_dir.join("codex");
+    let script = "#!/bin/sh\nprintf 'starting codex...\\n'\nsleep 1\nprintf '\\033[2J\\033[H  send a message\\n'\nIFS= read -r line\nprintf 'received-after-ready:<%s>\\n' \"$line\"\nsleep 60\n";
+    let mut file = std::fs::File::create(&script_path).expect("create delayed fake Codex");
+    file.write_all(script.as_bytes())
+        .expect("write delayed fake Codex");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("make delayed fake Codex executable");
+    script_path
+}
 
 /// A fresh session always owns one launch project. Root-level shortcuts are
 /// resolved inside that project, keeping the test fixtures aligned with the
@@ -324,8 +341,17 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
 }
 
 #[tokio::test]
-async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
-    let mut server = TestServer::start("initial-input-test").await;
+async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter() {
+    let fake_bin_dir = tempfile::tempdir().expect("create fake Codex directory");
+    let fake_codex_path = write_delayed_ready_codex_binary(fake_bin_dir.path());
+    let mut server = TestServer::start_with_detection_config(
+        "initial-input-test",
+        ilium_server::config::DetectionConfig {
+            working_poll_interval: Duration::from_millis(100),
+            idle_poll_interval: Duration::from_millis(100),
+        },
+    )
+    .await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -344,10 +370,10 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            // This process emits its marker only after `read` receives the
-            // final Enter, proving both writes in the new server path landed.
+            // This process exposes no ready composer until after its startup
+            // delay, then emits its marker only after the final Enter.
             kind: NewPaneKind::CommandWithInitialInput {
-                command_line: "IFS= read -r line; printf 'submitted:<%s>\\n' \"$line\"".to_string(),
+                command_line: fake_codex_path.to_string_lossy().to_string(),
                 initial_input: "/goal inspect the selected line".to_string(),
             },
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -355,6 +381,29 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
     )
     .await
     .expect("create command pane with initial input");
+
+    let no_early_submission = tokio::time::timeout(Duration::from_millis(600), async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read events before fake agent prompt appears");
+            assert!(
+                !matches!(
+                    event,
+                    ServerEvent::PanePromptSubmitted {
+                        source: PromptSubmissionSource::InitialAgentPrompt,
+                        ..
+                    }
+                ),
+                "initial input must not arrive before the agent shows its composer"
+            );
+        }
+    })
+    .await;
+    assert!(
+        no_early_submission.is_err(),
+        "the fake agent deliberately hides its composer for 1 second"
+    );
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut saw_prompt_event = false;
@@ -375,13 +424,105 @@ async fn command_with_initial_input_writes_the_prompt_then_submits_enter() {
             event,
             ServerEvent::ScreenUpdate { ref bytes, .. }
                 if String::from_utf8_lossy(bytes)
-                    .contains("submitted:</goal inspect the selected line>")
+                    .contains("received-after-ready:</goal inspect the selected line>")
         );
     }
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
+async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting() {
+    let fake_bin_dir = tempfile::tempdir().expect("create fake Codex directory");
+    let fake_codex_path = write_delayed_ready_codex_binary(fake_bin_dir.path());
+    let mut server = TestServer::start_with_detection_config(
+        "initial-input-cancel-test",
+        ilium_server::config::DetectionConfig {
+            working_poll_interval: Duration::from_millis(100),
+            idle_poll_interval: Duration::from_millis(100),
+        },
+    )
+    .await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "initial-input-cancel-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach test client");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::CommandWithInitialInput {
+                command_line: fake_codex_path.to_string_lossy().to_string(),
+                initial_input: "/goal automatic task".to_string(),
+            },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("create delayed agent pane");
+    let tree = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = tree else {
+        unreachable!("predicate only accepts a tree snapshot")
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    write_frame(
+        &mut client,
+        &ClientRequest::KeyInput {
+            pane_id,
+            bytes: b"manual task\r".to_vec(),
+            submission: Some(PromptSubmissionSource::Keyboard),
+        },
+    )
+    .await
+    .expect("send manual input before agent composer exists");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut saw_manual_output = false;
+    while !saw_manual_output {
+        let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
+            .await
+            .expect("manual input should reach the delayed agent")
+            .expect("read manual-input event");
+        assert!(
+            !matches!(
+                event,
+                ServerEvent::PanePromptSubmitted {
+                    source: PromptSubmissionSource::InitialAgentPrompt,
+                    ..
+                }
+            ),
+            "manual terminal input must cancel the delayed automatic prompt"
+        );
+        saw_manual_output = matches!(
+            event,
+            ServerEvent::ScreenUpdate { ref bytes, .. }
+                if String::from_utf8_lossy(bytes)
+                    .contains("received-after-ready:<manual task>")
+        );
+    }
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("kill test session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 

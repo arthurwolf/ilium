@@ -18,6 +18,7 @@ mod agent_debug;
 pub mod config;
 mod detection;
 pub mod error;
+mod initial_prompt;
 mod ipc;
 mod mouse;
 mod notifications;
@@ -32,6 +33,7 @@ mod sounds;
 mod state;
 mod task_guard;
 
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -48,6 +50,16 @@ use crate::task_guard::AbortOnDropHandle;
 
 pub use crate::sounds::{NoopSoundPlayer, SoundPlayer, SystemSoundPlayer};
 
+/// Server-owned publication target for the log file chosen by the launcher.
+/// The detached child writes this only after its Unix socket is bound, so an
+/// unsuccessful daemon launch can never replace metadata for a still-live
+/// previous server.
+#[derive(Debug, Clone)]
+pub struct ReadyLogMetadata {
+    pub active_log_path_file: PathBuf,
+    pub log_path: PathBuf,
+}
+
 /// Everything [`run`] needs to serve one session. Constructed by `main`
 /// from CLI-resolved project paths, or directly
 /// by tests with tempdir paths -- either way `run` itself never touches
@@ -56,6 +68,9 @@ pub struct ServerOptions {
     pub session_name: String,
     pub socket_path: PathBuf,
     pub snapshot_path: PathBuf,
+    /// Optional ready handshake used by the real CLI. Unit/integration tests
+    /// may omit it when they do not exercise the launcher lifecycle.
+    pub ready_log_metadata: Option<ReadyLogMetadata>,
     /// Project directory the CLI used to create this session. It is needed
     /// as the hard boundary for pane cwd and agent transcript ownership.
     pub session_cwd: PathBuf,
@@ -98,6 +113,9 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
             path: options.socket_path.clone(),
             source,
         })?;
+    if let Some(ready_log_metadata) = &options.ready_log_metadata {
+        publish_ready_log_metadata(ready_log_metadata)?;
+    }
     tracing::info!(
         session_name = %options.session_name,
         session_cwd = %options.session_cwd.display(),
@@ -206,6 +224,40 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         ),
     }
     tracing::info!(session_name = %state.session_name, "detached session server stopped");
+    Ok(())
+}
+
+/// Atomically records the exact log file for a server that has already bound
+/// its listener. The temporary file lives beside the final marker so `rename`
+/// is atomic; clients therefore observe either the previous healthy server's
+/// marker or the newly ready server's marker, never a partial path.
+fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerError> {
+    let temporary_path = metadata
+        .active_log_path_file
+        .with_extension(format!("ready-{}", std::process::id()));
+    let log_path = metadata
+        .log_path
+        .to_str()
+        .ok_or_else(|| ServerError::ReadyLogMetadata {
+            path: metadata.active_log_path_file.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ready log path is not valid UTF-8",
+            ),
+        })?;
+    let contents = format!("pid={}\nlog_path={log_path}\n", std::process::id());
+    let write_result = std::fs::write(&temporary_path, contents)
+        .and_then(|()| {
+            std::fs::set_permissions(&temporary_path, std::fs::Permissions::from_mode(0o600))
+        })
+        .and_then(|()| std::fs::rename(&temporary_path, &metadata.active_log_path_file));
+    if let Err(source) = write_result {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(ServerError::ReadyLogMetadata {
+            path: metadata.active_log_path_file.clone(),
+            source,
+        });
+    }
     Ok(())
 }
 
@@ -500,6 +552,7 @@ mod restore_tests {
             session_name: "restore-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path,
+            ready_log_metadata: None,
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
@@ -866,6 +919,7 @@ mod restore_tests {
             session_name: "restart-test".to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
+            ready_log_metadata: None,
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
@@ -913,6 +967,29 @@ mod restore_tests {
 mod socket_tests {
     use super::*;
 
+    fn server_options(
+        directory: &tempfile::TempDir,
+        socket_path: PathBuf,
+        ready_log_metadata: Option<ReadyLogMetadata>,
+    ) -> ServerOptions {
+        ServerOptions {
+            session_name: "ready-metadata-test".to_string(),
+            socket_path,
+            snapshot_path: directory.path().join("session.snapshot.json"),
+            ready_log_metadata,
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            detection_config: DetectionConfig::default(),
+            notifications_config: NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_config_path: None,
+            sound_player: Arc::new(NoopSoundPlayer),
+            custom_signatures: Vec::new(),
+            session_recovery: SessionRecoveryConfig::StartFresh,
+            agent_debug_menu_enabled: false,
+        }
+    }
+
     #[test]
     fn refuses_to_replace_a_live_session_socket() {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -926,5 +1003,83 @@ mod socket_tests {
             matches!(result, Err(ServerError::SessionAlreadyRunning(path)) if path == socket_path)
         );
         assert!(socket_path.exists(), "live socket must remain in place");
+    }
+
+    #[tokio::test]
+    async fn ready_metadata_is_published_only_after_the_listener_binds() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let socket_path = directory.path().join("ready.sock");
+        let active_log_path_file = directory.path().join(".active-log-path");
+        let log_path = directory.path().join("log-ready.txt");
+        let options = server_options(
+            &directory,
+            socket_path.clone(),
+            Some(ReadyLogMetadata {
+                active_log_path_file: active_log_path_file.clone(),
+                log_path: log_path.clone(),
+            }),
+        );
+        let server_task = tokio::spawn(run(options));
+
+        let published = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if socket_path.exists() && active_log_path_file.exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(published.is_ok(), "server did not publish ready metadata");
+
+        let contents = std::fs::read_to_string(&active_log_path_file)
+            .expect("read atomically published ready metadata");
+        assert_eq!(
+            contents,
+            format!(
+                "pid={}\nlog_path={}\n",
+                std::process::id(),
+                log_path.display()
+            )
+        );
+
+        let mut client = tokio::net::UnixStream::connect(&socket_path)
+            .await
+            .expect("connect to ready server");
+        ilium_ipc::write_frame(&mut client, &ilium_ipc::ClientRequest::KillSession)
+            .await
+            .expect("stop ready server");
+        let result = tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("server did not stop")
+            .expect("server task panicked");
+        assert!(result.is_ok(), "server stopped with an error: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn failed_bind_preserves_previous_ready_metadata() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let socket_path = directory.path().join("already-live.sock");
+        let _listener =
+            std::os::unix::net::UnixListener::bind(&socket_path).expect("bind live listener");
+        let active_log_path_file = directory.path().join(".active-log-path");
+        let previous_contents = "pid=42\nlog_path=/tmp/previous-log.txt\n";
+        std::fs::write(&active_log_path_file, previous_contents).expect("seed previous metadata");
+
+        let result = run(server_options(
+            &directory,
+            socket_path,
+            Some(ReadyLogMetadata {
+                active_log_path_file: active_log_path_file.clone(),
+                log_path: directory.path().join("new-log.txt"),
+            }),
+        ))
+        .await;
+
+        assert!(matches!(result, Err(ServerError::SessionAlreadyRunning(_))));
+        assert_eq!(
+            std::fs::read_to_string(&active_log_path_file).expect("read preserved metadata"),
+            previous_contents
+        );
     }
 }

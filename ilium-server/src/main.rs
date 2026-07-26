@@ -16,6 +16,7 @@ struct ServerLaunch {
     snapshot_path: PathBuf,
     session_cwd: PathBuf,
     log_path: PathBuf,
+    active_log_path_file: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -104,6 +105,12 @@ async fn async_main(
         session_name: launch.session_name,
         socket_path: launch.socket_path,
         snapshot_path: launch.snapshot_path,
+        ready_log_metadata: launch.active_log_path_file.map(|active_log_path_file| {
+            ilium_server::ReadyLogMetadata {
+                active_log_path_file,
+                log_path: launch.log_path,
+            }
+        }),
         session_cwd: launch.session_cwd,
         home_dir: directories::BaseDirs::new()
             .map(|directories| directories.home_dir().to_path_buf())
@@ -133,6 +140,7 @@ fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
     let mut snapshot_path = None;
     let mut session_cwd = None;
     let mut log_path = None;
+    let mut active_log_path_file = None;
     while let Some(flag) = values.next() {
         let value = values
             .next()
@@ -143,6 +151,7 @@ fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
             "--snapshot-path" => snapshot_path = Some(PathBuf::from(value)),
             "--session-cwd" => session_cwd = Some(PathBuf::from(value)),
             "--log-path" => log_path = Some(PathBuf::from(value)),
+            "--active-log-path-file" => active_log_path_file = Some(PathBuf::from(value)),
             _ => return Err(format!("unknown argument {flag}")),
         }
     }
@@ -152,11 +161,12 @@ fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
         snapshot_path: snapshot_path.ok_or_else(usage)?,
         session_cwd: session_cwd.ok_or_else(usage)?,
         log_path: log_path.ok_or_else(usage)?,
+        active_log_path_file,
     })
 }
 
 fn usage() -> String {
-    "usage: ilium-server --session-name <name> --socket-path <path> --snapshot-path <path> --session-cwd <directory> --log-path <path>".to_string()
+    "usage: ilium-server --session-name <name> --socket-path <path> --snapshot-path <path> --session-cwd <directory> --log-path <path> [--active-log-path-file <path>]".to_string()
 }
 
 #[cfg(test)]
@@ -177,6 +187,8 @@ mod tests {
             "/work/project".to_string(),
             "--log-path".to_string(),
             "/tmp/.ilium/work-project-default/log-2026-07-19_12-00-00.000.txt".to_string(),
+            "--active-log-path-file".to_string(),
+            "/tmp/.ilium/work-project-default/.active-log-path".to_string(),
         ])
         .expect("valid launch");
         assert_eq!(launch.session_name, "default");
@@ -187,6 +199,12 @@ mod tests {
         assert_eq!(
             launch.snapshot_path,
             PathBuf::from("/work/project/.ilium/sessions/default.json")
+        );
+        assert_eq!(
+            launch.active_log_path_file,
+            Some(PathBuf::from(
+                "/tmp/.ilium/work-project-default/.active-log-path"
+            ))
         );
         assert_eq!(launch.session_cwd, PathBuf::from("/work/project"));
         assert_eq!(

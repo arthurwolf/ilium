@@ -12,36 +12,51 @@ use ratatui::Frame;
 use ratatui_image::Image;
 
 use super::render::{RenderedBlock, RenderedDocument};
+use crate::config::LineDisplay;
 
-/// Total content height (in terminal rows) of `document` wrapped to
-/// `width` -- the caller uses this to clamp scroll offsets.
-pub fn content_height(document: &RenderedDocument, width: u16) -> u16 {
+/// Total content height (in terminal rows) of `document` at `width` under
+/// `line_display` -- the caller uses this to clamp scroll offsets.
+pub fn content_height(document: &RenderedDocument, width: u16, line_display: LineDisplay) -> u16 {
     document
         .blocks
         .iter()
-        .map(|block| block_height(block, width))
+        .map(|block| block_height(block, width, line_display))
         .fold(0u16, u16::saturating_add)
 }
 
 /// Largest valid row offset for a document in the exact viewport geometry
 /// used to draw it. Centralizing this prevents input paths from accidentally
 /// counting editor chrome as visible Markdown rows.
-pub fn max_scroll(document: &RenderedDocument, width: u16, viewport_height: u16) -> u16 {
-    content_height(document, width).saturating_sub(viewport_height)
+pub fn max_scroll(
+    document: &RenderedDocument,
+    width: u16,
+    viewport_height: u16,
+    line_display: LineDisplay,
+) -> u16 {
+    content_height(document, width, line_display).saturating_sub(viewport_height)
 }
 
-/// Builds the word-wrapped `Paragraph` for a `Text` block's lines. The one
-/// place that owns this wrap configuration, so `block_height` (measuring
-/// for a scroll-clamp pass) and `draw_block` (measuring immediately before
-/// drawing) can't drift apart on how a text block wraps.
-fn text_paragraph(lines: &[ratatui::text::Line<'static>]) -> Paragraph<'static> {
-    Paragraph::new(lines.to_vec()).wrap(Wrap { trim: false })
+/// Builds a text block with the exact overflow policy selected in the
+/// editor toolbar. Keeping this decision here makes rendered Markdown's
+/// height measurement and drawing agree on whether a long logical line
+/// consumes one clipped row or several soft-wrapped rows.
+fn text_paragraph(
+    lines: &[ratatui::text::Line<'static>],
+    line_display: LineDisplay,
+) -> Paragraph<'static> {
+    let paragraph = Paragraph::new(lines.to_vec());
+    if matches!(line_display, LineDisplay::Wrap) {
+        paragraph.wrap(Wrap { trim: false })
+    } else {
+        paragraph
+    }
 }
 
-fn block_height(block: &RenderedBlock, width: u16) -> u16 {
+fn block_height(block: &RenderedBlock, width: u16, line_display: LineDisplay) -> u16 {
     match block {
         RenderedBlock::Text(lines) => {
-            u16::try_from(text_paragraph(lines).line_count(width.max(1))).unwrap_or(u16::MAX)
+            u16::try_from(text_paragraph(lines, line_display).line_count(width.max(1)))
+                .unwrap_or(u16::MAX)
         }
         RenderedBlock::BlankLines(lines) => u16::try_from(lines.len()).unwrap_or(u16::MAX),
         RenderedBlock::Header(protocol) | RenderedBlock::Image(protocol) => protocol.size().height,
@@ -49,11 +64,18 @@ fn block_height(block: &RenderedBlock, width: u16) -> u16 {
     }
 }
 
-/// Draws `document` into `area`, scrolled down by `scroll` rows.
-pub fn render(frame: &mut Frame, area: Rect, document: &RenderedDocument, scroll: u16) {
+/// Draws `document` into `area`, scrolled down by `scroll` rows under the
+/// selected line-overflow policy.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    document: &RenderedDocument,
+    scroll: u16,
+    line_display: LineDisplay,
+) {
     let mut y = i64::from(area.y) - i64::from(scroll);
     for block in &document.blocks {
-        y += draw_block(frame, area, block, y);
+        y += draw_block(frame, area, block, y, line_display);
     }
 }
 
@@ -67,13 +89,19 @@ pub fn render(frame: &mut Frame, area: Rect, document: &RenderedDocument, scroll
 /// to build that `Paragraph` from a fresh `lines.clone()` each, which meant
 /// cloning every visible text block's content twice per frame -- and this
 /// runs on every frame a Rendered-mode markdown pane is on screen.
-fn draw_block(frame: &mut Frame, area: Rect, block: &RenderedBlock, y: i64) -> i64 {
+fn draw_block(
+    frame: &mut Frame,
+    area: Rect,
+    block: &RenderedBlock,
+    y: i64,
+    line_display: LineDisplay,
+) -> i64 {
     let area_top = i64::from(area.y);
     let area_bottom = i64::from(area.bottom());
 
     match block {
         RenderedBlock::Text(lines) => {
-            let paragraph = text_paragraph(lines);
+            let paragraph = text_paragraph(lines, line_display);
             let height = u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
             let visible = visible_rect(area, area_top, area_bottom, y, height);
             if let Some((visible_top, _, rect)) = visible {
@@ -161,14 +189,22 @@ mod tests {
 
     #[test]
     fn content_height_counts_blank_line_blocks() {
-        assert_eq!(content_height(&spaced_document(), 20), 4);
+        assert_eq!(content_height(&spaced_document(), 20, LineDisplay::Wrap), 4);
     }
 
     #[test]
     fn render_leaves_blank_rows_before_following_content() {
         let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
         terminal
-            .draw(|frame| render(frame, Rect::new(0, 0, 20, 4), &spaced_document(), 0))
+            .draw(|frame| {
+                render(
+                    frame,
+                    Rect::new(0, 0, 20, 4),
+                    &spaced_document(),
+                    0,
+                    LineDisplay::Wrap,
+                )
+            })
             .unwrap();
 
         let buffer = terminal.backend().buffer();
@@ -180,12 +216,20 @@ mod tests {
 
     #[test]
     fn scrolling_across_blank_rows_keeps_following_content_aligned() {
-        let scroll = max_scroll(&spaced_document(), 20, 2);
+        let scroll = max_scroll(&spaced_document(), 20, 2, LineDisplay::Wrap);
         assert_eq!(scroll, 2);
 
         let mut terminal = Terminal::new(TestBackend::new(20, 2)).unwrap();
         terminal
-            .draw(|frame| render(frame, Rect::new(0, 0, 20, 2), &spaced_document(), scroll))
+            .draw(|frame| {
+                render(
+                    frame,
+                    Rect::new(0, 0, 20, 2),
+                    &spaced_document(),
+                    scroll,
+                    LineDisplay::Wrap,
+                )
+            })
             .unwrap();
 
         let buffer = terminal.backend().buffer();
@@ -195,6 +239,45 @@ mod tests {
 
     #[test]
     fn fitted_document_has_no_scroll_range() {
-        assert_eq!(max_scroll(&spaced_document(), 20, 4), 0);
+        assert_eq!(max_scroll(&spaced_document(), 20, 4, LineDisplay::Wrap), 0);
+    }
+
+    #[test]
+    fn line_display_changes_both_rendered_height_and_visible_text() {
+        let document = RenderedDocument {
+            blocks: vec![RenderedBlock::Text(Arc::new(vec![Line::from("abcdef")]))],
+        };
+        assert_eq!(content_height(&document, 3, LineDisplay::Clip), 1);
+        assert_eq!(content_height(&document, 3, LineDisplay::Wrap), 2);
+
+        let mut terminal = Terminal::new(TestBackend::new(3, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    Rect::new(0, 0, 3, 2),
+                    &document,
+                    0,
+                    LineDisplay::Clip,
+                )
+            })
+            .unwrap();
+        let clipped = terminal.backend().buffer();
+        assert_eq!(clipped.cell((0, 0)).unwrap().symbol(), "a");
+        assert_eq!(clipped.cell((0, 1)).unwrap().symbol(), " ");
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    Rect::new(0, 0, 3, 2),
+                    &document,
+                    0,
+                    LineDisplay::Wrap,
+                )
+            })
+            .unwrap();
+        let wrapped = terminal.backend().buffer();
+        assert_eq!(wrapped.cell((0, 1)).unwrap().symbol(), "d");
     }
 }

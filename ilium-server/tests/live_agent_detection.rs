@@ -124,6 +124,24 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
     script_path
 }
 
+/// Writes a short-lived working phase followed by an idle screen. Unlike the
+/// queue fixture above, this process never reads terminal input, isolating the
+/// focus acknowledgement from queue-delivery acknowledgement behavior.
+fn write_finished_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = bin_dir.join("codex");
+    let script = "#!/bin/sh\n\
+                  printf 'Cogitating (esc to interrupt)\\n'\n\
+                  sleep 2\n\
+                  printf '\\033[2J\\033[HDone. Ready for the next instruction.\\n'\n\
+                  sleep 60\n";
+    let mut file = std::fs::File::create(&script_path).expect("create finished fake codex");
+    file.write_all(script.as_bytes())
+        .expect("write finished fake codex");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("make finished fake codex executable");
+    script_path
+}
+
 /// Resolves the first pane created through the root shortcut. The server
 /// deliberately translates that legacy shortcut into `project -> default ->
 /// pane`, so these end-to-end assertions must follow the user-visible tree
@@ -142,6 +160,109 @@ fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
         .expect("a default group should have been created for the pane");
     tree.children_of(default_group)
         .expect("default group is a container")[0]
+}
+
+#[tokio::test]
+async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the finished fake codex");
+    let fake_codex_path = write_finished_fake_codex_binary(fake_bin_dir.path());
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+    };
+    let mut server =
+        TestServer::start_with_detection_config("focus-acknowledgement-test", detection_config)
+            .await;
+    let mut client = server.connect().await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "focus-acknowledgement-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach to the live focus-acknowledgement session");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("start the live finished fake Codex agent");
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
+                if *changed_id == pane_id
+                    && matches!(
+                        status,
+                        PaneStatus::Agent(ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Working)
+                    )
+        )
+    })
+    .await;
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
+                if *changed_id == pane_id
+                    && matches!(
+                        status,
+                        PaneStatus::Agent(ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Done)
+                    )
+        )
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::SetPaneFocus {
+            pane_id,
+            focused: true,
+        },
+    )
+    .await
+    .expect("open the completed agent pane");
+    let acknowledged_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
+                if *changed_id == pane_id
+                    && *status
+                        == PaneStatus::Agent(
+                            ilium_core::AgentClass::Codex,
+                            ilium_core::AgentActivity::Idle,
+                        )
+        )
+    })
+    .await;
+    assert!(matches!(
+        acknowledged_event,
+        ServerEvent::PaneStatusChanged { .. }
+    ));
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop the live focus-acknowledgement session");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
 #[tokio::test]
@@ -231,6 +352,18 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     };
     let pane_id = first_launch_project_pane(&tree);
 
+    // A visible pane must still enter the durable completed-turn state. Focus
+    // only controls polling cadence; it no longer acknowledges completion.
+    write_frame(
+        &mut client,
+        &ClientRequest::SetPaneFocus {
+            pane_id,
+            focused: true,
+        },
+    )
+    .await
+    .expect("focus the live fake agent pane");
+
     write_frame(
         &mut client,
         &ClientRequest::EnqueuePrompt {
@@ -288,14 +421,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // Structural assertion #2: once the script clears the screen, both the
     // working marker and goal footer become temporarily absent. The real,
     // unmodified pipeline must retain goal ownership for the same process and
-    // reclassify the pane `Done`, not plain `Idle` -- this client
-    // never sent `SetPaneFocus` for this pane, so
-    // `ilium-server::detection::promote_to_done` must turn the raw
-    // "just went idle" verdict `classify_activity` reports into the
-    // stateful "finished, unseen" one the tree/UI actually renders as a
-    // bell. Regression coverage for the bug where this pane sat at plain
-    // `Idle` forever because nothing between `classify_activity` and the
-    // tree ever remembered the pane had just been `Working`.
+    // reclassify the pane `Done`, not plain `Idle`, even though it is focused.
+    // `ilium-server::detection::promote_to_done` must turn the raw "just went
+    // idle" verdict into the durable completed-turn state that drives the
+    // sound, bell, and title marker.
     let done_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
@@ -323,6 +452,29 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
 
+    // Completion opens the queue gate. Its successful PTY write is fresh
+    // input, so the same server-owned status immediately returns to Idle while
+    // retaining the goal variant; later idle detection must not resurrect it.
+    let acknowledged_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
+                if *changed_id == pane_id
+                    && matches!(
+                        status,
+                        PaneStatus::AgentWithGoal(
+                            ilium_core::AgentClass::Codex,
+                            ilium_core::AgentActivity::Idle
+                        )
+                    )
+        )
+    })
+    .await;
+    assert!(matches!(
+        acknowledged_event,
+        ServerEvent::PaneStatusChanged { .. }
+    ));
+
     let delivered_prompt = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
@@ -348,6 +500,21 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         ilium_sound::SoundSourceKind::SystemBeep
     );
 
+    // Wait for one post-input classification to establish the stable Idle
+    // baseline. The input acknowledgement changes status synchronously; this
+    // poll adds the corresponding change-only detector explanation once.
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneDebugEntryAppended {
+                pane_id: changed_id,
+                entry,
+            } if *changed_id == pane_id
+                && entry.kind == AgentDebugEventKind::DetectionCycle
+                && entry.context.activity == Some(ilium_core::AgentActivity::Idle)
+        )
+    })
+    .await;
     write_frame(
         &mut client,
         &ClientRequest::GetPaneDebugLog {
@@ -387,8 +554,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         .collect();
     assert_eq!(
         detection_entries.len(),
-        2,
-        "four identical working polls and repeated done polls must produce only the Working and Done decisions: {detection_entries:#?}"
+        3,
+        "repeated polls must produce only the Working, Done, and input-acknowledged Idle decisions: {detection_entries:#?}"
     );
     assert!(detection_entries.iter().all(|entry| {
         [
@@ -425,7 +592,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         },
     )
     .await
-    .expect("request history after several unchanged done-state polls");
+    .expect("request history after several unchanged idle-state polls");
     let later_debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
         matches!(
             event,

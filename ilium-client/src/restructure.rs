@@ -32,8 +32,29 @@ use crate::app::PaneRuntime;
 /// Output budget for a project-scoped reply (every existing pane/folder
 /// retitled, plus any new groups/split-views) -- much larger than the
 /// single-title pipeline's 1536 (`ilium_inference::InferenceRequest::json_only`),
-/// which is sized for a 2-7 word title, not a full nested JSON tree.
-const RESTRUCTURE_MAX_TOKENS: u32 = 4096;
+/// which is sized for a 1-7-word title, not a full nested JSON tree.
+const RESTRUCTURE_MAX_TOKENS: u32 = 8192;
+
+/// The complete rendered request must remain small enough that an inference
+/// backend can spend its output allowance on the replacement tree rather than
+/// consuming it interpreting copied terminal/transcript noise. The observed
+/// failure recordings reached 180k characters with only ten items because a
+/// line-count cap alone does not constrain giant JSON/tool-output lines.
+const MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS: usize = 32_000;
+
+/// Every leaf remains represented, but all leaf evidence together receives a
+/// fixed budget. This prevents one verbose agent transcript from crowding out
+/// the identities of the other items the model must reference exactly once.
+const MAXIMUM_ITEM_EVIDENCE_CHARACTERS: usize = 12_000;
+
+/// Current hierarchy is useful continuity context, but is inspiration rather
+/// than a second source of truth; it therefore has an independent cap.
+const MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS: usize = 4_000;
+
+/// A single item's content gets enough room to retain both its opening and
+/// newest activity, without allowing a small project to recreate the old
+/// unbounded-prompt behavior.
+const MAXIMUM_CONTENT_CHARACTERS_PER_ITEM: usize = 2_000;
 
 /// How many lines of a content extract to keep from the start/end when it
 /// exceeds `HEAD_LINES + TAIL_LINES` -- mirrors `terminal_naming`'s
@@ -55,7 +76,7 @@ Each entry in "children" (and in any nested "children") is exactly one of:
 - {"kind":"group","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new group; never has an id
 - {"kind":"split_view","orientation":"vertical"|"horizontal","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new split view; never has an id; its "children" must all be "pane" entries, at most 4 of them
 
-"title" is a full descriptive title (5 to 7 words); "short_title" is a short form (2 to 3 words); "icon" is one compact UTF-8 icon/emoticon. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
+"title" is the full descriptive title and must use at most 7 words; this is a maximum, not a target or a minimum. "short_title" is a short form of 2 to 3 words; "icon" is one compact UTF-8 icon/emoticon. Choose the most accurate title first, then keep it within its limit. A one- or two-word "title" is correct when it best names the item; never add filler merely to make it longer. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
 
 Every "pane" entry whose item below has kind="Plain shell" (a plain terminal, not an agent/editor/board) must also carry a "command_hint": the short form of whichever single command is currently running, most recently finished, or whose output is what's currently in that item's content -- or "" if none is clearly identifiable. Rules for "command_hint":
 - Keep only the program name, plus its first argument when that argument is a subcommand (e.g. "git commit", "cargo build", "docker ps", "npm run"), or its short flags when the flags are essential to what the command does (e.g. "ps faux", "ls -la").
@@ -69,7 +90,7 @@ The following is the project's current hierarchy. Use it as context and preserve
 </current-structure>
 <items>
 {{#each items}}
-<item id="{{id}}" kind="{{kind_label}}">
+<item id="{{id}}" kind={{kind_label}}>
     <current-title>{{current_title}}</current-title>
     <current-icon>{{current_icon}}</current-icon>
     {{#if filename}}<filename>{{filename}}</filename>{{/if}}
@@ -79,6 +100,11 @@ The following is the project's current hierarchy. Use it as context and preserve
 </item>
 {{/each}}
 </items>
+{{#if retry_feedback}}
+<retry-feedback>
+The prior answer was rejected by the local validator. Correct this specific issue while still returning every listed id exactly once: {{{retry_feedback}}}
+</retry-feedback>
+{{/if}}
 <output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧","command_hint":""},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️","command_hint":"npm run dev"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}</output-example>
 <response-format>Return exactly one JSON object following the output example's shape. Do not wrap it in Markdown.</response-format>"#;
 
@@ -94,6 +120,10 @@ pub struct LeafContext {
     pub current_icon: Option<String>,
     pub filename: Option<String>,
     pub content_extract: String,
+    /// Compact identity of the local evidence available before the worker
+    /// reads an agent transcript. It lets automatic retry policy recognize
+    /// new visible work without putting disk I/O on the UI event loop.
+    automatic_content_fingerprint: u64,
     #[serde(skip)]
     agent_lookup: Option<(AgentClass, String)>,
 }
@@ -144,17 +174,22 @@ pub fn gather_leaf_contexts(
             current_icon: node.inferred_icon.clone(),
             filename: None,
             content_extract: String::new(),
+            automatic_content_fingerprint: 0,
             agent_lookup: None,
         };
         match (panes.get(&pane_id), status) {
             (
-                Some(PaneRuntime::Terminal(_)),
+                Some(PaneRuntime::Terminal(view)),
                 PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
             ) if agent_session_ids.contains_key(&pane_id) => {
+                context.automatic_content_fingerprint =
+                    stable_restructure_fingerprint(&view.with_screen(|screen| screen.contents()));
                 context.agent_lookup = Some((class.clone(), agent_session_ids[&pane_id].clone()));
             }
             (Some(PaneRuntime::Terminal(view)), _) => {
                 context.content_extract = clip_lines(&view.with_screen(|screen| screen.contents()));
+                context.automatic_content_fingerprint =
+                    stable_restructure_fingerprint(&context.content_extract);
             }
             (Some(PaneRuntime::Editor(editor)), _) => {
                 context.filename = editor
@@ -163,10 +198,14 @@ pub fn gather_leaf_contexts(
                     .and_then(|path| path.file_name())
                     .map(|name| name.to_string_lossy().into_owned());
                 context.content_extract = clip_lines(&editor.textarea.lines().join("\n"));
+                context.automatic_content_fingerprint =
+                    stable_restructure_fingerprint(&context.content_extract);
             }
             (Some(PaneRuntime::Board(board)), _) => {
                 context.content_extract =
                     clip_lines(&crate::board::board_text_extract(&board.columns));
+                context.automatic_content_fingerprint =
+                    stable_restructure_fingerprint(&context.content_extract);
             }
             (None, _) => {}
         }
@@ -187,12 +226,67 @@ pub fn gather_leaf_contexts(
                 current_icon: node.inferred_icon.clone(),
                 filename: None,
                 content_extract: String::new(),
+                automatic_content_fingerprint: 0,
                 agent_lookup: None,
             });
         }
     }
 
     contexts
+}
+
+/// Produces a stable identity for the exact UI evidence that would be sent
+/// to a project-restructure worker. Automatic failures retry when this
+/// evidence or the hierarchy changes, rather than on every repeated trigger.
+pub fn project_restructure_input_fingerprint(
+    contexts: &[LeafContext],
+    current_structure: &str,
+) -> u64 {
+    let mut fingerprint = FNV_OFFSET_BASIS;
+    hash_restructure_value(&mut fingerprint, current_structure);
+    for context in contexts {
+        hash_restructure_value(&mut fingerprint, &context.id.0.to_string());
+        hash_restructure_value(&mut fingerprint, &context.kind_label);
+        hash_restructure_value(&mut fingerprint, &context.current_title);
+        hash_restructure_value(
+            &mut fingerprint,
+            context.current_icon.as_deref().unwrap_or_default(),
+        );
+        hash_restructure_value(
+            &mut fingerprint,
+            context.filename.as_deref().unwrap_or_default(),
+        );
+        hash_restructure_value(&mut fingerprint, &context.content_extract);
+        hash_restructure_value(
+            &mut fingerprint,
+            &context.automatic_content_fingerprint.to_string(),
+        );
+    }
+    fingerprint
+}
+
+/// Fixed FNV-1a parameters avoid randomized collection hashers in a retry
+/// policy where equal UI evidence must compare equally across calls.
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x00000100000001b3;
+
+fn stable_restructure_fingerprint(value: &str) -> u64 {
+    let mut fingerprint = FNV_OFFSET_BASIS;
+    hash_restructure_value(&mut fingerprint, value);
+    fingerprint
+}
+
+/// Delimit each field by its byte length so concatenated values cannot create
+/// an accidental same-byte representation.
+fn hash_restructure_value(fingerprint: &mut u64, value: &str) {
+    for byte in (value.len() as u64)
+        .to_le_bytes()
+        .into_iter()
+        .chain(value.bytes())
+    {
+        *fingerprint ^= u64::from(byte);
+        *fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+    }
 }
 
 /// Gathers only the panes and persisted folder roots owned by one project.
@@ -349,6 +443,7 @@ fn clip_lines(text: &str) -> String {
 struct RestructurePromptContext {
     items: Vec<PromptLeafContext>,
     current_structure: String,
+    retry_feedback: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -362,28 +457,140 @@ struct PromptLeafContext {
 }
 
 impl RestructurePromptContext {
-    fn new(items: &[LeafContext], current_structure: &str) -> Self {
+    fn new(
+        items: &[LeafContext],
+        current_structure: &str,
+        item_evidence_budget: usize,
+        structure_evidence_budget: usize,
+        retry_feedback: Option<&str>,
+    ) -> Self {
+        let evidence_budget_per_item = item_evidence_budget / items.len().max(1);
         Self {
             items: items
                 .iter()
-                .map(|item| PromptLeafContext {
-                    id: item.id,
-                    kind_label: item.kind_label.clone(),
-                    current_title: crate::naming::encode_untrusted_context(&item.current_title),
-                    current_icon: item
-                        .current_icon
-                        .as_deref()
-                        .map(crate::naming::encode_untrusted_context),
-                    filename: item
-                        .filename
-                        .as_deref()
-                        .map(crate::naming::encode_untrusted_context),
-                    content_extract: crate::naming::encode_untrusted_context(&item.content_extract),
-                })
+                .map(|item| PromptLeafContext::from_leaf(item, evidence_budget_per_item))
                 .collect(),
-            current_structure: crate::naming::encode_untrusted_context(current_structure),
+            current_structure: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                current_structure,
+                structure_evidence_budget,
+            )),
+            retry_feedback: retry_feedback.map(|feedback| {
+                crate::naming::encode_untrusted_context(&clip_restructure_evidence(feedback, 512))
+            }),
         }
     }
+}
+
+impl PromptLeafContext {
+    fn from_leaf(item: &LeafContext, evidence_budget: usize) -> Self {
+        // Preserve every leaf's identity before allocating the remaining room
+        // to its volatile content. The model cannot produce a valid plan if it
+        // loses an id/title, whereas a long transcript can be summarized.
+        let title_budget = (evidence_budget / 4).clamp(32, 256);
+        let kind_budget = (evidence_budget / 10).clamp(16, 96);
+        let icon_budget = (evidence_budget / 20).clamp(8, 32);
+        let filename_budget = (evidence_budget / 10).clamp(16, 128);
+        let metadata_budget = title_budget
+            .saturating_add(kind_budget)
+            .saturating_add(icon_budget)
+            .saturating_add(filename_budget);
+        let content_budget = evidence_budget
+            .saturating_sub(metadata_budget)
+            .min(MAXIMUM_CONTENT_CHARACTERS_PER_ITEM);
+
+        Self {
+            id: item.id,
+            kind_label: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                &item.kind_label,
+                kind_budget,
+            )),
+            current_title: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                &item.current_title,
+                title_budget,
+            )),
+            current_icon: item.current_icon.as_deref().map(|icon| {
+                crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                    icon,
+                    icon_budget,
+                ))
+            }),
+            filename: item.filename.as_deref().map(|filename| {
+                crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                    filename,
+                    filename_budget,
+                ))
+            }),
+            content_extract: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
+                &item.content_extract,
+                content_budget,
+            )),
+        }
+    }
+}
+
+/// Preserves the beginning and newest end of a value while keeping one prompt
+/// field inside its caller-assigned share of the request budget.
+fn clip_restructure_evidence(value: &str, maximum_characters: usize) -> String {
+    let value = value.trim();
+    let character_count = value.chars().count();
+    if character_count <= maximum_characters {
+        return value.to_string();
+    }
+    if maximum_characters == 0 {
+        return String::new();
+    }
+
+    let omitted_marker = "… [content omitted] …";
+    let marker_characters = omitted_marker.chars().count();
+    if maximum_characters <= marker_characters {
+        return value.chars().take(maximum_characters).collect();
+    }
+
+    let retained_characters = maximum_characters - marker_characters;
+    let head_characters = retained_characters / 2;
+    let tail_characters = retained_characters - head_characters;
+    let head: String = value.chars().take(head_characters).collect();
+    let tail: String = value
+        .chars()
+        .skip(character_count - tail_characters)
+        .collect();
+    format!("{head}{omitted_marker}{tail}")
+}
+
+/// Renders one bounded prompt from the exact current project state. Encoding
+/// can expand JSON/control characters, so render-and-measure rather than
+/// assuming raw input character budgets map one-to-one onto wire size.
+fn render_restructure_prompt(
+    items: &[LeafContext],
+    current_structure: &str,
+    retry_feedback: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
+    let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
+
+    for _ in 0..12 {
+        let mut handlebars = Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars.register_template_string("restructure", RESTRUCTURE_TEMPLATE)?;
+        let prompt_context = RestructurePromptContext::new(
+            items,
+            current_structure,
+            item_evidence_budget,
+            structure_evidence_budget,
+            retry_feedback,
+        );
+        let prompt = handlebars.render("restructure", &prompt_context)?;
+        if prompt.chars().count() <= MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS {
+            return Ok(prompt);
+        }
+
+        item_evidence_budget = item_evidence_budget.saturating_mul(3) / 4;
+        structure_evidence_budget = structure_evidence_budget.saturating_mul(3) / 4;
+    }
+
+    anyhow::bail!(
+        "restructure prompt exceeded the {MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS}-character safety budget"
+    )
 }
 
 /// LLM-facing mirror of `ilium_core::RestructureNode`, tagged for a clean
@@ -480,27 +687,25 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
         anyhow::bail!("no panes or folders to restructure");
     }
 
-    let mut handlebars = Handlebars::new();
-    // Plain-text prompt for an LLM, not HTML -- see `naming::render_and_complete`'s
-    // matching comment on why the default escape fn would otherwise mangle
-    // shell/code content with HTML entities.
-    handlebars.register_escape_fn(handlebars::no_escape);
-    handlebars.register_template_string("restructure", RESTRUCTURE_TEMPLATE)?;
-    let prompt_context = RestructurePromptContext::new(contexts, current_structure);
-    let prompt = handlebars.render("restructure", &prompt_context)?;
-
     static NEXT_OPERATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let operation_id = NEXT_OPERATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    tracing::info!(
-        operation_id,
-        prompt_characters = prompt.chars().count(),
-        item_count = contexts.len(),
-        "restructure inference started"
-    );
-    tracing::debug!(operation_id, prompt = %prompt, "restructure inference prompt");
-
     let mut last_parse_error = None;
+    let mut retry_feedback = None;
     for attempt in 1..=RESTRUCTURE_MAX_ATTEMPTS {
+        let prompt =
+            render_restructure_prompt(contexts, current_structure, retry_feedback.as_deref())?;
+        tracing::info!(
+            operation_id,
+            attempt,
+            prompt_characters = prompt.chars().count(),
+            item_count = contexts.len(),
+            is_corrective_retry = retry_feedback.is_some(),
+            "restructure inference started"
+        );
+        // The Debug setting explicitly promises complete LLM evidence. This
+        // logger writes only while that setting is on, so retain the exact
+        // bounded request here instead of hiding it behind `RUST_LOG=debug`.
+        tracing::info!(operation_id, attempt, prompt = %prompt, "restructure inference prompt");
         let response = match generator.complete_restructure_prompt(&prompt) {
             Ok(response) => response,
             Err(error) => {
@@ -520,7 +725,7 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
             response_characters = response.chars().count(),
             "restructure inference response received"
         );
-        tracing::debug!(operation_id, attempt, response = %response, "restructure inference response");
+        tracing::info!(operation_id, attempt, response = %response, "restructure inference response");
 
         match parse_restructure_response(&response, contexts) {
             Ok(plan) => {
@@ -539,6 +744,7 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
                     "restructure inference response could not be parsed"
                 );
                 tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, response = %response, "unparseable restructure inference response");
+                retry_feedback = Some(error.to_string());
                 last_parse_error = Some(error);
             }
         }
@@ -861,6 +1067,7 @@ mod tests {
     struct FakeGenerator {
         calls: Cell<u8>,
         last_prompt: RefCell<Option<String>>,
+        prompts: RefCell<Vec<String>>,
         // One entry per successive call; the last entry repeats once
         // exhausted, so `new` (a single-element sequence) still returns the
         // same response every time as before.
@@ -876,6 +1083,7 @@ mod tests {
             Self {
                 calls: Cell::new(0),
                 last_prompt: RefCell::new(None),
+                prompts: RefCell::new(Vec::new()),
                 responses: RefCell::new(responses.into_iter().collect()),
             }
         }
@@ -885,6 +1093,7 @@ mod tests {
         fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String> {
             self.calls.set(self.calls.get() + 1);
             *self.last_prompt.borrow_mut() = Some(prompt.to_string());
+            self.prompts.borrow_mut().push(prompt.to_string());
             let mut responses = self.responses.borrow_mut();
             if responses.len() > 1 {
                 return Ok(responses.remove(0));
@@ -901,8 +1110,31 @@ mod tests {
             current_icon: None,
             filename: None,
             content_extract: "$ cargo build".to_string(),
+            automatic_content_fingerprint: 0,
             agent_lookup: None,
         }
+    }
+
+    #[test]
+    fn project_input_fingerprint_changes_for_content_or_structure_changes() {
+        let contexts = vec![leaf(1, "shell")];
+        let original = project_restructure_input_fingerprint(&contexts, "project shell");
+        assert_eq!(
+            original,
+            project_restructure_input_fingerprint(&contexts, "project shell")
+        );
+
+        let mut changed_content = contexts.clone();
+        changed_content[0].automatic_content_fingerprint =
+            stable_restructure_fingerprint("new work");
+        assert_ne!(
+            original,
+            project_restructure_input_fingerprint(&changed_content, "project shell")
+        );
+        assert_ne!(
+            original,
+            project_restructure_input_fingerprint(&contexts, "project renamed")
+        );
     }
 
     #[test]
@@ -1101,6 +1333,59 @@ mod tests {
 
         assert_eq!(plan.children.len(), 1);
         assert_eq!(generator.calls.get(), 2);
+        let prompts = generator.prompts.borrow();
+        assert!(!prompts[0].contains("<retry-feedback>"));
+        assert!(prompts[1].contains("<retry-feedback>"));
+        assert!(prompts[1].contains("prior answer was rejected"));
+    }
+
+    #[test]
+    fn bounds_recording_sized_evidence_without_omitting_any_leaf_identity() {
+        // The live failure recordings had only 5-10 items but individual
+        // transcript/tool-output lines large enough to create 180k-character
+        // prompts. Model that shape locally without putting private recorded
+        // data into the repository.
+        let mut contexts = (1..=10)
+            .map(|id| leaf(id, &format!("Recorded Item {id}")))
+            .collect::<Vec<_>>();
+        for context in &mut contexts {
+            context.content_extract = format!(
+                "opening-evidence-{} {} newest-evidence-{}",
+                context.id.0,
+                "x".repeat(30_000),
+                context.id.0,
+            );
+        }
+        let response_children = contexts
+            .iter()
+            .map(|context| {
+                format!(
+                    r#"{{"kind":"pane","id":{},"title":"Recorded Work {}","short_title":"Recorded","icon":"📌"}}"#,
+                    context.id.0, context.id.0
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let generator = FakeGenerator::new(format!(r#"{{"children":[{response_children}]}}"#));
+        let structure = format!("structure-head {} structure-tail", "y".repeat(30_000));
+
+        let plan = infer_restructure_plan_with_structure(&generator, &contexts, &structure)
+            .expect("bounded recorded-like context should still produce a valid plan");
+
+        assert_eq!(plan.children.len(), contexts.len());
+        let prompt = generator
+            .last_prompt
+            .borrow()
+            .clone()
+            .expect("rendered prompt");
+        assert!(prompt.chars().count() <= MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS);
+        assert!(prompt.contains("structure-head"));
+        assert!(prompt.contains("structure-tail"));
+        for context in &contexts {
+            assert!(prompt.contains(&format!(r#"<item id="{}""#, context.id.0)));
+            assert!(prompt.contains(&format!("opening-evidence-{}", context.id.0)));
+            assert!(prompt.contains(&format!("newest-evidence-{}", context.id.0)));
+        }
     }
 
     #[test]
@@ -1180,6 +1465,9 @@ mod tests {
         assert!(prompt.contains("<output-example>"));
         assert!(prompt.contains("command_hint"));
         assert!(prompt.contains("kind=\"Plain shell\""));
+        assert!(prompt
+            .contains("must use at most 7 words; this is a maximum, not a target or a minimum"));
+        assert!(prompt.contains("never add filler merely to make it longer"));
     }
 
     #[test]
@@ -1297,6 +1585,7 @@ mod tests {
             current_icon: None,
             filename: None,
             content_extract: String::new(),
+            automatic_content_fingerprint: 0,
             agent_lookup: Some((
                 AgentClass::Claude,
                 "00000000-0000-4000-8000-000000000000".to_string(),

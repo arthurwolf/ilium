@@ -95,6 +95,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
+                show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             panes: &app.panes,
         },
@@ -135,25 +136,16 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             frame,
             area,
             app.keyboard_settings.shortcut_base,
+            app.keyboard_settings.navigation_shortcut_base,
             &app.keybindings,
         ),
         Mode::ContextMenu(menu) => {
             draw_context_menu(frame, menu, app.ui_settings.tree_order);
         }
-        Mode::AgentPaneContextMenu(menu) => {
-            frame.render_widget(Clear, menu.area);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    " 🐞 Show debug log",
-                    Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD),
-                )))
-                .block(theme::block(true).title(theme::chrome_title("Agent actions"))),
-                menu.area,
-            );
-        }
+        Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu),
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
-            modal::render_text_prompt(frame, area, "Save agent debug log", state);
+            modal::render_text_prompt(frame, area, "Save agent debug log", state, "Save");
         }
         Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
@@ -166,17 +158,17 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::CreateSplitMembers(state) => draw_create_split_members(frame, area, state),
         Mode::CreateBoard(state) => draw_create_board(frame, area, state),
         Mode::BoardCardPrompt(_, state) => {
-            modal::render_text_prompt(frame, area, "New card", state);
+            modal::render_text_prompt(frame, area, "New card", state, "Create card");
         }
         Mode::BoardColumnPrompt(_, state) => {
-            modal::render_text_prompt(frame, area, "New column", state);
+            modal::render_text_prompt(frame, area, "New column", state, "Create column");
         }
         Mode::BoardRenamePrompt(_, target, state) => {
             let title = match target {
                 BoardRenameTarget::Card => "Rename card",
                 BoardRenameTarget::Column => "Rename column",
             };
-            modal::render_text_prompt(frame, area, title, state);
+            modal::render_text_prompt(frame, area, title, state, "Rename");
         }
         Mode::BoardDeleteConfirm(_, target) => {
             let (title, message) = match target {
@@ -185,34 +177,57 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
                     ("Delete column?", "Delete the empty selected column?")
                 }
             };
-            modal::render_confirm(frame, area, title, message);
+            modal::render_confirm(
+                frame,
+                area,
+                title,
+                message,
+                modal::DialogActions::confirmation(
+                    "Cancel",
+                    modal::DialogButtonTone::Neutral,
+                    "Delete",
+                    modal::DialogButtonTone::Danger,
+                ),
+            );
         }
-        Mode::Rename(state) => modal::render_text_prompt(frame, area, "Rename", state),
+        Mode::Rename(state) => {
+            modal::render_text_prompt(frame, area, "Rename", state, "Rename");
+        }
         Mode::CommandPrompt(state) => {
-            modal::render_text_prompt(frame, area, "Run command", state);
+            modal::render_text_prompt(frame, area, "Run command", state, "Run");
         }
         Mode::InferenceSettingPrompt(field, state) => {
-            modal::render_text_prompt(frame, area, field.label(), state);
+            modal::render_text_prompt(frame, area, field.label(), state, "Apply");
         }
         Mode::VoiceSettingPrompt(field, state) => {
-            modal::render_masked_text_prompt(frame, area, field.label(), state);
+            modal::render_masked_text_prompt(frame, area, field.label(), state, "Replace");
         }
         Mode::VoicePromptEditor(state) => modal::render_multiline_prompt(
             frame,
             area,
             "Voice control custom prompt",
             &state.textarea,
+            "Apply",
         ),
-        Mode::SaveAs(_, state) => modal::render_text_prompt(frame, area, "Save As", state),
+        Mode::SaveAs(_, state) => {
+            modal::render_text_prompt(frame, area, "Save As", state, "Save");
+        }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
         Mode::ConfirmSessionRecovery { pane_count } => modal::render_confirm(
             frame,
             area,
             "Restore previous session?",
-            &format!("Restore {pane_count} pane(s) from the stored snapshot?  Enter/Y: restore · N/Esc: start fresh"),
+            &format!("A stored snapshot contains {pane_count} pane(s). Restore it, or discard it and start fresh?"),
+            modal::DialogActions::confirmation(
+                "Discard",
+                modal::DialogButtonTone::Danger,
+                "Restore",
+                modal::DialogButtonTone::Primary,
+            ),
         ),
         Mode::Normal
         | Mode::LeaderPending
+        | Mode::NavigationLeaderPending
         | Mode::Move
         | Mode::Settings(_)
         | Mode::Search(_) => {}
@@ -220,29 +235,66 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
 }
 
 fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
-    let popup = modal::centered_fixed_rect(68, 11, area);
-    frame.render_widget(Clear, popup);
+    let layout = modal::create_board_dialog_layout(area);
+    frame.render_widget(Clear, layout.popup);
     let block = theme::block(true).title(theme::chrome_title("New board"));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let storage = match state.storage_kind {
-        BoardStorageKind::Folder => "Folder columns + Markdown cards",
-        BoardStorageKind::MarkdownFile => "One Markdown file (headings + bullets)",
+    frame.render_widget(block, layout.popup);
+    draw_scheduled_input_field(
+        frame,
+        layout.name_box,
+        "Board name",
+        &state.name,
+        !state.editing_path,
+    );
+
+    let selected_storage_style = Style::new()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let unselected_storage_style = Style::new().fg(Color::Cyan);
+    let (folder_style, markdown_style) = match state.storage_kind {
+        BoardStorageKind::Folder => (selected_storage_style, unselected_storage_style),
+        BoardStorageKind::MarkdownFile => (unselected_storage_style, selected_storage_style),
     };
-    let active_name = if state.editing_path { "" } else { " ›" };
-    let active_path = if state.editing_path { " ›" } else { "" };
-    let lines = vec![
-        Line::from(format!("Name{active_name}: {}", state.name.buf)),
-        Line::from(format!("Storage: {storage}  (←/→ to switch)")),
-        Line::from(format!("Path{active_path}: {}", state.path.buf)),
-        Line::from(Span::styled("[ Browse… ]", Style::new().fg(Color::Cyan))),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Tab field · Ctrl+P browse · Enter create · Esc cancel",
-            Style::new().add_modifier(Modifier::DIM),
-        )),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Folder columns + Markdown cards ", folder_style),
+            Span::raw("  "),
+            Span::styled(" One Markdown file ", markdown_style),
+        ]))
+        .alignment(Alignment::Center),
+        layout.storage_row,
+    );
+
+    draw_scheduled_input_field(
+        frame,
+        layout.path_box,
+        "Storage path",
+        &state.path,
+        state.editing_path,
+    );
+    frame.render_widget(
+        Paragraph::new("[ Browse path… ]")
+            .style(
+                Style::new()
+                    .fg(Color::Black)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .alignment(Alignment::Center),
+        layout.browse_button,
+    );
+    modal::render_dialog_actions(
+        frame,
+        layout.actions,
+        modal::DialogActions::form("Cancel", "Create board"),
+    );
+    frame.render_widget(
+        Paragraph::new("Click a field to edit · Tab switches fields · Ctrl+P browses")
+            .style(Style::new().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        layout.hint_row,
+    );
 }
 
 fn draw_create_split_orientation(
@@ -351,7 +403,18 @@ fn draw_confirm_close(frame: &mut Frame, area: Rect, app: &App, target: NodeId) 
     let message = app
         .close_confirmation_message(target)
         .unwrap_or_else(|| "Close this item?".to_string());
-    modal::render_confirm(frame, area, "Close?", &message);
+    modal::render_confirm(
+        frame,
+        area,
+        "Close this item?",
+        &message,
+        modal::DialogActions::confirmation(
+            "Keep open",
+            modal::DialogButtonTone::Neutral,
+            "Close",
+            modal::DialogButtonTone::Danger,
+        ),
+    );
 }
 
 /// Draws the actionable right-click popup. It is intentionally opaque and
@@ -679,6 +742,30 @@ fn draw_editor_line_context_menu(frame: &mut Frame, menu: &EditorLineContextMenu
     frame.render_widget(widget, menu.area);
 }
 
+/// Draws terminal copy actions without implying that a plain shell is an agent.
+fn draw_terminal_pane_context_menu(
+    frame: &mut Frame,
+    menu: &crate::terminal_context_menu::TerminalPaneContextMenu,
+) {
+    let lines: Vec<Line> = menu
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| {
+            let style = if index == menu.selected_index {
+                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            Line::from(Span::styled(format!(" {}", action.label()), style))
+        })
+        .collect();
+    let widget = Paragraph::new(lines)
+        .block(theme::block(true).title(theme::chrome_title("Terminal actions")));
+    frame.render_widget(Clear, menu.area);
+    frame.render_widget(widget, menu.area);
+}
+
 /// Draws the agent selector, editable multi-line prompt, and explicit submit
 /// button using geometry shared with `crate::mouse`.
 fn draw_create_agent_from_line(
@@ -880,6 +967,10 @@ fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
         crate::agent_debug_ui::render(frame, area, app, state);
         return;
     }
+    if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
+        crate::chatroom_ui::render(frame, area, app, *project_id);
+        return;
+    }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         let (title, message) = match app.right_panel_target {
@@ -907,21 +998,34 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
     let pane_focused =
         matches!(app.focus, FocusTarget::Pane) && app.active_pane_id() == Some(viewport.pane_id);
     let pane_title = pane_title(app, viewport.pane_id);
+    let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
         let placeholder = Paragraph::new("pane is loading")
             .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
+        if let Some(action) = completed_agent_close_action {
+            draw_completed_agent_close_action(frame, action.button_area);
+        }
         return;
     };
 
     match runtime {
         PaneRuntime::Terminal(term) => {
-            term.with_screen(|screen| {
-                let widget = PseudoTerminal::new(screen)
-                    .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
-                frame.render_widget(widget, viewport.outer_area);
-            });
-            draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
+            if let Some(action) = completed_agent_close_action {
+                let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
+                frame.render_widget(block, viewport.outer_area);
+                term.with_screen(|screen| {
+                    frame.render_widget(PseudoTerminal::new(screen), action.terminal_area);
+                });
+                draw_terminal_scrollbar(frame, action.terminal_area, term.as_ref());
+            } else {
+                term.with_screen(|screen| {
+                    let widget = PseudoTerminal::new(screen)
+                        .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
+                    frame.render_widget(widget, viewport.outer_area);
+                });
+                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
+            }
         }
         PaneRuntime::Editor(editor) => {
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
@@ -942,6 +1046,26 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
             );
         }
     }
+
+    if let Some(action) = completed_agent_close_action {
+        draw_completed_agent_close_action(frame, action.button_area);
+    }
+}
+
+/// Renders the completed-agent acknowledgement as a full-width destructive
+/// action, visually distinct from ordinary terminal output and chrome.
+fn draw_completed_agent_close_action(frame: &mut Frame, area: Rect) {
+    let style = Style::new()
+        .fg(Color::White)
+        .bg(Color::Red)
+        .add_modifier(Modifier::BOLD);
+    let button = Paragraph::new(Span::styled(
+        crate::completed_agent_action::CLOSE_COMPLETED_AGENT_LABEL,
+        style,
+    ))
+    .alignment(Alignment::Center)
+    .style(style);
+    frame.render_widget(button, area);
 }
 
 /// Draws a vertical scrollbar merged into the terminal pane block's right
@@ -972,7 +1096,8 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 
     match editor.view_mode {
         EditorViewMode::Source => {
-            editor.update_source_scroll_mirror(chrome.content_area.height);
+            editor
+                .update_source_scroll_mirror(chrome.content_area.height, chrome.content_area.width);
             match editor.highlighted_lines() {
                 Some(tokens) => {
                     editor.update_source_scroll_col_mirror(chrome.content_area.width);
@@ -991,6 +1116,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     chrome.content_area,
                     document,
                     editor.rendered_scroll,
+                    editor.line_display,
                 );
                 draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
             }
@@ -1017,7 +1143,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// available editor body. It uses Ratatui's own scrollbar widget and shares
 /// the same authoritative viewport position as wheel navigation.
 fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
-    let total_lines = editor.textarea.lines().len();
+    let total_lines = editor.source_visual_rows(area.width).len();
     if total_lines <= usize::from(area.height) {
         return;
     }
@@ -1040,7 +1166,7 @@ fn draw_rendered_scrollbar(
     document: &markdown::render::RenderedDocument,
     editor: &EditorPane,
 ) {
-    let total_height = markdown::view::content_height(document, area.width);
+    let total_height = markdown::view::content_height(document, area.width, editor.line_display);
     if total_height <= area.height {
         return;
     }
@@ -1065,7 +1191,9 @@ fn minimap_highlight_line(editor: &EditorPane, total_lines: usize, rendered_widt
             let Some(document) = &editor.rendered else {
                 return 0;
             };
-            let total_height = markdown::view::content_height(document, rendered_width).max(1);
+            let total_height =
+                markdown::view::content_height(document, rendered_width, editor.line_display)
+                    .max(1);
             let fraction = f64::from(editor.rendered_scroll) / f64::from(total_height);
             ((fraction * total_lines as f64).round() as usize).min(total_lines.saturating_sub(1))
         }
@@ -1089,11 +1217,16 @@ fn pane_title(app: &App, id: NodeId) -> String {
         return "Terminal".to_string();
     };
     match &node.kind {
-        NodeKind::Pane {
-            status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
-            ..
-        } => format!("{} — {}", node.name, agent_class_title(class)),
-        _ => node.name.clone(),
+        NodeKind::Pane { status, .. } => {
+            let logical_title = match status {
+                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => {
+                    format!("{} — {}", node.name, agent_class_title(class))
+                }
+                _ => node.name.clone(),
+            };
+            crate::pane_title::decorate_pane_title(status, &logical_title)
+        }
+        NodeKind::Container(_) | NodeKind::Folder { .. } => node.name.clone(),
     }
 }
 
@@ -1118,6 +1251,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mode_label: &'static str = match &app.mode {
         Mode::Normal => "NORMAL",
         Mode::LeaderPending => "LEADER (press a letter — ? for help)",
+        Mode::NavigationLeaderPending => "TREE NAVIGATION (↓ ↑ Pg↓ Pg↑)",
         Mode::Move => "MOVE",
         // The buffer itself is shown in the modal popup (see `draw`), not
         // here -- the status bar only names the mode while one is open.
@@ -1133,7 +1267,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::FolderExplorer(..) => "FOLDER PICKER",
         Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
-        Mode::AgentPaneContextMenu(..) => "AGENT ACTIONS",
+        Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
@@ -1282,6 +1416,134 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn right_panel_title_prefixes_done_without_mutating_the_pane_name() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Review authentication", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Done),
+            )
+            .unwrap();
+
+        assert_eq!(
+            pane_title(&app, pane_id),
+            "« [done] » Review authentication — Codex"
+        );
+        assert_eq!(app.tree.get(pane_id).unwrap().name, "Review authentication");
+
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Working),
+            )
+            .unwrap();
+        assert_eq!(pane_title(&app, pane_id), "Review authentication — Codex");
+    }
+
+    #[test]
+    fn completed_agent_renders_a_full_width_red_close_action_at_the_panel_bottom() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Completed review", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Done),
+            )
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let action = app
+            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
+            .expect("done agent should expose its close action");
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+
+        let button_cells = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(120)
+            .nth(usize::from(action.button_area.y))
+            .expect("button row is inside the test backend")
+            .get(usize::from(action.button_area.x)..usize::from(action.button_area.right()))
+            .expect("button spans the complete inner panel row");
+        assert!(button_cells.iter().all(|cell| cell.bg == Color::Red));
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Close finished agent"));
+    }
+
+    #[test]
+    fn rapid_terminal_switches_never_mix_the_previous_pane_into_the_right_panel() {
+        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let mut first_view = TerminalView::new(24, 80);
+        first_view.apply_replay(b"FIRST-PANE-ONLY\r\n", 1, true);
+        let mut second_view = TerminalView::new(24, 80);
+        second_view.apply_replay(b"SECOND-PANE-ONLY\r\n", 1, true);
+        app.panes
+            .insert(first, PaneRuntime::Terminal(Box::new(first_view)));
+        app.panes
+            .insert(second, PaneRuntime::Terminal(Box::new(second_view)));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        for (pane_id, expected, forbidden) in [
+            (first, "FIRST-PANE-ONLY", "SECOND-PANE-ONLY"),
+            (second, "SECOND-PANE-ONLY", "FIRST-PANE-ONLY"),
+            (first, "FIRST-PANE-ONLY", "SECOND-PANE-ONLY"),
+            (second, "SECOND-PANE-ONLY", "FIRST-PANE-ONLY"),
+        ] {
+            app.focus_pane(pane_id);
+            terminal
+                .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+
+            assert!(rendered.contains(expected));
+            assert!(
+                !rendered.contains(forbidden),
+                "the prior pane must be fully cleared in the same frame"
+            );
+        }
+    }
+
+    #[test]
     fn voice_control_dot_is_black_when_disabled_and_red_when_enabled() {
         let backend = TestBackend::new(22, 1);
         let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -1339,7 +1601,9 @@ mod tests {
         assert!(rendered.contains("⚙ Settings"));
         assert!(rendered.contains("Voice control"));
         assert!(rendered.contains("OpenAI API key"));
-        assert!(rendered.contains("Enter to replace · Esc to keep the existing key"));
+        assert!(rendered.contains("Protected value"));
+        assert!(rendered.contains("Keep existing"));
+        assert!(rendered.contains("Replace"));
     }
 
     #[test]

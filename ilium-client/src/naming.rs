@@ -157,7 +157,8 @@ pub struct DualTitle {
     pub icon: String,
     /// 2-3 words, shown when the tree panel is too narrow for `long`.
     pub short: String,
-    /// 5-7 words, shown when the tree panel is wide enough.
+    /// One to seven words, shown when the tree panel is wide enough. The
+    /// maximum is a display bound, not a target length.
     pub long: String,
 }
 

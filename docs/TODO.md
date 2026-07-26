@@ -1,3 +1,53 @@
+# Right-panel pane-switch integrity
+
+- [x] Trace tree selection, right-panel targeting, render-cache ownership, terminal replay, output sequencing, and exact `tui-term` clearing behavior.
+- [x] Reproduce the intermittent stale/wrong/scrolled presentation from the live runtime log and identify the broadcast-overrun full-session replay storm.
+- [x] Make lag recovery pane- and sequence-scoped so unrelated terminal histories are never replayed, and preserve a historical/search viewport across necessary live replay repair.
+- [x] Add focused ordering, replay, scroll, and forced-lag regressions.
+- [x] Preserve the first input after a full event batch instead of dropping that boundary key during simultaneous output pressure.
+- [x] Run focused and workspace gates, rebuild/install, and prove rapid pane switching remains correct under sustained output in an isolated real TUI. (Every non-ignored workspace test, strict workspace Clippy, formatting, all 10 PTY scenarios against the installed binaries, release/install hash parity, forced broadcast-overrun recovery, 60 rapid final-build pane transitions, byte-identical historical-scroll preservation, exact 77-character boundary input, and active client/server executable parity pass.)
+
+# Optional tree row management controls
+
+- [x] Trace the row-action renderer, hit testing, User Interface settings registry, and TOML persistence path.
+- [x] Add a live-persisted User Interface setting for Rename and Move up/down tree-row buttons, disabled by default while preserving Close, Retitle, context-menu, drag/drop, and keyboard actions.
+- [x] Explicitly disable the setting in the current installation, run focused and workspace gates, rebuild/install, and verify both the disabled default and opt-in behavior in an isolated real TUI. (The focused regressions, all 694 client library tests, full workspace suite, formatting, strict workspace Clippy, release/install parity, isolated Off→On→Off persistence proof, and restarted actual-session Off rendering proof pass.)
+
+# Mouse-clickable aerated dialogs
+
+- [x] Inventory every blocking client dialog and identify the confirmation, text-entry, and creation flows that still expose keyboard-only actions.
+- [x] Centralize spacious dialog geometry and explicit primary/cancel button hit targets so rendering and mouse routing cannot drift.
+- [x] Route every affected confirmation and prompt through its existing keyboard action contract, preserving nested-modal return behavior and keyboard shortcuts.
+- [x] Add focused layout, rendering, mouse, and PTY regressions for close, delete, restore/discard, text prompts, voice prompt editing, and board creation.
+- [x] Run workspace gates, rebuild/install, and verify both mouse and keyboard interaction in an isolated real tmux-controlled TUI. (All workspace tests, strict Clippy, formatting, all 10 PTY scenarios against the installed binary, binary parity, and live tmux clicks on Keep open, Close, Cancel, and Rename pass.)
+
+# Chatroom history scrolling and live-tail following
+
+- [x] Trace chatroom refresh, rendering, keyboard, and mouse paths; define one wrapped-line geometry contract for the virtual room.
+- [x] Add a visible interactive scrollbar and keyboard/wheel history navigation.
+- [x] Follow new messages while pinned to the bottom and preserve a manually scrolled historical viewport as messages arrive.
+- [x] Add focused state/render/mouse regressions, run workspace gates, and verify the behavior in an isolated real TUI. (The installed TUI retained its historical viewport across an external append, returned to the live tail through its scrollbar/wheel path, and automatically followed the next append.)
+
+# Terminal context-menu clipboard pasting
+
+- [x] Extend terminal-pane actions with Paste clipboard and target the exact pane selected by the right-click menu.
+- [x] Add Copy full terminal history, capturing the complete retained terminal journal as clipboard-safe plain text at the right-click boundary.
+- [x] Add focused menu/history regressions, run formatting and strict workspace Clippy, and verify both terminal clipboard actions.
+- [x] Rebuild/install and verify Paste clipboard plus Copy full terminal history in an isolated installed ilium session. (The real menu showed both entries; full-history copying produced the expected history lines as plain clipboard text with no ANSI escapes.)
+
+# Agent-finished acknowledgement on open
+
+- [x] Trace the server-owned completion, focus, and rendering lifecycle; confirm that the existing sticky-on-focus contract causes the reported bell to remain after opening its pane.
+- [x] Acknowledge a `Done` agent when the client focuses it, clearing the bell and completed title marker while retaining its detected-agent and goal identity.
+- [x] Add focused domain/client/server-runtime regressions, run strict Clippy and formatting checks, rebuild/install, and verify the installed TUI in an isolated tmux session. (The installed sidebar showed `🔔 « [done] »`; an actual mouse click opened the pane and changed it to the ordinary idle dot, with the completed marker gone.)
+
+# Agent-focused voice dictation fallback
+
+- [x] Define an explicit precedence contract in which clear ilium commands win, while an otherwise unqualified utterance is submitted verbatim when the active pane is a detected coding agent.
+- [x] Keep the Realtime model synchronized with the active pane's detected-agent context and reinforce the same fallback in the terminal tool description.
+- [x] Add focused prompt, context, tool-schema, event-loop, and live-provider regressions for bare agent-directed utterances.
+- [x] Run workspace gates, rebuild/install, and verify the behavior against the real Realtime model and installed runtime. (The full workspace test run retains the separately tracked unrelated `removal_transition_withholds_pointer_hits_until_visual_rows_match_the_new_tree` failure; all 624 other client tests, every non-client workspace test, strict Clippy, formatting, both new live Realtime cases, release/install parity, and the installed agent-plus-voice runtime proof pass.)
+
 # Claude and Codex `/clear` identity reset
 
 - [x] Define one provider-owned `/clear` transition contract for Claude and Codex, while leaving unrelated agents and non-exact input unchanged.
@@ -257,6 +307,11 @@
 - [x] Add atomic command-pane creation with initial prompt submission and Enter.
 - [x] Cover the interaction and IPC/runtime path, run workspace gates, manually verify the real TUI, rebuild, and install.
 
+# Open project files from editor lines
+
+- [x] Normalize source-line file references, require a real project-CWD file, and show `Open in editor` only when it can succeed.
+- [x] Cover menu eligibility and the resulting editor-open request, then run focused and live installed-TUI verification. (Installed-binary proof: a Markdown bullet ``- `docs/guide.md` `` exposed the entry, then opened that exact file in its own editor pane.)
+
 # Sound settings and event alerts
 
 - [x] Add a cross-platform sound adapter with system sound discovery, system beep, file playback, and pure event-transition rules.
@@ -363,7 +418,7 @@
 # AI session titles
 
 - [x] Add `transcript_context.rs`: locate the project-verified JSONL transcript, extract separate recent user, assistant, and tool-result windows in chronological order, and compact every dynamic context value independently to its first/last 1,000 Unicode characters.
-- [x] Add `session_naming.rs`: XML/Handlebars prompt template combining the current title, pane/session/process/project/transcript metadata, activity/goal state, terminal screen, and typed transcript entries; validate icon plus 2-3-word short and 5-7-word long titles.
+- [x] Add `session_naming.rs`: XML/Handlebars prompt template combining the current title, pane/session/process/project/transcript metadata, activity/goal state, terminal screen, and typed transcript entries; validate icon plus 2-3-word short titles and long titles of up to seven words.
 - [x] Add a `TitleSource` (`Auto`/`User`) flag to `SavedNode::Terminal` in `workspace_file.rs` so a user-typed rename is never overwritten by auto-inference, and a restored pane never re-triggers inference for a title it already has.
 - [x] Wire `App::panes_needing_title_inference`/`mark_title_inference_started`/`apply_inferred_title`/`fail_title_inference` and per-pane worker orchestration in `main.rs` (mirrors the project-name worker, generalized to a map).
 - [x] Render the shared braille spinner in place of a pane's name in `tree_ui::pane_label` while its title inference is in flight.

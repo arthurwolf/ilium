@@ -11,6 +11,7 @@
 //! would mean two handles to track and cancel together for what is really
 //! one logical connection.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
@@ -60,7 +61,13 @@ where
     let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
 
     let reader = read_requests(Arc::clone(&state), read_half, direct_tx, attach_phase_tx);
-    let writer = write_replies(write_half, broadcast_rx, direct_rx, attach_phase_rx);
+    let writer = write_replies(
+        write_half,
+        broadcast_rx,
+        direct_rx,
+        attach_phase_rx,
+        Some(Arc::clone(&state)),
+    );
     tokio::join!(reader, writer);
 }
 
@@ -146,9 +153,15 @@ async fn write_replies<W>(
     mut broadcast_rx: tokio::sync::broadcast::Receiver<ServerEvent>,
     mut direct_rx: mpsc::Receiver<ServerEvent>,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
+    resynchronization_state: Option<Arc<ServerState>>,
 ) where
     W: AsyncWrite + Unpin,
 {
+    // This belongs to one connection writer, not the session: it records the
+    // newest terminal journal sequence successfully written to this client so
+    // a broadcast overrun repairs only genuinely missing panes.
+    let mut delivered_terminal_sequences = HashMap::new();
+
     loop {
         // While an Attach handler is building its replay batch, drain direct
         // events but leave broadcasts queued. A later Attach returns to this
@@ -164,7 +177,13 @@ async fn write_replies<W>(
                 },
                 direct_event = direct_rx.recv() => match direct_event {
                     Some(event) => {
-                        if let Err(error) = write_frame(&mut write_half, &event).await {
+                        if let Err(error) = write_server_event(
+                            &mut write_half,
+                            &event,
+                            &mut delivered_terminal_sequences,
+                        )
+                        .await
+                        {
                             tracing::warn!("connection write failed during attach, closing: {error}");
                             return;
                         }
@@ -210,6 +229,17 @@ async fn write_replies<W>(
                 Ok(event) => event,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
+                    if let Some(state) = &resynchronization_state {
+                        if !write_resynchronization(
+                            &mut write_half,
+                            state,
+                            &mut delivered_terminal_sequences,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
                     continue;
                 }
                 // The session's broadcast sender only drops with
@@ -219,11 +249,159 @@ async fn write_replies<W>(
             },
         };
 
-        if let Err(error) = write_frame(&mut write_half, &event).await {
+        // Recovery can leave already-queued output at or below the replay
+        // watermark in `broadcast_rx`. Do not spend socket bandwidth sending
+        // bytes the client must discard, which otherwise helps recreate the
+        // same overrun immediately after repair.
+        if is_redundant_terminal_event(&event, &delivered_terminal_sequences) {
+            continue;
+        }
+
+        // A merged frame can overlap a recovery watermark while still ending
+        // above it. Replaying the overlapping prefix would duplicate raw
+        // terminal bytes, while dropping the whole frame would lose its
+        // suffix. Recover again from the authoritative pane journal instead,
+        // which emits exactly the missing contiguous tail.
+        if screen_update_requires_recovery(&event, &delivered_terminal_sequences) {
+            if let Some(state) = &resynchronization_state {
+                tracing::warn!("terminal output frame was not contiguous; resynchronizing");
+                if !write_resynchronization(
+                    &mut write_half,
+                    state,
+                    &mut delivered_terminal_sequences,
+                )
+                .await
+                {
+                    break;
+                }
+                continue;
+            }
+        }
+
+        if let Err(error) =
+            write_server_event(&mut write_half, &event, &mut delivered_terminal_sequences).await
+        {
             tracing::warn!("connection write failed, closing: {error}");
             break;
         }
     }
+}
+
+/// Rebuilds a lagging attached client's render cache from the current server
+/// authority. This deliberately does not include `InitialStateSyncComplete`:
+/// that event is an attach-only trigger boundary, whereas a replay repair
+/// must be transparent to automatic action routing.
+async fn write_resynchronization<W>(
+    write_half: &mut W,
+    state: &ServerState,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+) -> bool
+where
+    W: AsyncWrite + Unpin,
+{
+    for event in handlers::resynchronization_events(state, delivered_terminal_sequences).await {
+        if let Err(error) =
+            write_server_event(write_half, &event, delivered_terminal_sequences).await
+        {
+            tracing::warn!(
+                "connection write failed during lag resynchronization, closing: {error}"
+            );
+            return false;
+        }
+    }
+    true
+}
+
+/// Writes one event and advances the per-connection output watermark only
+/// after the frame reached the socket. Failed writes must not claim delivery.
+async fn write_server_event<W>(
+    write_half: &mut W,
+    event: &ServerEvent,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+) -> Result<(), ilium_ipc::IpcError>
+where
+    W: AsyncWrite + Unpin,
+{
+    write_frame(write_half, event).await?;
+    record_delivered_terminal_sequence(delivered_terminal_sequences, event);
+    Ok(())
+}
+
+/// Records the newest raw-output sequence represented by a live update or a
+/// replay. Both variants establish the same deduplication watermark.
+fn record_delivered_terminal_sequence(
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    event: &ServerEvent,
+) {
+    if let ServerEvent::TreeSnapshot(tree) = event {
+        // Node ids are never reused, but one long-lived attachment can still
+        // create and close many panes. Prune connection-local watermarks with
+        // the same authoritative snapshot that removes their render caches.
+        delivered_terminal_sequences
+            .retain(|pane_id, _| tree.get(*pane_id).is_some_and(ilium_core::Node::is_pane));
+        return;
+    }
+
+    let (pane_id, sequence) = match event {
+        ServerEvent::ScreenUpdate {
+            pane_id, sequence, ..
+        } => (*pane_id, *sequence),
+        ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence,
+            ..
+        } => (*pane_id, *through_sequence),
+        _ => return,
+    };
+    delivered_terminal_sequences
+        .entry(pane_id)
+        .and_modify(|delivered| *delivered = (*delivered).max(sequence))
+        .or_insert(sequence);
+}
+
+/// Returns whether a queued terminal event is wholly covered by a replay or
+/// newer live frame already written to this connection.
+fn is_redundant_terminal_event(
+    event: &ServerEvent,
+    delivered_terminal_sequences: &HashMap<ilium_core::NodeId, u64>,
+) -> bool {
+    let (pane_id, sequence) = match event {
+        ServerEvent::ScreenUpdate {
+            pane_id, sequence, ..
+        } => (*pane_id, *sequence),
+        ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence,
+            ..
+        } => (*pane_id, *through_sequence),
+        _ => return false,
+    };
+    delivered_terminal_sequences
+        .get(&pane_id)
+        .is_some_and(|delivered| sequence <= *delivered)
+}
+
+/// Returns whether a live frame starts anywhere other than the next exact
+/// pane-local journal sequence already delivered to this connection.
+///
+/// This catches both gaps and partial overlap after lag recovery. A wholly
+/// covered frame is handled separately by [`is_redundant_terminal_event`].
+fn screen_update_requires_recovery(
+    event: &ServerEvent,
+    delivered_terminal_sequences: &HashMap<ilium_core::NodeId, u64>,
+) -> bool {
+    let ServerEvent::ScreenUpdate {
+        pane_id,
+        first_sequence,
+        ..
+    } = event
+    else {
+        return false;
+    };
+    let Some(delivered_sequence) = delivered_terminal_sequences.get(pane_id) else {
+        return false;
+    };
+    *first_sequence != delivered_sequence.saturating_add(1)
 }
 
 /// Flushes every broadcast event already sitting in `broadcast_rx`'s buffer
@@ -259,6 +437,8 @@ async fn drain_pending_broadcasts<W>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ilium_core::{NodeId, Tree};
     use tokio::io::duplex;
     use tokio::sync::{broadcast, mpsc, watch};
@@ -281,10 +461,12 @@ mod tests {
             broadcast_rx,
             direct_rx,
             attach_phase_rx,
+            None,
         ));
 
         let live_event = ServerEvent::ScreenUpdate {
             pane_id: NodeId(2),
+            first_sequence: 2,
             sequence: 2,
             bytes: b"live-after-replay".to_vec(),
         };
@@ -354,6 +536,7 @@ mod tests {
             broadcast_rx,
             direct_rx,
             attach_phase_rx,
+            None,
         ));
 
         let tree_event = ServerEvent::TreeSnapshot(Tree::new());
@@ -369,5 +552,142 @@ mod tests {
         assert_eq!(received, tree_event);
 
         writer.abort();
+    }
+
+    #[tokio::test]
+    async fn broadcast_lag_rebuilds_state_without_retriggering_startup() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "lag-repair".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("lag-repair.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let (server_stream, mut client_stream) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(1);
+        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Ready);
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            attach_phase_rx,
+            Some(Arc::clone(&state)),
+        ));
+
+        for sequence in 1..=3 {
+            broadcast_tx
+                .send(ServerEvent::ScreenUpdate {
+                    pane_id: NodeId(9),
+                    first_sequence: sequence,
+                    sequence,
+                    bytes: vec![sequence as u8],
+                })
+                .expect("writer is subscribed before broadcasts begin");
+        }
+
+        let repaired = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("lag repair did not write a state snapshot")
+        .expect("read repaired state event");
+        assert!(matches!(repaired, ServerEvent::TreeSnapshot(_)));
+        assert!(
+            !handlers::initial_state_events(&state, false)
+                .await
+                .contains(&ServerEvent::InitialStateSyncComplete),
+            "a lag repair must not create another startup trigger boundary"
+        );
+
+        drop(direct_tx);
+        drop(attach_phase_tx);
+        drop(broadcast_tx);
+        sound_task.abort();
+        timeout(Duration::from_secs(1), writer)
+            .await
+            .expect("writer did not stop")
+            .expect("writer task panicked");
+    }
+
+    #[test]
+    fn delivered_replay_suppresses_only_covered_terminal_events() {
+        let pane_id = NodeId(9);
+        let mut delivered = HashMap::new();
+        let replay = ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence: 7,
+            bytes: b"replay".to_vec(),
+            is_complete: true,
+        };
+        record_delivered_terminal_sequence(&mut delivered, &replay);
+
+        assert!(is_redundant_terminal_event(
+            &ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 7,
+                sequence: 7,
+                bytes: b"duplicate".to_vec(),
+            },
+            &delivered,
+        ));
+        assert!(!is_redundant_terminal_event(
+            &ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 8,
+                sequence: 8,
+                bytes: b"new".to_vec(),
+            },
+            &delivered,
+        ));
+        assert!(!is_redundant_terminal_event(
+            &ServerEvent::TreeSnapshot(Tree::new()),
+            &delivered,
+        ));
+
+        record_delivered_terminal_sequence(&mut delivered, &ServerEvent::TreeSnapshot(Tree::new()));
+        assert!(delivered.is_empty());
+    }
+
+    #[test]
+    fn partial_overlap_and_gaps_require_journal_recovery() {
+        let pane_id = NodeId(9);
+        let delivered = HashMap::from([(pane_id, 7)]);
+
+        assert!(screen_update_requires_recovery(
+            &ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 6,
+                sequence: 8,
+                bytes: b"overlap-and-new-suffix".to_vec(),
+            },
+            &delivered,
+        ));
+        assert!(screen_update_requires_recovery(
+            &ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 9,
+                sequence: 9,
+                bytes: b"gap".to_vec(),
+            },
+            &delivered,
+        ));
+        assert!(!screen_update_requires_recovery(
+            &ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 8,
+                sequence: 9,
+                bytes: b"contiguous-merged-frame".to_vec(),
+            },
+            &delivered,
+        ));
     }
 }

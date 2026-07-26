@@ -58,12 +58,20 @@ pub struct EditorSourceLine {
 /// Actions exposed by the source-line context menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorLineContextAction {
+    CopyLineToClipboard,
+    OpenFileInEditor,
+    CopyChapterToClipboard,
+    CopyEntireFileToClipboard,
     CreateAgentFromLine,
 }
 
 impl EditorLineContextAction {
     pub const fn label(self) -> &'static str {
         match self {
+            Self::CopyLineToClipboard => "Copy line to clipboard",
+            Self::OpenFileInEditor => "Open in editor",
+            Self::CopyChapterToClipboard => "Copy chapter to clipboard",
+            Self::CopyEntireFileToClipboard => "Copy entire file to clipboard",
             Self::CreateAgentFromLine => "Create agent from line\u{2026}",
         }
     }

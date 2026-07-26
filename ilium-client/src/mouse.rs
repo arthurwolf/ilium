@@ -7,12 +7,14 @@
 //! request (see `compute_drop_target`) the same way any other structural
 //! tree edit does.
 
-use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ilium_core::{AgentProvider, NodeId, NodeKind, Tree, ROOT_ID};
 use ratatui::layout::{Position, Rect};
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
-use crate::app::{App, ContextMenu, CreateGroupState, Mode};
+use crate::app::{App, ContextMenu, CreateGroupState, Mode, RightPanelTarget};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
@@ -63,6 +65,19 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
 
+    // An active scrollbar drag retains ownership even when the pointer leaves
+    // the chatroom panel, so releasing over the tree or status row cannot
+    // leave the drag latched or route the same gesture into another surface.
+    if app.is_chatroom_scrollbar_dragging()
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+        )
+    {
+        app.handle_chatroom_mouse(mouse, position);
+        return;
+    }
+
     // The voice control is global and rendered above every full-screen view,
     // so its hit-test must precede modal dispatch as well.
     if app.layout.voice_control_area.contains(position)
@@ -84,12 +99,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_context_menu_mouse(app, menu, mouse);
         return;
     }
-    if matches!(app.mode, Mode::AgentPaneContextMenu(_)) {
-        let Mode::AgentPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+    if matches!(app.mode, Mode::TerminalPaneContextMenu(_)) {
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
         else {
-            unreachable!("just matched Mode::AgentPaneContextMenu above");
+            unreachable!("just matched Mode::TerminalPaneContextMenu above");
         };
-        handle_agent_pane_context_menu_mouse(app, menu, mouse);
+        handle_terminal_pane_context_menu_mouse(app, menu, mouse);
         return;
     }
     if matches!(app.mode, Mode::AgentDebugLog(_)) {
@@ -206,24 +221,14 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
-    // Modal keyboard overlays intentionally ignore pointer input until
-    // they grow their own hit-testing contract.
-    if matches!(
-        app.mode,
-        Mode::Help
-            | Mode::Rename(_)
-            | Mode::CommandPrompt(_)
-            | Mode::InferenceSettingPrompt(_, _)
-            | Mode::VoiceSettingPrompt(_, _)
-            | Mode::VoicePromptEditor(_)
-            | Mode::SaveAs(..)
-            | Mode::AgentDebugSavePath(..)
-            | Mode::ConfirmClose(_)
-            | Mode::BoardCardPrompt(_, _)
-            | Mode::BoardColumnPrompt(_, _)
-            | Mode::BoardRenamePrompt(_, _, _)
-            | Mode::BoardDeleteConfirm(_, _)
-    ) {
+    if is_shared_action_dialog(&app.mode) {
+        handle_shared_action_dialog_mouse(app, mouse);
+        return;
+    }
+
+    // Help is a read-only full-screen reference rather than an action
+    // dialog, so pointer events stay inert until it has scroll controls.
+    if matches!(app.mode, Mode::Help) {
         return;
     }
 
@@ -235,35 +240,158 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     app.set_tree_toolbar_hover(false, None);
 
     if app.layout.pane_area.contains(position) {
-        app.handle_pane_mouse(mouse, position);
+        if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {
+            app.handle_chatroom_mouse(mouse, position);
+        } else {
+            app.handle_pane_mouse(mouse, position);
+        }
         if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
-            app.set_drag_source(None);
+            app.clear_tree_drag();
         }
         return;
     }
 
     // A drag released outside the tree is a cancelled tree move.
     if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
-        app.set_drag_source(None);
+        app.clear_tree_drag();
     }
 }
 
-fn handle_agent_pane_context_menu_mouse(
-    app: &mut App,
-    menu: crate::app::AgentPaneContextMenu,
-    mouse: MouseEvent,
-) {
+/// Returns whether the active mode uses `crate::modal`'s shared action row.
+fn is_shared_action_dialog(mode: &Mode) -> bool {
+    matches!(
+        mode,
+        Mode::Rename(_)
+            | Mode::CommandPrompt(_)
+            | Mode::InferenceSettingPrompt(_, _)
+            | Mode::VoiceSettingPrompt(_, _)
+            | Mode::VoicePromptEditor(_)
+            | Mode::SaveAs(..)
+            | Mode::AgentDebugSavePath(..)
+            | Mode::ConfirmClose(_)
+            | Mode::BoardCardPrompt(_, _)
+            | Mode::BoardColumnPrompt(_, _)
+            | Mode::BoardRenamePrompt(_, _, _)
+            | Mode::BoardDeleteConfirm(_, _)
+            | Mode::ConfirmSessionRecovery { .. }
+    )
+}
+
+/// Handles all blocking dialogs whose renderer uses the shared Cancel/primary
+/// action row. Button clicks are translated into their existing keyboard
+/// contract, keeping validation and nested-modal restoration in one place.
+fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::AgentPaneContextMenu(menu);
         return;
     }
     let position = Position::new(mouse.column, mouse.row);
-    let action_row = menu.area.y.saturating_add(1);
-    if menu.area.contains(position) && position.y == action_row {
-        app.open_agent_debug_log(menu.pane_id);
-    } else {
-        app.mode = Mode::Normal;
+
+    if matches!(
+        app.mode,
+        Mode::ConfirmClose(_)
+            | Mode::BoardDeleteConfirm(_, _)
+            | Mode::ConfirmSessionRecovery { .. }
+    ) {
+        let layout = crate::modal::confirm_dialog_layout(app.layout.screen_area);
+        if let Some(action) = layout.actions.action_at(position) {
+            dispatch_confirmation_action(app, action);
+        }
+        return;
     }
+
+    if matches!(app.mode, Mode::VoicePromptEditor(_)) {
+        let layout = crate::modal::multiline_prompt_dialog_layout(app.layout.screen_area);
+        if let Some(action) = layout.actions.action_at(position) {
+            dispatch_multiline_prompt_action(app, action);
+            return;
+        }
+        if layout.editor_area.contains(position) {
+            let Mode::VoicePromptEditor(state) = &mut app.mode else {
+                unreachable!("the multiline dialog match above preserves its mode");
+            };
+            let row = position.y.saturating_sub(layout.editor_area.y);
+            let column = position.x.saturating_sub(layout.editor_area.x);
+            state
+                .textarea
+                .move_cursor(ratatui_textarea::CursorMove::Jump(row, column));
+        }
+        return;
+    }
+
+    let layout = crate::modal::text_prompt_dialog_layout(app.layout.screen_area);
+    if let Some(action) = layout.actions.action_at(position) {
+        dispatch_form_action(app, action);
+        return;
+    }
+    if !layout.input_box.contains(position) {
+        return;
+    }
+    let state = match &mut app.mode {
+        Mode::Rename(state)
+        | Mode::CommandPrompt(state)
+        | Mode::InferenceSettingPrompt(_, state)
+        | Mode::VoiceSettingPrompt(_, state)
+        | Mode::SaveAs(_, state)
+        | Mode::AgentDebugSavePath(_, state)
+        | Mode::BoardCardPrompt(_, state)
+        | Mode::BoardColumnPrompt(_, state)
+        | Mode::BoardRenamePrompt(_, _, state) => state,
+        _ => return,
+    };
+    place_prompt_cursor(state, layout.input_box, position);
+}
+
+/// Reuses the Y/N keyboard path so button clicks cannot drift from key
+/// behavior as confirmation modes evolve.
+fn dispatch_confirmation_action(app: &mut App, action: crate::modal::DialogAction) {
+    let code = match action {
+        crate::modal::DialogAction::Cancel => KeyCode::Char('n'),
+        crate::modal::DialogAction::Confirm => KeyCode::Char('y'),
+    };
+    crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+/// Reuses the Enter/Esc form contract, including validation and any parent
+/// modal that must be restored after the child closes.
+fn dispatch_form_action(app: &mut App, action: crate::modal::DialogAction) {
+    let code = match action {
+        crate::modal::DialogAction::Cancel => KeyCode::Esc,
+        crate::modal::DialogAction::Confirm => KeyCode::Enter,
+    };
+    crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+/// The multiline prompt deliberately applies with Ctrl+S because Enter is
+/// meaningful text input inside its editor.
+fn dispatch_multiline_prompt_action(app: &mut App, action: crate::modal::DialogAction) {
+    let (code, modifiers) = match action {
+        crate::modal::DialogAction::Cancel => (KeyCode::Esc, KeyModifiers::NONE),
+        crate::modal::DialogAction::Confirm => (KeyCode::Char('s'), KeyModifiers::CONTROL),
+    };
+    crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, modifiers)));
+}
+
+fn handle_terminal_pane_context_menu_mouse(
+    app: &mut App,
+    mut menu: crate::terminal_context_menu::TerminalPaneContextMenu,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::TerminalPaneContextMenu(menu);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    if !menu.area.contains(position) || position.y < menu.area.y.saturating_add(1) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    let action_index = usize::from(position.y - menu.area.y.saturating_add(1));
+    let Some(action) = menu.actions.get(action_index).copied() else {
+        app.mode = Mode::TerminalPaneContextMenu(menu);
+        return;
+    };
+    menu.selected_index = action_index;
+    app.execute_terminal_context_action(action, menu);
 }
 
 fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
@@ -410,9 +538,14 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     }
 
     if let Some(hit) = app.hovered_tree_node {
-        if let Some(action) =
-            tree_ui::row_action_at(&app.tree, hit.id, app.layout.tree_area, hit.row, position)
-        {
+        if let Some(action) = tree_ui::row_action_at(
+            &app.tree,
+            hit.id,
+            app.layout.tree_area,
+            hit.row,
+            position,
+            app.ui_settings.show_tree_row_management_controls,
+        ) {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                 handle_tree_row_action(app, hit.id, action);
             }
@@ -431,15 +564,21 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
             // No node under the click means empty space below the last
             // entry -- fall back to ROOT_ID so "New group" lands at the
             // top level instead of doing nothing.
-            let target = app
+            let selected_target = app
                 .tree_node_at(position)
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
+            let target =
+                tree_ui::chatroom_project(&app.tree, selected_target).unwrap_or(selected_target);
             app.select_node(target);
             app.open_context_menu(target, mouse.column, mouse.row);
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(hit) = app.tree_node_at(position) {
+                if let Some(project_id) = tree_ui::chatroom_project(&app.tree, hit.id) {
+                    app.show_chatroom(project_id);
+                    return;
+                }
                 if let Some(entry) = tree_ui::folder_entry(&app.tree, hit.id) {
                     app.select_tree_path(entry.identifier_path);
                     if entry.is_directory {
@@ -453,7 +592,7 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                     return;
                 }
                 app.select_node(hit.id);
-                app.set_drag_source(Some(hit.id));
+                app.begin_tree_drag(hit.id);
                 if app
                     .tree
                     .get(hit.id)
@@ -471,6 +610,9 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 }
             }
         }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            app.mark_tree_drag_in_progress();
+        }
         MouseEventKind::Up(MouseButton::Left) => {
             // Arbitrary drag-and-drop: drop onto another tree row (its
             // `NodeId`) or `None` for the empty space below the last row
@@ -478,7 +620,11 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
             // `compute_drop_target`'s doc comment for the exact target
             // rules and the cases that are rejected client-side rather
             // than round-tripped to the server.
-            if let Some(dragged_id) = app.drag_source() {
+            if app.is_tree_drag_in_progress() {
+                let Some(dragged_id) = app.drag_source() else {
+                    app.clear_tree_drag();
+                    return;
+                };
                 let drop_target = app.tree_node_at(position).map(|hit| hit.id);
                 if let Some((new_parent, index)) =
                     compute_drop_target(&app.tree, dragged_id, drop_target)
@@ -486,7 +632,7 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                     app.request_reparent(dragged_id, new_parent, index);
                 }
             }
-            app.set_drag_source(None);
+            app.clear_tree_drag();
         }
         _ => {}
     }
@@ -895,24 +1041,49 @@ fn handle_create_group_mouse(app: &mut App, state: CreateGroupState, mouse: Mous
     }
 }
 
-/// The board dialog keeps text entry keyboard-first, while its explicit
-/// Browse button opens the same mouse-capable picker used elsewhere.
+/// Gives board creation the same direct field selection and explicit
+/// Cancel/Create targets as the shared prompt dialogs.
 fn handle_create_board_mouse(
     app: &mut App,
-    state: crate::app::CreateBoardState,
+    mut state: crate::app::CreateBoardState,
     mouse: MouseEvent,
 ) {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::CreateBoard(state);
         return;
     }
-    let popup = crate::modal::centered_fixed_rect(68, 11, app.layout.screen_area);
-    let browse_row = popup.y.saturating_add(4);
-    if mouse.row == browse_row && mouse.column >= popup.x.saturating_add(1) {
+    let position = Position::new(mouse.column, mouse.row);
+    let layout = crate::modal::create_board_dialog_layout(app.layout.screen_area);
+    if let Some(action) = layout.actions.action_at(position) {
+        app.mode = Mode::CreateBoard(state);
+        dispatch_form_action(app, action);
+        return;
+    }
+    if layout.name_box.contains(position) {
+        state.editing_path = false;
+        place_prompt_cursor(&mut state.name, layout.name_box, position);
+        app.mode = Mode::CreateBoard(state);
+        return;
+    }
+    if layout.storage_row.contains(position) {
+        state.storage_kind = match state.storage_kind {
+            crate::app::BoardStorageKind::Folder => crate::app::BoardStorageKind::MarkdownFile,
+            crate::app::BoardStorageKind::MarkdownFile => crate::app::BoardStorageKind::Folder,
+        };
+        app.mode = Mode::CreateBoard(state);
+        return;
+    }
+    if layout.path_box.contains(position) {
+        state.editing_path = true;
+        place_prompt_cursor(&mut state.path, layout.path_box, position);
+        app.mode = Mode::CreateBoard(state);
+        return;
+    }
+    if layout.browse_button.contains(position) {
         app.open_board_path_picker(state);
         return;
     }
-    if popup.contains(Position::new(mouse.column, mouse.row)) {
+    if layout.popup.contains(position) {
         app.mode = Mode::CreateBoard(state);
     } else {
         app.mode = Mode::Normal;
@@ -942,7 +1113,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 position,
                 &available,
             ) {
-                app.settings_assign_key(action, key);
+                app.settings_assign_key(action, crate::keymap::BindingKey::Character(key));
                 state.keyboard_picker = None;
             } else {
                 state.keyboard_picker = Some(action);
@@ -1225,7 +1396,10 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                 row.saturating_sub(crate::settings_ui::KEYBOARD_TABLE_FIRST_ROW),
                             );
                             if let Some(binding) = app.keybindings.get(index) {
-                                app.settings_assign_key(binding.action, key);
+                                app.settings_assign_key(
+                                    binding.action,
+                                    crate::keymap::BindingKey::Character(key),
+                                );
                             }
                         }
                         crate::settings_ui::KeyboardTableAction::OpenPicker(action) => {
@@ -1787,6 +1961,94 @@ mod markdown_board_context_mouse_tests {
 }
 
 #[cfg(test)]
+mod chatroom_scroll_mouse_tests {
+    use super::*;
+    use crate::app::{ChatroomViewState, RightPanelTarget};
+    use crate::chatroom::ChatMessage;
+    use crossterm::event::KeyModifiers;
+    use std::path::PathBuf;
+
+    fn mouse(kind: MouseEventKind, position: Position) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn wheel_and_scrollbar_drag_route_through_the_virtual_chatroom_view() {
+        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/chatroom-scroll-mouse"))
+            .unwrap();
+        app.chatrooms.insert(
+            project_id,
+            ChatroomViewState {
+                messages: (0..30)
+                    .map(|index| ChatMessage {
+                        timestamp: format!("2026-07-26 14:{index:02}:00 +02:00"),
+                        author: "agent:codex".to_string(),
+                        content: format!("mouse history message {index:02}"),
+                    })
+                    .collect(),
+                ..ChatroomViewState::default()
+            },
+        );
+        app.right_panel_target = RightPanelTarget::Chatroom { project_id };
+        app.set_screen_area(Rect::new(0, 0, 100, 18));
+        let room_layout = crate::chatroom_ui::layout(app.layout.pane_area);
+        let content_position = Position::new(
+            room_layout.message_content_area.x,
+            room_layout.message_content_area.y,
+        );
+
+        handle_mouse_event(&mut app, mouse(MouseEventKind::ScrollUp, content_position));
+        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 3);
+
+        handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::ScrollDown, content_position),
+        );
+        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
+
+        let top_of_scrollbar =
+            Position::new(room_layout.scrollbar_area.x, room_layout.scrollbar_area.y);
+        handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), top_of_scrollbar),
+        );
+        let oldest_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
+        assert_eq!(oldest_metrics.top, 0);
+        assert!(app.is_chatroom_scrollbar_dragging());
+
+        let bottom_row = room_layout.scrollbar_area.bottom().saturating_sub(1);
+        let outside_pane_horizontally = Position::new(app.layout.tree_area.x, bottom_row);
+        handle_mouse_event(
+            &mut app,
+            mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                outside_pane_horizontally,
+            ),
+        );
+        let newest_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
+        assert_eq!(newest_metrics.top, newest_metrics.maximum_top);
+        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
+
+        handle_mouse_event(
+            &mut app,
+            mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                outside_pane_horizontally,
+            ),
+        );
+        assert!(!app.is_chatroom_scrollbar_dragging());
+    }
+}
+
+#[cfg(test)]
 mod row_action_click_tests {
     use super::*;
     use crate::app::App;
@@ -1968,5 +2230,182 @@ mod row_action_click_tests {
                 ..
             }] if command_line == "agy"
         ));
+    }
+}
+
+#[cfg(test)]
+mod shared_dialog_mouse_tests {
+    use super::*;
+    use crate::app::{BoardStorageKind, CreateBoardState, SettingsState};
+    use crate::text_prompt::TextPromptState;
+    use crossterm::event::KeyModifiers;
+    use ilium_ipc::ClientRequest;
+    use std::path::PathBuf;
+
+    /// Clicks the center of one exact shared dialog target.
+    fn click(app: &mut App, area: Rect) {
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x.saturating_add(area.width.saturating_sub(1) / 2),
+                row: area.y.saturating_add(area.height.saturating_sub(1) / 2),
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+    }
+
+    /// Builds a predictable viewport so centered modal geometry is stable.
+    fn app() -> App {
+        let mut app = App::new("dialog-mouse-test".to_owned(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app
+    }
+
+    #[test]
+    fn close_confirmation_buttons_preserve_cancel_and_confirm_keyboard_behavior() {
+        let mut app = app();
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree
+            .add_pane(group_id, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let actions = crate::modal::confirm_dialog_layout(app.layout.screen_area).actions;
+
+        app.mode = Mode::ConfirmClose(group_id);
+        click(&mut app, actions.cancel_button);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.take_outbound_requests().is_empty());
+
+        app.mode = Mode::ConfirmClose(group_id);
+        click(&mut app, actions.confirm_button);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ClosePane { pane_id: group_id }]
+        );
+    }
+
+    #[test]
+    fn session_recovery_buttons_do_not_leak_clicks_to_the_obscured_tui() {
+        let mut app = app();
+        let actions = crate::modal::confirm_dialog_layout(app.layout.screen_area).actions;
+
+        app.mode = Mode::ConfirmSessionRecovery { pane_count: 3 };
+        click(&mut app, actions.cancel_button);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ResolveSessionRecovery { restore: false }]
+        );
+
+        app.mode = Mode::ConfirmSessionRecovery { pane_count: 3 };
+        click(&mut app, actions.confirm_button);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ResolveSessionRecovery { restore: true }]
+        );
+    }
+
+    #[test]
+    fn text_prompt_accepts_cursor_placement_and_named_action_button_clicks() {
+        let mut app = app();
+        let group_id = app.tree.add_group(ROOT_ID, "before").unwrap();
+        app.tree_state.select(vec![group_id]);
+        let layout = crate::modal::text_prompt_dialog_layout(app.layout.screen_area);
+
+        app.mode = Mode::Rename(TextPromptState::new("renamed"));
+        click(&mut app, layout.actions.cancel_button);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.take_outbound_requests().is_empty());
+
+        app.mode = Mode::Rename(TextPromptState::new("renamed"));
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: layout.input_box.x.saturating_add(3),
+                row: layout.input_box.y.saturating_add(1),
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            matches!(&app.mode, Mode::Rename(state) if state.cursor == 2),
+            "input clicks should place the text cursor relative to the field"
+        );
+
+        click(&mut app, layout.actions.confirm_button);
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::RenameNode {
+                node_id,
+                title,
+                short_title: None,
+                inferred_icon: None,
+            }] if *node_id == group_id && title == "renamed"
+        ));
+    }
+
+    #[test]
+    fn multiline_prompt_buttons_restore_the_exact_parent_and_apply_text() {
+        let mut app = app();
+        app.mode = Mode::Settings(SettingsState::default());
+        app.push_modal(Mode::VoicePromptEditor(Box::new(
+            crate::voice_settings::VoicePromptEditorState::new("Speak concisely."),
+        )));
+        let actions = crate::modal::multiline_prompt_dialog_layout(app.layout.screen_area).actions;
+
+        click(&mut app, actions.confirm_button);
+
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert!(app.modal_stack.is_empty());
+        assert_eq!(app.voice_settings.custom_prompt, "Speak concisely.");
+    }
+
+    #[test]
+    fn board_form_fields_and_create_button_are_fully_mouse_operable() {
+        let project_path = std::env::temp_dir().join(format!(
+            "ilium-board-dialog-mouse-{}-{}",
+            std::process::id(),
+            crate::scheduled_input::unix_millis_now()
+        ));
+        std::fs::create_dir_all(&project_path).unwrap();
+        let mut app = App::new("dialog-mouse-test".to_owned(), project_path.clone());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let board_path = project_path.join("planning.md");
+        app.mode = Mode::CreateBoard(CreateBoardState {
+            parent_group: group_id,
+            name: TextPromptState::new("Planning"),
+            path: TextPromptState::new(board_path.display().to_string()),
+            storage_kind: BoardStorageKind::Folder,
+            editing_path: false,
+        });
+        let layout = crate::modal::create_board_dialog_layout(app.layout.screen_area);
+
+        click(&mut app, layout.storage_row);
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateBoard(state)
+                if state.storage_kind == BoardStorageKind::MarkdownFile
+        ));
+
+        click(&mut app, layout.path_box);
+        assert!(matches!(
+            &app.mode,
+            Mode::CreateBoard(state) if state.editing_path
+        ));
+
+        click(&mut app, layout.actions.confirm_button);
+        assert!(board_path.is_file());
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::NewBoard {
+                parent_group,
+                name,
+                storage: ilium_core::BoardStorage::MarkdownFile { path },
+            }] if *parent_group == group_id && name == "Planning" && path == &board_path
+        ));
+        std::fs::remove_dir_all(project_path).unwrap();
     }
 }

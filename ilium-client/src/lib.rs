@@ -36,11 +36,15 @@ pub mod app;
 pub mod background_priority;
 pub mod board;
 pub mod board_ui;
+pub mod chatroom;
+pub mod chatroom_ui;
+pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
 pub mod control;
 pub mod editor_chrome;
 pub mod editor_highlight;
+pub mod editor_line_path;
 pub mod editor_pane;
 pub mod editor_toolbar;
 pub mod error;
@@ -60,6 +64,7 @@ pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
 pub mod outbound_requests;
+pub mod pane_title;
 pub mod paths;
 pub mod project_config;
 pub mod project_naming;
@@ -73,6 +78,7 @@ pub mod session_naming;
 pub mod settings_ui;
 pub mod split_layout;
 pub mod syntax;
+pub mod terminal_context_menu;
 pub mod terminal_guard;
 pub mod terminal_links;
 pub mod terminal_naming;
@@ -268,6 +274,11 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         log_path = %options.log_path.display(),
         "ilium-client starting"
     );
+    match crate::chatroom::ensure_integrations(&options.session_cwd) {
+        Ok(true) => tracing::info!("repaired chatroom integrations for session project"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "could not repair chatroom integrations at startup"),
+    }
     let sound_discovery = ilium_sound::discover_system_sounds();
     let voice_input_devices = ilium_voice::available_input_devices().unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to enumerate voice input devices");
@@ -395,6 +406,9 @@ async fn run_inner(
     } else {
         None
     };
+    let mut delivered_voice_target_context = voice_service
+        .as_ref()
+        .map(|_| crate::control::VoiceTargetContext::capture(&app));
     // Bus names of the MPRIS players `pause_playing_players` paused, so a
     // later stop resumes only those -- see `reconcile_voice_runtime` and
     // `VoiceSettings::pause_media_while_active`. Voice mode can already be
@@ -583,6 +597,13 @@ async fn run_inner(
                 &mut paused_media_players,
             )
             .await;
+            reconcile_voice_target_context(
+                &mut app,
+                &control_plane,
+                voice_service.as_ref(),
+                &mut delivered_voice_target_context,
+            )
+            .await;
             deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
         }
 
@@ -608,6 +629,13 @@ async fn run_inner(
                 &control_plane,
                 &mut voice_service,
                 &mut paused_media_players,
+            )
+            .await;
+            reconcile_voice_target_context(
+                &mut app,
+                &control_plane,
+                voice_service.as_ref(),
+                &mut delivered_voice_target_context,
             )
             .await;
             deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
@@ -675,6 +703,7 @@ fn start_voice_service(
     app: &mut App,
     control_plane: &crate::control::ControlPlane,
 ) -> Option<ilium_voice::VoiceService> {
+    let target_context = crate::control::VoiceTargetContext::capture(app);
     let settings = &app.voice_settings;
     let api_key = if settings.api_key.trim().is_empty() {
         std::env::var("OPENAI_API_KEY").unwrap_or_default()
@@ -691,7 +720,7 @@ fn start_voice_service(
         input_device_name: settings.input_device_name.clone(),
         output_device_name: settings.output_device_name.clone(),
         output_volume_percent: settings.output_volume_percent,
-        instructions: crate::control::system_instructions(&settings.custom_prompt),
+        instructions: crate::control::system_instructions(&settings.custom_prompt, target_context),
     };
     match ilium_voice::VoiceService::start(config, control_plane.tool_definitions()) {
         Ok(service) => {
@@ -705,6 +734,64 @@ fn start_voice_service(
             None
         }
     }
+}
+
+/// Builds one Realtime context update only when agent detection changed the
+/// semantic destination of an otherwise unqualified utterance. The tool still
+/// resolves the exact active pane at execution time, so focus changes between
+/// two detected agents do not require a provider update.
+fn pending_voice_target_context_update(
+    app: &App,
+    control_plane: &crate::control::ControlPlane,
+    delivered_context: Option<crate::control::VoiceTargetContext>,
+) -> Option<(
+    crate::control::VoiceTargetContext,
+    ilium_voice::VoiceCommand,
+)> {
+    let current_context = crate::control::VoiceTargetContext::capture(app);
+    if delivered_context == Some(current_context) {
+        return None;
+    }
+
+    Some((
+        current_context,
+        ilium_voice::VoiceCommand::UpdateContext {
+            instructions: crate::control::system_instructions(
+                &app.voice_settings.custom_prompt,
+                current_context,
+            ),
+            tools: control_plane.tool_definitions(),
+        },
+    ))
+}
+
+/// Keeps the long-lived Realtime session aligned with client focus and the
+/// server's latest agent classification without restarting audio or losing
+/// conversation state.
+async fn reconcile_voice_target_context(
+    app: &mut App,
+    control_plane: &crate::control::ControlPlane,
+    voice_service: Option<&ilium_voice::VoiceService>,
+    delivered_context: &mut Option<crate::control::VoiceTargetContext>,
+) {
+    let Some(service) = voice_service else {
+        *delivered_context = None;
+        return;
+    };
+    let Some((current_context, command)) =
+        pending_voice_target_context_update(app, control_plane, *delivered_context)
+    else {
+        return;
+    };
+
+    if service.command_sender().send(command).await.is_err() {
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "could not update the active-agent context for the voice model".to_owned(),
+        ));
+        return;
+    }
+
+    *delivered_context = Some(current_context);
 }
 
 async fn next_voice_event(
@@ -894,7 +981,7 @@ fn apply_server_events(
 ) -> bool {
     use ilium_ipc::ServerEvent;
 
-    let mut pending_screen_update: Option<(ilium_core::NodeId, u64, Vec<u8>)> = None;
+    let mut pending_screen_update: Option<(ilium_core::NodeId, u64, u64, Vec<u8>)> = None;
     let mut next = Some(first);
     let mut observed_non_screen_event = false;
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
@@ -908,21 +995,30 @@ fn apply_server_events(
         match event {
             ServerEvent::ScreenUpdate {
                 pane_id: incoming_pane_id,
+                first_sequence: incoming_first_sequence,
                 sequence: incoming_sequence,
                 bytes: mut incoming_bytes,
             } => match &mut pending_screen_update {
-                Some((pending_pane_id, pending_sequence, pending_bytes))
-                    if *pending_pane_id == incoming_pane_id
-                        && incoming_sequence == pending_sequence.saturating_add(1)
-                        && screen_updates_fit(pending_bytes.len(), incoming_bytes.len()) =>
+                Some((
+                    pending_pane_id,
+                    _pending_first_sequence,
+                    pending_sequence,
+                    pending_bytes,
+                )) if *pending_pane_id == incoming_pane_id
+                    && incoming_first_sequence == pending_sequence.saturating_add(1)
+                    && screen_updates_fit(pending_bytes.len(), incoming_bytes.len()) =>
                 {
                     pending_bytes.append(&mut incoming_bytes);
                     *pending_sequence = incoming_sequence;
                 }
                 _ => {
                     flush_pending_screen_update(app, &mut pending_screen_update);
-                    pending_screen_update =
-                        Some((incoming_pane_id, incoming_sequence, incoming_bytes));
+                    pending_screen_update = Some((
+                        incoming_pane_id,
+                        incoming_first_sequence,
+                        incoming_sequence,
+                        incoming_bytes,
+                    ));
                 }
             },
             ServerEvent::DebugLoggingChanged { enabled } => {
@@ -979,11 +1075,29 @@ fn dispatch_ready_input_events(
     home_dir: Option<&std::path::Path>,
     first: Event,
 ) {
+    for_each_ready_input_event(input_rx, first, |event| {
+        dispatch_input_event(app, naming_workers, icon_search_workers, home_dir, event);
+    });
+}
+
+/// Visits a bounded batch without ever receiving one more event than the
+/// caller can dispatch. The event after the batch boundary must remain in
+/// `input_rx`; pulling it into a local look-ahead slot would drop that key
+/// when this function returns.
+fn for_each_ready_input_event(
+    input_rx: &mut mpsc::Receiver<Event>,
+    first: Event,
+    mut dispatch: impl FnMut(Event),
+) {
     let mut next = Some(first);
 
-    for _ in 0..MAX_INPUT_EVENTS_PER_BATCH {
-        let Some(event) = next.take() else {
-            break;
+    for event_index in 0..MAX_INPUT_EVENTS_PER_BATCH {
+        let event = match next.take() {
+            Some(event) => event,
+            None => match input_rx.try_recv() {
+                Ok(event) => event,
+                Err(_) => break,
+            },
         };
         let event = if matches!(
             event,
@@ -991,7 +1105,8 @@ fn dispatch_ready_input_events(
                 kind: crossterm::event::MouseEventKind::Moved,
                 ..
             })
-        ) {
+        ) && event_index + 1 < MAX_INPUT_EVENTS_PER_BATCH
+        {
             let mut newest_motion = event;
             loop {
                 match input_rx.try_recv() {
@@ -1018,11 +1133,7 @@ fn dispatch_ready_input_events(
             event
         };
 
-        dispatch_input_event(app, naming_workers, icon_search_workers, home_dir, event);
-
-        if next.is_none() {
-            next = input_rx.try_recv().ok();
-        }
+        dispatch(event);
     }
 }
 
@@ -1030,13 +1141,14 @@ fn dispatch_ready_input_events(
 /// see `apply_server_events`.
 fn flush_pending_screen_update(
     app: &mut App,
-    pending: &mut Option<(ilium_core::NodeId, u64, Vec<u8>)>,
+    pending: &mut Option<(ilium_core::NodeId, u64, u64, Vec<u8>)>,
 ) {
-    if let Some((pane_id, sequence, bytes)) = pending.take() {
+    if let Some((pane_id, first_sequence, sequence, bytes)) = pending.take() {
         crate::render_cache::apply(
             app,
             ilium_ipc::ServerEvent::ScreenUpdate {
                 pane_id,
+                first_sequence,
                 sequence,
                 bytes,
             },
@@ -1182,12 +1294,45 @@ fn spawn_input_forwarder() -> mpsc::Receiver<Event> {
 #[cfg(test)]
 mod responsiveness_tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
     fn merged_screen_updates_respect_the_byte_ceiling() {
         assert!(screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH - 1, 1));
         assert!(!screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH, 1));
         assert!(!screen_updates_fit(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn input_after_the_batch_boundary_remains_queued() {
+        let (input_tx, mut input_rx) = mpsc::channel(MAX_INPUT_EVENTS_PER_BATCH + 1);
+        let first = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        for input_index in 0..MAX_INPUT_EVENTS_PER_BATCH {
+            let character = if input_index + 1 == MAX_INPUT_EVENTS_PER_BATCH {
+                '!'
+            } else {
+                'b'
+            };
+            input_tx
+                .try_send(Event::Key(KeyEvent::new(
+                    KeyCode::Char(character),
+                    KeyModifiers::NONE,
+                )))
+                .expect("test input channel has exact capacity");
+        }
+        let mut dispatched = Vec::new();
+
+        for_each_ready_input_event(&mut input_rx, first, |event| dispatched.push(event));
+
+        assert_eq!(dispatched.len(), MAX_INPUT_EVENTS_PER_BATCH);
+        assert!(matches!(
+            input_rx.try_recv(),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('!'),
+                ..
+            }))
+        ));
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[test]
@@ -1259,6 +1404,60 @@ mod responsiveness_tests {
 
         assert!(voice_tool_outputs_request_shutdown(&outputs));
         assert!(!voice_tool_outputs_request_shutdown(&outputs[..1]));
+    }
+
+    #[test]
+    fn realtime_context_update_is_emitted_once_per_agent_boundary_change() {
+        let mut app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        let group_id = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(pane_id);
+        let control_plane = crate::control::ControlPlane::default();
+
+        assert!(pending_voice_target_context_update(
+            &app,
+            &control_plane,
+            Some(crate::control::VoiceTargetContext::NoDetectedAgent),
+        )
+        .is_none());
+
+        app.tree
+            .set_pane_status(
+                pane_id,
+                ilium_core::PaneStatus::Agent(
+                    ilium_core::AgentClass::Codex,
+                    ilium_core::AgentActivity::Idle,
+                ),
+            )
+            .unwrap();
+        let (context, command) = pending_voice_target_context_update(
+            &app,
+            &control_plane,
+            Some(crate::control::VoiceTargetContext::NoDetectedAgent),
+        )
+        .expect("agent detection should update Realtime context");
+
+        assert_eq!(context, crate::control::VoiceTargetContext::DetectedAgent);
+        match command {
+            ilium_voice::VoiceCommand::UpdateContext {
+                instructions,
+                tools,
+            } => {
+                assert!(instructions.contains("agent-default dictation rule is active"));
+                assert!(instructions.contains("user's complete utterance as `text`"));
+                assert!(tools
+                    .iter()
+                    .any(|definition| definition.name == "ilium_send_to_terminal"));
+            }
+            _ => panic!("agent detection should produce a context update"),
+        }
+        assert!(pending_voice_target_context_update(&app, &control_plane, Some(context)).is_none());
     }
 
     #[tokio::test]

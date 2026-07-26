@@ -220,7 +220,7 @@ fn partition_session_claims(
 /// issue, not a per-pane one; the structure is still one pane at a time so
 /// a future fallible step here stays isolated per pane).
 ///
-/// A `Working -> Done`/`Idle` transition (see
+/// A `Working -> Done` transition (see
 /// `notifications::is_finished_transition`) queues a desktop notification,
 /// but the notification itself is only sent after the `tree`/`panes` locks
 /// below are dropped -- a slow or unavailable notification daemon must
@@ -675,25 +675,17 @@ async fn run_due_panes(
             // Raw classification (`classify_pane`/`ilium_detect::classify_activity`)
             // never produces `Done` -- it has no memory of what a pane was
             // doing a moment ago. `promote_to_done` is what actually turns
-            // "just went idle" into "done" when nobody was watching; see its
+            // "just went idle" into the durable completed-turn state; see its
             // doc comment.
             let raw_status = classified_pane.status.clone();
             let new_status = match classified_pane.status {
                 PaneStatus::Agent(class, raw_activity) => PaneStatus::Agent(
                     class,
-                    promote_to_done(
-                        previous_status.as_ref(),
-                        raw_activity,
-                        runtime.detection_schedule.client_focused,
-                    ),
+                    promote_to_done(previous_status.as_ref(), raw_activity),
                 ),
                 PaneStatus::AgentWithGoal(class, raw_activity) => PaneStatus::AgentWithGoal(
                     class,
-                    promote_to_done(
-                        previous_status.as_ref(),
-                        raw_activity,
-                        runtime.detection_schedule.client_focused,
-                    ),
+                    promote_to_done(previous_status.as_ref(), raw_activity),
                 ),
                 other => other,
             };
@@ -717,6 +709,7 @@ async fn run_due_panes(
                 .identity
                 .as_ref()
                 .map(|identity| identity.pid);
+            runtime.detected_agent_class = detected_agent_class.clone();
             let became_fresh_agent_screen =
                 classified_pane.is_fresh_agent_screen && !runtime.is_showing_fresh_agent_screen;
             runtime.is_showing_fresh_agent_screen = classified_pane.is_fresh_agent_screen;
@@ -963,7 +956,6 @@ async fn run_due_panes(
                         &raw_status,
                         &new_status,
                         classified_pane.activity_evidence,
-                        runtime.detection_schedule.client_focused,
                     ),
                 ),
                 AgentDebugField::plain(
@@ -1252,7 +1244,6 @@ fn explain_activity_decision(
     raw_status: &PaneStatus,
     applied_status: &PaneStatus,
     evidence: Option<ilium_detect::ActivityEvidence>,
-    client_focused: bool,
 ) -> String {
     let Some(applied_activity) = status_activity(applied_status) else {
         return "Activity was not evaluated because no agent process was detected.".to_string();
@@ -1288,12 +1279,7 @@ fn explain_activity_decision(
 
     if raw_activity == AgentActivity::Idle && applied_activity == AgentActivity::Done {
         return format!(
-            "Done — {evidence_explanation}. The pane had previously been active and was not focused, so ilium marked that completed turn as unseen."
-        );
-    }
-    if raw_activity == AgentActivity::Idle && client_focused {
-        return format!(
-            "Idle — {evidence_explanation}. Because this pane is focused, ilium does not show an unseen-completion state."
+            "Done — {evidence_explanation}. The pane had previously been active, so ilium keeps that completed turn marked until new terminal input or renewed activity acknowledges it."
         );
     }
     format!(
@@ -1568,25 +1554,19 @@ fn classify_identity(
 /// only ever returns `Working`/`WaitingBackground`/`WaitingApproval`/`Idle`
 /// -- never `Done`, since it looks at nothing but the current screen text)
 /// into the stateful activity this loop actually records: a pane that just
-/// went idle while nobody was looking at it reads as "finished, unseen"
-/// (`Done`), not silently as plain `Idle`. Mirrors the pre-client/server
-/// `App`'s `next_activity` combinator.
+/// went idle after active work reads as `Done`, not silently as plain
+/// `Idle`. This completion state is shared by sounds and title presentation.
 ///
 /// - Any raw activity other than `Idle` passes through unchanged -- only
 ///   "just went idle" is ever eligible to become `Done`.
-/// - `client_focused` short-circuits to `Idle`: a pane the user is actually
-///   looking at right now must never show a stale "come look" badge.
-/// - Otherwise, `Done` is sticky: it holds through repeated idle
-///   reclassifications (`previous` itself `Done`) until either the pane
-///   gets focused or starts a new turn, so a slow-to-look-back user doesn't
-///   miss the badge because a later tick happened to reclassify while they
-///   were away.
+/// - `Done` is sticky through repeated idle reclassifications until fresh
+///   terminal input acknowledges it or non-idle detection proves that the
+///   agent started processing again.
 fn promote_to_done(
     previous: Option<&PaneStatus>,
     raw_activity: ilium_core::AgentActivity,
-    client_focused: bool,
 ) -> ilium_core::AgentActivity {
-    if raw_activity != ilium_core::AgentActivity::Idle || client_focused {
+    if raw_activity != ilium_core::AgentActivity::Idle {
         return raw_activity;
     }
     match previous {
@@ -1818,7 +1798,6 @@ mod tests {
             &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
             &status,
             Some(ilium_detect::ActivityEvidence::NoActiveMarker),
-            false,
         )
         .contains("previously been active"));
     }
@@ -1955,53 +1934,25 @@ mod tests {
     }
 
     #[test]
-    fn finishing_while_unfocused_becomes_done() {
+    fn finishing_active_turn_becomes_done() {
         assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::Working)),
-                AgentActivity::Idle,
-                false
-            ),
+            promote_to_done(Some(&agent(AgentActivity::Working)), AgentActivity::Idle),
             AgentActivity::Done
         );
     }
 
     #[test]
-    fn finishing_while_focused_stays_idle() {
+    fn done_stays_done_through_repeated_idle_detection() {
         assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::Working)),
-                AgentActivity::Idle,
-                true
-            ),
-            AgentActivity::Idle
-        );
-    }
-
-    #[test]
-    fn done_stays_done_until_focused() {
-        assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::Done)),
-                AgentActivity::Idle,
-                false
-            ),
+            promote_to_done(Some(&agent(AgentActivity::Done)), AgentActivity::Idle),
             AgentActivity::Done
-        );
-        assert_eq!(
-            promote_to_done(Some(&agent(AgentActivity::Done)), AgentActivity::Idle, true),
-            AgentActivity::Idle
         );
     }
 
     #[test]
     fn already_idle_stays_idle_rather_than_becoming_done() {
         assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::Idle)),
-                AgentActivity::Idle,
-                false
-            ),
+            promote_to_done(Some(&agent(AgentActivity::Idle)), AgentActivity::Idle),
             AgentActivity::Idle
         );
     }
@@ -2009,7 +1960,7 @@ mod tests {
     #[test]
     fn no_prior_status_never_promotes_to_done() {
         assert_eq!(
-            promote_to_done(None, AgentActivity::Idle, false),
+            promote_to_done(None, AgentActivity::Idle),
             AgentActivity::Idle
         );
     }
@@ -2021,14 +1972,7 @@ mod tests {
             AgentActivity::WaitingApproval,
             AgentActivity::WaitingBackground,
         ] {
-            assert_eq!(
-                promote_to_done(Some(&agent(AgentActivity::Done)), raw, false),
-                raw
-            );
-            assert_eq!(
-                promote_to_done(Some(&agent(AgentActivity::Done)), raw, true),
-                raw
-            );
+            assert_eq!(promote_to_done(Some(&agent(AgentActivity::Done)), raw), raw);
         }
     }
 
@@ -2037,16 +1981,14 @@ mod tests {
         assert_eq!(
             promote_to_done(
                 Some(&agent(AgentActivity::WaitingApproval)),
-                AgentActivity::Idle,
-                false
+                AgentActivity::Idle
             ),
             AgentActivity::Done
         );
         assert_eq!(
             promote_to_done(
                 Some(&agent(AgentActivity::WaitingBackground)),
-                AgentActivity::Idle,
-                false
+                AgentActivity::Idle
             ),
             AgentActivity::Done
         );

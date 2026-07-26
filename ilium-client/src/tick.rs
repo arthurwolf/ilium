@@ -26,7 +26,12 @@ pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) 
     let tree_transition_changed = app.tick_tree_transitions(now);
     let autosave_wrote = app.tick_autosave();
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
-    was_animating || tree_transition_changed || autosave_wrote || workspace_search_started
+    let chatroom_changed = app.reconcile_chatroom_projects();
+    was_animating
+        || tree_transition_changed
+        || autosave_wrote
+        || workspace_search_started
+        || chatroom_changed
 }
 
 /// Applies one finished background naming result to `app`, and tells

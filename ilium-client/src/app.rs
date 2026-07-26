@@ -28,11 +28,12 @@ use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
 use crate::board::BoardPane;
+use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
     DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
     TerminalSettings, TreeOrder, UiSettings, VoiceSettings,
 };
-use crate::editor_pane::{EditorPane, EditorViewMode};
+use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::icon_search_workers::{IconSearchRequest, IconSemanticSearchEvent};
 use crate::keymap::{self, Action, KeyBinding, KeymapPreset};
@@ -47,6 +48,7 @@ use crate::search_ui::{
 };
 use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
+use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
 use crate::terminal_title_inference;
 use crate::terminal_view::{self, TerminalView};
 use crate::text_prompt::TextPromptState;
@@ -160,6 +162,11 @@ pub enum FocusTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RightPanelTarget {
     Empty,
+    /// A project-local, file-backed coordination surface. It is deliberately
+    /// not a pane: no PTY, server snapshot, or split-view slot owns it.
+    Chatroom {
+        project_id: NodeId,
+    },
     Pane {
         pane_id: NodeId,
     },
@@ -173,6 +180,7 @@ impl RightPanelTarget {
     pub const fn active_pane_id(&self) -> Option<NodeId> {
         match self {
             Self::Empty
+            | Self::Chatroom { .. }
             | Self::SplitView {
                 active_pane_id: None,
                 ..
@@ -186,11 +194,30 @@ impl RightPanelTarget {
     }
 }
 
+/// Client-local message feed and composer state for one virtual project row.
+/// `CHATROOM.md` remains authoritative; this cache only makes rendering and
+/// typed input independent of filesystem I/O during each draw call.
+#[derive(Default)]
+pub struct ChatroomViewState {
+    pub messages: Vec<crate::chatroom::ChatMessage>,
+    pub draft: String,
+    /// Wrapped rows between the current viewport and the live tail. Zero is
+    /// the explicit "follow new messages" state.
+    pub scroll_from_newest: usize,
+    /// True only between a left-button press on the scrollbar and its release.
+    /// This keeps unrelated drags elsewhere in the virtual pane inert.
+    pub is_scrollbar_dragging: bool,
+}
+
 /// The input-handling mode. Most keys are dispatched differently
 /// depending on this; see `crate::keys`.
 pub enum Mode {
     Normal,
     LeaderPending,
+    /// A pending `Ctrl+B` tree-navigation sequence. It accepts only the four
+    /// cycle/jump actions, so the dedicated default never silently turns into
+    /// a second general leader while `Ctrl+A` remains the primary prefix.
+    NavigationLeaderPending,
     Move,
     /// In-progress rename prompt for the selected node.
     Rename(TextPromptState),
@@ -222,8 +249,8 @@ pub enum Mode {
     ProjectFolderExplorer(Box<ExplorerOverlay>, ProjectFolderSelection),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
-    /// A pane-scoped right-click menu exposed only for a detected agent.
-    AgentPaneContextMenu(AgentPaneContextMenu),
+    /// A pane-scoped right-click menu for copying the visible terminal text.
+    TerminalPaneContextMenu(TerminalPaneContextMenu),
     /// Full right-panel semantic history for one exact agent pane.
     AgentDebugLog(AgentDebugLogViewState),
     /// Destination path prompt layered over its exact debug-log view state.
@@ -475,6 +502,7 @@ pub enum AppearanceRow {
     AutoResizeTree,
     TreeWidth,
     TreeOrder,
+    TreeRowManagementControls,
     AgentIdentifierMode,
     ColorScheme,
     MotionLevel,
@@ -485,10 +513,11 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 10] = [
+    pub const ALL: [AppearanceRow; 11] = [
         Self::AutoResizeTree,
         Self::TreeWidth,
         Self::TreeOrder,
+        Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
         Self::ColorScheme,
         Self::MotionLevel,
@@ -509,6 +538,7 @@ impl TerminalRow {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorRow {
+    LineDisplay,
     LineNumbers,
     Minimap,
     Autosave,
@@ -516,7 +546,8 @@ pub enum EditorRow {
     MarkdownDefault,
 }
 impl EditorRow {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
+        Self::LineDisplay,
         Self::LineNumbers,
         Self::Minimap,
         Self::Autosave,
@@ -784,6 +815,7 @@ pub enum ContextMenuAction {
     NewGroup,
     NewSplitView,
     NewFolder,
+    AddChatroom,
     ChangeProjectFolder,
     Rename,
     MoveUp,
@@ -820,6 +852,7 @@ impl ContextMenuAction {
             Self::NewGroup => "New group\u{2026}".to_string(),
             Self::NewSplitView => "New split view\u{2026}".to_string(),
             Self::NewFolder => "Open folder\u{2026}".to_string(),
+            Self::AddChatroom => "Add chatroom to project".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
             Self::Rename => "Rename".to_string(),
             Self::MoveUp => "Move up".to_string(),
@@ -856,11 +889,6 @@ pub struct ContextMenu {
     pub actions: Vec<ContextMenuAction>,
     pub selected_index: usize,
     pub tree_order_submenu: Option<TreeOrderSubmenu>,
-}
-
-pub struct AgentPaneContextMenu {
-    pub pane_id: NodeId,
-    pub area: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1087,6 +1115,48 @@ pub struct PendingRestructureRequest {
     pub current_structure: String,
 }
 
+/// Distinguishes an explicit user action from a passive lifecycle trigger.
+/// Only automatic work is rate-limited after a provider/inference failure;
+/// the manual command always remains an immediate recovery path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestructureRequestOrigin {
+    Manual,
+    Automatic,
+}
+
+impl RestructureRequestOrigin {
+    const fn is_automatic(self) -> bool {
+        matches!(self, Self::Automatic)
+    }
+}
+
+/// Failure memory for one unchanged automatic project request. This stays
+/// client-local because it protects the current attachment's provider budget;
+/// the source evidence itself remains the durable retry key.
+#[derive(Debug, Clone)]
+struct AutomaticRestructureRetry {
+    input_fingerprint: u64,
+    consecutive_failures: u32,
+    retry_after: Instant,
+}
+
+const AUTOMATIC_RESTRUCTURE_RETRY_BASE_DELAY: Duration = Duration::from_secs(60);
+const AUTOMATIC_RESTRUCTURE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30 * 60);
+
+/// Computes the bounded exponential delay for consecutive failures of one
+/// unchanged automatic request. Failure one waits one minute, then doubles
+/// until the half-hour cap prevents an unbounded blackout.
+fn automatic_restructure_retry_delay(consecutive_failures: u32) -> Duration {
+    let exponent = consecutive_failures.saturating_sub(1).min(5);
+    let multiplier = 1_u64 << exponent;
+    Duration::from_secs(
+        AUTOMATIC_RESTRUCTURE_RETRY_BASE_DELAY
+            .as_secs()
+            .saturating_mul(multiplier)
+            .min(AUTOMATIC_RESTRUCTURE_RETRY_MAX_DELAY.as_secs()),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectRestructureState {
     Queued,
@@ -1100,6 +1170,8 @@ pub enum ProjectRestructureState {
 pub struct ProjectRestructureJob {
     pub project_name: String,
     pub state: ProjectRestructureState,
+    request_origin: RestructureRequestOrigin,
+    input_fingerprint: u64,
 }
 
 pub struct App {
@@ -1109,6 +1181,11 @@ pub struct App {
     /// Read-only mirror of the server's tree -- see the module docs.
     pub tree: Tree,
     pub panes: HashMap<NodeId, PaneRuntime>,
+    /// File-backed room presentation keyed by the owning real project node.
+    pub chatrooms: HashMap<NodeId, ChatroomViewState>,
+    /// Last observed room availability. This is only used to invalidate the
+    /// sidebar hit-test cache when another process creates/removes a room.
+    chatroom_projects: HashSet<NodeId>,
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
@@ -1212,6 +1289,7 @@ pub struct App {
     pointer_position: Option<Position>,
     is_terminal_focused: bool,
     tree_drag_source: Option<NodeId>,
+    tree_drag_in_progress: bool,
     pub hovered_tree_node: Option<TreeNodeHit>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
@@ -1244,6 +1322,11 @@ pub struct App {
     /// would grow by one abandoned entry per failed open for the life of
     /// the client process.
     pending_editor_opens: Vec<PendingEditorOpen>,
+    /// Locally requested panes that should take right-panel focus after the
+    /// server confirms their authoritative tree nodes. The request protocol
+    /// has no opaque creation token, so this uses the server-owned name,
+    /// content kind, and (when available) target parent as its narrow match.
+    pending_pane_focuses: Vec<PendingPaneFocus>,
     pub markdown_picker: ratatui_image::picker::Picker,
     pub markdown_rasterizer: crate::markdown::raster::HeaderRasterizer,
     /// Creation-pulse bookkeeping: node id -> `started_at`-relative offset
@@ -1311,6 +1394,9 @@ pub struct App {
     /// Status of the latest project-scoped restructure batch, keyed by the
     /// stable project node id so footer and row indicators agree.
     pub project_restructure_jobs: HashMap<NodeId, ProjectRestructureJob>,
+    /// Per-project circuit breakers for failed automatic inference. A changed
+    /// content/structure fingerprint clears the relevant breaker.
+    automatic_restructure_retries: HashMap<NodeId, AutomaticRestructureRetry>,
     /// Project workers waiting for the event loop to spawn them.
     pending_restructure_requests: Vec<PendingRestructureRequest>,
     /// Bumped every time `render_cache::apply_tree_snapshot` replaces
@@ -1339,6 +1425,12 @@ pub(crate) struct PendingEditorOpen {
     pub(crate) column: Option<u32>,
 }
 
+pub(crate) struct PendingPaneFocus {
+    pub(crate) name: String,
+    pub(crate) content: PaneContentKind,
+    pub(crate) parent_group: Option<NodeId>,
+}
+
 /// Returns the first millisecond at which integer frame selection based on
 /// `remaining_millis / frame_millis` can change.
 fn scheduled_input_frame_delay(remaining_millis: u64, frame_millis: u64) -> Duration {
@@ -1360,6 +1452,8 @@ impl App {
             session_name,
             tree: Tree::new(),
             panes: HashMap::new(),
+            chatrooms: HashMap::new(),
+            chatroom_projects: HashSet::new(),
             agent_debug_logs: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
@@ -1413,6 +1507,7 @@ impl App {
             pointer_position: None,
             is_terminal_focused: true,
             tree_drag_source: None,
+            tree_drag_in_progress: false,
             hovered_tree_node: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
@@ -1423,6 +1518,7 @@ impl App {
             is_project_name_loading: false,
             titles_loading: HashSet::new(),
             pending_editor_opens: Vec::new(),
+            pending_pane_focuses: Vec::new(),
             // Talks to stdio once at startup; falls back to half-block
             // rendering (works everywhere, no protocol needed) if the
             // terminal doesn't answer the capability query.
@@ -1442,6 +1538,7 @@ impl App {
             pending_retitle_requests: Vec::new(),
             structure_loading: false,
             project_restructure_jobs: HashMap::new(),
+            automatic_restructure_retries: HashMap::new(),
             pending_restructure_requests: Vec::new(),
             tree_version: 0,
             tree_hit_test_cache: tree_ui::TreeItemCache::default(),
@@ -1602,7 +1699,7 @@ impl App {
 
     pub fn displayed_pane_ids(&self) -> Vec<NodeId> {
         match self.right_panel_target {
-            RightPanelTarget::Empty => Vec::new(),
+            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => Vec::new(),
             RightPanelTarget::Pane { pane_id } => vec![pane_id],
             RightPanelTarget::SplitView { split_id, .. } => self
                 .tree
@@ -1634,6 +1731,76 @@ impl App {
         let next =
             (current as i32 + direction.signum()).rem_euclid(visible_panes.len() as i32) as usize;
         self.focus_pane(visible_panes[next]);
+    }
+
+    /// Cycles among direct panes and split members in the group that owns the
+    /// currently active/selected thing. Nested groups remain separate folders
+    /// by design; [`Self::jump_to_group`] is the companion action that moves
+    /// between them. This keeps the two actions orthogonal and makes their
+    /// combined traversal cover the entire pane tree without flattening it.
+    pub fn cycle_pane_in_current_group(&mut self, direction: i32) {
+        let anchor = self.active_pane_id().or_else(|| self.selected_node_id());
+        let Some(group_id) = anchor.and_then(|node_id| self.tree.containing_group(node_id)) else {
+            self.status_message = Some("No current group contains a pane to cycle".to_string());
+            return;
+        };
+        let pane_ids = self.tree.navigable_panes_in_group(group_id);
+        if pane_ids.is_empty() {
+            self.status_message = Some("This group has no panes to cycle".to_string());
+            return;
+        }
+        let target_index = match self
+            .active_pane_id()
+            .and_then(|pane_id| pane_ids.iter().position(|candidate| *candidate == pane_id))
+        {
+            Some(current_index) => (current_index as i32 + direction.signum())
+                .rem_euclid(pane_ids.len() as i32) as usize,
+            None if direction < 0 => pane_ids.len() - 1,
+            None => 0,
+        };
+        self.focus_pane(pane_ids[target_index]);
+    }
+
+    /// Jumps to the first pane in the next or previous non-empty group in
+    /// visible tree order. A project is an ownership boundary, not a group,
+    /// so this naturally traverses groups across projects while preserving
+    /// their real nesting/order. Empty groups are skipped because no focusable
+    /// "first thing" exists inside them.
+    pub fn jump_to_group(&mut self, direction: i32) {
+        let groups: Vec<NodeId> = self
+            .tree
+            .group_ids_in_tree_order()
+            .into_iter()
+            .filter(|group_id| !self.tree.navigable_panes_in_group(*group_id).is_empty())
+            .collect();
+        if groups.is_empty() {
+            self.status_message = Some("No groups contain panes to jump to".to_string());
+            return;
+        }
+
+        let anchor = self.active_pane_id().or_else(|| self.selected_node_id());
+        let current_group = anchor.and_then(|node_id| self.tree.containing_group(node_id));
+        let target_index = match current_group
+            .and_then(|group_id| groups.iter().position(|candidate| *candidate == group_id))
+        {
+            Some(current_index) => {
+                (current_index as i32 + direction.signum()).rem_euclid(groups.len() as i32) as usize
+            }
+            None if direction < 0 => groups.len() - 1,
+            None => 0,
+        };
+        let target_group = groups[target_index];
+        // `groups` was filtered with this exact helper immediately above, so
+        // every target has a first pane unless an impossible in-memory tree
+        // mutation interleaves inside this synchronous method.
+        if let Some(pane_id) = self
+            .tree
+            .navigable_panes_in_group(target_group)
+            .first()
+            .copied()
+        {
+            self.focus_pane(pane_id);
+        }
     }
 
     /// Focuses the nearest visible split member in a cardinal direction.
@@ -1698,7 +1865,7 @@ impl App {
 
     pub fn pane_viewports(&self) -> Vec<PaneViewport> {
         match self.right_panel_target {
-            RightPanelTarget::Empty => Vec::new(),
+            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
                 SplitOrientation::Vertical,
@@ -1728,13 +1895,56 @@ impl App {
         split_layout::viewport_at(&self.pane_viewports(), position)
     }
 
+    /// Returns the bottom-row close action for a pane whose detected agent
+    /// has reached the durable `Done` state (the same state shown as a bell).
+    pub(crate) fn completed_agent_close_action(
+        &self,
+        viewport: PaneViewport,
+    ) -> Option<CompletedAgentCloseAction> {
+        self.is_completed_agent_pane(viewport.pane_id)
+            .then(|| completed_agent_action::layout(viewport))
+            .flatten()
+    }
+
+    /// Whether `pane_id` is a terminal agent that has finished its current
+    /// turn and still needs acknowledgement rather than merely being idle.
+    pub(crate) fn is_completed_agent_pane(&self, pane_id: NodeId) -> bool {
+        matches!(
+            self.tree.get(pane_id).map(|node| &node.kind),
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                status: PaneStatus::Agent(_, AgentActivity::Done)
+                    | PaneStatus::AgentWithGoal(_, AgentActivity::Done),
+                ..
+            })
+        )
+    }
+
     pub fn reconcile_right_panel_target(&mut self) {
         self.right_panel_target = match self.right_panel_target.clone() {
             RightPanelTarget::Empty => RightPanelTarget::Empty,
+            RightPanelTarget::Chatroom { project_id }
+                if self.tree.get(project_id).is_some_and(Node::is_project)
+                    && self
+                        .tree
+                        .get(project_id)
+                        .and_then(Node::project_path)
+                        .is_some_and(crate::chatroom::exists) =>
+            {
+                RightPanelTarget::Chatroom { project_id }
+            }
             RightPanelTarget::Pane { pane_id }
                 if self.tree.get(pane_id).is_some_and(Node::is_pane) =>
             {
-                RightPanelTarget::Pane { pane_id }
+                match self.tree.parent_of(pane_id) {
+                    Some(split_id) if self.tree.get(split_id).is_some_and(Node::is_split_view) => {
+                        RightPanelTarget::SplitView {
+                            split_id,
+                            active_pane_id: Some(pane_id),
+                        }
+                    }
+                    _ => RightPanelTarget::Pane { pane_id },
+                }
             }
             RightPanelTarget::SplitView {
                 split_id,
@@ -1751,6 +1961,396 @@ impl App {
             }
             _ => RightPanelTarget::Empty,
         };
+    }
+
+    /// Creates the file room and all provider-facing integration artifacts
+    /// for one real project selected from its context menu.
+    pub fn action_add_chatroom_to_project(&mut self, project_id: NodeId) {
+        let Some(project_root) = self
+            .tree
+            .get(project_id)
+            .filter(|node| node.is_project())
+            .and_then(Node::project_path)
+            .map(Path::to_path_buf)
+        else {
+            self.status_message = Some("That entry is not a project".to_string());
+            return;
+        };
+        match crate::chatroom::initialize(&project_root) {
+            Ok(()) => {
+                self.chatroom_projects.insert(project_id);
+                self.bump_tree_version();
+                self.show_chatroom(project_id);
+                self.status_message =
+                    Some("Chatroom added; Claude/Codex hooks and guidance are ready".to_string());
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Could not add chatroom: {error}"));
+            }
+        }
+    }
+
+    /// Selects a virtual room row and makes its file-backed feed the active
+    /// right-panel surface without pretending it is a server-owned pane.
+    pub fn show_chatroom(&mut self, project_id: NodeId) {
+        let Some(project_root) = self
+            .tree
+            .get(project_id)
+            .and_then(Node::project_path)
+            .map(Path::to_path_buf)
+        else {
+            return;
+        };
+        if !crate::chatroom::exists(&project_root) {
+            self.status_message = Some("This project has no chatroom".to_string());
+            return;
+        }
+        self.select_tree_path(vec![
+            project_id,
+            crate::tree_ui::chatroom_node_id(project_id),
+        ]);
+        self.right_panel_target = RightPanelTarget::Chatroom { project_id };
+        self.focus = FocusTarget::Pane;
+        self.refresh_chatroom(project_id);
+    }
+
+    /// Re-reads the visible project's room after an append or a low-frequency
+    /// maintenance pass. Broken manual edits surface as a status message but
+    /// retain the last readable messages instead of blanking the conversation.
+    pub fn refresh_chatroom(&mut self, project_id: NodeId) -> bool {
+        let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) else {
+            return false;
+        };
+        match crate::chatroom::read_messages(project_root, 200) {
+            Ok(messages) => {
+                let Some(existing_state) = self.chatrooms.get(&project_id) else {
+                    self.chatrooms.insert(
+                        project_id,
+                        ChatroomViewState {
+                            messages,
+                            ..ChatroomViewState::default()
+                        },
+                    );
+                    return true;
+                };
+                if existing_state.messages == messages {
+                    return false;
+                }
+                // A positive tail distance means the user intentionally left
+                // the live tail. Grow that distance by the appended wrapped
+                // rows so the same historical top row remains on screen.
+                let previous_metrics = crate::chatroom_ui::scroll_metrics(
+                    self.layout.pane_area,
+                    &existing_state.messages,
+                    existing_state.scroll_from_newest,
+                );
+                let next_metrics =
+                    crate::chatroom_ui::scroll_metrics(self.layout.pane_area, &messages, 0);
+                let adjusted_scroll_from_newest = if existing_state.scroll_from_newest == 0 {
+                    0
+                } else if next_metrics.total_lines >= previous_metrics.total_lines {
+                    existing_state.scroll_from_newest.saturating_add(
+                        next_metrics
+                            .total_lines
+                            .saturating_sub(previous_metrics.total_lines),
+                    )
+                } else {
+                    existing_state.scroll_from_newest.saturating_sub(
+                        previous_metrics
+                            .total_lines
+                            .saturating_sub(next_metrics.total_lines),
+                    )
+                }
+                .min(next_metrics.maximum_top);
+                let Some(state) = self.chatrooms.get_mut(&project_id) else {
+                    return false;
+                };
+                state.messages = messages;
+                state.scroll_from_newest = adjusted_scroll_from_newest;
+                true
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Could not read chatroom: {error}"));
+                false
+            }
+        }
+    }
+
+    /// Checks every visible project at boot and during normal UI ticks. An
+    /// existing room repairs missing provider hooks/guidance before its agents
+    /// do further work; projects without rooms remain completely untouched.
+    pub fn reconcile_chatroom_projects(&mut self) -> bool {
+        let mut available = HashSet::new();
+        let mut has_changed = false;
+        let project_ids = self.tree.project_ids();
+        for project_id in project_ids {
+            let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) else {
+                continue;
+            };
+            match crate::chatroom::ensure_integrations(project_root) {
+                Ok(true) => {
+                    available.insert(project_id);
+                    if matches!(self.right_panel_target, RightPanelTarget::Chatroom { project_id: active } if active == project_id)
+                    {
+                        has_changed |= self.refresh_chatroom(project_id);
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    self.status_message = Some(format!("Could not repair chatroom setup: {error}"));
+                }
+            }
+        }
+        if available == self.chatroom_projects {
+            return has_changed;
+        }
+        self.chatroom_projects = available;
+        self.bump_tree_version();
+        true
+    }
+
+    /// Handles text entry directly in the room's composer. The user is the
+    /// author of TUI messages; agents use the identical storage path through
+    /// `ilium chat send`, so ordering remains serialized by the file lock.
+    pub fn handle_chatroom_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
+            return;
+        };
+        if !is_press(&key) {
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => self.leave_pane_focus(),
+            KeyCode::Up => self.scroll_chatroom_by(project_id, -1, 1),
+            KeyCode::Down => self.scroll_chatroom_by(project_id, 1, 1),
+            KeyCode::PageUp => {
+                let page_lines = self
+                    .chatroom_scroll_metrics(project_id)
+                    .map(|metrics| metrics.visible_lines.max(1))
+                    .unwrap_or(1);
+                self.scroll_chatroom_by(project_id, -1, page_lines);
+            }
+            KeyCode::PageDown => {
+                let page_lines = self
+                    .chatroom_scroll_metrics(project_id)
+                    .map(|metrics| metrics.visible_lines.max(1))
+                    .unwrap_or(1);
+                self.scroll_chatroom_by(project_id, 1, page_lines);
+            }
+            KeyCode::Home => self.scroll_chatroom_to_top(project_id),
+            KeyCode::End => self.scroll_chatroom_to_bottom(project_id),
+            KeyCode::Enter => {
+                let draft = self
+                    .chatrooms
+                    .get_mut(&project_id)
+                    .map(|state| std::mem::take(&mut state.draft))
+                    .unwrap_or_default();
+                if draft.trim().is_empty() {
+                    return;
+                }
+                let Some(project_root) = self
+                    .tree
+                    .get(project_id)
+                    .and_then(Node::project_path)
+                    .map(Path::to_path_buf)
+                else {
+                    return;
+                };
+                match crate::chatroom::append_message(&project_root, "user", &draft) {
+                    Ok(()) => {
+                        self.refresh_chatroom(project_id);
+                        self.status_message = Some("Chatroom message sent".to_string());
+                    }
+                    Err(error) => {
+                        if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                            state.draft = draft;
+                        }
+                        self.status_message =
+                            Some(format!("Could not send chatroom message: {error}"));
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                    state.draft.pop();
+                }
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                self.chatrooms
+                    .entry(project_id)
+                    .or_default()
+                    .draft
+                    .push(character);
+            }
+            _ => {}
+        }
+    }
+
+    /// Routes wheel and scrollbar gestures for the active virtual room.
+    ///
+    /// Chatrooms do not own a server pane viewport, so this path deliberately
+    /// uses `chatroom_ui`'s shared geometry instead of `handle_pane_mouse`.
+    pub fn handle_chatroom_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        position: Position,
+    ) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+
+        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
+            return;
+        };
+        let room_layout = crate::chatroom_ui::layout(self.layout.pane_area);
+        let metrics = self.chatroom_scroll_metrics(project_id);
+        let is_dragging = self
+            .chatrooms
+            .get(&project_id)
+            .is_some_and(|state| state.is_scrollbar_dragging);
+        match mouse.kind {
+            MouseEventKind::ScrollUp if room_layout.message_content_area.contains(position) => {
+                self.scroll_chatroom_by(project_id, -1, 3);
+            }
+            MouseEventKind::ScrollDown if room_layout.message_content_area.contains(position) => {
+                self.scroll_chatroom_by(project_id, 1, 3);
+            }
+            MouseEventKind::Down(MouseButton::Left)
+                if metrics.is_some_and(|metrics| metrics.is_overflowing())
+                    && room_layout.scrollbar_area.contains(position) =>
+            {
+                if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                    state.is_scrollbar_dragging = true;
+                }
+                if let Some(metrics) = metrics {
+                    let top = crate::chatroom_ui::scrollbar_top_for_row(
+                        room_layout.scrollbar_area,
+                        metrics.maximum_top,
+                        position.y,
+                    );
+                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if is_dragging => {
+                if let Some(metrics) = metrics {
+                    let top = crate::chatroom_ui::scrollbar_top_for_row(
+                        room_layout.scrollbar_area,
+                        metrics.maximum_top,
+                        position.y,
+                    );
+                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if is_dragging => {
+                if let Some(metrics) = metrics {
+                    let top = crate::chatroom_ui::scrollbar_top_for_row(
+                        room_layout.scrollbar_area,
+                        metrics.maximum_top,
+                        position.y,
+                    );
+                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
+                }
+                if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                    state.is_scrollbar_dragging = false;
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                    state.is_scrollbar_dragging = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// True while the active room owns an in-progress scrollbar drag. The
+    /// top-level mouse router uses this to retain the gesture outside the pane.
+    pub fn is_chatroom_scrollbar_dragging(&self) -> bool {
+        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
+            return false;
+        };
+        self.chatrooms
+            .get(&project_id)
+            .is_some_and(|state| state.is_scrollbar_dragging)
+    }
+
+    /// Returns wrapped-line scroll limits for one cached room at the current
+    /// responsive right-panel width.
+    pub fn chatroom_scroll_metrics(
+        &self,
+        project_id: NodeId,
+    ) -> Option<crate::chatroom_ui::ChatroomScrollMetrics> {
+        let state = self.chatrooms.get(&project_id)?;
+        Some(crate::chatroom_ui::scroll_metrics(
+            self.layout.pane_area,
+            &state.messages,
+            state.scroll_from_newest,
+        ))
+    }
+
+    /// Moves through history by rendered rows. Negative movement goes toward
+    /// older messages; reaching the newest valid top re-enables live following.
+    pub fn scroll_chatroom_by(&mut self, project_id: NodeId, direction: i32, lines: usize) {
+        let Some(metrics) = self.chatroom_scroll_metrics(project_id) else {
+            return;
+        };
+        let next_top = if direction < 0 {
+            metrics.top.saturating_sub(lines)
+        } else {
+            metrics.top.saturating_add(lines).min(metrics.maximum_top)
+        };
+        self.set_chatroom_scroll_top(project_id, next_top, metrics.maximum_top);
+    }
+
+    /// Jumps to the oldest available wrapped row and disables live following
+    /// whenever the room actually overflows.
+    pub fn scroll_chatroom_to_top(&mut self, project_id: NodeId) {
+        let Some(metrics) = self.chatroom_scroll_metrics(project_id) else {
+            return;
+        };
+        self.set_chatroom_scroll_top(project_id, 0, metrics.maximum_top);
+    }
+
+    /// Returns to the live tail. A zero tail distance is the sole state that
+    /// follows newly appended messages automatically.
+    pub fn scroll_chatroom_to_bottom(&mut self, project_id: NodeId) {
+        if let Some(state) = self.chatrooms.get_mut(&project_id) {
+            state.scroll_from_newest = 0;
+        }
+    }
+
+    /// Stores a bounded top row as its distance from the newest valid top.
+    /// This representation makes "pinned to bottom" explicit and resize-safe.
+    fn set_chatroom_scroll_top(&mut self, project_id: NodeId, top: usize, maximum_top: usize) {
+        if let Some(state) = self.chatrooms.get_mut(&project_id) {
+            state.scroll_from_newest = maximum_top.saturating_sub(top.min(maximum_top));
+        }
+    }
+
+    /// Builds the participant list from the already server-confirmed pane
+    /// tree. Chat authors are historical; this deliberately reports only
+    /// currently live agent panes as active participants.
+    pub fn chatroom_participants(&self, project_id: NodeId) -> Vec<String> {
+        self.tree
+            .all_ids()
+            .filter(|pane_id| self.tree.project_ancestor(*pane_id) == Some(project_id))
+            .filter_map(|pane_id| {
+                let node = self.tree.get(pane_id)?;
+                let NodeKind::Pane { status, .. } = &node.kind else {
+                    return None;
+                };
+                match status {
+                    PaneStatus::Agent(class, activity)
+                    | PaneStatus::AgentWithGoal(class, activity) => {
+                        Some(format!("{} — {} ({activity:?})", class.label(), node.name))
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     /// Activates the surviving sidebar row chosen after a close. Panes and
@@ -1823,10 +2423,13 @@ impl App {
         if !ui.agent_debug_menu_enabled
             && matches!(
                 self.mode,
-                Mode::AgentPaneContextMenu(_) | Mode::AgentDebugLog(_)
+                Mode::AgentDebugLog(_) | Mode::AgentDebugSavePath(..)
             )
         {
             self.mode = Mode::Normal;
+        }
+        if !ui.agent_debug_menu_enabled {
+            self.remove_agent_debug_action_from_terminal_menu();
         }
         self.ui_settings = ui.clone();
         let now = Instant::now();
@@ -2184,17 +2787,22 @@ impl App {
 
     /// Attempts one live remap. Duplicate keys are refused before mutation,
     /// leaving both dispatch and the persisted configuration unchanged.
-    pub fn settings_assign_key(&mut self, action: Action, key: char) {
+    pub fn settings_assign_key(&mut self, action: Action, key: keymap::BindingKey) {
         match keymap::assign_key(&mut self.keybindings, action, key) {
             Ok(()) => self.persist_keymap(),
             Err(conflict) if conflict != action => {
                 self.status_message = Some(format!(
                     "{} is already assigned to {}",
-                    key,
+                    keymap::key_label(key),
                     keymap::action_name(conflict).replace('_', " ")
                 ));
             }
-            Err(_) => self.status_message = Some(format!("{key} cannot be used as a shortcut")),
+            Err(_) => {
+                self.status_message = Some(format!(
+                    "{} cannot be used as a shortcut",
+                    keymap::key_label(key)
+                ))
+            }
         }
     }
 
@@ -2213,12 +2821,36 @@ impl App {
     /// Selects an explicit A-Z shortcut base, used by direct letter entry in
     /// the Keyboard settings tab.
     pub fn settings_set_shortcut_base(&mut self, shortcut_base: crate::keymap::ShortcutBase) {
-        self.apply_and_persist_keyboard_settings(KeyboardSettings { shortcut_base });
+        self.apply_and_persist_keyboard_settings(KeyboardSettings {
+            shortcut_base,
+            ..self.keyboard_settings
+        });
     }
 
     /// Cycles the current shortcut base through all allowed letters.
     pub fn settings_adjust_shortcut_base(&mut self, direction: i32) {
         self.settings_set_shortcut_base(self.keyboard_settings.shortcut_base.stepped(direction));
+    }
+
+    /// Selects and persists the independent prefix for tree cycle/jump
+    /// actions without changing the user's general leader-key workflow.
+    pub fn settings_set_navigation_shortcut_base(
+        &mut self,
+        navigation_shortcut_base: crate::keymap::ShortcutBase,
+    ) {
+        self.apply_and_persist_keyboard_settings(KeyboardSettings {
+            navigation_shortcut_base,
+            ..self.keyboard_settings
+        });
+    }
+
+    /// Cycles the tree-navigation prefix through all Ctrl+letter choices.
+    pub fn settings_adjust_navigation_shortcut_base(&mut self, direction: i32) {
+        self.settings_set_navigation_shortcut_base(
+            self.keyboard_settings
+                .navigation_shortcut_base
+                .stepped(direction),
+        );
     }
 
     /// Applies and persists the global card-preview height used by all boards.
@@ -2934,6 +3566,14 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles the optional rename and one-step move buttons in hovered tree
+    /// rows. Context menus and keyboard shortcuts remain available either way.
+    pub fn settings_toggle_tree_row_management_controls(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.show_tree_row_management_controls = !ui.show_tree_row_management_controls;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Toggles both discoverability and server-side capture of the persisted
     /// per-agent semantic history.
     pub fn settings_toggle_agent_debug_menu(&mut self) {
@@ -2996,6 +3636,9 @@ impl App {
             AppearanceRow::AutoResizeTree => self.settings_toggle_auto_resize_tree(),
             AppearanceRow::TreeWidth => self.settings_adjust_tree_width(direction),
             AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
+            AppearanceRow::TreeRowManagementControls => {
+                self.settings_toggle_tree_row_management_controls()
+            }
             AppearanceRow::AgentIdentifierMode => {
                 self.settings_adjust_agent_identifier_mode(direction)
             }
@@ -3032,6 +3675,7 @@ impl App {
     pub fn settings_adjust_editor_row(&mut self, row: EditorRow, direction: i32) {
         let mut settings = self.editor_settings;
         match row {
+            EditorRow::LineDisplay => settings.line_display = settings.line_display.toggled(),
             EditorRow::LineNumbers => settings.show_line_numbers = !settings.show_line_numbers,
             EditorRow::Minimap => settings.show_minimap = !settings.show_minimap,
             EditorRow::Autosave => settings.autosave_enabled = !settings.autosave_enabled,
@@ -3289,38 +3933,16 @@ impl App {
             &self.markdown_picker,
             &mut self.markdown_rasterizer,
             width,
+            editor.heading_rendering,
         ));
         editor.rendered_width = width;
     }
 
-    /// Clears a `Done` (finished, unseen) agent pane back to `Idle` the
-    /// moment the user actually looks at it. The tree itself is
-    /// server-owned, so this only updates the render-cache locally --
-    /// the server's own detection tick will reach the same conclusion (a
-    /// focused pane a user is actively looking at doesn't stay `Done`)
-    /// and broadcast the authoritative `PaneStatusChanged` in time.
-    fn mark_seen(&mut self, id: NodeId) {
-        if let Some(NodeKind::Pane { status, .. }) = self.tree.get(id).map(|node| &node.kind) {
-            let cleared_status = match status {
-                PaneStatus::Agent(class, ilium_core::AgentActivity::Done) => Some(
-                    PaneStatus::Agent(class.clone(), ilium_core::AgentActivity::Idle),
-                ),
-                PaneStatus::AgentWithGoal(class, ilium_core::AgentActivity::Done) => Some(
-                    PaneStatus::AgentWithGoal(class.clone(), ilium_core::AgentActivity::Idle),
-                ),
-                _ => None,
-            };
-            let Some(cleared_status) = cleared_status else {
-                return;
-            };
-            let _ = self.tree.set_pane_status(id, cleared_status);
-        }
-    }
-
-    /// Focuses `id` (a pane) both in the tree selection and as the
-    /// right-panel content, clearing a stale `Done` flag if this is the
-    /// first look since it finished. Notifies the server of the focus
-    /// transition (`ClientRequest::SetPaneFocus`) so its adaptive
+    /// Focuses `id` (a pane) both in the tree selection and as the right-panel
+    /// content. The server acknowledges a completed turn when this pane gains
+    /// focus, then broadcasts the resulting idle status to every attachment.
+    /// Notifies the server of the focus transition
+    /// (`ClientRequest::SetPaneFocus`) so its adaptive
     /// detection schedule can pin `id` to the fastest poll tier and force
     /// an immediate recheck -- see `ilium-server::detection` -- covering
     /// both "entered pane focus from the tree" and "switched directly from
@@ -3354,7 +3976,6 @@ impl App {
             _ => RightPanelTarget::Pane { pane_id: id },
         };
         self.focus = FocusTarget::Pane;
-        self.mark_seen(id);
         self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
     }
 
@@ -3435,6 +4056,29 @@ impl App {
     /// opening every ancestor so the selection is actually visible.
     pub(crate) fn select_node(&mut self, id: NodeId) {
         self.select_tree_path(self.path_to(id));
+    }
+
+    /// Rebuilds the widget-owned identifier path after an authoritative tree
+    /// snapshot changed a selected node's ancestry. `TreeState` compares the
+    /// complete path when deciding whether to draw its highlight, so retaining
+    /// only a still-live final `NodeId` after a reparent would otherwise leave
+    /// the active pane visibly unselected until the user navigated again.
+    ///
+    /// Synthetic folder and chatroom rows deliberately remain untouched: they
+    /// are client-local descendants and their caller already owns their full
+    /// path rather than `Tree::parent_of`.
+    pub(crate) fn reconcile_selected_tree_path(&mut self) {
+        let Some(selected_node_id) = self.selected_node_id() else {
+            return;
+        };
+        if self.tree.get(selected_node_id).is_none() {
+            return;
+        }
+
+        let canonical_path = self.path_to(selected_node_id);
+        if self.tree_state.selected() != canonical_path {
+            self.select_tree_path(canonical_path);
+        }
     }
 
     /// Toggles the selected tree path and invalidates virtual folder hit
@@ -3571,6 +4215,7 @@ impl App {
     /// Queues a `NewPane` request for a plain shell under `parent_group`
     /// (the caller resolves that group -- see `group_for_new_node`).
     pub fn request_new_terminal(&mut self, parent_group: NodeId) {
+        self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
@@ -3581,6 +4226,11 @@ impl App {
     /// Queues a `NewPane` request for a specific command line (e.g.
     /// `claude`, `codex`, `agy`) under `parent_group`.
     pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) {
+        self.record_pending_pane_focus(
+            parent_group,
+            PaneContentKind::Terminal,
+            command_line.clone(),
+        );
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
@@ -3597,6 +4247,11 @@ impl App {
         command_line: String,
         initial_input: String,
     ) {
+        self.record_pending_pane_focus(
+            parent_group,
+            PaneContentKind::Terminal,
+            command_line.clone(),
+        );
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
@@ -3633,11 +4288,12 @@ impl App {
             self.pending_editor_opens.remove(0);
         }
         self.pending_editor_opens.push(PendingEditorOpen {
-            basename,
+            basename: basename.clone(),
             path: path.clone(),
             line,
             column,
         });
+        self.record_pending_pane_focus(parent_group, PaneContentKind::Editor, basename);
         self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Editor(path),
@@ -3793,6 +4449,7 @@ impl App {
             .map(|stem| stem.to_string_lossy().into_owned())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Board".to_string());
+        self.record_pending_pane_focus(parent_group, PaneContentKind::Board, name.clone());
         self.queue_request(ClientRequest::NewBoard {
             parent_group,
             name,
@@ -3915,6 +4572,7 @@ impl App {
         } else {
             state.name.buf.trim().to_string()
         };
+        self.record_pending_pane_focus(state.parent_group, PaneContentKind::Board, name.clone());
         self.queue_request(ClientRequest::NewBoard {
             parent_group: state.parent_group,
             name,
@@ -4349,20 +5007,124 @@ impl App {
         })
     }
 
-    /// Opens the one-action pane menu at the exact split viewport that was
-    /// right-clicked. Eligibility is rechecked again on activation.
-    pub fn open_agent_pane_context_menu(&mut self, pane_id: NodeId, column: u16, row: u16) {
-        if !self.ui_settings.agent_debug_menu_enabled || !self.is_detected_agent_pane(pane_id) {
+    /// Captures one terminal context menu at the exact right-click position.
+    /// Copy actions deliberately use immutable text, while paste retains this
+    /// exact pane identifier so incoming PTY output cannot retarget a later
+    /// menu click.
+    pub fn open_terminal_pane_context_menu(
+        &mut self,
+        pane_id: NodeId,
+        source_row: usize,
+        column: u16,
+        row: u16,
+    ) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
             return;
+        };
+        let full_history = view.copyable_history();
+        let (source_line_text, visible_contents) = view.with_screen(|screen| {
+            let visible_contents = screen.contents();
+            let source_line_text = visible_contents
+                .lines()
+                .nth(source_row)
+                // Terminal cells pad short output lines with spaces. They are
+                // not user-authored text, so keep clipboard results readable.
+                .map(|line| line.trim_end().to_string())
+                .unwrap_or_default();
+            (source_line_text, visible_contents)
+        });
+        let mut actions = Vec::with_capacity(5);
+        // Preserve the existing agent-debug entry point and its first-row
+        // activation contract when the user has explicitly enabled it. The
+        // activation itself still verifies that this exact pane is an agent.
+        if self.ui_settings.agent_debug_menu_enabled {
+            actions.push(TerminalContextAction::ShowAgentDebugLog);
         }
-        let width = 28.min(self.layout.screen_area.width.max(1));
-        let height = 3.min(self.layout.screen_area.height.max(1));
+        actions.extend([
+            TerminalContextAction::CopyLineToClipboard,
+            TerminalContextAction::CopyVisibleTerminalToClipboard,
+            TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+            TerminalContextAction::PasteClipboard,
+        ]);
+        let width = 38.min(self.layout.screen_area.width.max(1));
+        let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
-        self.mode = Mode::AgentPaneContextMenu(AgentPaneContextMenu {
+        self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
             pane_id,
+            source_line_text,
+            visible_contents,
+            full_history,
             area: Rect::new(column.min(max_x), row.min(max_y), width, height),
+            actions,
+            selected_index: 0,
         });
+    }
+
+    /// Executes an action from an already-captured terminal context menu.
+    pub fn execute_terminal_context_action(
+        &mut self,
+        action: TerminalContextAction,
+        menu: TerminalPaneContextMenu,
+    ) {
+        match action {
+            TerminalContextAction::CopyLineToClipboard => self
+                .copy_terminal_text_to_clipboard(menu.source_line_text, "Line copied to clipboard"),
+            TerminalContextAction::CopyVisibleTerminalToClipboard => self
+                .copy_terminal_text_to_clipboard(
+                    menu.visible_contents,
+                    "Visible terminal copied to clipboard",
+                ),
+            TerminalContextAction::CopyFullTerminalHistoryToClipboard => self
+                .copy_terminal_text_to_clipboard(
+                    menu.full_history,
+                    "Full terminal history copied to clipboard",
+                ),
+            TerminalContextAction::PasteClipboard => self.paste_clipboard_to_terminal(menu.pane_id),
+            TerminalContextAction::ShowAgentDebugLog => self.open_agent_debug_log(menu.pane_id),
+        }
+    }
+
+    /// Uses the host clipboard for terminal text while keeping UI feedback at
+    /// the terminal interaction boundary.
+    fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text)) {
+            Ok(()) => self.status_message = Some(success_message.to_string()),
+            Err(error) => self.status_message = Some(format!("Could not copy text: {error}")),
+        }
+    }
+
+    /// Reads text from the host clipboard and forwards it to the terminal the
+    /// context menu was opened for. The menu target is authoritative so a
+    /// concurrent focus change cannot paste into a different pane.
+    fn paste_clipboard_to_terminal(&mut self, pane_id: NodeId) {
+        let clipboard_text =
+            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+                Ok(clipboard_text) => clipboard_text,
+                Err(error) => {
+                    self.status_message = Some(format!("Could not read clipboard: {error}"));
+                    return;
+                }
+            };
+
+        if self.forward_terminal_paste(pane_id, &clipboard_text) {
+            self.status_message = Some("Clipboard pasted into terminal".to_string());
+        } else {
+            self.status_message = Some("The selected pane is no longer a terminal".to_string());
+        }
+    }
+
+    /// Keeps an open terminal menu usable when debug history is disabled by
+    /// another client or from Settings while the menu is on screen.
+    pub(crate) fn remove_agent_debug_action_from_terminal_menu(&mut self) {
+        let Mode::TerminalPaneContextMenu(menu) = &mut self.mode else {
+            return;
+        };
+        menu.actions
+            .retain(|action| *action != TerminalContextAction::ShowAgentDebugLog);
+        menu.selected_index = menu
+            .selected_index
+            .min(menu.actions.len().saturating_sub(1));
     }
 
     pub fn open_agent_debug_log(&mut self, pane_id: NodeId) {
@@ -4517,7 +5279,7 @@ impl App {
         column: u16,
         row: u16,
     ) {
-        let actions = vec![EditorLineContextAction::CreateAgentFromLine];
+        let actions = self.editor_line_context_actions(&source);
         let width = 34.min(self.layout.screen_area.width.max(1));
         let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
@@ -4538,6 +5300,30 @@ impl App {
         source: EditorSourceLine,
     ) {
         match action {
+            EditorLineContextAction::CopyLineToClipboard
+            | EditorLineContextAction::CopyChapterToClipboard
+            | EditorLineContextAction::CopyEntireFileToClipboard => {
+                match self.editor_clipboard_text_for_context_action(action, &source) {
+                    Ok(text) => self.copy_editor_text_to_clipboard(text, action),
+                    Err(message) => self.status_message = Some(message),
+                }
+            }
+            EditorLineContextAction::OpenFileInEditor => {
+                let Some(path) = crate::editor_line_path::project_file_from_line(
+                    &source.text,
+                    &self.session_cwd,
+                ) else {
+                    self.status_message =
+                        Some("The line no longer identifies a file under this project".to_string());
+                    return;
+                };
+                let parent_group = self
+                    .tree
+                    .parent_of(source.pane_id)
+                    .unwrap_or_else(|| self.group_for_new_node());
+                self.request_new_editor(parent_group, path.clone());
+                self.status_message = Some(format!("Opening {}", path.display()));
+            }
             EditorLineContextAction::CreateAgentFromLine => {
                 let parent_group = self
                     .tree
@@ -4548,6 +5334,111 @@ impl App {
                     parent_group,
                 )));
             }
+        }
+    }
+
+    /// Derives the actions from the immutable right-click target and the live
+    /// editor buffer. Chapter copying is intentionally absent unless the
+    /// clicked physical line belongs to a parsed Markdown heading section.
+    fn editor_line_context_actions(
+        &self,
+        source: &EditorSourceLine,
+    ) -> Vec<EditorLineContextAction> {
+        let mut actions = vec![EditorLineContextAction::CopyLineToClipboard];
+        if crate::editor_line_path::project_file_from_line(&source.text, &self.session_cwd)
+            .is_some()
+        {
+            actions.push(EditorLineContextAction::OpenFileInEditor);
+        }
+        if self
+            .editor_contents_for_context_source(source)
+            .is_some_and(|contents| {
+                is_markdown_path(&source.path)
+                    && crate::markdown::chapter::source_range_for_chapter_containing_line(
+                        &contents,
+                        source.line_number.saturating_sub(1),
+                    )
+                    .is_some()
+            })
+        {
+            actions.push(EditorLineContextAction::CopyChapterToClipboard);
+        }
+        actions.push(EditorLineContextAction::CopyEntireFileToClipboard);
+        actions.push(EditorLineContextAction::CreateAgentFromLine);
+        actions
+    }
+
+    /// Obtains the current, unsaved editor buffer rather than rereading disk:
+    /// right-click copy actions must preserve edits visible in the pane.
+    fn editor_contents_for_context_source(&self, source: &EditorSourceLine) -> Option<String> {
+        let PaneRuntime::Editor(editor) = self.panes.get(&source.pane_id)? else {
+            return None;
+        };
+        Some(editor.textarea.lines().join("\n"))
+    }
+
+    /// Selects the requested text without doing host I/O, which keeps source
+    /// boundaries testable even where a desktop clipboard is unavailable.
+    fn editor_clipboard_text_for_context_action(
+        &self,
+        action: EditorLineContextAction,
+        source: &EditorSourceLine,
+    ) -> Result<String, String> {
+        match action {
+            EditorLineContextAction::CopyLineToClipboard => Ok(source.text.clone()),
+            EditorLineContextAction::OpenFileInEditor => {
+                Err("Open in editor does not copy text".to_string())
+            }
+            EditorLineContextAction::CopyEntireFileToClipboard => self
+                .editor_contents_for_context_source(source)
+                .ok_or_else(|| "Editor content is no longer available".to_string()),
+            EditorLineContextAction::CopyChapterToClipboard => {
+                let contents = self
+                    .editor_contents_for_context_source(source)
+                    .ok_or_else(|| "Editor content is no longer available".to_string())?;
+                let Some(range) =
+                    crate::markdown::chapter::source_range_for_chapter_containing_line(
+                        &contents,
+                        source.line_number.saturating_sub(1),
+                    )
+                else {
+                    return Err(format!(
+                        "No Markdown chapter contains line {}",
+                        source.line_number
+                    ));
+                };
+                Ok(contents[range].to_string())
+            }
+            EditorLineContextAction::CreateAgentFromLine => {
+                Err("Create agent from line does not copy text".to_string())
+            }
+        }
+    }
+
+    /// Copies already-selected editor text through the same host clipboard
+    /// adapter used by terminal-link actions, keeping user feedback local to
+    /// the interaction that initiated it.
+    fn copy_editor_text_to_clipboard(&mut self, text: String, action: EditorLineContextAction) {
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text)) {
+            Ok(()) => {
+                let message = match action {
+                    EditorLineContextAction::CopyLineToClipboard => "Line copied to clipboard",
+                    EditorLineContextAction::OpenFileInEditor => {
+                        unreachable!("only clipboard actions reach the clipboard adapter")
+                    }
+                    EditorLineContextAction::CopyChapterToClipboard => {
+                        "Chapter copied to clipboard"
+                    }
+                    EditorLineContextAction::CopyEntireFileToClipboard => {
+                        "Entire file copied to clipboard"
+                    }
+                    EditorLineContextAction::CreateAgentFromLine => {
+                        unreachable!("only clipboard actions reach the clipboard adapter")
+                    }
+                };
+                self.status_message = Some(message.to_string());
+            }
+            Err(error) => self.status_message = Some(format!("Could not copy text: {error}")),
         }
     }
 
@@ -4612,6 +5503,7 @@ impl App {
                 actions.insert(0, ContextMenuAction::ShowSplitView);
             }
             Some(node) if node.is_project() => {
+                actions.insert(0, ContextMenuAction::AddChatroom);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 actions.insert(0, ContextMenuAction::ToggleGroup);
             }
@@ -4710,6 +5602,7 @@ impl App {
             }
             ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
             ContextMenuAction::NewFolder => self.action_new_folder(),
+            ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
@@ -4860,6 +5753,15 @@ impl App {
         }
     }
 
+    /// Closes exactly the completed agent selected by its right-panel action.
+    /// Rechecking the durable tree status prevents a stale mouse event from
+    /// closing a pane after detection has observed resumed work.
+    pub(crate) fn action_close_completed_agent(&mut self, pane_id: NodeId) {
+        if self.is_completed_agent_pane(pane_id) {
+            self.action_close(pane_id);
+        }
+    }
+
     pub fn action_start_rename(&mut self) {
         let Some(id) = self.selected_node_id() else {
             return;
@@ -4967,6 +5869,20 @@ impl App {
         }
     }
 
+    /// Toggles only the active editor's line treatment in both Source and
+    /// Rendered Markdown views. The global Editor setting remains the
+    /// default applied to existing and new editors from Settings.
+    pub fn action_toggle_editor_line_display(&mut self) {
+        let Some(id) = self.active_pane_id() else {
+            return;
+        };
+        let content_area = self.editor_content_area(id);
+        if let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) {
+            editor.toggle_line_display();
+            editor.clamp_rendered_scroll(content_area.width, content_area.height);
+        }
+    }
+
     pub fn action_toggle_editor_minimap(&mut self) {
         let Some(id) = self.active_pane_id() else {
             return;
@@ -5050,17 +5966,36 @@ impl App {
             .unwrap_or(ordinary_delay)
     }
 
-    /// Records the tree node currently being drag-held by the left mouse
-    /// button, if any -- see `crate::mouse`, which reads this back out on
-    /// mouse-up to compute the `ReparentNode` request a drop should send.
-    pub(crate) fn set_drag_source(&mut self, source: Option<NodeId>) {
-        self.tree_drag_source = source;
+    /// Starts a possible tree drag. A press alone is intentionally not a
+    /// reorder: `crate::mouse` must observe a real drag event before it can
+    /// turn this into a structural request on mouse-up.
+    pub(crate) fn begin_tree_drag(&mut self, source: NodeId) {
+        self.tree_drag_source = Some(source);
+        self.tree_drag_in_progress = false;
+    }
+
+    /// Marks the current held tree row as an intentional drag gesture.
+    pub(crate) fn mark_tree_drag_in_progress(&mut self) {
+        if self.tree_drag_source.is_some() {
+            self.tree_drag_in_progress = true;
+        }
+    }
+
+    /// Clears the pending tree-drag state after release or cancellation.
+    pub(crate) fn clear_tree_drag(&mut self) {
+        self.tree_drag_source = None;
+        self.tree_drag_in_progress = false;
     }
 
     /// The tree node currently being drag-held, if any -- see
-    /// `set_drag_source`.
+    /// `begin_tree_drag`.
     pub(crate) fn drag_source(&self) -> Option<NodeId> {
         self.tree_drag_source
+    }
+
+    /// Whether the held tree row crossed from a click into a drag gesture.
+    pub(crate) fn is_tree_drag_in_progress(&self) -> bool {
+        self.tree_drag_in_progress
     }
 
     pub(crate) fn help_leader_pending(&self) -> bool {
@@ -5120,6 +6055,45 @@ impl App {
         Some(self.pending_editor_opens.remove(index))
     }
 
+    /// Records a pane this attached client just requested so only its server
+    /// confirmation changes the current right-panel presentation.
+    fn record_pending_pane_focus(
+        &mut self,
+        parent_group: NodeId,
+        content: PaneContentKind,
+        name: String,
+    ) {
+        if self.pending_pane_focuses.len() >= MAX_PENDING_EDITOR_OPENS {
+            self.pending_pane_focuses.remove(0);
+        }
+        self.pending_pane_focuses.push(PendingPaneFocus {
+            name,
+            content,
+            parent_group: (parent_group != ROOT_ID).then_some(parent_group),
+        });
+    }
+
+    /// Consumes this client's pending focus request once the matching pane
+    /// exists in the authoritative tree snapshot. `ROOT_ID` is deliberately
+    /// unconstrained because the server first materializes its project/group.
+    pub(crate) fn take_matching_pending_pane_focus(
+        &mut self,
+        pane_id: NodeId,
+        content: PaneContentKind,
+        name: &str,
+    ) -> bool {
+        let parent_group = self.tree.parent_of(pane_id);
+        let Some(index) = self.pending_pane_focuses.iter().position(|pending| {
+            pending.content == content
+                && pending.name == name
+                && (pending.parent_group.is_none() || pending.parent_group == parent_group)
+        }) else {
+            return false;
+        };
+        self.pending_pane_focuses.remove(index);
+        true
+    }
+
     /// Ordinary (non-leader) key handling while the tree panel has focus.
     pub fn handle_tree_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
@@ -5142,6 +6116,10 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(id) = self.selected_node_id() {
+                    if let Some(project_id) = crate::tree_ui::chatroom_project(&self.tree, id) {
+                        self.show_chatroom(project_id);
+                        return;
+                    }
                     if let Some(entry) = crate::tree_ui::folder_entry(&self.tree, id) {
                         if entry.is_directory {
                             self.toggle_selected_tree_node();
@@ -5182,6 +6160,10 @@ impl App {
     /// you type.
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
+        if matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. }) {
+            self.handle_chatroom_key(key);
+            return;
+        }
         let Some(id) = self.active_pane_id() else {
             return;
         };
@@ -5227,6 +6209,7 @@ impl App {
                             document,
                             editor_content_area.width,
                             editor_content_area.height,
+                            editor.line_display,
                         )
                     })
                     .unwrap_or(0);
@@ -5392,6 +6375,12 @@ impl App {
         let Some(pane_id) = self.active_pane_id() else {
             return false;
         };
+        self.forward_terminal_paste(pane_id, pasted)
+    }
+
+    /// Writes one semantic paste to an exact terminal pane. This shared path
+    /// keeps crossterm paste events and context-menu clipboard reads aligned.
+    fn forward_terminal_paste(&mut self, pane_id: NodeId, pasted: &str) -> bool {
         let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
             return false;
         };
@@ -5444,12 +6433,10 @@ impl App {
                         .pane_id
                         .and_then(|pane_id| self.tree.project_ancestor(pane_id))
                     {
-                        if !self.is_project_restructure_loading(project_id) {
-                            self.action_request_project_restructure(project_id);
-                        }
+                        self.request_automatic_project_restructure(project_id);
                     }
                 }
-                TriggerAction::RestructureAllProjects => self.action_request_restructure(),
+                TriggerAction::RestructureAllProjects => self.request_automatic_restructure(),
             }
         }
     }
@@ -5645,21 +6632,35 @@ impl App {
     /// project. Empty projects are reported as skipped and never spend an
     /// LLM call.
     pub fn action_request_restructure(&mut self) {
+        self.request_restructure_all(RestructureRequestOrigin::Manual);
+    }
+
+    /// Starts a passive restructure batch without bypassing the per-project
+    /// failure circuit breaker. Used only by configured lifecycle triggers.
+    fn request_automatic_restructure(&mut self) {
+        self.request_restructure_all(RestructureRequestOrigin::Automatic);
+    }
+
+    fn request_restructure_all(&mut self, request_origin: RestructureRequestOrigin) {
         // Preserve queued/running jobs so an all-project trigger cannot make
         // an earlier worker's eventual result look like a fresh batch result.
-        self.project_restructure_jobs.retain(|_, job| {
-            matches!(
-                job.state,
-                ProjectRestructureState::Queued | ProjectRestructureState::Running
-            )
-        });
+        if !request_origin.is_automatic() {
+            self.project_restructure_jobs.retain(|_, job| {
+                matches!(
+                    job.state,
+                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                )
+            });
+        }
         let project_ids = self.tree.project_ids();
         if project_ids.is_empty() {
-            self.status_message = Some("No projects to restructure yet".to_string());
+            if !request_origin.is_automatic() {
+                self.status_message = Some("No projects to restructure yet".to_string());
+            }
             return;
         }
         for project_id in project_ids {
-            self.action_request_project_restructure(project_id);
+            self.request_project_restructure(project_id, request_origin);
         }
         self.refresh_structure_loading();
     }
@@ -5667,6 +6668,20 @@ impl App {
     /// Starts one LLM restructure call scoped to `project_id`. A second
     /// click while that project is running does not duplicate its worker.
     pub fn action_request_project_restructure(&mut self, project_id: NodeId) {
+        self.request_project_restructure(project_id, RestructureRequestOrigin::Manual);
+    }
+
+    /// Queues one automatic project request when its current evidence is not
+    /// still inside the exponential retry window from a previous failure.
+    fn request_automatic_project_restructure(&mut self, project_id: NodeId) {
+        self.request_project_restructure(project_id, RestructureRequestOrigin::Automatic);
+    }
+
+    fn request_project_restructure(
+        &mut self,
+        project_id: NodeId,
+        request_origin: RestructureRequestOrigin,
+    ) {
         if self
             .project_restructure_jobs
             .get(&project_id)
@@ -5677,15 +6692,21 @@ impl App {
                 )
             })
         {
-            self.status_message = Some("That project is already restructuring".to_string());
+            if !request_origin.is_automatic() {
+                self.status_message = Some("That project is already restructuring".to_string());
+            }
             return;
         }
         let Some(project) = self.tree.get(project_id) else {
-            self.status_message = Some("Project no longer exists".to_string());
+            if !request_origin.is_automatic() {
+                self.status_message = Some("Project no longer exists".to_string());
+            }
             return;
         };
         let Some(project_cwd) = project.project_path().map(Path::to_path_buf) else {
-            self.status_message = Some("That entry is not a project".to_string());
+            if !request_origin.is_automatic() {
+                self.status_message = Some("That entry is not a project".to_string());
+            }
             return;
         };
         let project_name = project.name.clone();
@@ -5699,17 +6720,34 @@ impl App {
             match crate::restructure::render_project_structure(&self.tree, project_id) {
                 Ok(current_structure) => current_structure,
                 Err(error) => {
-                    self.status_message =
-                        Some(format!("Could not read project structure: {error}"));
+                    if !request_origin.is_automatic() {
+                        self.status_message =
+                            Some(format!("Could not read project structure: {error}"));
+                    }
                     return;
                 }
             };
+        let input_fingerprint = crate::restructure::project_restructure_input_fingerprint(
+            &contexts,
+            &current_structure,
+        );
+        if request_origin.is_automatic()
+            && !self.automatic_restructure_retry_allows(
+                project_id,
+                input_fingerprint,
+                Instant::now(),
+            )
+        {
+            return;
+        }
         if contexts.is_empty() {
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
                     project_name,
                     state: ProjectRestructureState::Skipped,
+                    request_origin,
+                    input_fingerprint,
                 },
             );
             self.refresh_structure_loading();
@@ -5720,6 +6758,8 @@ impl App {
             ProjectRestructureJob {
                 project_name: project_name.clone(),
                 state: ProjectRestructureState::Queued,
+                request_origin,
+                input_fingerprint,
             },
         );
         self.pending_restructure_requests
@@ -5731,6 +6771,46 @@ impl App {
                 current_structure,
             });
         self.refresh_structure_loading();
+    }
+
+    /// Returns whether an automatic request may spend another provider call.
+    /// A changed fingerprint is a new problem and clears the old breaker;
+    /// unchanged evidence waits for the recorded exponential cooldown.
+    fn automatic_restructure_retry_allows(
+        &mut self,
+        project_id: NodeId,
+        input_fingerprint: u64,
+        now: Instant,
+    ) -> bool {
+        let Some(retry) = self.automatic_restructure_retries.get(&project_id) else {
+            return true;
+        };
+        if retry.input_fingerprint != input_fingerprint {
+            self.automatic_restructure_retries.remove(&project_id);
+            return true;
+        }
+        now >= retry.retry_after
+    }
+
+    /// Records one provider/inference failure for unchanged automatic input.
+    /// The delay grows from one minute to a thirty-minute cap, containing
+    /// transient gateway storms while still eventually retrying on its own.
+    fn record_automatic_restructure_failure(&mut self, project_id: NodeId, input_fingerprint: u64) {
+        let now = Instant::now();
+        let consecutive_failures = self
+            .automatic_restructure_retries
+            .get(&project_id)
+            .filter(|retry| retry.input_fingerprint == input_fingerprint)
+            .map_or(1, |retry| retry.consecutive_failures.saturating_add(1));
+        let retry_after = now + automatic_restructure_retry_delay(consecutive_failures);
+        self.automatic_restructure_retries.insert(
+            project_id,
+            AutomaticRestructureRetry {
+                input_fingerprint,
+                consecutive_failures,
+                retry_after,
+            },
+        );
     }
 
     /// Drains every queued project request for worker startup.
@@ -5749,27 +6829,48 @@ impl App {
         expected_structure: &str,
         result: anyhow::Result<ilium_core::RestructurePlan>,
     ) {
-        let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
+        let Some(job) = self.project_restructure_jobs.get(&project_id) else {
             return;
         };
-        match result {
-            Ok(plan) => {
-                let current_structure =
-                    crate::restructure::render_project_structure(&self.tree, project_id);
-                if current_structure
-                    .as_deref()
-                    .is_ok_and(|current_structure| current_structure == expected_structure)
-                {
-                    job.state = ProjectRestructureState::Complete;
-                    self.request_apply_project_restructure_plan(project_id, plan);
-                } else {
-                    job.state = ProjectRestructureState::Failed(
-                        "project changed while inference was running; stale plan discarded"
-                            .to_string(),
-                    );
+        let request_origin = job.request_origin;
+        let input_fingerprint = job.input_fingerprint;
+        let mut inference_failed = false;
+        let mut plan_to_apply = None;
+        let completed = {
+            let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
+                return;
+            };
+            match result {
+                Ok(plan) => {
+                    let current_structure =
+                        crate::restructure::render_project_structure(&self.tree, project_id);
+                    if current_structure
+                        .as_deref()
+                        .is_ok_and(|current_structure| current_structure == expected_structure)
+                    {
+                        job.state = ProjectRestructureState::Complete;
+                        plan_to_apply = Some(plan);
+                    } else {
+                        job.state = ProjectRestructureState::Failed(
+                            "project changed while inference was running; stale plan discarded"
+                                .to_string(),
+                        );
+                    }
+                }
+                Err(error) => {
+                    job.state = ProjectRestructureState::Failed(error.to_string());
+                    inference_failed = true;
                 }
             }
-            Err(error) => job.state = ProjectRestructureState::Failed(error.to_string()),
+            matches!(job.state, ProjectRestructureState::Complete)
+        };
+        if let Some(plan) = plan_to_apply {
+            self.request_apply_project_restructure_plan(project_id, plan);
+        }
+        if inference_failed && request_origin.is_automatic() {
+            self.record_automatic_restructure_failure(project_id, input_fingerprint);
+        } else if completed {
+            self.automatic_restructure_retries.remove(&project_id);
         }
         self.refresh_structure_loading();
     }
@@ -5777,10 +6878,18 @@ impl App {
     /// Records a failure that happened before a restructure worker could be
     /// started, where no inference-time hierarchy snapshot exists to compare.
     pub fn fail_project_restructure(&mut self, project_id: NodeId, error: anyhow::Error) {
+        let Some(job) = self.project_restructure_jobs.get(&project_id) else {
+            return;
+        };
+        let request_origin = job.request_origin;
+        let input_fingerprint = job.input_fingerprint;
         let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
             return;
         };
         job.state = ProjectRestructureState::Failed(error.to_string());
+        if request_origin.is_automatic() {
+            self.record_automatic_restructure_failure(project_id, input_fingerprint);
+        }
         self.refresh_structure_loading();
     }
 
@@ -5872,6 +6981,18 @@ impl App {
             return;
         };
         let id = viewport.pane_id;
+        if self
+            .completed_agent_close_action(viewport)
+            .is_some_and(|action| action.button_area.contains(position))
+        {
+            if matches!(
+                mouse.kind,
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+            ) {
+                self.action_close_completed_agent(id);
+            }
+            return;
+        }
         if matches!(
             mouse.kind,
             crossterm::event::MouseEventKind::Down(
@@ -5879,15 +7000,6 @@ impl App {
             )
         ) {
             self.focus_pane(id);
-        }
-        if matches!(
-            mouse.kind,
-            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right)
-        ) && self.ui_settings.agent_debug_menu_enabled
-            && self.is_detected_agent_pane(id)
-        {
-            self.open_agent_pane_context_menu(id, position.x, position.y);
-            return;
         }
         if !viewport.content_area.contains(position) {
             return;
@@ -5899,6 +7011,17 @@ impl App {
         }
         if matches!(self.panes.get(&id), Some(PaneRuntime::Board(_))) {
             self.handle_board_pane_mouse(id, viewport.content_area, mouse, position);
+            return;
+        }
+
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right)
+        ) && self.panes.get(&id).is_some_and(
+            |pane| matches!(pane, PaneRuntime::Terminal(view) if !view.wants_mouse_protocol()),
+        ) {
+            let source_row = usize::from(position.y.saturating_sub(viewport.content_area.y));
+            self.open_terminal_pane_context_menu(id, source_row, position.x, position.y);
             return;
         }
 
@@ -6248,8 +7371,14 @@ impl App {
                     Some("Switch to Source view to select a physical file line".to_string());
                 return;
             }
-            let source_row = usize::from(editor.source_scroll_row())
+            let source_visual_row = usize::from(editor.source_scroll_row())
                 + usize::from(position.y.saturating_sub(chrome.content_area.y));
+            let Some(source_row) = editor
+                .source_visual_row_at(chrome.content_area.width, source_visual_row)
+                .map(|visual_row| visual_row.source_row)
+            else {
+                return;
+            };
             let Some(line_text) = editor.textarea.lines().get(source_row).cloned() else {
                 return;
             };
@@ -6279,6 +7408,7 @@ impl App {
                         editor.scroll_source_view(
                             -(TERMINAL_WHEEL_SCROLL_LINES as i16),
                             chrome.content_area.height,
+                            chrome.content_area.width,
                         );
                         return;
                     }
@@ -6286,6 +7416,7 @@ impl App {
                         editor.scroll_source_view(
                             TERMINAL_WHEEL_SCROLL_LINES as i16,
                             chrome.content_area.height,
+                            chrome.content_area.width,
                         );
                         return;
                     }
@@ -6314,6 +7445,7 @@ impl App {
                         document,
                         chrome.content_area.width,
                         chrome.content_area.height,
+                        editor.line_display,
                     )
                 })
                 .unwrap_or(0);
@@ -6347,12 +7479,16 @@ impl App {
                 let Some(document) = &editor.rendered else {
                     return;
                 };
-                let total_height =
-                    crate::markdown::view::content_height(document, editor_content_area.width);
+                let total_height = crate::markdown::view::content_height(
+                    document,
+                    editor_content_area.width,
+                    editor.line_display,
+                );
                 let max_scroll = crate::markdown::view::max_scroll(
                     document,
                     editor_content_area.width,
                     editor_content_area.height,
+                    editor.line_display,
                 );
                 let fraction = target_line as f64 / total_lines.max(1) as f64;
                 editor.rendered_scroll =
@@ -6369,6 +7505,7 @@ impl App {
         action: crate::editor_toolbar::ToolbarAction,
     ) {
         use crate::editor_toolbar::ToolbarAction;
+        let content_area = self.editor_content_area(id);
         let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
             return;
         };
@@ -6387,7 +7524,15 @@ impl App {
                     self.rebuild_rendered_markdown(id);
                 }
             }
+            ToolbarAction::ToggleHeadingRendering => {
+                editor.toggle_heading_rendering();
+                self.rebuild_rendered_markdown(id);
+            }
             ToolbarAction::ToggleLineNumbers => editor.toggle_line_numbers(),
+            ToolbarAction::ToggleLineDisplay => {
+                editor.toggle_line_display();
+                editor.clamp_rendered_scroll(content_area.width, content_area.height);
+            }
             ToolbarAction::ToggleMinimap => {
                 editor.toggle_minimap();
                 if editor.view_mode == EditorViewMode::Rendered {
@@ -6426,9 +7571,17 @@ fn checkbox_at(
     }
 
     let clicked_row_on_screen = position.y - content_area.y;
-    let row = editor.source_scroll_row() as usize + clicked_row_on_screen as usize;
+    let visual_row = editor.source_visual_row_at(
+        content_area.width,
+        editor.source_scroll_row() as usize + clicked_row_on_screen as usize,
+    )?;
+    let row = visual_row.source_row;
     let line = editor.textarea.lines().get(row)?;
     let (bracket_col, checked) = crate::markdown::checkbox::find_checkbox(line)?;
+    let bracket_byte = line.char_indices().nth(bracket_col)?.0;
+    if !(visual_row.start_byte..visual_row.end_byte).contains(&bracket_byte) {
+        return None;
+    }
 
     let gutter_width = if editor.show_line_numbers {
         usize::from(crate::editor_highlight::line_number_gutter_width(
@@ -6438,7 +7591,8 @@ fn checkbox_at(
         0
     };
     let clicked_col_on_screen = (position.x - content_area.x) as usize;
-    let expected_col = gutter_width + bracket_col;
+    let expected_col = gutter_width
+        + unicode_width::UnicodeWidthStr::width(&line[visual_row.start_byte..bracket_byte]);
     let checkbox_span = expected_col..expected_col + 3; // "[ ]" / "[x]"
     checkbox_span
         .contains(&clicked_col_on_screen)
@@ -6602,6 +7756,68 @@ mod tests {
             &app.project_restructure_jobs[&project_id].state,
             ProjectRestructureState::Failed(message) if message.contains("stale plan discarded")
         ));
+    }
+
+    #[test]
+    fn automatic_restructure_failures_back_off_but_manual_and_changed_input_bypass_them() {
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/retry-project"))
+            .unwrap();
+        let group_id = app.tree.add_group(project_id, "initial work").unwrap();
+        app.tree
+            .add_pane(group_id, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        app.request_automatic_project_restructure(project_id);
+        let automatic_request = app.take_pending_restructure_requests().remove(0);
+        app.finish_project_restructure(
+            project_id,
+            &automatic_request.current_structure,
+            Err(anyhow::anyhow!("gateway timed out")),
+        );
+        assert_eq!(
+            app.automatic_restructure_retries[&project_id].consecutive_failures,
+            1
+        );
+
+        app.request_automatic_project_restructure(project_id);
+        assert!(app.take_pending_restructure_requests().is_empty());
+
+        app.action_request_project_restructure(project_id);
+        let manual_request = app.take_pending_restructure_requests().remove(0);
+        app.finish_project_restructure(
+            project_id,
+            &manual_request.current_structure,
+            Err(anyhow::anyhow!("manual provider failure")),
+        );
+        assert_eq!(
+            app.automatic_restructure_retries[&project_id].consecutive_failures, 1,
+            "a manual bypass must not extend the automatic circuit breaker"
+        );
+
+        app.tree
+            .rename_node(group_id, "new work arrived", None, None)
+            .unwrap();
+        app.request_automatic_project_restructure(project_id);
+        assert_eq!(app.take_pending_restructure_requests().len(), 1);
+    }
+
+    #[test]
+    fn automatic_restructure_retry_delay_is_bounded_exponential_backoff() {
+        assert_eq!(
+            automatic_restructure_retry_delay(1),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            automatic_restructure_retry_delay(2),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            automatic_restructure_retry_delay(99),
+            Duration::from_secs(30 * 60)
+        );
     }
 
     #[test]
@@ -7472,6 +8688,47 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_paste_preserves_its_target_pane_and_bracketed_paste_contract() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let context_menu_pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        let active_pane_id = app
+            .tree
+            .add_pane(group, "other", PaneContentKind::Terminal)
+            .unwrap();
+        let mut context_menu_view = TerminalView::new(24, 80);
+        context_menu_view.feed(b"\x1b[?2004h");
+        app.panes.insert(
+            context_menu_pane_id,
+            PaneRuntime::Terminal(Box::new(context_menu_view)),
+        );
+        app.panes.insert(
+            active_pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane {
+            pane_id: active_pane_id,
+        };
+        app.focus = FocusTarget::Pane;
+        app.take_outbound_requests();
+
+        let clipboard_text = "first line\nUnicode: café 世界\n";
+        assert!(app.forward_terminal_paste(context_menu_pane_id, clipboard_text));
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id: context_menu_pane_id,
+                bytes: encode_bracketed_paste(clipboard_text),
+                submission: None,
+            }]
+        );
+    }
+
+    #[test]
     fn non_bracketed_terminal_paste_is_one_raw_bulk_request() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -7711,7 +8968,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_pane_selects_it_and_clears_a_stale_done_flag() {
+    fn focus_pane_requests_server_acknowledgement_for_a_completed_turn() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -7732,16 +8989,88 @@ mod tests {
 
         assert_eq!(app.active_pane_id(), Some(pane_id));
         assert_eq!(app.focus, FocusTarget::Pane);
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::SetPaneFocus {
+                pane_id: requested_pane_id,
+                focused: true,
+            }] if *requested_pane_id == pane_id
+        ));
         match &app.tree.get(pane_id).unwrap().kind {
             NodeKind::Pane { status, .. } => assert_eq!(
                 *status,
                 PaneStatus::Agent(
                     ilium_core::AgentClass::Claude,
-                    ilium_core::AgentActivity::Idle
+                    ilium_core::AgentActivity::Done
                 )
             ),
             _ => panic!("expected a pane"),
         }
+    }
+
+    #[test]
+    fn cycle_navigation_wraps_direct_group_panes_and_split_members() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Editor)
+            .unwrap();
+        let third = app
+            .tree
+            .add_pane(group, "third", PaneContentKind::Board)
+            .unwrap();
+        app.tree
+            .create_split_view(group, "split", SplitOrientation::Vertical, &[second, third])
+            .unwrap();
+        app.focus_pane(first);
+        app.take_outbound_requests();
+
+        app.cycle_pane_in_current_group(1);
+        assert_eq!(app.active_pane_id(), Some(second));
+        app.cycle_pane_in_current_group(1);
+        assert_eq!(app.active_pane_id(), Some(third));
+        app.cycle_pane_in_current_group(1);
+        assert_eq!(app.active_pane_id(), Some(first));
+        app.cycle_pane_in_current_group(-1);
+        assert_eq!(app.active_pane_id(), Some(third));
+    }
+
+    #[test]
+    fn group_jump_skips_empty_groups_and_wraps_in_tree_order() {
+        let mut app = app();
+        let first_group = app.tree.add_group(ROOT_ID, "first").unwrap();
+        let first_pane = app
+            .tree
+            .add_pane(first_group, "first pane", PaneContentKind::Terminal)
+            .unwrap();
+        let empty_group = app.tree.add_group(ROOT_ID, "empty").unwrap();
+        let nested_group = app.tree.add_group(first_group, "nested").unwrap();
+        let nested_pane = app
+            .tree
+            .add_pane(nested_group, "nested pane", PaneContentKind::Editor)
+            .unwrap();
+        let last_group = app.tree.add_group(ROOT_ID, "last").unwrap();
+        let last_pane = app
+            .tree
+            .add_pane(last_group, "last pane", PaneContentKind::Board)
+            .unwrap();
+        app.focus_pane(first_pane);
+        app.take_outbound_requests();
+
+        app.jump_to_group(1);
+        assert_eq!(app.active_pane_id(), Some(nested_pane));
+        app.jump_to_group(1);
+        assert_eq!(app.active_pane_id(), Some(last_pane));
+        app.jump_to_group(1);
+        assert_eq!(app.active_pane_id(), Some(first_pane));
+        app.jump_to_group(-1);
+        assert_eq!(app.active_pane_id(), Some(last_pane));
+        assert!(app.tree.navigable_panes_in_group(empty_group).is_empty());
     }
 
     #[test]
@@ -7893,6 +9222,42 @@ mod tests {
             }
         );
         assert_eq!(app.displayed_pane_ids(), vec![first]);
+    }
+
+    #[test]
+    fn pane_target_reconciliation_promotes_a_member_moved_into_a_split() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first],
+            )
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: second };
+
+        app.tree.move_node(second, split, None).unwrap();
+        app.reconcile_right_panel_target();
+
+        assert_eq!(
+            app.right_panel_target,
+            RightPanelTarget::SplitView {
+                split_id: split,
+                active_pane_id: Some(second),
+            }
+        );
+        assert_eq!(app.displayed_pane_ids(), vec![first, second]);
     }
 
     #[test]
@@ -8118,7 +9483,61 @@ mod tests {
     }
 
     #[test]
-    fn right_click_opens_debug_menu_only_for_detected_agents_when_enabled() {
+    fn completed_agent_close_action_queues_close_without_forwarding_a_terminal_click() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            )
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.take_outbound_requests();
+        let action = app
+            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
+            .expect("done agent exposes a close action");
+        let position = Position::new(action.button_area.x, action.button_area.y);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ClosePane { pane_id }]
+        );
+
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            )
+            .unwrap();
+        assert!(app
+            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn right_click_opens_terminal_clipboard_menu_for_shells_and_adds_debug_for_agents() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
         let mut app = app();
@@ -8129,13 +9548,17 @@ mod tests {
             .unwrap();
         app.panes.insert(
             pane_id,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                view.feed(b"first terminal line\r\nclicked terminal line");
+                view
+            })),
         );
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.focus = FocusTarget::Pane;
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let viewport = app.pane_viewport(pane_id).unwrap();
-        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 2);
+        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 1);
         let right_click = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Right),
             column: position.x,
@@ -8144,7 +9567,24 @@ mod tests {
         };
 
         app.handle_pane_mouse(right_click, position);
-        assert!(!matches!(app.mode, Mode::AgentPaneContextMenu(_)));
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("plain shell right click should open its copy menu");
+        };
+        assert_eq!(menu.pane_id, pane_id);
+        assert_eq!(menu.source_line_text, "clicked terminal line");
+        assert_eq!(
+            menu.full_history,
+            "first terminal line\nclicked terminal line"
+        );
+        assert_eq!(
+            menu.actions,
+            vec![
+                TerminalContextAction::CopyLineToClipboard,
+                TerminalContextAction::CopyVisibleTerminalToClipboard,
+                TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+                TerminalContextAction::PasteClipboard,
+            ]
+        );
 
         app.tree
             .set_pane_status(
@@ -8153,14 +9593,26 @@ mod tests {
             )
             .unwrap();
         app.handle_pane_mouse(right_click, position);
-        assert!(!matches!(app.mode, Mode::AgentPaneContextMenu(_)));
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("detected agent right click should retain terminal copy actions");
+        };
+        assert_eq!(menu.actions.len(), 4);
 
         app.ui_settings.agent_debug_menu_enabled = true;
         app.handle_pane_mouse(right_click, position);
-        let Mode::AgentPaneContextMenu(menu) = &app.mode else {
-            panic!("enabled detected-agent right click should open its menu");
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("enabled detected-agent right click should open its terminal menu");
         };
-        assert_eq!(menu.pane_id, pane_id);
+        assert_eq!(
+            menu.actions,
+            vec![
+                TerminalContextAction::ShowAgentDebugLog,
+                TerminalContextAction::CopyLineToClipboard,
+                TerminalContextAction::CopyVisibleTerminalToClipboard,
+                TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+                TerminalContextAction::PasteClipboard,
+            ]
+        );
     }
 
     #[test]
@@ -8368,19 +9820,20 @@ mod tests {
     fn editor_right_click_captures_the_physical_source_line_and_opens_its_menu() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-        let mut app = app();
+        let project = tempfile::tempdir().unwrap();
+        let target_path = project.path().join("docs").join("guide.md");
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(&target_path, "# Guide\n").unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let editor_id = app
             .tree
             .add_pane(group, "main.rs", PaneContentKind::Editor)
             .unwrap();
         let mut editor = EditorPane::empty();
-        editor.path = Some(PathBuf::from("/work/src/main.rs"));
-        editor.textarea = ratatui_textarea::TextArea::from([
-            "first();",
-            "create_the_agent_from_this();",
-            "third();",
-        ]);
+        editor.path = Some(project.path().join("tasks.md"));
+        editor.textarea =
+            ratatui_textarea::TextArea::from(["first();", "- `docs/guide.md`", "third();"]);
         app.panes
             .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
         app.right_panel_target = RightPanelTarget::Pane { pane_id: editor_id };
@@ -8406,8 +9859,119 @@ mod tests {
         };
         assert_eq!(menu.source.pane_id, editor_id);
         assert_eq!(menu.source.line_number, 2);
-        assert_eq!(menu.source.text, "create_the_agent_from_this();");
-        assert_eq!(menu.source.path, PathBuf::from("/work/src/main.rs"));
+        assert_eq!(menu.source.text, "- `docs/guide.md`");
+        assert_eq!(menu.source.path, project.path().join("tasks.md"));
+        assert_eq!(
+            menu.actions,
+            vec![
+                EditorLineContextAction::CopyLineToClipboard,
+                EditorLineContextAction::OpenFileInEditor,
+                EditorLineContextAction::CopyEntireFileToClipboard,
+                EditorLineContextAction::CreateAgentFromLine,
+            ]
+        );
+    }
+
+    #[test]
+    fn editor_line_context_menu_opens_an_existing_normalized_project_file() {
+        let project = tempfile::tempdir().unwrap();
+        let project_cwd = project.path();
+        let target_path = project_cwd.join("docs").join("guide.md");
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(&target_path, "# Guide\n").unwrap();
+        let mut app = App::new("test".to_string(), project_cwd.to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "tasks.md", PaneContentKind::Editor)
+            .unwrap();
+        let source = EditorSourceLine {
+            pane_id: editor_id,
+            path: project_cwd.join("tasks.md"),
+            line_number: 4,
+            text: "- `docs/guide.md`".to_string(),
+        };
+
+        assert_eq!(
+            app.editor_line_context_actions(&source),
+            vec![
+                EditorLineContextAction::CopyLineToClipboard,
+                EditorLineContextAction::OpenFileInEditor,
+                EditorLineContextAction::CopyEntireFileToClipboard,
+                EditorLineContextAction::CreateAgentFromLine,
+            ]
+        );
+        app.execute_editor_line_context_action(EditorLineContextAction::OpenFileInEditor, source);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::NewPane {
+                parent_group: group,
+                kind: ilium_ipc::NewPaneKind::Editor(target_path.clone()),
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+            }]
+        );
+        let status_message = format!("Opening {}", target_path.display());
+        assert_eq!(app.status_message.as_deref(), Some(status_message.as_str()));
+    }
+
+    #[test]
+    fn markdown_editor_context_menu_copies_current_chapter_and_unsaved_file_contents() {
+        let mut app = app();
+        let editor_id = NodeId(88);
+        let mut editor = EditorPane::empty();
+        editor.path = Some(PathBuf::from("/work/guide.md"));
+        editor.textarea = ratatui_textarea::TextArea::from([
+            "# Guide",
+            "",
+            "## Install",
+            "setup",
+            "",
+            "### Detail",
+            "inner",
+            "",
+            "## Use",
+            "run",
+        ]);
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+        let source = EditorSourceLine {
+            pane_id: editor_id,
+            path: PathBuf::from("/work/guide.md"),
+            line_number: 7,
+            text: "inner".to_string(),
+        };
+
+        assert_eq!(
+            app.editor_line_context_actions(&source),
+            vec![
+                EditorLineContextAction::CopyLineToClipboard,
+                EditorLineContextAction::CopyChapterToClipboard,
+                EditorLineContextAction::CopyEntireFileToClipboard,
+                EditorLineContextAction::CreateAgentFromLine,
+            ]
+        );
+        assert_eq!(
+            app.editor_clipboard_text_for_context_action(
+                EditorLineContextAction::CopyLineToClipboard,
+                &source,
+            ),
+            Ok("inner".to_string())
+        );
+        assert_eq!(
+            app.editor_clipboard_text_for_context_action(
+                EditorLineContextAction::CopyChapterToClipboard,
+                &source,
+            ),
+            Ok("### Detail\ninner\n\n".to_string())
+        );
+        assert_eq!(
+            app.editor_clipboard_text_for_context_action(
+                EditorLineContextAction::CopyEntireFileToClipboard,
+                &source,
+            ),
+            Ok("# Guide\n\n## Install\nsetup\n\n### Detail\ninner\n\n## Use\nrun".to_string())
+        );
     }
 
     #[test]
@@ -8500,6 +10064,24 @@ mod tests {
                 .unwrap()
                 .ui
                 .use_stable_glyphs
+        );
+    }
+
+    #[test]
+    fn tree_row_management_controls_default_off_and_persist_when_enabled() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        assert!(!app.ui_settings.show_tree_row_management_controls);
+        app.settings_adjust_row(AppearanceRow::TreeRowManagementControls, 1);
+
+        assert!(app.ui_settings.show_tree_row_management_controls);
+        assert!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .show_tree_row_management_controls
         );
     }
 
@@ -8776,6 +10358,48 @@ mod tests {
     }
 
     #[test]
+    fn pixel_header_toolbar_action_rebuilds_rendered_markdown_as_plain_text() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "portable.md", PaneContentKind::Editor)
+            .unwrap();
+        let mut editor = EditorPane::empty();
+        editor.path = Some(PathBuf::from("/tmp/portable.md"));
+        editor.textarea = ratatui_textarea::TextArea::from(["# Portable title"]);
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: editor_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        app.execute_editor_toolbar_action(
+            editor_id,
+            crate::editor_toolbar::ToolbarAction::ViewRendered,
+        );
+        app.execute_editor_toolbar_action(
+            editor_id,
+            crate::editor_toolbar::ToolbarAction::ToggleHeadingRendering,
+        );
+
+        let PaneRuntime::Editor(editor) = app.panes.get(&editor_id).unwrap() else {
+            panic!("test pane must remain an editor");
+        };
+        assert_eq!(
+            editor.heading_rendering,
+            crate::markdown::render::HeadingRendering::PlainText
+        );
+        let document = editor
+            .rendered
+            .as_ref()
+            .expect("toolbar action must rebuild the rendered document");
+        let crate::markdown::render::RenderedBlock::Text(lines) = &document.blocks[0] else {
+            panic!("disabled pixel headers must render as plain text");
+        };
+        assert_eq!(lines[0].spans[0].content, "Portable title");
+    }
+
+    #[test]
     fn every_tree_context_menu_exposes_workspace_search() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
@@ -8785,5 +10409,68 @@ mod tests {
             panic!("tree context menu should open");
         };
         assert!(menu.actions.contains(&ContextMenuAction::Search));
+    }
+
+    #[test]
+    fn chatroom_refresh_follows_only_while_the_view_is_at_the_live_tail() {
+        let directory = tempfile::tempdir().unwrap();
+        crate::chatroom::initialize(directory.path()).unwrap();
+        for index in 0..20 {
+            crate::chatroom::append_message(
+                directory.path(),
+                "agent:codex",
+                &format!("initial history message {index:02}"),
+            )
+            .unwrap();
+        }
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(directory.path().to_path_buf())
+            .unwrap();
+        app.set_screen_area(Rect::new(0, 0, 90, 16));
+        app.show_chatroom(project_id);
+        assert!(app.reconcile_chatroom_projects());
+        assert!(!app.reconcile_chatroom_projects());
+
+        let initial_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
+        assert!(initial_metrics.is_overflowing());
+        assert_eq!(initial_metrics.top, initial_metrics.maximum_top);
+        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
+
+        app.handle_chatroom_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::PageUp,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        let manually_scrolled_top = app.chatroom_scroll_metrics(project_id).unwrap().top;
+        assert!(app.chatrooms[&project_id].scroll_from_newest > 0);
+
+        crate::chatroom::append_message(
+            directory.path(),
+            "agent:claude",
+            "new message while history is being inspected",
+        )
+        .unwrap();
+        assert!(app.reconcile_chatroom_projects());
+        assert_eq!(
+            app.chatroom_scroll_metrics(project_id).unwrap().top,
+            manually_scrolled_top
+        );
+        assert!(app.chatrooms[&project_id].scroll_from_newest > 0);
+
+        app.handle_chatroom_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        crate::chatroom::append_message(
+            directory.path(),
+            "agent:codex",
+            "new message while following the live tail",
+        )
+        .unwrap();
+        assert!(app.reconcile_chatroom_projects());
+        let followed_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
+        assert_eq!(followed_metrics.top, followed_metrics.maximum_top);
+        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
     }
 }

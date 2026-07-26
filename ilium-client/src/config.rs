@@ -1,5 +1,5 @@
 //! ilium-client's own `~/.config/ilium/config.toml` tables:
-//! `[keybindings]` (remap which letter triggers an existing
+//! `[keybindings]` (remap which key triggers an existing
 //! `keymap::Action`), `[keyboard]` (choose the `Ctrl+letter` shortcut base),
 //! and `[theme]` (override a handful of `theme::Theme`'s colors). Server-side config (`ilium-server/src/config.rs`: poll
 //! intervals, custom detection signatures) lives in a different crate and
@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ClientError;
 use crate::icon_settings::{IconSettings, IconTarget};
-use crate::keymap::{self, KeyBinding, ShortcutBase, LEADER_BINDINGS};
+use crate::keymap::{
+    self, BindingKey, KeyBinding, ShortcutBase, DEFAULT_NAVIGATION_SHORTCUT_BASE, LEADER_BINDINGS,
+};
 use crate::layout::{DEFAULT_TREE_WIDTH, MAX_TREE_WIDTH, MIN_TREE_WIDTH};
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
@@ -248,6 +250,9 @@ impl NewPaneDirectory {
 /// Defaults for newly opened local editor panes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorSettings {
+    /// Whether Source view preserves logical lines with horizontal scrolling
+    /// or folds them into the available editor width.
+    pub line_display: LineDisplay,
     pub show_line_numbers: bool,
     pub show_minimap: bool,
     pub autosave_enabled: bool,
@@ -257,11 +262,39 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            line_display: LineDisplay::default(),
             show_line_numbers: true,
             show_minimap: true,
             autosave_enabled: true,
             autosave_delay_ms: 1000,
             markdown_rendered_by_default: false,
+        }
+    }
+}
+
+/// Source-view treatment for lines that extend beyond the editor viewport.
+/// `Clip` preserves the existing code-editor convention: the visible portion
+/// is clipped while cursor movement reveals the rest horizontally. `Wrap`
+/// reflows the line at terminal-cell boundaries without changing the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineDisplay {
+    #[default]
+    Clip,
+    Wrap,
+}
+
+impl LineDisplay {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Clip => "Clip",
+            Self::Wrap => "Wrap",
+        }
+    }
+
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Clip => Self::Wrap,
+            Self::Wrap => Self::Clip,
         }
     }
 }
@@ -308,9 +341,21 @@ pub struct SessionSettings {
 }
 
 /// `[keyboard]` settings, validated before they reach input dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyboardSettings {
     pub shortcut_base: ShortcutBase,
+    /// Independent prefix for the four tree cycle/jump actions. This keeps
+    /// the requested default available even when the general leader differs.
+    pub navigation_shortcut_base: ShortcutBase,
+}
+
+impl Default for KeyboardSettings {
+    fn default() -> Self {
+        Self {
+            shortcut_base: ShortcutBase::default(),
+            navigation_shortcut_base: DEFAULT_NAVIGATION_SHORTCUT_BASE,
+        }
+    }
 }
 
 pub const MIN_CARD_PREVIEW_LINES: u16 = 1;
@@ -593,6 +638,10 @@ pub struct UiSettings {
     pub use_stable_glyphs: bool,
     /// Shows LLM-suggested per-title icons before node names in the left tree.
     pub show_inferred_title_icons: bool,
+    /// Shows the rename and one-step move controls in the hovered tree-row
+    /// action strip. They are optional because keyboard shortcuts and context
+    /// menus keep the operations available without persistent row clutter.
+    pub show_tree_row_management_controls: bool,
     /// Exposes a pane-scoped right-click debug history for detected agents.
     /// Capture is deliberately opt-in because prompts and provider details
     /// are persisted in the project session snapshot.
@@ -613,6 +662,7 @@ impl Default for UiSettings {
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
             show_inferred_title_icons: false,
+            show_tree_row_management_controls: false,
             agent_debug_menu_enabled: false,
             icons: IconSettings::default(),
         }
@@ -627,8 +677,9 @@ impl Default for UiSettings {
 /// validator.
 #[derive(Debug, Default, Deserialize)]
 struct RawClientConfig {
-    /// `action_name -> letter`, e.g. `new_terminal = "c"`. Only remaps
-    /// which letter triggers an existing `Action` -- see `keymap`'s module
+    /// `action_name -> key`, e.g. `new_terminal = "c"` or
+    /// `cycle_next_in_group = "down"`. Only remaps which key triggers an
+    /// existing `Action` -- see `keymap`'s module
     /// doc comment for why defining brand-new actions is out of scope.
     #[serde(default)]
     keybindings: HashMap<String, String>,
@@ -662,6 +713,7 @@ struct RawClientConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawKeyboardConfig {
     shortcut_base: Option<String>,
+    navigation_shortcut_base: Option<String>,
 }
 
 /// `[kanban_board]`'s optional on-disk shape.
@@ -689,6 +741,7 @@ struct RawUiConfig {
     sidebar_density: Option<String>,
     use_stable_glyphs: Option<bool>,
     show_inferred_title_icons: Option<bool>,
+    show_tree_row_management_controls: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
@@ -701,6 +754,7 @@ struct RawTerminalConfig {
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawEditorConfig {
+    line_display: Option<String>,
     show_line_numbers: Option<bool>,
     show_minimap: Option<bool>,
     autosave_enabled: Option<bool>,
@@ -737,18 +791,19 @@ pub enum ConfigLoadError {
     /// A `[keybindings]` key isn't any known `Action`'s `action_name`.
     #[error("keybindings.{0:?} is not a known action")]
     UnknownAction(String),
-    /// A `[keybindings]` value isn't exactly one character.
-    #[error("keybindings.{action:?} = {value:?} must be exactly one character")]
-    InvalidLetter { action: String, value: String },
+    /// A `[keybindings]` value isn't a printable key or one of the named
+    /// arrow/page keys supported after the leader.
+    #[error("keybindings.{action:?} = {value:?} must be one printable key, up, down, page_up, or page_down")]
+    InvalidBinding { action: String, value: String },
     /// `[keyboard].shortcut_base` is not exactly one ASCII letter.
     #[error("keyboard.shortcut_base = {0:?} must be exactly one letter from A to Z")]
     InvalidShortcutBase(String),
-    /// Two actions ended up bound to the same letter after applying every
+    /// Two actions ended up bound to the same key after applying every
     /// override -- `action_for` can only ever dispatch one of them, so this
     /// is rejected rather than silently picking whichever comes first in
     /// table order.
-    #[error("keybindings config binds more than one action to the letter {0:?}")]
-    DuplicateLetter(char),
+    #[error("keybindings config binds more than one action to the key {0}")]
+    DuplicateBinding(BindingKey),
     /// A `[theme]` value isn't a valid `#rrggbb`/`rrggbb` hex color.
     #[error("theme.{field:?} = {value:?} is not a valid #rrggbb hex color")]
     InvalidColor { field: &'static str, value: String },
@@ -785,6 +840,8 @@ pub enum ConfigLoadError {
     InvalidScrollbackBudget(u16),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
     InvalidNewPaneDirectory(String),
+    #[error("editor.line_display = {0:?} must be \"clip\" or \"wrap\"")]
+    InvalidEditorLineDisplay(String),
     #[error("session.recovery_policy = {0:?} is not supported")]
     InvalidSessionRecoveryPolicy(String),
     /// `kanban_board.card_preview_lines` is outside the supported range.
@@ -859,7 +916,10 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
-    let editor = merge_editor(raw.editor);
+    let editor = merge_editor(raw.editor).map_err(|source| ClientError::ConfigLoad {
+        path: path.clone(),
+        source,
+    })?;
     let session = merge_session(raw.session).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source,
@@ -893,15 +953,24 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     })
 }
 
-/// Resolves the shortcut base while keeping an absent `[keyboard]` table on
-/// the portable `Ctrl+A` default.
+/// Resolves both configurable keyboard prefixes while keeping an absent
+/// `[keyboard]` table on the portable `Ctrl+A` and dedicated `Ctrl+B`
+/// defaults.
 fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoadError> {
     let shortcut_base = match raw.shortcut_base {
         Some(value) => ShortcutBase::parse(&value)
             .ok_or_else(|| ConfigLoadError::InvalidShortcutBase(value.clone()))?,
         None => ShortcutBase::default(),
     };
-    Ok(KeyboardSettings { shortcut_base })
+    let navigation_shortcut_base = match raw.navigation_shortcut_base {
+        Some(value) => ShortcutBase::parse(&value)
+            .ok_or_else(|| ConfigLoadError::InvalidShortcutBase(value.clone()))?,
+        None => DEFAULT_NAVIGATION_SHORTCUT_BASE,
+    };
+    Ok(KeyboardSettings {
+        shortcut_base,
+        navigation_shortcut_base,
+    })
 }
 
 /// Applies the optional board preview height over the three-line default.
@@ -994,6 +1063,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_inferred_title_icons: raw
             .show_inferred_title_icons
             .unwrap_or(defaults.show_inferred_title_icons),
+        show_tree_row_management_controls: raw
+            .show_tree_row_management_controls
+            .unwrap_or(defaults.show_tree_row_management_controls),
         agent_debug_menu_enabled: raw
             .agent_debug_menu_enabled
             .unwrap_or(defaults.agent_debug_menu_enabled),
@@ -1024,9 +1096,15 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
         new_pane_directory,
     })
 }
-fn merge_editor(raw: RawEditorConfig) -> EditorSettings {
+fn merge_editor(raw: RawEditorConfig) -> Result<EditorSettings, ConfigLoadError> {
     let defaults = EditorSettings::default();
-    EditorSettings {
+    Ok(EditorSettings {
+        line_display: raw
+            .line_display
+            .as_deref()
+            .map(parse_line_display)
+            .transpose()?
+            .unwrap_or(defaults.line_display),
         show_line_numbers: raw.show_line_numbers.unwrap_or(defaults.show_line_numbers),
         show_minimap: raw.show_minimap.unwrap_or(defaults.show_minimap),
         autosave_enabled: raw.autosave_enabled.unwrap_or(defaults.autosave_enabled),
@@ -1037,7 +1115,7 @@ fn merge_editor(raw: RawEditorConfig) -> EditorSettings {
         markdown_rendered_by_default: raw
             .markdown_rendered_by_default
             .unwrap_or(defaults.markdown_rendered_by_default),
-    }
+    })
 }
 fn merge_session(raw: RawSessionConfig) -> Result<SessionSettings, ConfigLoadError> {
     Ok(SessionSettings {
@@ -1072,6 +1150,13 @@ fn parse_new_pane_directory(value: &str) -> Result<NewPaneDirectory, ConfigLoadE
         "focused_terminal" => Ok(NewPaneDirectory::FocusedTerminal),
         "last_used" => Ok(NewPaneDirectory::LastUsed),
         _ => Err(ConfigLoadError::InvalidNewPaneDirectory(value.to_string())),
+    }
+}
+fn parse_line_display(value: &str) -> Result<LineDisplay, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "clip" => Ok(LineDisplay::Clip),
+        "wrap" => Ok(LineDisplay::Wrap),
+        _ => Err(ConfigLoadError::InvalidEditorLineDisplay(value.to_string())),
     }
 }
 fn parse_session_recovery_policy(value: &str) -> Result<SessionRecoveryPolicy, ConfigLoadError> {
@@ -1232,52 +1317,35 @@ fn merge_keybindings(
 ) -> Result<Vec<KeyBinding>, ConfigLoadError> {
     let mut bindings = LEADER_BINDINGS.to_vec();
 
-    for (action_name, letter_value) in overrides {
+    for (action_name, key_value) in overrides {
         let action = keymap::action_from_name(action_name)
             .ok_or_else(|| ConfigLoadError::UnknownAction(action_name.clone()))?;
-        let letter = single_char(letter_value).ok_or_else(|| ConfigLoadError::InvalidLetter {
-            action: action_name.clone(),
-            value: letter_value.clone(),
-        })?;
-        if !keymap::BINDABLE_KEYS.contains(&letter) {
-            return Err(ConfigLoadError::InvalidLetter {
+        let key = BindingKey::parse_config_value(key_value).ok_or_else(|| {
+            ConfigLoadError::InvalidBinding {
                 action: action_name.clone(),
-                value: letter_value.clone(),
-            });
-        }
+                value: key_value.clone(),
+            }
+        })?;
 
         // `LEADER_BINDINGS` has exactly one entry per `Action` (enforced by
         // `action_for`/`action_name` both being total functions over every
         // binding), so this always finds a match.
         if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
-            binding.letter = letter;
+            binding.key = key;
         }
     }
 
-    reject_duplicate_letters(&bindings)?;
+    reject_duplicate_keys(&bindings)?;
     Ok(bindings)
 }
 
-/// `letter_value` if it is exactly one `char`, else `None` -- rejects both
-/// an empty string and a multi-character one (e.g. an accidental `"cc"` or
-/// a pasted multi-byte grapheme cluster the single-letter leader dispatch
-/// couldn't act on anyway).
-fn single_char(letter_value: &str) -> Option<char> {
-    let mut chars = letter_value.chars();
-    let letter = chars.next()?;
-    match chars.next() {
-        Some(_) => None,
-        None => Some(letter),
-    }
-}
-
-/// Rejects a binding table where two actions share a letter -- see
-/// `ConfigLoadError::DuplicateLetter`'s doc comment.
-fn reject_duplicate_letters(bindings: &[KeyBinding]) -> Result<(), ConfigLoadError> {
-    let mut seen_letters = HashSet::with_capacity(bindings.len());
+/// Rejects a binding table where two actions share a key -- see
+/// `ConfigLoadError::DuplicateBinding`'s doc comment.
+fn reject_duplicate_keys(bindings: &[KeyBinding]) -> Result<(), ConfigLoadError> {
+    let mut seen_keys = HashSet::with_capacity(bindings.len());
     for binding in bindings {
-        if !seen_letters.insert(binding.letter) {
-            return Err(ConfigLoadError::DuplicateLetter(binding.letter));
+        if !seen_keys.insert(binding.key) {
+            return Err(ConfigLoadError::DuplicateBinding(binding.key));
         }
     }
     Ok(())
@@ -1419,7 +1487,7 @@ pub fn save_keymap_settings(
     keyboard: &KeyboardSettings,
     bindings: &[KeyBinding],
 ) -> Result<(), ClientError> {
-    reject_duplicate_letters(bindings).map_err(|source| ClientError::ConfigLoad {
+    reject_duplicate_keys(bindings).map_err(|source| ClientError::ConfigLoad {
         path: config_dir.join("config.toml"),
         source,
     })?;
@@ -1433,7 +1501,7 @@ pub fn save_keymap_settings(
     for binding in bindings {
         keybindings.insert(
             keymap::action_name(binding.action).to_string(),
-            toml::Value::String(binding.letter.to_string()),
+            toml::Value::String(binding.key.config_value()),
         );
     }
     table.insert("keybindings".to_string(), toml::Value::Table(keybindings));
@@ -1655,6 +1723,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         toml::Value::Boolean(ui.show_inferred_title_icons),
     );
     table.insert(
+        "show_tree_row_management_controls".to_string(),
+        toml::Value::Boolean(ui.show_tree_row_management_controls),
+    );
+    table.insert(
         "agent_debug_menu_enabled".to_string(),
         toml::Value::Boolean(ui.agent_debug_menu_enabled),
     );
@@ -1692,6 +1764,16 @@ fn terminal_settings_to_toml(settings: &TerminalSettings) -> toml::Value {
 }
 fn editor_settings_to_toml(settings: &EditorSettings) -> toml::Value {
     let mut table = toml::value::Table::new();
+    table.insert(
+        "line_display".into(),
+        toml::Value::String(
+            match settings.line_display {
+                LineDisplay::Clip => "clip",
+                LineDisplay::Wrap => "wrap",
+            }
+            .into(),
+        ),
+    );
     table.insert(
         "show_line_numbers".into(),
         toml::Value::Boolean(settings.show_line_numbers),
@@ -1750,6 +1832,10 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
     table.insert(
         "shortcut_base".to_string(),
         toml::Value::String(keyboard.shortcut_base.letter().to_string()),
+    );
+    table.insert(
+        "navigation_shortcut_base".to_string(),
+        toml::Value::String(keyboard.navigation_shortcut_base.letter().to_string()),
     );
     toml::Value::Table(table)
 }
@@ -1875,6 +1961,69 @@ mod tests {
     }
 
     #[test]
+    fn navigation_shortcut_base_loads_and_defaults_independently() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[keyboard]\nshortcut_base = \"a\"\nnavigation_shortcut_base = \"C\"\n",
+        )
+        .unwrap();
+        let configured = load(&dir).expect("valid navigation prefix should load");
+        assert_eq!(configured.keyboard.shortcut_base, ShortcutBase::A);
+        assert_eq!(
+            configured.keyboard.navigation_shortcut_base,
+            ShortcutBase::parse("c").unwrap()
+        );
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[keyboard]\nshortcut_base = \"a\"\n",
+        )
+        .unwrap();
+        let defaulted = load(&dir).expect("missing navigation prefix should default");
+        assert_eq!(
+            defaulted.keyboard.navigation_shortcut_base,
+            DEFAULT_NAVIGATION_SHORTCUT_BASE
+        );
+    }
+
+    #[test]
+    fn editor_line_display_round_trips_without_replacing_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 5\n[editor]\nline_display = \"wrap\"\n",
+        )
+        .unwrap();
+
+        let loaded = load(&dir).expect("load wrapped editor setting");
+        assert_eq!(loaded.editor.line_display, LineDisplay::Wrap);
+
+        save_editor_settings(&dir, &EditorSettings::default()).expect("save editor setting");
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[detection]"));
+        assert!(saved.contains("line_display = \"clip\""));
+    }
+
+    #[test]
+    fn editor_line_display_rejects_unknown_values() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[editor]\nline_display = \"sideways\"\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidEditorLineDisplay(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn keyboard_shortcut_base_rejects_non_letters() {
         let dir = scratch_dir();
         std::fs::write(
@@ -1902,18 +2051,49 @@ mod tests {
 
         let config = load(&dir).expect("valid config should load");
         assert_eq!(
-            keymap::action_for_table(&config.keybindings, 'x'),
+            keymap::action_for_table(&config.keybindings, BindingKey::Character('x')),
             Some(keymap::Action::Quit)
         );
         assert_eq!(
-            keymap::action_for_table(&config.keybindings, 'q'),
+            keymap::action_for_table(&config.keybindings, BindingKey::Character('q')),
             Some(keymap::Action::ClosePane)
         );
         // Every other binding keeps its default letter.
         assert_eq!(
-            keymap::action_for_table(&config.keybindings, 'c'),
+            keymap::action_for_table(&config.keybindings, BindingKey::Character('c')),
             Some(keymap::Action::NewTerminal)
         );
+    }
+
+    #[test]
+    fn navigation_keybindings_load_and_round_trip_with_named_arrow_and_page_keys() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            concat!(
+                "[keybindings]\n",
+                "cycle_next_in_group = \"page_down\"\n",
+                "cycle_previous_in_group = \"page_up\"\n",
+                "jump_next_group = \"down\"\n",
+                "jump_previous_group = \"up\"\n",
+            ),
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("named navigation keys should load");
+        assert_eq!(
+            keymap::action_for_table(&config.keybindings, BindingKey::PageDown),
+            Some(keymap::Action::CycleNextInGroup)
+        );
+        assert_eq!(
+            keymap::action_for_table(&config.keybindings, BindingKey::Up),
+            Some(keymap::Action::JumpPreviousGroup)
+        );
+        save_keymap_settings(&dir, &config.keyboard, &config.keybindings)
+            .expect("navigation bindings should persist");
+        let persisted = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(persisted.contains("cycle_next_in_group = \"page_down\""));
+        assert!(persisted.contains("jump_previous_group = \"up\""));
     }
 
     #[test]
@@ -1924,27 +2104,38 @@ mod tests {
     }
 
     #[test]
-    fn a_multi_character_letter_is_a_clear_config_error() {
+    fn a_multi_character_key_is_a_clear_config_error() {
         let overrides = HashMap::from([("quit".to_string(), "qq".to_string())]);
         let result = merge_keybindings(&overrides);
-        assert!(matches!(result, Err(ConfigLoadError::InvalidLetter { .. })));
+        assert!(matches!(
+            result,
+            Err(ConfigLoadError::InvalidBinding { .. })
+        ));
     }
 
     #[test]
-    fn an_empty_letter_is_a_clear_config_error() {
+    fn an_empty_key_is_a_clear_config_error() {
         let overrides = HashMap::from([("quit".to_string(), String::new())]);
         let result = merge_keybindings(&overrides);
-        assert!(matches!(result, Err(ConfigLoadError::InvalidLetter { .. })));
+        assert!(matches!(
+            result,
+            Err(ConfigLoadError::InvalidBinding { .. })
+        ));
     }
 
     #[test]
-    fn remapping_two_actions_onto_the_same_letter_is_a_clear_config_error() {
+    fn remapping_two_actions_onto_the_same_key_is_a_clear_config_error() {
         let overrides = HashMap::from([
             ("quit".to_string(), "c".to_string()),
             ("new_terminal".to_string(), "c".to_string()),
         ]);
         let result = merge_keybindings(&overrides);
-        assert!(matches!(result, Err(ConfigLoadError::DuplicateLetter('c'))));
+        assert!(matches!(
+            result,
+            Err(ConfigLoadError::DuplicateBinding(BindingKey::Character(
+                'c'
+            )))
+        ));
     }
 
     #[test]
@@ -2237,6 +2428,7 @@ mod tests {
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
             show_inferred_title_icons: true,
+            show_tree_row_management_controls: true,
             agent_debug_menu_enabled: true,
             use_stable_glyphs: true,
             icons: IconSettings::default(),
@@ -2268,6 +2460,29 @@ mod tests {
     }
 
     #[test]
+    fn tree_row_management_controls_are_opt_in_and_persisted() {
+        let dir = scratch_dir();
+        assert!(
+            !load(&dir)
+                .expect("missing config should use defaults")
+                .ui
+                .show_tree_row_management_controls
+        );
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_tree_row_management_controls = true\n",
+        )
+        .expect("write UI preference");
+        assert!(
+            load(&dir)
+                .expect("tree row management preference should load")
+                .ui
+                .show_tree_row_management_controls
+        );
+    }
+
+    #[test]
     fn save_ui_settings_preserves_an_existing_keybindings_table() {
         let dir = scratch_dir();
         std::fs::write(dir.join("config.toml"), "[keybindings]\nquit = \"z\"\n").unwrap();
@@ -2276,7 +2491,7 @@ mod tests {
 
         let config = load(&dir).expect("saved config should load back");
         assert_eq!(
-            keymap::action_for_table(&config.keybindings, 'z'),
+            keymap::action_for_table(&config.keybindings, BindingKey::Character('z')),
             Some(keymap::Action::Quit)
         );
         assert_eq!(config.ui, UiSettings::default());
@@ -2342,6 +2557,7 @@ mod tests {
         .unwrap();
         let keyboard = KeyboardSettings {
             shortcut_base: ShortcutBase::B,
+            navigation_shortcut_base: ShortcutBase::A,
         };
         save_keyboard_settings(&dir, &keyboard).expect("keyboard save should succeed");
 
@@ -2349,7 +2565,7 @@ mod tests {
         assert_eq!(config.keyboard, keyboard);
         assert_eq!(config.ui.tree_width, 40);
         assert_eq!(
-            keymap::action_for_table(&config.keybindings, 'z'),
+            keymap::action_for_table(&config.keybindings, BindingKey::Character('z')),
             Some(keymap::Action::Quit)
         );
     }
@@ -2359,6 +2575,7 @@ mod tests {
         let dir = scratch_dir();
         let keyboard = KeyboardSettings {
             shortcut_base: ShortcutBase::B,
+            navigation_shortcut_base: ShortcutBase::A,
         };
         let bindings = keymap::preset_bindings(keymap::KeymapPreset::Tmux);
 

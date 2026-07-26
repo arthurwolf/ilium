@@ -57,15 +57,15 @@ fn wheel_navigation_moves_the_source_viewport_and_keeps_it_until_cursor_navigati
     let mut editor = EditorPane::load(fixture.clone()).expect("load editor fixture");
     editor.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
 
-    editor.scroll_source_view(3, 4);
-    editor.update_source_scroll_mirror(4);
+    editor.scroll_source_view(3, 4, 80);
+    editor.update_source_scroll_mirror(4, 80);
     assert_eq!(editor.source_scroll_row(), 3);
 
-    editor.scroll_source_view(100, 4);
+    editor.scroll_source_view(100, 4, 80);
     assert_eq!(editor.source_scroll_row(), 6);
 
     editor.jump_to_line(0);
-    editor.update_source_scroll_mirror(4);
+    editor.update_source_scroll_mirror(4, 80);
     assert_eq!(editor.source_scroll_row(), 0);
 }
 

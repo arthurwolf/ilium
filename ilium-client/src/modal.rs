@@ -4,8 +4,8 @@
 //! context-menu/help/explorer overlays in `ui.rs`/`help.rs`, so every modal
 //! in ilium reads as one visual language instead of three.
 
-use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::{Alignment, Constraint, Direction, Flex, Layout, Position, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -174,11 +174,275 @@ pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-/// Fixed size of the text-prompt popup: wide enough for a typical pane/group
-/// name or shell command, three rows tall (border, input line, border) plus
-/// one for the hint.
-const PROMPT_WIDTH: u16 = 50;
-const PROMPT_HEIGHT: u16 = 4;
+/// Semantic result of clicking one of a blocking dialog's action buttons.
+/// Keyboard handlers remain authoritative; `crate::mouse` translates this
+/// result back into the corresponding Enter/Esc or Y/N key contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogAction {
+    Cancel,
+    Confirm,
+}
+
+/// Visual meaning of one action button. A danger tone is reserved for the
+/// action that actually destroys data or closes a tree item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogButtonTone {
+    Neutral,
+    Primary,
+    Danger,
+}
+
+/// Text and keyboard affordance rendered inside one action button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialogButton<'a> {
+    pub key_hint: &'a str,
+    pub label: &'a str,
+    pub tone: DialogButtonTone,
+}
+
+/// Ordered cancel/confirm actions shared by rendering and hit testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialogActions<'a> {
+    pub cancel: DialogButton<'a>,
+    pub confirm: DialogButton<'a>,
+}
+
+impl<'a> DialogActions<'a> {
+    /// Standard form actions retain Esc/Enter as the keyboard equivalents.
+    pub const fn form(cancel_label: &'a str, confirm_label: &'a str) -> Self {
+        Self {
+            cancel: DialogButton {
+                key_hint: "Esc",
+                label: cancel_label,
+                tone: DialogButtonTone::Neutral,
+            },
+            confirm: DialogButton {
+                key_hint: "Enter",
+                label: confirm_label,
+                tone: DialogButtonTone::Primary,
+            },
+        }
+    }
+
+    /// Yes/No actions retain the existing N/Y shortcuts while allowing each
+    /// side to communicate its own safety level.
+    pub const fn confirmation(
+        cancel_label: &'a str,
+        cancel_tone: DialogButtonTone,
+        confirm_label: &'a str,
+        confirm_tone: DialogButtonTone,
+    ) -> Self {
+        Self {
+            cancel: DialogButton {
+                key_hint: "N",
+                label: cancel_label,
+                tone: cancel_tone,
+            },
+            confirm: DialogButton {
+                key_hint: "Y",
+                label: confirm_label,
+                tone: confirm_tone,
+            },
+        }
+    }
+}
+
+/// Exact rectangles occupied by the two visible action buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialogActionLayout {
+    pub cancel_button: Rect,
+    pub confirm_button: Rect,
+}
+
+impl DialogActionLayout {
+    /// Maps a pointer position to the same semantic action keyboard input
+    /// already exposes.
+    pub fn action_at(self, position: Position) -> Option<DialogAction> {
+        if self.cancel_button.contains(position) {
+            return Some(DialogAction::Cancel);
+        }
+        if self.confirm_button.contains(position) {
+            return Some(DialogAction::Confirm);
+        }
+        None
+    }
+}
+
+/// Layout shared by every single-line text-entry dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextPromptDialogLayout {
+    pub popup: Rect,
+    pub input_box: Rect,
+    pub input_area: Rect,
+    pub actions: DialogActionLayout,
+    pub hint_row: Rect,
+}
+
+/// Layout shared by the multiline Voice prompt editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MultilinePromptDialogLayout {
+    pub popup: Rect,
+    pub editor_area: Rect,
+    pub actions: DialogActionLayout,
+    pub hint_row: Rect,
+}
+
+/// Layout shared by every Yes/No confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmDialogLayout {
+    pub popup: Rect,
+    pub message_area: Rect,
+    pub actions: DialogActionLayout,
+    pub hint_row: Rect,
+}
+
+/// Layout for the board-creation form, which needs two text fields plus a
+/// storage selector and a path picker before its shared action row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateBoardDialogLayout {
+    pub popup: Rect,
+    pub name_box: Rect,
+    pub name_input: Rect,
+    pub storage_row: Rect,
+    pub path_box: Rect,
+    pub path_input: Rect,
+    pub browse_button: Rect,
+    pub actions: DialogActionLayout,
+    pub hint_row: Rect,
+}
+
+/// Fixed size of a single-line prompt. The extra vertical space gives the
+/// input and both mouse targets room to read as real controls.
+const PROMPT_WIDTH: u16 = 68;
+const PROMPT_HEIGHT: u16 = 10;
+
+/// Computes the authoritative single-line prompt geometry.
+pub fn text_prompt_dialog_layout(screen_area: Rect) -> TextPromptDialogLayout {
+    let popup = centered_fixed_rect(PROMPT_WIDTH, PROMPT_HEIGHT, screen_area);
+    let inner = inset_rect(popup, 1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    let input_box = rows[1];
+    TextPromptDialogLayout {
+        popup,
+        input_box,
+        input_area: inset_rect(input_box, 1),
+        actions: dialog_action_layout(rows[3]),
+        hint_row: rows[4],
+    }
+}
+
+/// Size-only entry point for PTY integration tests that intentionally do not
+/// depend on ratatui themselves.
+pub fn text_prompt_dialog_layout_for_size(width: u16, height: u16) -> TextPromptDialogLayout {
+    text_prompt_dialog_layout(Rect::new(0, 0, width, height))
+}
+
+/// Computes the responsive multiline prompt geometry.
+pub fn multiline_prompt_dialog_layout(screen_area: Rect) -> MultilinePromptDialogLayout {
+    let width = screen_area.width.saturating_sub(8).clamp(40, 100);
+    let height = screen_area.height.saturating_sub(6).clamp(11, 30);
+    let popup = centered_fixed_rect(width, height, screen_area);
+    let inner = inset_rect(popup, 1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    MultilinePromptDialogLayout {
+        popup,
+        editor_area: rows[0],
+        actions: dialog_action_layout(rows[2]),
+        hint_row: rows[3],
+    }
+}
+
+/// Computes spacious board-form geometry shared by rendering and mouse input.
+pub fn create_board_dialog_layout(screen_area: Rect) -> CreateBoardDialogLayout {
+    let popup = centered_fixed_rect(78, 20, screen_area);
+    let inner = Rect::new(
+        popup.x.saturating_add(3),
+        popup.y.saturating_add(2),
+        popup.width.saturating_sub(6),
+        popup.height.saturating_sub(4),
+    );
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    let browse_button = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(18)])
+        .split(rows[5])[0];
+    CreateBoardDialogLayout {
+        popup,
+        name_box: rows[0],
+        name_input: inset_rect(rows[0], 1),
+        storage_row: rows[2],
+        path_box: rows[4],
+        path_input: inset_rect(rows[4], 1),
+        browse_button,
+        actions: dialog_action_layout(rows[7]),
+        hint_row: rows[8],
+    }
+}
+
+/// Size-only board-form geometry for the real-binary PTY suite.
+pub fn create_board_dialog_layout_for_size(width: u16, height: u16) -> CreateBoardDialogLayout {
+    create_board_dialog_layout(Rect::new(0, 0, width, height))
+}
+
+/// Insets a rectangle without underflow on very small terminals.
+fn inset_rect(area: Rect, margin: u16) -> Rect {
+    Rect::new(
+        area.x.saturating_add(margin),
+        area.y.saturating_add(margin),
+        area.width.saturating_sub(margin.saturating_mul(2)),
+        area.height.saturating_sub(margin.saturating_mul(2)),
+    )
+}
+
+/// Gives each button nearly half of the available row, separated by a
+/// deliberate two-cell gutter that remains usable on narrow screens.
+fn dialog_action_layout(row: Rect) -> DialogActionLayout {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(2),
+            Constraint::Fill(1),
+        ])
+        .flex(Flex::Center)
+        .split(row);
+    DialogActionLayout {
+        cancel_button: columns[0],
+        confirm_button: columns[2],
+    }
+}
 
 /// Draws the rename/run-command popup and places the real terminal cursor
 /// inside it -- a blinking, native cursor reads as a proper text input
@@ -190,24 +454,27 @@ pub fn render_text_prompt(
     screen_area: Rect,
     title: &str,
     state: &TextPromptState,
+    confirm_label: &str,
 ) {
-    let area = centered_fixed_rect(PROMPT_WIDTH, PROMPT_HEIGHT, screen_area);
-    frame.render_widget(Clear, area);
+    let layout = text_prompt_dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
 
     let block = theme::block(true).title(theme::chrome_title(title));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
-
-    frame.render_widget(Paragraph::new(state.buf.as_str()), rows[0]);
+    frame.render_widget(block, layout.popup);
     frame.render_widget(
-        Paragraph::new("Enter to confirm · Esc to cancel")
+        theme::block(true).title(theme::chrome_title("Value")),
+        layout.input_box,
+    );
+    frame.render_widget(Paragraph::new(state.buf.as_str()), layout.input_area);
+    render_dialog_actions(
+        frame,
+        layout.actions,
+        DialogActions::form("Cancel", confirm_label),
+    );
+    frame.render_widget(
+        Paragraph::new("Click a button or use the shown keyboard shortcut")
             .style(Style::new().add_modifier(Modifier::DIM)),
-        rows[1],
+        layout.hint_row,
     );
 
     // ilium's prompts only ever hold pane/group names and shell command
@@ -218,15 +485,16 @@ pub fn render_text_prompt(
     // typed/pasted character and is otherwise unbounded, so `rows[0].x +
     // cursor` could overflow `u16` (panic in debug, wrap to a bogus column
     // in release) before the `.min()` below ever got a chance to clamp it.
-    let cursor_x = rows[0]
+    let cursor_x = layout
+        .input_area
         .x
         .saturating_add(u16::try_from(state.cursor).unwrap_or(u16::MAX));
     // `Rect::right()` is exclusive (the first column *outside* the rect), so
     // clamping to it directly would let the cursor land on the block's right
     // border instead of the last real cell of the input row.
     frame.set_cursor_position(Position::new(
-        cursor_x.min(rows[0].right().saturating_sub(1)),
-        rows[0].y,
+        cursor_x.min(layout.input_area.right().saturating_sub(1)),
+        layout.input_area.y,
     ));
 }
 
@@ -238,31 +506,37 @@ pub fn render_masked_text_prompt(
     screen_area: Rect,
     title: &str,
     state: &TextPromptState,
+    confirm_label: &str,
 ) {
-    let area = centered_fixed_rect(PROMPT_WIDTH, PROMPT_HEIGHT, screen_area);
-    frame.render_widget(Clear, area);
+    let layout = text_prompt_dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
     let block = theme::block(true).title(theme::chrome_title(title));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
+    frame.render_widget(block, layout.popup);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title("Protected value")),
+        layout.input_box,
+    );
     frame.render_widget(
         Paragraph::new("•".repeat(state.buf.chars().count())),
-        rows[0],
+        layout.input_area,
+    );
+    render_dialog_actions(
+        frame,
+        layout.actions,
+        DialogActions::form("Keep existing", confirm_label),
     );
     frame.render_widget(
-        Paragraph::new("Enter to replace · Esc to keep the existing key")
+        Paragraph::new("The stored value remains hidden")
             .style(Style::new().add_modifier(Modifier::DIM)),
-        rows[1],
+        layout.hint_row,
     );
-    let cursor_x = rows[0]
+    let cursor_x = layout
+        .input_area
         .x
         .saturating_add(u16::try_from(state.cursor).unwrap_or(u16::MAX));
     frame.set_cursor_position(Position::new(
-        cursor_x.min(rows[0].right().saturating_sub(1)),
-        rows[0].y,
+        cursor_x.min(layout.input_area.right().saturating_sub(1)),
+        layout.input_area.y,
     ));
 }
 
@@ -272,69 +546,253 @@ pub fn render_multiline_prompt(
     screen_area: Rect,
     title: &str,
     textarea: &ratatui_textarea::TextArea<'static>,
+    confirm_label: &str,
 ) {
-    let width = screen_area.width.saturating_sub(8).clamp(40, 100);
-    let height = screen_area.height.saturating_sub(6).clamp(8, 28);
-    let area = centered_fixed_rect(width, height, screen_area);
-    frame.render_widget(Clear, area);
+    let layout = multiline_prompt_dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
     let block = theme::block(true).title(theme::chrome_title(title));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(inner);
-    frame.render_widget(textarea, rows[0]);
+    frame.render_widget(block, layout.popup);
+    frame.render_widget(textarea, layout.editor_area);
+    render_dialog_actions(
+        frame,
+        layout.actions,
+        DialogActions::form("Cancel", confirm_label),
+    );
     frame.render_widget(
-        Paragraph::new("Ctrl+S to apply · Esc to cancel · Enter inserts a line")
+        Paragraph::new("Enter inserts a line · Ctrl+S also applies")
             .style(Style::new().add_modifier(Modifier::DIM)),
-        rows[1],
+        layout.hint_row,
     );
 }
 
-/// Size of the confirmation popup: enough for a two-line message plus the
-/// Yes/No hint.
-const CONFIRM_WIDTH: u16 = 54;
-const CONFIRM_HEIGHT: u16 = 5;
+/// Size of the confirmation popup: three wrapped message rows, spacious
+/// separation, two full-width buttons, and a keyboard reminder.
+const CONFIRM_WIDTH: u16 = 68;
+const CONFIRM_HEIGHT: u16 = 10;
+
+/// Computes the authoritative confirmation geometry.
+pub fn confirm_dialog_layout(screen_area: Rect) -> ConfirmDialogLayout {
+    let popup = centered_fixed_rect(CONFIRM_WIDTH, CONFIRM_HEIGHT, screen_area);
+    let inner = inset_rect(popup, 1);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    ConfirmDialogLayout {
+        popup,
+        message_area: rows[1],
+        actions: dialog_action_layout(rows[3]),
+        hint_row: rows[4],
+    }
+}
+
+/// Size-only confirmation geometry for the real-binary PTY suite.
+pub fn confirm_dialog_layout_for_size(width: u16, height: u16) -> ConfirmDialogLayout {
+    confirm_dialog_layout(Rect::new(0, 0, width, height))
+}
 
 /// Draws a Yes/No confirmation popup, styled with a warning accent so a
 /// destructive action (closing a group with children, or an editor with
 /// unsaved changes) reads as distinct from the neutral rename/run-command
 /// prompts.
-pub fn render_confirm(frame: &mut Frame, screen_area: Rect, title: &str, message: &str) {
-    let area = centered_fixed_rect(CONFIRM_WIDTH, CONFIRM_HEIGHT, screen_area);
-    frame.render_widget(Clear, area);
+pub fn render_confirm(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    message: &str,
+    actions: DialogActions<'_>,
+) {
+    let layout = confirm_dialog_layout(screen_area);
+    frame.render_widget(Clear, layout.popup);
 
-    let warning_style = Style::new().fg(ratatui::style::Color::Yellow);
+    let warning_style = Style::new().fg(Color::Yellow);
     let block = theme::block(true)
         .title(theme::chrome_title(title))
         .border_style(warning_style.add_modifier(Modifier::BOLD));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    frame.render_widget(block, layout.popup);
 
-    // The message row gets 2 lines (see `CONFIRM_HEIGHT`'s doc comment) with
+    // The message row gets 3 lines (see `CONFIRM_HEIGHT`'s doc comment) with
     // wrapping enabled -- a plain `Length(1)` + no-wrap `Paragraph` silently
     // clipped every real confirmation (e.g. `"\"backend-services\" contains
     // 5 item(s). Close it and everything inside?"` is well past the inner
     // width), so the message needs both the extra row and `Wrap` to actually
     // use it.
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(1)])
-        .split(inner);
+    frame.render_widget(
+        Paragraph::new(message)
+            .wrap(Wrap { trim: false })
+            .alignment(Alignment::Center),
+        layout.message_area,
+    );
+    render_dialog_actions(frame, layout.actions, actions);
+    frame.render_widget(
+        Paragraph::new("Click either button, or use Y / N · Enter confirms · Esc cancels")
+            .style(Style::new().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        layout.hint_row,
+    );
+}
 
-    frame.render_widget(Paragraph::new(message).wrap(Wrap { trim: false }), rows[0]);
-    let hint = Line::from(vec![
-        Span::styled(
-            "y",
-            warning_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-        ),
-        Span::raw("es  /  "),
-        Span::styled(
-            "n",
-            Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-        ),
-        Span::raw("o / Esc"),
-    ]);
-    frame.render_widget(Paragraph::new(hint), rows[1]);
+/// Paints button-sized backgrounds so actions read as clickable controls
+/// instead of underlined letters embedded in prose.
+pub fn render_dialog_actions(
+    frame: &mut Frame,
+    layout: DialogActionLayout,
+    actions: DialogActions<'_>,
+) {
+    render_dialog_button(frame, layout.cancel_button, actions.cancel);
+    render_dialog_button(frame, layout.confirm_button, actions.confirm);
+}
+
+/// Renders one centered action label using a dark-theme-safe tone.
+fn render_dialog_button(frame: &mut Frame, area: Rect, button: DialogButton<'_>) {
+    let style = match button.tone {
+        DialogButtonTone::Neutral => Style::new()
+            .fg(Color::White)
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+        DialogButtonTone::Primary => Style::new()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        DialogButtonTone::Danger => Style::new()
+            .fg(Color::White)
+            .bg(Color::Red)
+            .add_modifier(Modifier::BOLD),
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(" {} ", button.key_hint),
+                style.add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::styled(button.label, style),
+        ]))
+        .style(style)
+        .alignment(Alignment::Center),
+        area,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// Flattens the test backend into text so visible action labels can be
+    /// asserted without depending on terminal escape sequences.
+    fn rendered_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn confirmation_layout_exposes_two_distinct_mouse_targets_on_small_screens() {
+        let screen = Rect::new(0, 0, 32, 8);
+        let layout = confirm_dialog_layout(screen);
+
+        assert!(screen.contains(layout.popup.as_position()));
+        assert!(layout.popup.right() <= screen.right());
+        assert!(layout.popup.bottom() <= screen.bottom());
+        assert!(!layout.actions.cancel_button.is_empty());
+        assert!(!layout.actions.confirm_button.is_empty());
+        assert!(layout.actions.cancel_button.right() <= layout.actions.confirm_button.x);
+        assert_eq!(
+            layout
+                .actions
+                .action_at(layout.actions.cancel_button.as_position()),
+            Some(DialogAction::Cancel)
+        );
+        assert_eq!(
+            layout
+                .actions
+                .action_at(layout.actions.confirm_button.as_position()),
+            Some(DialogAction::Confirm)
+        );
+    }
+
+    #[test]
+    fn destructive_confirmation_renders_aerated_named_buttons_with_dark_safe_tones() {
+        let screen = Rect::new(0, 0, 100, 30);
+        let layout = confirm_dialog_layout(screen);
+        let mut terminal = Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_confirm(
+                    frame,
+                    screen,
+                    "Close this item?",
+                    "Close the selected group and all of its children?",
+                    DialogActions::confirmation(
+                        "Keep open",
+                        DialogButtonTone::Neutral,
+                        "Close",
+                        DialogButtonTone::Danger,
+                    ),
+                );
+            })
+            .unwrap();
+
+        let text = rendered_text(&terminal);
+        assert!(text.contains("Keep open"));
+        assert!(text.contains("Close"));
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell(layout.actions.cancel_button.as_position())
+                .unwrap()
+                .bg,
+            Color::DarkGray
+        );
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell(layout.actions.confirm_button.as_position())
+                .unwrap()
+                .bg,
+            Color::Red
+        );
+    }
+
+    #[test]
+    fn text_prompt_renders_clickable_cancel_and_primary_actions() {
+        let screen = Rect::new(0, 0, 100, 30);
+        let layout = text_prompt_dialog_layout(screen);
+        let state = TextPromptState::new("new title");
+        let mut terminal = Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_text_prompt(frame, screen, "Rename", &state, "Rename");
+            })
+            .unwrap();
+
+        let text = rendered_text(&terminal);
+        assert!(text.contains("Cancel"));
+        assert!(text.contains("Rename"));
+        assert_eq!(
+            terminal
+                .backend()
+                .buffer()
+                .cell(layout.actions.confirm_button.as_position())
+                .unwrap()
+                .bg,
+            Color::Cyan
+        );
+    }
 }

@@ -85,6 +85,37 @@ enum Command {
         #[arg(last = true, required = true, value_name = "CMD")]
         cmd: Vec<String>,
     },
+    /// Read, initialize, or post to this project's file-backed agent room.
+    Chat {
+        #[command(subcommand)]
+        command: ChatCommand,
+    },
+}
+
+/// Local chatroom operations intentionally avoid the detached server: agents
+/// can coordinate through the project file even when no TUI is attached.
+#[derive(Subcommand, Debug)]
+enum ChatCommand {
+    /// Create CHATROOM.md and install the project guidance/hook bridge.
+    Init,
+    /// Post one message as the calling agent. The author defaults to
+    /// ILIUM_CHATROOM_AUTHOR, then AGENT_NAME, then `agent`.
+    Send {
+        #[arg(long)]
+        message: String,
+        #[arg(long)]
+        author: Option<String>,
+    },
+    /// Print the recent room tail in a form that lifecycle hooks inject into an agent turn.
+    Context {
+        #[arg(long, default_value_t = 40)]
+        limit: usize,
+    },
+    /// Print the most recent room records for direct terminal inspection.
+    Tail {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
 }
 
 #[tokio::main]
@@ -119,7 +150,61 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         Some(Command::NewPane { session_name, cmd }) => {
             new_pane(&session_name, &cmd, &cli.cwd).await
         }
+        Some(Command::Chat { command }) => chat(command, &cli.cwd),
     }
+}
+
+fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
+    let cwd = cwd
+        .canonicalize()
+        .map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
+    if !cwd.is_dir() {
+        return Err(CliError::InvalidCwd(cwd.to_path_buf()));
+    }
+    match command {
+        ChatCommand::Init => {
+            ilium_client::chatroom::initialize(&cwd)?;
+            println!("chatroom ready at {}", cwd.join("CHATROOM.md").display());
+            Ok(())
+        }
+        ChatCommand::Send { message, author } => {
+            let project_root = chatroom_project_root(&cwd);
+            let author = author.unwrap_or_else(default_chatroom_author);
+            ilium_client::chatroom::append_message(&project_root, &author, &message)?;
+            println!("chatroom message sent");
+            Ok(())
+        }
+        ChatCommand::Context { limit } => {
+            let project_root = chatroom_project_root(&cwd);
+            println!("{}", ilium_client::chatroom::context(&project_root, limit)?);
+            Ok(())
+        }
+        ChatCommand::Tail { limit } => {
+            let project_root = chatroom_project_root(&cwd);
+            for message in ilium_client::chatroom::read_messages(&project_root, limit)? {
+                println!(
+                    "{} | {} | {}",
+                    message.timestamp, message.author, message.content
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Finds the nearest owning room so a provider hook also works when an agent
+/// starts in a project subdirectory rather than exactly at the project root.
+fn chatroom_project_root(cwd: &Path) -> PathBuf {
+    cwd.ancestors()
+        .find(|ancestor| ilium_client::chatroom::exists(ancestor))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+fn default_chatroom_author() -> String {
+    std::env::var("ILIUM_CHATROOM_AUTHOR")
+        .or_else(|_| std::env::var("AGENT_NAME"))
+        .unwrap_or_else(|_| "agent".to_string())
 }
 
 /// The bare-invocation and `new-session` paths: ensure the session's
@@ -409,7 +494,7 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{client_restart_args, session, shell_join};
+    use super::{chatroom_project_root, client_restart_args, session, shell_join};
 
     fn project_session(name: &str) -> session::ProjectSession {
         session::ProjectSession {
@@ -475,5 +560,15 @@ mod tests {
             shell_join(&["echo".to_string(), "it's here".to_string()]),
             "echo 'it'\\''s here'"
         );
+    }
+
+    #[test]
+    fn chatroom_lookup_uses_the_nearest_parent_room() {
+        let project = tempfile::tempdir().unwrap();
+        let nested = project.path().join("src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        ilium_client::chatroom::initialize(project.path()).unwrap();
+
+        assert_eq!(chatroom_project_root(&nested), project.path());
     }
 }

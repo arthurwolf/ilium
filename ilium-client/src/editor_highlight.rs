@@ -14,9 +14,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::editor_pane::EditorPane;
+use crate::editor_pane::{EditorPane, SourceVisualRow};
 use crate::syntax::LineTokens;
 
 /// Matches `ratatui_textarea`'s own default `cursor_style` (reversed
@@ -63,27 +63,35 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &EditorPane, tokens: &[Line
         0
     };
 
+    let visual_rows = editor.source_visual_rows(area.width);
     let top_row = usize::from(editor.source_scroll_row());
-    let bottom_row = (top_row + usize::from(area.height)).min(total_lines);
+    let bottom_row = (top_row + usize::from(area.height)).min(visual_rows.len());
     let cursor = editor.textarea.cursor();
     let (cursor_row, cursor_col) = (cursor.0, cursor.1);
     let selection = editor.textarea.selection_range();
     let tab_len = editor.textarea.tab_length();
 
-    let rendered: Vec<Line<'static>> = (top_row..bottom_row)
-        .map(|row| {
-            let line = &lines[row];
-            let is_cursor_row = row == cursor_row;
-            let select_bounds =
-                selection.and_then(|(start, end)| row_selection_bytes(line, row, start, end));
+    let rendered: Vec<Line<'static>> = visual_rows[top_row..bottom_row]
+        .iter()
+        .map(|visual_row| {
+            let line = &lines[visual_row.source_row];
+            let is_cursor_row = visual_row.source_row == cursor_row;
+            let select_bounds = selection.and_then(|(start, end)| {
+                row_selection_bytes(line, visual_row.source_row, start, end)
+            });
 
             let mut spans = Vec::new();
             if editor.show_line_numbers {
-                spans.push(line_number_span(row, gutter_width));
+                spans.push(if visual_row.first_in_source_row {
+                    line_number_span(visual_row.source_row, gutter_width)
+                } else {
+                    line_number_placeholder_span(gutter_width)
+                });
             }
             spans.extend(render_row_spans(
                 line,
-                &tokens[row],
+                &tokens[visual_row.source_row],
+                *visual_row,
                 is_cursor_row,
                 cursor_col,
                 select_bounds,
@@ -93,7 +101,10 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &EditorPane, tokens: &[Line
         })
         .collect();
 
-    let paragraph = Paragraph::new(rendered).scroll((0, editor.source_scroll_col()));
+    let horizontal_scroll = matches!(editor.line_display, crate::config::LineDisplay::Clip)
+        .then_some(editor.source_scroll_col())
+        .unwrap_or(0);
+    let paragraph = Paragraph::new(rendered).scroll((0, horizontal_scroll));
     frame.render_widget(paragraph, area);
 }
 
@@ -104,6 +115,13 @@ fn line_number_span(row: usize, gutter_width: u16) -> Span<'static> {
     let number_field = usize::from(gutter_width).saturating_sub(1);
     Span::styled(
         format!("{:>width$} ", row + 1, width = number_field),
+        Style::new().fg(Color::DarkGray),
+    )
+}
+
+fn line_number_placeholder_span(gutter_width: u16) -> Span<'static> {
+    Span::styled(
+        " ".repeat(usize::from(gutter_width)),
         Style::new().fg(Color::DarkGray),
     )
 }
@@ -157,6 +175,7 @@ fn char_byte_offset(line: &str, char_col: usize) -> usize {
 fn render_row_spans(
     line: &str,
     tokens: &LineTokens,
+    visual_row: SourceVisualRow,
     is_cursor_row: bool,
     cursor_col: usize,
     select_bounds: Option<(usize, usize, bool)>,
@@ -195,9 +214,10 @@ fn render_row_spans(
     let mut spans = Vec::new();
     let mut run_style: Option<Style> = None;
     let mut run_text = String::new();
-    let mut visual_col = 0usize;
     let tab_width = usize::from(tab_len).max(1);
-    for (byte_index, ch) in line.char_indices() {
+    let mut visual_col = UnicodeWidthStr::width(&line[..visual_row.start_byte]);
+    for (relative_byte, ch) in line[visual_row.start_byte..visual_row.end_byte].char_indices() {
+        let byte_index = visual_row.start_byte + relative_byte;
         let style = per_byte[byte_index];
         if run_style != Some(style) {
             if !run_text.is_empty() {
@@ -224,9 +244,12 @@ fn render_row_spans(
         ));
     }
 
-    let cursor_at_row_end =
-        is_cursor_row && cursor_char_len == 0 && cursor_col >= line.chars().count();
-    let select_trailing = select_bounds.is_some_and(|(_, _, trailing)| trailing);
+    let cursor_at_row_end = is_cursor_row
+        && cursor_char_len == 0
+        && visual_row.last_in_source_row
+        && cursor_col >= line.chars().count();
+    let select_trailing =
+        visual_row.last_in_source_row && select_bounds.is_some_and(|(_, _, trailing)| trailing);
     // Both can be true at once -- e.g. a backward multi-line selection whose
     // cursor lands at the end of its (earlier) start row while the
     // selection still continues past that row -- so compose every
@@ -281,7 +304,7 @@ mod tests {
         let tokens = editor
             .highlighted_lines()
             .expect("fixture uses a recognized language");
-        editor.update_source_scroll_mirror(height);
+        editor.update_source_scroll_mirror(height, width);
         editor.update_source_scroll_col_mirror(width);
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
@@ -351,5 +374,37 @@ mod tests {
     fn unrecognized_language_leaves_highlighted_lines_empty() {
         let editor = load_pane("notes.unknownext", "just plain text");
         assert!(editor.highlighted_lines().is_none());
+    }
+
+    #[test]
+    fn wrapping_keeps_syntax_highlighting_on_every_visual_row() {
+        let mut editor = load_pane("sample.rs", "let greeting = \"hello\";");
+        editor.apply_defaults(&crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        });
+
+        let buffer = render_to_buffer(&editor, 8, 4);
+        let first_row = (0..8)
+            .map(|column| buffer.cell((column, 0)).unwrap().symbol())
+            .collect::<String>();
+        let second_row = (0..8)
+            .map(|column| buffer.cell((column, 1)).unwrap().symbol())
+            .collect::<String>();
+
+        assert!(
+            first_row.starts_with("let gree"),
+            "first row: {first_row:?}"
+        );
+        assert!(
+            second_row.starts_with("ting = \""),
+            "second row: {second_row:?}"
+        );
+        assert_ne!(
+            buffer.cell((6, 1)).unwrap().fg,
+            Color::Reset,
+            "wrapped string text should retain its token color"
+        );
     }
 }

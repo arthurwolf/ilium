@@ -34,6 +34,16 @@ pub enum ServerError {
         source: std::io::Error,
     },
 
+    /// The server bound its socket but could not atomically publish the log
+    /// path that newly attaching clients must use. Treat this as fatal: a
+    /// live session with misleading diagnostics is not a healthy session.
+    #[error("failed to publish ready session log metadata at {path}: {source}")]
+    ReadyLogMetadata {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     /// The resolved session socket path (whether under
     /// `$XDG_RUNTIME_DIR/ilium` or, lacking that, `<data_dir>`) is at or
     /// over the ~108-byte `sockaddr_un.sun_path` limit the OS enforces for

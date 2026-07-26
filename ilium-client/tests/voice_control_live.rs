@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use ilium_client::app::{App, VoiceRuntimeRequest};
-use ilium_client::control::{system_instructions, ControlPlane};
+use ilium_client::control::{system_instructions, ControlPlane, VoiceTargetContext};
 use ilium_voice::{
     ReasoningEffort, VadEagerness, VoiceCommand, VoiceConnectionState, VoiceEvent, VoiceInputMode,
     VoiceModel, VoiceName, VoiceRuntimeConfig, VoiceService, VoiceToolOutput,
@@ -14,7 +14,7 @@ use ilium_voice::{
 use serde_json::{json, Value};
 
 /// Uses the production prompt and tool definitions while muting audio output.
-fn live_config() -> VoiceRuntimeConfig {
+fn live_config(target_context: VoiceTargetContext) -> VoiceRuntimeConfig {
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY is required");
 
     VoiceRuntimeConfig {
@@ -27,7 +27,7 @@ fn live_config() -> VoiceRuntimeConfig {
         input_device_name: None,
         output_device_name: None,
         output_volume_percent: 0,
-        instructions: system_instructions(""),
+        instructions: system_instructions("", target_context),
     }
 }
 
@@ -116,8 +116,11 @@ async fn wait_for_confirmation_question(service: &mut VoiceService) -> String {
 #[ignore = "uses the live OpenAI Realtime API"]
 async fn explicit_enter_phrase_calls_the_dedicated_submission_tool() {
     let control_plane = ControlPlane::default();
-    let mut service = VoiceService::start(live_config(), control_plane.tool_definitions())
-        .expect("start voice actor");
+    let mut service = VoiceService::start(
+        live_config(VoiceTargetContext::NoDetectedAgent),
+        control_plane.tool_definitions(),
+    )
+    .expect("start voice actor");
     let sender = service.command_sender();
 
     wait_until_listening(&mut service).await;
@@ -192,10 +195,95 @@ async fn explicit_enter_phrase_calls_the_dedicated_submission_tool() {
 
 #[tokio::test]
 #[ignore = "uses the live OpenAI Realtime API"]
+async fn bare_utterance_is_forwarded_verbatim_after_agent_context_update() {
+    let control_plane = ControlPlane::default();
+    let mut service = VoiceService::start(
+        live_config(VoiceTargetContext::NoDetectedAgent),
+        control_plane.tool_definitions(),
+    )
+    .expect("start voice actor");
+    let sender = service.command_sender();
+    let bare_utterance =
+        "Change the voice fallback so unclear requests go to the current coding agent.";
+
+    wait_until_listening(&mut service).await;
+
+    sender
+        .send(VoiceCommand::UpdateContext {
+            instructions: system_instructions("", VoiceTargetContext::DetectedAgent),
+            tools: control_plane.tool_definitions(),
+        })
+        .await
+        .expect("update active-agent context");
+    sender
+        .send(VoiceCommand::SendText(bare_utterance.to_owned()))
+        .await
+        .expect("send bare agent-directed turn");
+
+    let (invocation, pre_tool_transcript) = wait_for_tool_invocation(&mut service).await;
+    assert_eq!(invocation.name, "ilium_send_to_terminal");
+    assert!(
+        pre_tool_transcript.trim().is_empty(),
+        "agent-default dictation should call the tool without a spoken answer"
+    );
+
+    let arguments: Value =
+        serde_json::from_str(&invocation.arguments_json).expect("valid tool arguments");
+    assert_eq!(arguments["text"], bare_utterance);
+    assert!(
+        arguments.get("target").is_none() || arguments["target"].is_null(),
+        "the active agent should be selected by omitting target"
+    );
+
+    service.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "uses the live OpenAI Realtime API"]
+async fn explicit_ilium_command_takes_priority_inside_agent_context() {
+    let control_plane = ControlPlane::default();
+    let mut service = VoiceService::start(
+        live_config(VoiceTargetContext::DetectedAgent),
+        control_plane.tool_definitions(),
+    )
+    .expect("start voice actor");
+    let sender = service.command_sender();
+
+    wait_until_listening(&mut service).await;
+
+    sender
+        .send(VoiceCommand::SendText(
+            "Open ilium's settings screen.".to_owned(),
+        ))
+        .await
+        .expect("send explicit ilium-control turn");
+
+    let (invocation, pre_tool_transcript) = wait_for_tool_invocation(&mut service).await;
+    assert_eq!(invocation.name, "ilium_ui");
+    assert!(
+        pre_tool_transcript.trim().is_empty(),
+        "explicit ilium control should call its tool without a spoken answer"
+    );
+
+    let arguments: Value =
+        serde_json::from_str(&invocation.arguments_json).expect("valid tool arguments");
+    assert!(matches!(
+        arguments["action"].as_str(),
+        Some("open_settings" | "show_settings_tab")
+    ));
+
+    service.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "uses the live OpenAI Realtime API"]
 async fn stop_voice_request_calls_the_dedicated_tool_and_ends_the_session() {
     let mut control_plane = ControlPlane::default();
-    let mut service = VoiceService::start(live_config(), control_plane.tool_definitions())
-        .expect("start voice actor");
+    let mut service = VoiceService::start(
+        live_config(VoiceTargetContext::NoDetectedAgent),
+        control_plane.tool_definitions(),
+    )
+    .expect("start voice actor");
     let sender = service.command_sender();
 
     wait_until_listening(&mut service).await;

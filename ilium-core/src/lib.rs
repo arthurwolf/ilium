@@ -410,10 +410,9 @@ pub enum AgentActivity {
     /// "blocked on background work" rather than "blocked on you".
     WaitingBackground,
     WaitingApproval,
-    /// A working turn just finished and nobody has looked at this pane
-    /// since -- distinct from `Idle` so the UI can flag it for attention
-    /// until the user focuses the pane, at which point it reverts to
-    /// `Idle`.
+    /// A working turn just finished and the user has not opened that pane or
+    /// submitted newer terminal input. Distinct from `Idle` so every client
+    /// can present it as unread completed work until it is acknowledged.
     Done,
     Idle,
 }
@@ -953,6 +952,84 @@ impl Tree {
         let mut pane_ids = Vec::new();
         collect(self, ROOT_ID, &mut pane_ids);
         pane_ids
+    }
+
+    /// Finds the ordinary group that owns `node_id`. Split views are a
+    /// presentation container rather than a folder boundary, so a pane inside
+    /// one belongs to the nearest enclosing `Group`; projects and the session
+    /// root are skipped unless the root itself is the legacy group owner.
+    pub fn containing_group(&self, node_id: NodeId) -> Option<NodeId> {
+        let mut current = Some(node_id);
+        while let Some(candidate) = current {
+            let node = self.get(candidate)?;
+            if node.is_group() {
+                return Some(candidate);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    /// Returns the focusable panes owned by one ordinary group in its visible
+    /// child order. Direct pane children and direct split-view members are one
+    /// group-level sequence; nested groups deliberately remain separate
+    /// folders, reached by group-jump navigation rather than by cycling.
+    pub fn navigable_panes_in_group(&self, group_id: NodeId) -> Vec<NodeId> {
+        if !self.get(group_id).is_some_and(Node::is_group) {
+            return Vec::new();
+        }
+        let Ok(children) = self.children_of(group_id) else {
+            return Vec::new();
+        };
+        let mut pane_ids = Vec::new();
+        for child in children {
+            match self.get(*child) {
+                Some(node) if node.is_pane() => pane_ids.push(*child),
+                Some(node) if node.is_split_view() => {
+                    if let Ok(split_children) = self.children_of(*child) {
+                        pane_ids.extend(
+                            split_children
+                                .iter()
+                                .copied()
+                                .filter(|pane_id| self.get(*pane_id).is_some_and(Node::is_pane)),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        pane_ids
+    }
+
+    /// Lists ordinary groups in the same depth-first order shown by the tree
+    /// panel. Project containers are transparent ownership boundaries here:
+    /// Jump is about folders of panes, not switching a project heading.
+    pub fn group_ids_in_tree_order(&self) -> Vec<NodeId> {
+        fn collect(tree: &Tree, parent: NodeId, groups: &mut Vec<NodeId>) {
+            let Ok(children) = tree.children_of(parent) else {
+                return;
+            };
+            for child in children {
+                let Some(node) = tree.get(*child) else {
+                    continue;
+                };
+                if node.is_group() {
+                    groups.push(*child);
+                }
+                if node.is_container() {
+                    collect(tree, *child, groups);
+                }
+            }
+        }
+
+        let mut groups = Vec::new();
+        if self.get(ROOT_ID).is_some_and(Node::is_group)
+            && !self.navigable_panes_in_group(ROOT_ID).is_empty()
+        {
+            groups.push(ROOT_ID);
+        }
+        collect(self, ROOT_ID, &mut groups);
+        groups
     }
 
     /// All node ids, in no particular order (used for persistence/debugging).
@@ -1714,6 +1791,32 @@ impl Tree {
             }
             NodeKind::Container(_) | NodeKind::Folder { .. } => Err(TreeError::NotAPane(id)),
         }
+    }
+
+    /// Acknowledges that the user has seen a completed agent turn. Only
+    /// `Done` changes: concurrent detection may already have observed
+    /// renewed work, and a stale acknowledgement must never overwrite that
+    /// newer activity with `Idle`.
+    pub fn acknowledge_agent_completion(
+        &mut self,
+        id: NodeId,
+    ) -> Result<Option<PaneStatus>, TreeError> {
+        let NodeKind::Pane { status, .. } = &mut self.get_mut(id)?.kind else {
+            return Err(TreeError::NotAPane(id));
+        };
+        let acknowledged_status = match status {
+            PaneStatus::Agent(class, AgentActivity::Done) => {
+                Some(PaneStatus::Agent(class.clone(), AgentActivity::Idle))
+            }
+            PaneStatus::AgentWithGoal(class, AgentActivity::Done) => Some(
+                PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle),
+            ),
+            _ => None,
+        };
+        if let Some(acknowledged_status) = &acknowledged_status {
+            *status = acknowledged_status.clone();
+        }
+        Ok(acknowledged_status)
     }
 
     /// Replaces the pending input for one terminal pane. Replacement is
@@ -3121,6 +3224,62 @@ mod tests {
     }
 
     #[test]
+    fn completion_acknowledgement_only_changes_done_agents_and_preserves_goal_ownership() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(PathBuf::from("/tmp/project"))
+            .unwrap();
+        let ordinary_pane = tree
+            .add_pane(project, "ordinary", PaneContentKind::Terminal)
+            .unwrap();
+        let goal_pane = tree
+            .add_pane(project, "goal", PaneContentKind::Terminal)
+            .unwrap();
+        let working_pane = tree
+            .add_pane(project, "working", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            ordinary_pane,
+            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+        )
+        .unwrap();
+        tree.set_pane_status(
+            goal_pane,
+            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done),
+        )
+        .unwrap();
+        tree.set_pane_status(
+            working_pane,
+            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+        )
+        .unwrap();
+
+        assert_eq!(
+            tree.acknowledge_agent_completion(ordinary_pane).unwrap(),
+            Some(PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle))
+        );
+        assert_eq!(
+            tree.acknowledge_agent_completion(goal_pane).unwrap(),
+            Some(PaneStatus::AgentWithGoal(
+                AgentClass::Claude,
+                AgentActivity::Idle
+            ))
+        );
+        assert_eq!(
+            tree.acknowledge_agent_completion(working_pane).unwrap(),
+            None,
+            "a stale input acknowledgement must not overwrite renewed work"
+        );
+        assert!(matches!(
+            &tree.get(goal_pane).unwrap().kind,
+            NodeKind::Pane {
+                status: PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Idle),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn apply_restructure_regroups_and_retitles_in_one_shot() {
         let mut tree = Tree::new();
         let flat_group = tree.add_group(ROOT_ID, "misc").unwrap();
@@ -3408,5 +3567,42 @@ mod tests {
 
         assert!(matches!(err, TreeError::SplitViewOnlyAcceptsPanes));
         assert_eq!(tree, before);
+    }
+
+    #[test]
+    fn group_navigation_keeps_nested_groups_separate_and_includes_split_members() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/navigation")).unwrap();
+        let group = tree.add_group(project, "work").unwrap();
+        let direct = tree
+            .add_pane(group, "direct", PaneContentKind::Terminal)
+            .unwrap();
+        let first_split_member = tree
+            .add_pane(group, "first split", PaneContentKind::Terminal)
+            .unwrap();
+        let second_split_member = tree
+            .add_pane(group, "second split", PaneContentKind::Editor)
+            .unwrap();
+        let split = tree
+            .create_split_view(
+                group,
+                "split",
+                SplitOrientation::Vertical,
+                &[first_split_member, second_split_member],
+            )
+            .unwrap();
+        let nested_group = tree.add_group(group, "nested").unwrap();
+        let nested_pane = tree
+            .add_pane(nested_group, "nested pane", PaneContentKind::Board)
+            .unwrap();
+
+        assert_eq!(tree.containing_group(second_split_member), Some(group));
+        assert_eq!(tree.containing_group(nested_pane), Some(nested_group));
+        assert_eq!(
+            tree.navigable_panes_in_group(group),
+            vec![direct, first_split_member, second_split_member]
+        );
+        assert_eq!(tree.group_ids_in_tree_order(), vec![group, nested_group]);
+        assert!(tree.get(split).unwrap().is_split_view());
     }
 }

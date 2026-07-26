@@ -194,6 +194,16 @@ pub struct PtyOutputReplay {
     pub is_complete: bool,
 }
 
+/// Minimal repair for one downstream consumer that last received
+/// `after_sequence`. A retained contiguous tail can be appended directly;
+/// only a consumer older than the journal's retained window needs a reset
+/// plus full replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PtyOutputRecovery {
+    Delta(PtyOutputChunk),
+    Replay(PtyOutputReplay),
+}
+
 /// The PTY reader owns mutation of this journal; attachment handlers only
 /// clone snapshots through the mutex. Keeping it here makes history survive
 /// client detach/reattach without making the server retain a second parser.
@@ -248,6 +258,43 @@ impl OutputJournal {
             bytes,
             is_complete: self.is_complete,
         }
+    }
+
+    /// Returns only output newer than `after_sequence` when every missing
+    /// chunk remains retained. Falling behind the retained window requires a
+    /// full replay because terminal escape streams cannot skip bytes safely.
+    fn recovery_after(&self, after_sequence: u64) -> Option<PtyOutputRecovery> {
+        if after_sequence >= self.next_sequence {
+            return None;
+        }
+
+        let first_retained_sequence = self
+            .chunks
+            .front()
+            .map(|chunk| chunk.sequence)
+            .unwrap_or_else(|| self.next_sequence.saturating_add(1));
+        if after_sequence.saturating_add(1) < first_retained_sequence {
+            return Some(PtyOutputRecovery::Replay(self.replay()));
+        }
+
+        let retained_bytes = self
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.sequence > after_sequence)
+            .map(|chunk| chunk.bytes.len())
+            .sum();
+        let mut bytes = Vec::with_capacity(retained_bytes);
+        for chunk in self
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.sequence > after_sequence)
+        {
+            bytes.extend_from_slice(&chunk.bytes);
+        }
+        Some(PtyOutputRecovery::Delta(PtyOutputChunk {
+            sequence: self.next_sequence,
+            bytes,
+        }))
     }
 }
 
@@ -790,6 +837,15 @@ impl PtySession {
         self.output_journal.lock().unwrap().replay()
     }
 
+    /// Returns the smallest safe repair for a downstream parser known to
+    /// contain every journal chunk through `after_sequence`.
+    pub fn output_recovery_after(&self, after_sequence: u64) -> Option<PtyOutputRecovery> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .recovery_after(after_sequence)
+    }
+
     /// Terminates the spawned child process. A no-op returning `Ok(())` if
     /// the child has already exited -- there is nothing left to kill, and
     /// treating that as an error would make normal pane teardown (the
@@ -852,5 +908,53 @@ impl Drop for PtySession {
             let _ = self.child.lock().unwrap().kill();
         }
         self.reader_should_stop.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn journal() -> OutputJournal {
+        OutputJournal {
+            chunks: VecDeque::new(),
+            retained_bytes: 0,
+            next_sequence: 0,
+            is_complete: true,
+        }
+    }
+
+    #[test]
+    fn output_recovery_returns_only_the_contiguous_missing_tail() {
+        let mut journal = journal();
+        journal.append(b"first".to_vec());
+        journal.append(b"-second".to_vec());
+        journal.append(b"-third".to_vec());
+
+        assert_eq!(
+            journal.recovery_after(1),
+            Some(PtyOutputRecovery::Delta(PtyOutputChunk {
+                sequence: 3,
+                bytes: b"-second-third".to_vec(),
+            }))
+        );
+        assert_eq!(journal.recovery_after(3), None);
+    }
+
+    #[test]
+    fn output_recovery_falls_back_to_replay_after_retained_history_was_lost() {
+        let mut journal = journal();
+        journal.append(b"discarded".to_vec());
+        journal.append(b"retained".to_vec());
+        let removed = journal.chunks.pop_front().unwrap();
+        journal.retained_bytes = journal.retained_bytes.saturating_sub(removed.bytes.len());
+        journal.is_complete = false;
+
+        let Some(PtyOutputRecovery::Replay(replay)) = journal.recovery_after(0) else {
+            panic!("a missing retained chunk requires full replay");
+        };
+        assert_eq!(replay.through_sequence, 2);
+        assert!(!replay.is_complete);
+        assert_eq!(replay.bytes, b"\x1bcretained");
     }
 }

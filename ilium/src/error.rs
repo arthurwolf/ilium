@@ -61,6 +61,8 @@ pub enum CliError {
         #[source]
         source: std::io::Error,
     },
+    #[error("chatroom operation failed: {0}")]
+    Chatroom(#[from] anyhow::Error),
     #[error(transparent)]
     Connection(#[from] ilium_client::connection::ConnectionError),
     #[error(transparent)]

@@ -18,6 +18,8 @@ use crate::editor_pane::{EditorPane, EditorViewMode};
 pub enum ToolbarAction {
     ViewSource,
     ViewRendered,
+    ToggleHeadingRendering,
+    ToggleLineDisplay,
     ToggleLineNumbers,
     ToggleMinimap,
     ToggleAutosave,
@@ -49,11 +51,37 @@ fn buttons_for(pane: &EditorPane) -> Vec<Button> {
             label: " Rendered ".to_string(),
             active: pane.view_mode == EditorViewMode::Rendered,
         });
+        if pane.view_mode == EditorViewMode::Rendered {
+            buttons.push(Button {
+                action: ToolbarAction::ToggleHeadingRendering,
+                label: format!(
+                    " [ {} ] Pixel headers ",
+                    if pane.heading_rendering
+                        == crate::markdown::render::HeadingRendering::Rasterized
+                    {
+                        "x"
+                    } else {
+                        " "
+                    }
+                ),
+                active: pane.heading_rendering
+                    == crate::markdown::render::HeadingRendering::Rasterized,
+            });
+        }
     }
+    buttons.push(Button {
+        action: ToolbarAction::ToggleLineDisplay,
+        label: match pane.line_display {
+            crate::config::LineDisplay::Clip => "Clip",
+            crate::config::LineDisplay::Wrap => "Wrap",
+        }
+        .to_string(),
+        active: matches!(pane.line_display, crate::config::LineDisplay::Wrap),
+    });
     buttons.push(Button {
         action: ToolbarAction::ToggleLineNumbers,
         label: format!(
-            " # Lines: {} ",
+            "# Lines: {} ",
             if pane.show_line_numbers { "on" } else { "off" }
         ),
         active: pane.show_line_numbers,
@@ -61,7 +89,7 @@ fn buttons_for(pane: &EditorPane) -> Vec<Button> {
     buttons.push(Button {
         action: ToolbarAction::ToggleMinimap,
         label: format!(
-            " \u{25a4} Map: {} ",
+            "\u{25a4} Map: {} ",
             if pane.show_minimap { "on" } else { "off" }
         ),
         active: pane.show_minimap,
@@ -69,7 +97,7 @@ fn buttons_for(pane: &EditorPane) -> Vec<Button> {
     buttons.push(Button {
         action: ToolbarAction::ToggleAutosave,
         label: format!(
-            " \u{21bb} Auto: {} ",
+            "\u{21bb} Auto: {} ",
             if pane.show_autosave { "on" } else { "off" }
         ),
         active: pane.show_autosave,
@@ -202,11 +230,57 @@ mod tests {
         let mut pane = EditorPane::empty();
         pane.path = Some(PathBuf::from("notes.txt"));
         let area = Rect::new(0, 0, 80, 1);
-        // First button should be the line-numbers toggle, not Source.
+        // First button should be the line-display toggle, not Source.
         assert_eq!(
-            action_at(area, &pane, Position::new(2, 0)),
-            Some(ToolbarAction::ToggleLineNumbers)
+            action_at(area, &pane, Position::new(0, 0)),
+            Some(ToolbarAction::ToggleLineDisplay)
         );
+    }
+
+    #[test]
+    fn every_editor_exposes_the_line_display_switch() {
+        let pane = markdown_pane();
+        let area = Rect::new(0, 0, 100, 1);
+        let line_display = button_rects(area, &pane)
+            .into_iter()
+            .find(|(action, ..)| *action == ToolbarAction::ToggleLineDisplay)
+            .expect("editor toolbar should expose line display");
+
+        assert_eq!(line_display.2, "Clip");
+        assert!(!line_display.3);
+    }
+
+    #[test]
+    fn rendered_markdown_exposes_the_same_clip_wrap_switch() {
+        let mut pane = markdown_pane();
+        pane.view_mode = EditorViewMode::Rendered;
+        let area = Rect::new(0, 0, 100, 1);
+
+        let label_for_line_display = |pane: &EditorPane| {
+            button_rects(area, pane)
+                .into_iter()
+                .find(|(action, ..)| *action == ToolbarAction::ToggleLineDisplay)
+                .map(|(_, _, label, _)| label)
+                .expect("rendered Markdown should expose line display")
+        };
+
+        assert_eq!(label_for_line_display(&pane), "Clip");
+        pane.toggle_line_display();
+        assert_eq!(label_for_line_display(&pane), "Wrap");
+    }
+
+    #[test]
+    fn rendered_markdown_shows_a_pixel_header_checkbox() {
+        let mut pane = markdown_pane();
+        pane.view_mode = EditorViewMode::Rendered;
+        let area = Rect::new(0, 0, 100, 1);
+        let checkbox = button_rects(area, &pane)
+            .into_iter()
+            .find(|(action, ..)| *action == ToolbarAction::ToggleHeadingRendering)
+            .expect("rendered Markdown should expose the pixel-header checkbox");
+
+        assert!(checkbox.2.contains("[ x ] Pixel headers"));
+        assert!(checkbox.3);
     }
 
     #[test]

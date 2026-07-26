@@ -404,9 +404,9 @@ pub enum ServerEvent {
     /// simplicity is worth more here than the bytes saved by diffing.
     TreeSnapshot(Tree),
     /// One or more consecutive raw PTY output chunks for `pane_id`, in the
-    /// order they were produced. `sequence` is the newest source chunk
-    /// included in `bytes`, allowing the server to combine an already-ready
-    /// burst without changing replay de-duplication. Sent as raw bytes rather than a `vt100::Screen`
+    /// order they were produced. `first_sequence` and `sequence` bound the
+    /// exact contiguous source range included in `bytes`, allowing recovery
+    /// to reject both gaps and partial overlap after replay. Sent as raw bytes rather than a `vt100::Screen`
     /// cell-diff: `vt100::Screen` doesn't implement `Serialize`, and the
     /// client already needs its own `vt100::Parser` per pane to drive
     /// `tui-term` rendering, so feeding it the same byte stream the
@@ -417,6 +417,11 @@ pub enum ServerEvent {
     /// not needing a second, IPC-specific screen-diff representation.
     ScreenUpdate {
         pane_id: NodeId,
+        /// Oldest pane-local PTY journal chunk represented by `bytes`.
+        /// A merged event can cover several chunks, so this boundary lets a
+        /// receiver reject partial overlap instead of duplicating its prefix.
+        first_sequence: u64,
+        /// Newest pane-local PTY journal chunk represented by `bytes`.
         sequence: u64,
         bytes: Vec<u8>,
     },

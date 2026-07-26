@@ -1986,6 +1986,10 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
     };
     let label = "Shortcut base";
     let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+    let navigation_label = "Tree navigation prefix";
+    let navigation_padding =
+        usize::from(LABEL_COLUMN_WIDTH).saturating_sub(navigation_label.chars().count());
+    let navigation_control = format!("[ {} ]", keyboard.navigation_shortcut_base.label());
     let control = format!("\u{2039} {} \u{203a}", shortcut_base.label());
 
     let mut lines = vec![
@@ -2004,6 +2008,22 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
         ]),
         Line::from(Span::styled(
             "    Use Left/Right to browse A-Z, or type Shift+A-Z for an exact custom letter.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(vec![
+            Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+            Span::styled(
+                navigation_label,
+                Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ),
+            Span::raw(" ".repeat(navigation_padding)),
+            Span::styled(
+                navigation_control,
+                theme::selected_style().add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "    Prefix for cycle/jump only. Defaults to Ctrl+B independently of the general leader.",
             Style::new().add_modifier(Modifier::DIM),
         )),
         Line::from(""),
@@ -2037,7 +2057,7 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
         Line::from(format!("  {}", advice.explanation)),
         Line::from(""),
         Line::from(Span::styled(
-            "Each action is remapped live. Duplicate keys are refused; Help mirrors this table immediately.",
+            "Tree navigation is listed first: cycle ↓/↑ within a group; jump Pg↓/Pg↑ between groups. Open a row, then press a printable, arrow, or Page key to remap it live.",
             Style::new().add_modifier(Modifier::DIM),
         )),
     ]);
@@ -2054,11 +2074,15 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
             .map(|key| format!("[{key}]"))
             .collect::<Vec<_>>()
             .join(" ");
-        let mnemonic = keymap::mnemonic_for(binding.action, binding.letter).unwrap_or("—");
+        let mnemonic = binding
+            .key
+            .character()
+            .and_then(|key| keymap::mnemonic_for(binding.action, key))
+            .unwrap_or("—");
         lines.push(Line::from(format!(
             " {:<KEYBOARD_ACTION_COLUMN_WIDTH$.KEYBOARD_ACTION_COLUMN_WIDTH$} [{:^KEYBOARD_KEY_CAP_WIDTH$}] {:<KEYBOARD_MNEMONIC_COLUMN_WIDTH$.KEYBOARD_MNEMONIC_COLUMN_WIDTH$} {} [+]",
             keymap::action_label(binding.action),
-            keymap::key_label(binding.letter),
+            keymap::key_label(binding.key),
             mnemonic,
             choices,
         )));
@@ -2074,7 +2098,7 @@ pub enum KeyboardTableAction {
     OpenPicker(Action),
 }
 
-pub const KEYBOARD_TABLE_FIRST_ROW: u16 = 14;
+pub const KEYBOARD_TABLE_FIRST_ROW: u16 = 16;
 
 pub fn keyboard_table_hit(
     content_area: Rect,
@@ -2262,6 +2286,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::AutoResizeTree => "Auto-resize tree panel on focus",
         AppearanceRow::TreeWidth => "Tree panel width",
         AppearanceRow::TreeOrder => "Tree order",
+        AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ColorScheme => "Color theme",
         AppearanceRow::MotionLevel => "Motion level",
@@ -2280,6 +2305,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::TreeWidth => "Collapsed width of the tree panel, in terminal columns.",
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
+        }
+        AppearanceRow::TreeRowManagementControls => {
+            "Show rename and move up/down buttons when a tree row is hovered."
         }
         AppearanceRow::AgentIdentifierMode => {
             "Show each agent type as its full name, one letter, a chosen icon, or nothing."
@@ -2312,6 +2340,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         }
         AppearanceRow::TreeWidth => ui.tree_width.to_string(),
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
+        AppearanceRow::TreeRowManagementControls => {
+            if ui.show_tree_row_management_controls {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
         AppearanceRow::AgentIdentifierMode => ui.agent_identifiers.mode.label().to_string(),
         AppearanceRow::ColorScheme => match ui.color_scheme {
             ColorScheme::Dark => "Dark".to_string(),
@@ -2391,6 +2426,11 @@ fn terminal_lines(settings: &TerminalSettings, selected: usize) -> Vec<Line<'sta
 fn editor_lines(settings: &EditorSettings, selected: usize) -> Vec<Line<'static>> {
     setting_lines(
         &[
+            (
+                "Long lines",
+                settings.line_display.label().to_string(),
+                "Clip at the editor edge or wrap into additional visual rows.",
+            ),
             (
                 "Line numbers",
                 on_off(settings.show_line_numbers),
@@ -3258,6 +3298,10 @@ mod tests {
             appearance_content_hit(area, 0, Position::new(control_start_x, 4)),
             Some((AppearanceRow::TreeWidth, -1))
         );
+        assert_eq!(
+            appearance_content_hit(area, 0, Position::new(control_start_x, 10)),
+            Some((AppearanceRow::TreeRowManagementControls, -1))
+        );
         // A click on the label (left of the control) is a no-op.
         assert_eq!(appearance_content_hit(area, 0, Position::new(2, 1)), None);
         // A click on the description line between rows is a no-op.
@@ -3280,7 +3324,7 @@ mod tests {
     }
 
     #[test]
-    fn appearance_lines_expose_agent_mode_stable_glyphs_and_private_debug_history() {
+    fn appearance_lines_expose_tree_controls_agent_mode_glyphs_and_private_debug_history() {
         let ui = UiSettings {
             tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
@@ -3299,6 +3343,12 @@ mod tests {
             .join("\n");
         assert!(rendered.contains("Tree order"));
         assert!(rendered.contains("Age up (newest first)"));
+        assert!(rendered.contains("Tree row management buttons"));
+        assert!(rendered.contains("Show rename and move up/down buttons"));
+        assert_eq!(
+            appearance_row_value(AppearanceRow::TreeRowManagementControls, &ui),
+            "Off"
+        );
         assert!(rendered.contains("Agent identifier"));
         assert!(rendered.contains("Selected icon"));
         assert!(!rendered.contains("Claude icon"));
@@ -3386,6 +3436,10 @@ mod tests {
         assert!(recommended.contains("[GNU Screen preset] Ctrl+A"));
         assert!(recommended.contains("[tmux preset] Ctrl+B"));
         assert!(recommended.contains("Recommended: Ctrl+A"));
+        assert!(recommended.contains("Tree navigation prefix"));
+        assert!(recommended.contains("[ Ctrl+B ]"));
+        assert!(recommended.contains("Cycle next"));
+        assert!(recommended.contains("Jump next group"));
 
         keyboard.shortcut_base = ShortcutBase::parse("c").unwrap();
         let warned = keyboard_lines(&keyboard, keymap::LEADER_BINDINGS)
@@ -3426,15 +3480,19 @@ mod tests {
                 Position::new(70, KEYBOARD_TABLE_FIRST_ROW),
                 &bindings,
             ),
-            Some(KeyboardTableAction::OpenPicker(Action::NewTerminal))
+            Some(KeyboardTableAction::OpenPicker(Action::CycleNextInGroup))
         );
     }
 
     #[test]
     fn keyboard_table_renders_every_action_from_the_live_remapped_table() {
         let mut bindings = keymap::LEADER_BINDINGS.to_vec();
-        keymap::assign_key(&mut bindings, Action::NewGroup, 'z')
-            .expect("z is free in the default map");
+        keymap::assign_key(
+            &mut bindings,
+            Action::NewGroup,
+            keymap::BindingKey::Character('z'),
+        )
+        .expect("z is free in the default map");
         let rendered = keyboard_lines(&KeyboardSettings::default(), &bindings)
             .into_iter()
             .map(|line| line.to_string())

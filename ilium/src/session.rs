@@ -35,6 +35,12 @@ const DEBUG_LOG_ROOT: &str = "/tmp/.ilium";
 const ACTIVE_LOG_PATH_FILE: &str = ".active-log-path";
 const SERVER_START_LOCK_FILE: &str = ".server-start.lock";
 
+/// Ready metadata format emitted by current `ilium-server` processes. A
+/// legacy marker containing only the log path is still understood so an
+/// already-running server from a prior local build remains controllable.
+const READY_METADATA_PID_PREFIX: &str = "pid=";
+const READY_METADATA_LOG_PATH_PREFIX: &str = "log_path=";
+
 /// Every path needed to own exactly one project-local session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectSession {
@@ -51,6 +57,15 @@ pub struct ProjectSession {
 pub struct SessionListing {
     pub name: String,
     pub live: bool,
+}
+
+/// The server's atomically published identity and diagnostic destination.
+/// `server_pid: None` denotes the path-only format from a pre-ready-marker
+/// local build; current servers always publish the PID as well.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveLogMetadata {
+    server_pid: Option<u32>,
+    log_path: PathBuf,
 }
 
 /// Resolves the canonical project root and all paths for one named session.
@@ -352,7 +367,6 @@ fn locate_server_binary() -> PathBuf {
 fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> {
     let server_binary = locate_server_binary();
     let log_path = log_path_for_new_server(session);
-    write_active_log_path(session, &log_path)?;
     let mut command = Command::new(&server_binary);
     command
         .args([
@@ -366,6 +380,8 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> 
             session.project_root.to_string_lossy().as_ref(),
             "--log-path",
             log_path.to_string_lossy().as_ref(),
+            "--active-log-path-file",
+            session.active_log_path_file.to_string_lossy().as_ref(),
         ])
         .current_dir(&session.project_root)
         .stdin(Stdio::null())
@@ -403,7 +419,6 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> 
     let mut middle_process = match command.spawn() {
         Ok(middle_process) => middle_process,
         Err(source) => {
-            remove_active_log_path_if_matches(session, &log_path);
             return Err(if source.kind() == std::io::ErrorKind::NotFound {
                 CliError::ServerBinaryNotFound(server_binary)
             } else {
@@ -427,17 +442,22 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> 
 /// with the timestamped file shared by that server and its attached clients.
 pub async fn ensure_server_running(session: &ProjectSession) -> Result<PathBuf, CliError> {
     if is_session_live(&session.socket_path) {
-        return read_active_log_path(session);
+        return read_active_log_path_for_live_server(session).await;
     }
     let _server_start_lock = acquire_server_start_lock(session)?;
     if is_session_live(&session.socket_path) {
-        return read_active_log_path(session);
+        return read_active_log_path_for_live_server(session).await;
     }
-    spawn_server_detached(session)?;
+    let expected_log_path = spawn_server_detached(session)?;
     let deadline = Instant::now() + SERVER_START_TIMEOUT;
     while Instant::now() < deadline {
-        if is_session_live(&session.socket_path) {
-            return read_active_log_path(session);
+        if is_session_live(&session.socket_path)
+            && matches!(
+                read_active_log_path_for_live_server(session).await,
+                Ok(path) if path == expected_log_path
+            )
+        {
+            return Ok(expected_log_path);
         }
         tokio::time::sleep(SERVER_START_POLL_INTERVAL).await;
     }
@@ -507,57 +527,98 @@ fn log_path_for_new_server(session: &ProjectSession) -> PathBuf {
     session.log_directory.join(format!("log-{timestamp}.txt"))
 }
 
-/// Publishes the current server's immutable log path for later client
-/// attachments. The file is metadata only; disabled logging still does not
-/// create the target `.txt` file.
-fn write_active_log_path(session: &ProjectSession, log_path: &Path) -> Result<(), CliError> {
-    std::fs::write(
-        &session.active_log_path_file,
-        log_path.as_os_str().as_encoded_bytes(),
-    )
-    .and_then(|()| {
-        std::fs::set_permissions(
-            &session.active_log_path_file,
-            std::fs::Permissions::from_mode(0o600),
-        )
-    })
-    .map_err(|source| CliError::SessionLogMetadata {
-        path: session.active_log_path_file.clone(),
-        source,
-    })
-}
-
-/// Clears metadata published for a spawn that failed before `ilium-server`
-/// could exist, without deleting a path replaced by another lifecycle owner.
-fn remove_active_log_path_if_matches(session: &ProjectSession, expected_path: &Path) {
-    if matches!(
-        read_active_log_path(session),
-        Ok(active_path) if active_path == expected_path
-    ) {
-        let _ = std::fs::remove_file(&session.active_log_path_file);
-    }
-}
-
 /// Resolves the timestamped path selected when an already-running server
-/// started, so a newly attached client appends to the same diagnostic stream.
+/// successfully bound. The detached server publishes this atomically after
+/// binding its listener, rather than the launcher publishing a speculative
+/// path before the daemon has proved it can start.
 pub fn read_active_log_path(session: &ProjectSession) -> Result<PathBuf, CliError> {
-    let path = std::fs::read_to_string(&session.active_log_path_file).map_err(|source| {
+    Ok(read_active_log_metadata(session)?.log_path)
+}
+
+/// Reads a server's diagnostic path only when its PID agrees with the live
+/// Unix-socket peer. This prevents a stale marker from attaching a fresh
+/// client to the wrong file after a failed or replaced daemon launch.
+async fn read_active_log_path_for_live_server(
+    session: &ProjectSession,
+) -> Result<PathBuf, CliError> {
+    let metadata = read_active_log_metadata(session)?;
+    if let Some(expected_pid) = metadata.server_pid {
+        let actual_pid = server_process_id(&session.socket_path).await?;
+        if actual_pid != Some(expected_pid) {
+            return Err(invalid_active_log_metadata(
+                session,
+                format!(
+                    "active log metadata names server PID {expected_pid}, but the live socket peer is {actual_pid:?}"
+                ),
+            ));
+        }
+    }
+    Ok(metadata.log_path)
+}
+
+/// Parses and validates the session-local marker before any caller trusts it
+/// for logging. New markers bind the path to a PID; legacy path-only markers
+/// remain readable during local development upgrades.
+fn read_active_log_metadata(session: &ProjectSession) -> Result<ActiveLogMetadata, CliError> {
+    let contents = std::fs::read_to_string(&session.active_log_path_file).map_err(|source| {
         CliError::SessionLogMetadata {
             path: session.active_log_path_file.clone(),
             source,
         }
     })?;
-    let path = PathBuf::from(path);
+    let metadata = if contents.starts_with(READY_METADATA_PID_PREFIX) {
+        let mut lines = contents.lines();
+        let pid_line = lines.next().unwrap_or_default();
+        let log_path_line = lines.next().unwrap_or_default();
+        if lines.next().is_some() {
+            return Err(invalid_active_log_metadata(
+                session,
+                "active log metadata has unexpected trailing content",
+            ));
+        }
+        let server_pid = pid_line
+            .strip_prefix(READY_METADATA_PID_PREFIX)
+            .and_then(|value| value.parse::<u32>().ok())
+            .ok_or_else(|| {
+                invalid_active_log_metadata(session, "active log metadata has an invalid PID")
+            })?;
+        let log_path = log_path_line
+            .strip_prefix(READY_METADATA_LOG_PATH_PREFIX)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                invalid_active_log_metadata(session, "active log metadata has no log path")
+            })?;
+        ActiveLogMetadata {
+            server_pid: Some(server_pid),
+            log_path,
+        }
+    } else {
+        ActiveLogMetadata {
+            server_pid: None,
+            log_path: PathBuf::from(contents),
+        }
+    };
+    let path = metadata.log_path;
     if path.parent() != Some(session.log_directory.as_path()) {
-        return Err(CliError::SessionLogMetadata {
-            path: session.active_log_path_file.clone(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "active log path points outside this session's log directory",
-            ),
-        });
+        return Err(invalid_active_log_metadata(
+            session,
+            "active log path points outside this session's log directory",
+        ));
     }
-    Ok(path)
+    Ok(ActiveLogMetadata {
+        server_pid: metadata.server_pid,
+        log_path: path,
+    })
+}
+
+/// Produces the uniform user-facing error for a malformed or mismatched
+/// ready marker without leaking a half-parsed value to lifecycle callers.
+fn invalid_active_log_metadata(session: &ProjectSession, message: impl Into<String>) -> CliError {
+    CliError::SessionLogMetadata {
+        path: session.active_log_path_file.clone(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, message.into()),
+    }
 }
 
 /// Returns the durable artifacts an explicit reset must remove. Kept pure so
@@ -796,7 +857,11 @@ mod tests {
             .log_directory
             .join("log-2026-07-19_12-00-00.000.txt");
 
-        write_active_log_path(&session, &log_path).expect("write metadata");
+        std::fs::write(
+            &session.active_log_path_file,
+            log_path.as_os_str().as_encoded_bytes(),
+        )
+        .expect("write ready-server metadata fixture");
 
         assert_eq!(
             read_active_log_path(&session).expect("read metadata"),

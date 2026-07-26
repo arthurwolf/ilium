@@ -383,6 +383,9 @@ pub struct TreeNodeHit {
 pub struct TreeHoverState {
     pub node: Option<TreeNodeHit>,
     pub toolbar_hovered: bool,
+    /// Whether the optional rename and one-step move buttons should appear
+    /// alongside the universally available row actions.
+    pub show_management_actions: bool,
     /// The exact button under the pointer, if any -- distinct from
     /// `toolbar_hovered` because the pointer can sit in the toolbar strip's
     /// dead space (past the last button) without targeting one.
@@ -533,7 +536,25 @@ fn build_item(
     let flash_on = should_flash(node.id, context.recently_created, context.elapsed_ms);
     match &node.kind {
         NodeKind::Container(container) => {
-            let children = build_children(tree, node.id, context, identifier_path);
+            let mut children = build_children(tree, node.id, context, identifier_path);
+            if let ContainerKind::Project { path } = &container.kind {
+                if crate::chatroom::exists(path) {
+                    children.insert(
+                        0,
+                        TreeItem::new_leaf(
+                            chatroom_node_id(node.id),
+                            apply_sidebar_density(
+                                node_label(
+                                    Span::styled("💬", Style::new().fg(Color::Cyan)),
+                                    None,
+                                    Span::styled("Chatroom", Style::new().fg(Color::Cyan)),
+                                ),
+                                context.sidebar_density,
+                            ),
+                        ),
+                    );
+                }
+            }
             let icon = match &container.kind {
                 ContainerKind::Project { .. } => context.icons.glyph(IconTarget::Project),
                 ContainerKind::Group => context.icons.glyph(IconTarget::Group),
@@ -703,6 +724,27 @@ fn virtual_folder_node_id(root: NodeId, path: &Path) -> NodeId {
     root.hash(&mut hasher);
     path.hash(&mut hasher);
     NodeId((1_u64 << 63) | (hasher.finish() & !(1_u64 << 63)))
+}
+
+/// Synthetic child identifier for a project's file-backed chatroom. This
+/// independent high range cannot collide with a real monotonically allocated
+/// `NodeId` or the folder-browser hash range above it.
+pub fn chatroom_node_id(project_id: NodeId) -> NodeId {
+    NodeId((1_u64 << 62) | project_id.0)
+}
+
+/// Resolves a virtual chatroom row to its real owning project. The file check
+/// makes delayed mouse/key input safe when another process removed the room
+/// after the last render.
+pub fn chatroom_project(tree: &Tree, id: NodeId) -> Option<NodeId> {
+    tree.project_ids().into_iter().find(|project_id| {
+        *project_id != ROOT_ID
+            && chatroom_node_id(*project_id) == id
+            && tree
+                .get(*project_id)
+                .and_then(Node::project_path)
+                .is_some_and(crate::chatroom::exists)
+    })
 }
 
 fn folder_children(
@@ -1081,9 +1123,9 @@ fn agent_pane_label(
                 )),
                 has_goal,
                 Span::styled(
-                    format!(
-                        "{} — done",
-                        agent_title(class, &title, agent_identifiers.mode)
+                    crate::pane_title::decorate_agent_title(
+                        activity,
+                        &agent_title(class, &title, agent_identifiers.mode),
                     ),
                     style,
                 ),
@@ -1411,33 +1453,51 @@ fn row_supports_retitle(tree: &Tree, id: NodeId) -> bool {
 /// Returns the row actions applicable to `id`'s node kind/status, in the
 /// same left-to-right order as `TreeRowAction::ALL` -- see
 /// `row_supports_retitle` for why `Retitle` is sometimes excluded.
-fn applicable_row_actions(tree: &Tree, id: NodeId) -> &'static [TreeRowAction] {
-    const BASIC: [TreeRowAction; 4] = [
+fn applicable_row_actions(
+    tree: &Tree,
+    id: NodeId,
+    show_management_actions: bool,
+) -> &'static [TreeRowAction] {
+    const HIDDEN_PANE: [TreeRowAction; 2] = [TreeRowAction::Close, TreeRowAction::Retitle];
+    const HIDDEN_BASIC: [TreeRowAction; 1] = [TreeRowAction::Close];
+    const HIDDEN_PROJECT: [TreeRowAction; 2] =
+        [TreeRowAction::Close, TreeRowAction::ProjectRestructure];
+    const MANAGEMENT_BASIC: [TreeRowAction; 4] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
         TreeRowAction::MoveDown,
         TreeRowAction::Close,
     ];
-    const RETITLE: [TreeRowAction; 5] = [
+    const MANAGEMENT_RETITLE: [TreeRowAction; 5] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
         TreeRowAction::MoveDown,
         TreeRowAction::Close,
         TreeRowAction::Retitle,
     ];
-    const PROJECT: [TreeRowAction; 5] = [
+    const MANAGEMENT_PROJECT: [TreeRowAction; 5] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
         TreeRowAction::MoveDown,
         TreeRowAction::Close,
         TreeRowAction::ProjectRestructure,
     ];
+    if !show_management_actions {
+        if tree.get(id).is_some_and(Node::is_project) {
+            return &HIDDEN_PROJECT;
+        }
+        return if row_supports_retitle(tree, id) {
+            &HIDDEN_PANE
+        } else {
+            &HIDDEN_BASIC
+        };
+    }
     if tree.get(id).is_some_and(Node::is_project) {
-        &PROJECT
+        &MANAGEMENT_PROJECT
     } else if row_supports_retitle(tree, id) {
-        &RETITLE
+        &MANAGEMENT_RETITLE
     } else {
-        &BASIC
+        &MANAGEMENT_BASIC
     }
 }
 
@@ -1452,13 +1512,14 @@ pub fn row_action_at(
     area: Rect,
     row: u16,
     position: Position,
+    show_management_actions: bool,
 ) -> Option<TreeRowAction> {
     let list = list_area(area);
     if row < list.y || row >= list.bottom() || position.y != row {
         return None;
     }
     let action = TreeRowActionStrip::from_tree_area(area)?.action_at(position)?;
-    applicable_row_actions(tree, id)
+    applicable_row_actions(tree, id, show_management_actions)
         .contains(&action)
         .then_some(action)
 }
@@ -1650,6 +1711,12 @@ pub fn render(
         );
     }
 
+    // Keep the selected-node visual independent from `TreeState`'s full-path
+    // comparison. Snapshot reconciliation normally maintains that path, but
+    // this final cell-level pass also protects the row while a presentation
+    // snapshot temporarily shows its pre-mutation ancestry.
+    paint_selected_row(frame, list, &flattened_items, state);
+
     draw_scrollbar(frame, area, flattened_items.len(), state);
 
     if let Some(hit) = options.hover.node {
@@ -1662,7 +1729,7 @@ pub fn render(
                 frame,
                 area,
                 hit.row,
-                applicable_row_actions(tree, hit.id),
+                applicable_row_actions(tree, hit.id, options.hover.show_management_actions),
                 options.icons,
                 options.use_stable_glyphs,
             );
@@ -1670,6 +1737,63 @@ pub fn render(
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
         draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
+    }
+}
+
+/// Applies the selected-row palette across every list cell, including empty
+/// trailing cells. The tree widget already handles ordinary selection, but a
+/// final `NodeId`-based pass keeps the highlight whole during width changes
+/// and snapshot-presentation frames where an item's old and new ancestry
+/// differ.
+fn paint_selected_row(
+    frame: &mut Frame,
+    list: Rect,
+    visible_items: &[Flattened<'_, NodeId>],
+    state: &TreeState<NodeId>,
+) {
+    let Some(selected_node_id) = state.selected().last().copied() else {
+        return;
+    };
+    let Some(selected_index) = visible_items.iter().position(|item| {
+        item.identifier
+            .last()
+            .is_some_and(|node_id| *node_id == selected_node_id)
+    }) else {
+        return;
+    };
+    let Some(visible_row) = selected_index.checked_sub(state.get_offset()) else {
+        return;
+    };
+    let Ok(visible_row) = u16::try_from(visible_row) else {
+        return;
+    };
+    if visible_row >= list.height {
+        return;
+    }
+
+    let row = list.y.saturating_add(visible_row);
+    let buffer = frame.buffer_mut();
+    buffer.set_style(
+        Rect::new(list.x, row, list.width, 1),
+        theme::selected_style(),
+    );
+
+    // `Buffer::set_style` intentionally leaves unmaterialized cells empty.
+    // Crossterm consequently has no character on which to emit that new
+    // background, leaving the selection visibly clipped at the label's old
+    // extent. Materialize only the blank tail, after every actual glyph, so
+    // UTF-8 icon continuation cells retain ratatui's normal width handling.
+    let trailing_start = (list.x..list.right())
+        .rev()
+        .find(|column| !buffer[(*column, row)].symbol().trim().is_empty())
+        .map_or(list.x, |column| column.saturating_add(1));
+    if trailing_start < list.right() {
+        buffer.set_string(
+            trailing_start,
+            row,
+            " ".repeat(usize::from(list.right() - trailing_start)),
+            theme::selected_style(),
+        );
     }
 }
 
@@ -1951,7 +2075,24 @@ mod tests {
         recently_created: &HashMap<NodeId, u128>,
         elapsed_ms: u128,
     ) -> Buffer {
-        let area = Rect::new(0, 0, 40, 8);
+        render_tree_buffer_in_area(
+            tree,
+            state,
+            transitions,
+            recently_created,
+            elapsed_ms,
+            Rect::new(0, 0, 40, 8),
+        )
+    }
+
+    fn render_tree_buffer_in_area(
+        tree: &Tree,
+        state: &mut TreeState<NodeId>,
+        transitions: &TreeTransitions,
+        recently_created: &HashMap<NodeId, u128>,
+        elapsed_ms: u128,
+        area: Rect,
+    ) -> Buffer {
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -2192,6 +2333,25 @@ mod tests {
             assert!(!line.spans[1].content.trim().is_empty());
             assert!(!line_text(&line).contains("Claude:"));
         }
+    }
+
+    #[test]
+    fn done_agent_title_starts_with_the_completion_marker() {
+        let settings = AgentIdentifierSettings {
+            mode: AgentIdentifierMode::Letter,
+            ..AgentIdentifierSettings::default()
+        };
+        let line = pane_label(
+            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            "Review auth",
+            0,
+            false,
+            &settings,
+            None,
+        );
+
+        assert!(line_text(&line).ends_with("« [done] » X: Review auth"));
+        assert!(!line_text(&line).contains("— done"));
     }
 
     #[test]
@@ -2504,6 +2664,7 @@ mod tests {
                                 id: first_group,
                                 row: list.y,
                             }),
+                            show_management_actions: true,
                             ..TreeHoverState::default()
                         },
                         panes: &HashMap::new(),
@@ -2683,6 +2844,41 @@ mod tests {
         assert!(updates
             .iter()
             .all(|(_, _, cell)| cell.diff_option == Default::default()));
+    }
+
+    #[test]
+    fn selected_row_extends_through_its_blank_tail_in_compact_and_expanded_sidebars() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "selected group").unwrap();
+        let transitions = TreeTransitions::default();
+        let recently_created = HashMap::new();
+
+        for width in [33, 65] {
+            let area = Rect::new(0, 0, width, 8);
+            let mut state = TreeState::default();
+            state.select(vec![group]);
+            let buffer = render_tree_buffer_in_area(
+                &tree,
+                &mut state,
+                &transitions,
+                &recently_created,
+                0,
+                area,
+            );
+            let list = list_area(area);
+            let last_cell = &buffer[(list.right().saturating_sub(1), list.y)];
+
+            assert_eq!(
+                last_cell.symbol(),
+                " ",
+                "selection tail was not materialized at width {width}"
+            );
+            assert_eq!(
+                last_cell.bg,
+                theme::accent_bg(),
+                "selection did not reach the right edge at width {width}"
+            );
+        }
     }
 
     #[test]
@@ -3155,7 +3351,7 @@ mod tests {
             .unwrap();
 
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
-        for (index, expected_action) in applicable_row_actions(&tree, shell)
+        for (index, expected_action) in applicable_row_actions(&tree, shell, true)
             .iter()
             .copied()
             .enumerate()
@@ -3171,6 +3367,7 @@ mod tests {
                             controls_start + index as u16 * ROW_ACTION_WIDTH + slot_offset,
                             5,
                         ),
+                        true,
                     ),
                     Some(expected_action),
                     "slot cell {slot_offset} did not map to {expected_action:?}",
@@ -3178,7 +3375,14 @@ mod tests {
             }
         }
         assert_eq!(
-            row_action_at(&tree, shell, area, 4, Position::new(controls_start, 5)),
+            row_action_at(
+                &tree,
+                shell,
+                area,
+                4,
+                Position::new(controls_start, 5),
+                true
+            ),
             None
         );
     }
@@ -3214,22 +3418,54 @@ mod tests {
         let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
         let retitle_x = controls_start + 4 * ROW_ACTION_WIDTH;
         assert_eq!(
-            row_action_at(&tree, group, area, 5, Position::new(retitle_x, 5)),
+            row_action_at(&tree, group, area, 5, Position::new(retitle_x, 5), true),
             None
         );
         assert_eq!(
-            row_action_at(&tree, editor, area, 5, Position::new(retitle_x, 5)),
+            row_action_at(&tree, editor, area, 5, Position::new(retitle_x, 5), true),
             None
         );
         // The other four actions still apply to both.
         let close_x = controls_start + 3 * ROW_ACTION_WIDTH;
         assert_eq!(
-            row_action_at(&tree, group, area, 5, Position::new(close_x, 5)),
+            row_action_at(&tree, group, area, 5, Position::new(close_x, 5), true),
             Some(TreeRowAction::Close)
         );
         assert_eq!(
-            row_action_at(&tree, editor, area, 5, Position::new(close_x, 5)),
+            row_action_at(&tree, editor, area, 5, Position::new(close_x, 5), true),
             Some(TreeRowAction::Close)
+        );
+    }
+
+    #[test]
+    fn row_management_actions_are_hidden_without_hiding_close_or_retitle() {
+        let area = Rect::new(0, 0, 33, 20);
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "group").unwrap();
+        let shell = tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+
+        assert_eq!(
+            applicable_row_actions(&tree, shell, false),
+            &[TreeRowAction::Close, TreeRowAction::Retitle],
+        );
+        let controls_start = list_area(area).right() - ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
+        assert_eq!(
+            row_action_at(
+                &tree,
+                shell,
+                area,
+                5,
+                Position::new(controls_start, 5),
+                false
+            ),
+            None,
+        );
+        let close_x = controls_start + 3 * ROW_ACTION_WIDTH;
+        assert_eq!(
+            row_action_at(&tree, shell, area, 5, Position::new(close_x, 5), false),
+            Some(TreeRowAction::Close),
         );
     }
 

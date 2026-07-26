@@ -121,6 +121,12 @@ pub struct TerminalPaneRuntime {
     /// input and lifecycle diagnostics need this PID even during unresolved
     /// or invalidated session windows.
     pub detected_agent_process_id: Option<u32>,
+    /// Most recently verified agent class from the live process tree. This is
+    /// intentionally independent of `session_agent_class`: a newly-launched
+    /// CLI can expose its prompt before transcript discovery has accepted an
+    /// identity, letting initial prompt delivery prefer a process-confirmed
+    /// provider when it has already arrived.
+    pub detected_agent_class: Option<AgentClass>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -131,6 +137,11 @@ pub struct TerminalPaneRuntime {
     /// (see `CLAUDE.md`'s async-task-ownership rule) -- `abort_background_tasks`
     /// is the only way this handle is ever touched after creation.
     forward_task: JoinHandle<()>,
+    /// One cancellable task that waits for a newly-launched agent's visible
+    /// composer before submitting its one-shot initial request. It is owned by
+    /// the pane so closing the pane or manually typing into it cannot leave a
+    /// delayed prompt writing into a reused terminal.
+    initial_prompt_task: Option<JoinHandle<()>>,
 }
 
 impl TerminalPaneRuntime {
@@ -168,8 +179,25 @@ impl TerminalPaneRuntime {
             session_id: None,
             session_agent_class: None,
             detected_agent_process_id: None,
+            detected_agent_class: None,
             session_process_id: None,
             forward_task,
+            initial_prompt_task: None,
+        }
+    }
+
+    /// Installs the pane-owned waiter for a one-shot initial agent prompt.
+    pub fn set_initial_prompt_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.initial_prompt_task.replace(task) {
+            previous_task.abort();
+        }
+    }
+
+    /// Cancels a not-yet-submitted automatic prompt once the user starts
+    /// interacting with this newly-created terminal themselves.
+    pub fn cancel_initial_prompt_delivery(&mut self) {
+        if let Some(task) = self.initial_prompt_task.take() {
+            task.abort();
         }
     }
 
@@ -178,8 +206,9 @@ impl TerminalPaneRuntime {
     /// process is the caller's separate responsibility via
     /// `session.kill()`, since a pane can also be torn down after its
     /// child already exited on its own).
-    pub fn abort_background_tasks(&self) {
+    pub fn abort_background_tasks(&mut self) {
         self.forward_task.abort();
+        self.cancel_initial_prompt_delivery();
     }
 }
 
@@ -293,7 +322,7 @@ impl PaneResource {
     /// Cancels any background tasks this resource owns. A no-op for
     /// `Editor` (it owns none). Called on `ClosePane`/session teardown
     /// before the resource is dropped.
-    pub fn abort_background_tasks(&self) {
+    pub fn abort_background_tasks(&mut self) {
         if let PaneResource::Terminal(runtime) = self {
             runtime.abort_background_tasks();
         }

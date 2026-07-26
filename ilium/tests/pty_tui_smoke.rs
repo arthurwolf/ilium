@@ -308,6 +308,24 @@ fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
     .expect("write isolated keyboard config");
 }
 
+/// Enables only the row-management controls in smoke scenarios that assert
+/// direct rename/reorder mouse gestures. The product default remains off.
+fn seed_tree_row_management_controls(xdg: &IsolatedXdgDirs) {
+    let ilium_config_dir = xdg.config_home.join("ilium");
+    std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
+    let config_path = ilium_config_dir.join("config.toml");
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let separator = (!existing.is_empty() && !existing.ends_with('\n')).then_some("\n");
+    std::fs::write(
+        config_path,
+        format!(
+            "{existing}{}[ui]\nshow_tree_row_management_controls = true\n",
+            separator.unwrap_or_default()
+        ),
+    )
+    .expect("write isolated row-management config");
+}
+
 /// Enables the otherwise opt-in agent-debug surface for an isolated client
 /// and detached server without touching the developer's real config.
 fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
@@ -323,6 +341,17 @@ fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
 /// Finds the timestamped private process log that contains this test's exact
 /// canonical project path. Session directory names are intentionally hashed,
 /// so the active-log metadata is the authoritative path boundary.
+fn active_log_path_from_metadata(metadata: &str) -> Option<PathBuf> {
+    if metadata.starts_with("pid=") {
+        return metadata
+            .lines()
+            .find_map(|line| line.strip_prefix("log_path="))
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+    }
+    (!metadata.is_empty()).then(|| PathBuf::from(metadata))
+}
+
 fn process_log_for_project(project_dir: &Path) -> Option<(PathBuf, String)> {
     let project_path = project_dir
         .canonicalize()
@@ -338,10 +367,12 @@ fn process_log_for_project(project_dir: &Path) -> Option<(PathBuf, String)> {
             continue;
         }
         let active_path = session_entry.path().join(".active-log-path");
-        let Ok(log_path) = std::fs::read_to_string(active_path) else {
+        let Ok(metadata) = std::fs::read_to_string(active_path) else {
             continue;
         };
-        let log_path = PathBuf::from(log_path);
+        let Some(log_path) = active_log_path_from_metadata(&metadata) else {
+            continue;
+        };
         let Ok(contents) = std::fs::read_to_string(&log_path) else {
             continue;
         };
@@ -378,6 +409,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
+    seed_tree_row_management_controls(&xdg);
     let project_dir = temp_root.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
     seed_project_config(&project_dir);
@@ -575,7 +607,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 let screen = tui.screen_text();
                 screen.contains("⚙ Settings")
                     && screen.contains("Voice control")
-                    && screen.contains("Enter to replace · Esc to keep the existing key")
+                    && screen.contains("Protected value")
+                    && screen.contains("Keep existing")
+                    && screen.contains("Replace")
             },
             WAIT_TIMEOUT,
         )
@@ -583,15 +617,23 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the API-key dialog over still-open Settings, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"smoke-key\r")
-        .expect("committing the isolated smoke-test API key");
+    tui.write(b"smoke-key")
+        .expect("typing the isolated smoke-test API key");
+    let api_key_layout = ilium_client::modal::text_prompt_dialog_layout_for_size(120, 44);
+    let replace_button = api_key_layout.actions.confirm_button;
+    tui.write(&sgr_mouse_down(
+        0,
+        replace_button.x + replace_button.width / 2,
+        replace_button.y,
+    ))
+    .expect("click Replace in the nested API-key dialog");
     assert!(
         wait_until(
             || {
                 let screen = tui.screen_text();
                 screen.contains("⚙ Settings")
                     && screen.contains("Voice control")
-                    && !screen.contains("Enter to replace · Esc to keep the existing key")
+                    && !screen.contains("Keep existing")
             },
             WAIT_TIMEOUT,
         )
@@ -774,7 +816,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // Use the settings view's `j`/`l` aliases rather than escape-prefixed
     // arrows: a real PTY can deliver an isolated escape before the rest of
     // a CSI sequence, which would legitimately close this full-screen view.
-    tui.write(b"jjjll")
+    tui.write(b"jjjjll")
         .expect("selecting icon mode for agent identifiers");
     let agent_controls_persisted = wait_until(
         || {
@@ -1059,10 +1101,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("isolated session socket");
     let session_log_directory =
         Path::new("/tmp/.ilium").join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
-    let active_log_path = PathBuf::from(
-        std::fs::read_to_string(session_log_directory.join(".active-log-path"))
+    let active_log_path = active_log_path_from_metadata(
+        &std::fs::read_to_string(session_log_directory.join(".active-log-path"))
             .expect("read active log metadata"),
-    );
+    )
+    .expect("active log metadata contains a log path");
     assert!(
         !active_log_path.exists(),
         "disabled logging unexpectedly created {}",
@@ -1794,6 +1837,63 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
 
+    // The selected default group contains both panes, so Close opens the real
+    // destructive confirmation. Cancel it with the rendered mouse button and
+    // prove the obscured tree received no leaked click or close request.
+    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    tui.write(&sgr_mouse_down(0, 8, default_row))
+        .expect("select the populated default group");
+    tui.write(&sgr_mouse_up(8, default_row))
+        .expect("release the populated default group click");
+    tui.write(b"\x01x")
+        .expect("open close confirmation for the populated default group");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Close this item?")
+                    && screen.contains("Keep open")
+                    && screen.contains("Close")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected aerated close confirmation buttons, got: {:?}",
+        tui.screen_text()
+    );
+    let confirmation_layout = ilium_client::modal::confirm_dialog_layout_for_size(120, 40);
+    let cancel_button = confirmation_layout.actions.cancel_button;
+    tui.write(&sgr_mouse_down(
+        0,
+        cancel_button.x + cancel_button.width / 2,
+        cancel_button.y,
+    ))
+    .expect("click Keep open in the real close dialog");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("Keep open") && tui.screen_text().contains("default"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "mouse cancellation should preserve the default group, got: {:?}",
+        tui.screen_text()
+    );
+    // The group-selection click above also toggled it closed. Expand it again
+    // and prove both child panes survived the cancelled confirmation.
+    tui.write(&sgr_mouse_down(0, 8, default_row))
+        .expect("expand the preserved default group");
+    tui.write(&sgr_mouse_up(8, default_row))
+        .expect("release the preserved default group click");
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 2),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "mouse cancellation should preserve both panes, got: {:?}",
+        tui.screen_text()
+    );
+
     // Select the first pane and close it through the real leader action. While
     // the authoritative tree already contains only one pane, the old snapshot
     // should remain on screen briefly with one of the two labels translated
@@ -1841,6 +1941,41 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     assert!(
         successor_received_input,
         "expected input to reach the successor selected after close, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Return to the tree, select the remaining pane's parent, then confirm its
+    // destructive close with the other rendered button. This complements the
+    // cancellation proof above and exercises both mouse outcomes end to end.
+    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    tui.write(&sgr_mouse_down(0, 8, default_row))
+        .expect("select the final populated default group");
+    tui.write(&sgr_mouse_up(8, default_row))
+        .expect("release the final populated default group click");
+    tui.write(b"\x01x")
+        .expect("open close confirmation for the final populated group");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Keep open"), WAIT_TIMEOUT).await,
+        "expected the close confirmation before clicking Close, got: {:?}",
+        tui.screen_text()
+    );
+    let close_button = confirmation_layout.actions.confirm_button;
+    tui.write(&sgr_mouse_down(
+        0,
+        close_button.x + close_button.width / 2,
+        close_button.y,
+    ))
+    .expect("click Close in the real close dialog");
+    assert!(
+        wait_until(
+            || {
+                !tui.screen_text().contains("Keep open")
+                    && tui.with_screen(|screen| rows_containing(screen, "📟   shell").is_empty())
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "mouse confirmation should close the populated group, got: {:?}",
         tui.screen_text()
     );
 
@@ -1894,7 +2029,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     std::fs::write(
         &fake_codex_path,
         format!(
-            "#!/bin/sh\nprintf 'STARTED' > '{}'\nIFS= read -r line\nprintf '%s' \"$line\" > '{}'\nsleep 30\n",
+            "#!/bin/sh\nprintf 'STARTED' > '{}'\nprintf '  send a message\\n'\nIFS= read -r line\nprintf '%s' \"$line\" > '{}'\nsleep 30\n",
             fake_output_path.display(),
             fake_output_path.display(),
         ),
@@ -1986,7 +2121,9 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         tui.screen_text()
     );
 
-    tui.write(&sgr_mouse_down(0, context_column + 1, target_row + 1))
+    // The menu renders its first item directly below its title. Create Agent
+    // is the third canonical line action after Copy line and Copy entire file.
+    tui.write(&sgr_mouse_down(0, context_column + 1, target_row + 3))
         .expect("click create-agent line action");
     assert!(
         wait_until(
@@ -2340,7 +2477,14 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         "expected selected dialog.md in create form, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\r").expect("create dialog-backed board");
+    let board_dialog = ilium_client::modal::create_board_dialog_layout_for_size(120, 40);
+    let create_board_button = board_dialog.actions.confirm_button;
+    tui.write(&sgr_mouse_down(
+        0,
+        create_board_button.x + create_board_button.width / 2,
+        create_board_button.y,
+    ))
+    .expect("click Create board in the restored creation form");
     assert!(
         wait_until(
             || {
@@ -2727,6 +2871,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
 async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_tree_row_management_controls(&xdg);
     let project_dir = temp_root.path().join("p");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
     seed_project_config(&project_dir);
@@ -3169,7 +3314,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
             || {
                 let screen = tui.screen_text();
                 screen.contains("Save agent debug log")
-                    && screen.contains("Enter to confirm · Esc to cancel")
+                    && screen.contains("Cancel")
+                    && screen.contains("Save")
             },
             WAIT_TIMEOUT,
         )
@@ -3177,7 +3323,14 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         "expected editable destination path prompt, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\r").expect("accept first default export path");
+    let save_prompt_layout = ilium_client::modal::text_prompt_dialog_layout_for_size(140, 44);
+    let save_prompt_button = save_prompt_layout.actions.confirm_button;
+    tui.write(&sgr_mouse_down(
+        0,
+        save_prompt_button.x + save_prompt_button.width / 2,
+        save_prompt_button.y,
+    ))
+    .expect("click Save in the destination path prompt");
     assert!(
         wait_until(
             || tui.screen_text().contains("Saved agent debug log to"),

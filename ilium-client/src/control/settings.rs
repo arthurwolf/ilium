@@ -78,6 +78,11 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "ui.tree_order" => {
             app.settings_set_tree_order(parse_tree_order(string(&value)?)?);
         }
+        "ui.tree_row_management_controls" => {
+            if app.ui_settings.show_tree_row_management_controls != boolean(&value)? {
+                app.settings_toggle_tree_row_management_controls();
+            }
+        }
         "ui.agent_identifier_mode" => {
             let target = parse_agent_identifier_mode(string(&value)?)?;
             for _ in 0..4 {
@@ -228,18 +233,14 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let action_name = path.trim_start_matches("keyboard.bindings.");
             let action = crate::keymap::action_from_name(action_name)
                 .ok_or_else(|| format!("Unknown keyboard action {action_name:?}"))?;
-            let mut characters = string(&value)?.chars();
-            let key = characters
-                .next()
-                .ok_or("keyboard binding must be one printable key")?;
-            if characters.next().is_some() || !crate::keymap::BINDABLE_KEYS.contains(&key) {
-                return Err("keyboard binding must be one supported printable key".to_owned());
-            }
+            let key = crate::keymap::BindingKey::parse_config_value(string(&value)?).ok_or(
+                "keyboard binding must be one printable key, up, down, page_up, or page_down",
+            )?;
             app.settings_assign_key(action, key);
             let reached = app
                 .keybindings
                 .iter()
-                .any(|binding| binding.action == action && binding.letter == key);
+                .any(|binding| binding.action == action && binding.key == key);
             if !reached {
                 return Err(app
                     .status_message
@@ -465,6 +466,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
     match path {
         "ui.tree_width" => app.settings_adjust_tree_width(direction),
         "ui.tree_order" => app.settings_adjust_tree_order(direction),
+        "ui.tree_row_management_controls" => app.settings_toggle_tree_row_management_controls(),
         "ui.agent_identifier_mode" => app.settings_adjust_agent_identifier_mode(direction),
         "ui.motion_level" => app.settings_adjust_row(AppearanceRow::MotionLevel, direction),
         "ui.sidebar_density" => app.settings_adjust_row(AppearanceRow::SidebarDensity, direction),

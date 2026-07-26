@@ -1,16 +1,16 @@
 //! Single source of truth for ilium's leader-key bindings.
 //!
-//! ilium's shortcut base defaults to `Ctrl+A` (like screen's classic
-//! prefix), followed by a single letter. The base is configurable to any
-//! ASCII letter through the Keyboard settings tab; `Ctrl+B` is the other
-//! recommended preset because it is tmux's established default. Both the
+//! ilium's general shortcut base defaults to `Ctrl+A` (Screen's classic
+//! prefix),
+//! followed by a configured key. The base is configurable to any
+//! ASCII letter through the Keyboard settings tab. Both the
 //! input-dispatch logic (`app.rs`) and the help screen render from
 //! [`effective_bindings`] (defaulting to [`LEADER_BINDINGS`] until
 //! [`init_effective_bindings`] runs at startup), so the two can't drift out
 //! of sync — add a new leader shortcut to `LEADER_BINDINGS` and both
 //! consumers pick it up automatically.
 //!
-//! A user may remap which letter triggers an existing [`Action`] via
+//! A user may remap which key triggers an existing [`Action`] via
 //! `config.toml`'s `[keybindings]` table (`crate::config`) — see
 //! [`action_name`]/[`action_from_name`] for the stable string each
 //! `Action` is addressed by in that config, and [`init_effective_bindings`]
@@ -127,6 +127,79 @@ const fn warning(explanation: &'static str) -> ShortcutBaseAdvice {
     }
 }
 
+/// A physical second key in a leader sequence. Printable keys retain the
+/// original single-character configuration spelling; the navigation keys use
+/// stable named values so TOML can represent the user's requested arrows and
+/// page keys without terminal escape bytes leaking into configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BindingKey {
+    Character(char),
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+}
+
+impl BindingKey {
+    pub const SPECIAL: [Self; 4] = [Self::Up, Self::Down, Self::PageUp, Self::PageDown];
+
+    pub const fn character(self) -> Option<char> {
+        match self {
+            Self::Character(character) => Some(character),
+            Self::Up | Self::Down | Self::PageUp | Self::PageDown => None,
+        }
+    }
+
+    /// Stable, human-editable value stored in `[keybindings]`.
+    pub fn config_value(self) -> String {
+        match self {
+            Self::Character(character) => character.to_string(),
+            Self::Up => "up".to_string(),
+            Self::Down => "down".to_string(),
+            Self::PageUp => "page_up".to_string(),
+            Self::PageDown => "page_down".to_string(),
+        }
+    }
+
+    /// Parses the stable TOML spelling while retaining the existing
+    /// one-printable-character bindings unchanged.
+    pub fn parse_config_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "up" | "arrow_up" => Some(Self::Up),
+            "down" | "arrow_down" => Some(Self::Down),
+            "page_up" | "pageup" => Some(Self::PageUp),
+            "page_down" | "pagedown" => Some(Self::PageDown),
+            _ => {
+                let mut characters = value.chars();
+                let character = characters.next()?;
+                (characters.next().is_none() && BINDABLE_KEYS.contains(&character))
+                    .then_some(Self::Character(character))
+            }
+        }
+    }
+
+    /// Converts one post-leader key event to a configured key. Modifiers on
+    /// printable keys remain intentionally ignored for compatibility with the
+    /// original dispatcher; arrows/page keys require no modifier so a pane's
+    /// Ctrl+Arrow or Alt+Page shortcut is never stolen.
+    pub fn from_key_event(key: &KeyEvent) -> Option<Self> {
+        match key.code {
+            KeyCode::Char(character) => Some(Self::Character(character)),
+            KeyCode::Up if key.modifiers.is_empty() => Some(Self::Up),
+            KeyCode::Down if key.modifiers.is_empty() => Some(Self::Down),
+            KeyCode::PageUp if key.modifiers.is_empty() => Some(Self::PageUp),
+            KeyCode::PageDown if key.modifiers.is_empty() => Some(Self::PageDown),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for BindingKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.config_value())
+    }
+}
+
 /// One leader-key action. Extend this enum (and `LEADER_BINDINGS` below)
 /// together when adding a new shortcut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +221,10 @@ pub enum Action {
     FocusPaneRight,
     FocusPaneUp,
     FocusPaneDown,
+    CycleNextInGroup,
+    CyclePreviousInGroup,
+    JumpNextGroup,
+    JumpPreviousGroup,
     ScrollbackUp,
     ScrollbackDown,
     Save,
@@ -166,11 +243,47 @@ pub enum Action {
     Settings,
 }
 
-/// A single letter -> action mapping, plus the human-readable description
+impl Action {
+    /// Tree traversal has its own `Ctrl+B` prefix so the requested defaults
+    /// coexist with ilium's historical configurable general leader (`Ctrl+A`
+    /// on a fresh install). When the general leader is also `Ctrl+B`, normal
+    /// leader dispatch naturally owns these actions too.
+    pub const fn uses_navigation_prefix(self) -> bool {
+        matches!(
+            self,
+            Self::CycleNextInGroup
+                | Self::CyclePreviousInGroup
+                | Self::JumpNextGroup
+                | Self::JumpPreviousGroup
+        )
+    }
+}
+
+/// The dedicated default prefix for tree traversal. It is intentionally
+/// separate from the general leader so existing `Ctrl+A` workflows survive
+/// while `Ctrl+B ↓/↑/Pg↓/Pg↑` remain the documented defaults.
+pub const DEFAULT_NAVIGATION_SHORTCUT_BASE: ShortcutBase = ShortcutBase::B;
+
+/// Chooses the prefix rendered for one action in Help. Navigation actions
+/// show their separately configurable tree-navigation prefix; all other
+/// actions use the general leader prefix.
+pub fn action_prefix_label(
+    action: Action,
+    general_base: ShortcutBase,
+    navigation_base: ShortcutBase,
+) -> String {
+    if action.uses_navigation_prefix() {
+        navigation_base.label()
+    } else {
+        general_base.label()
+    }
+}
+
+/// A configured key -> action mapping, plus the human-readable description
 /// shown on the help screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyBinding {
-    pub letter: char,
+    pub key: BindingKey,
     pub action: Action,
     pub description: &'static str,
 }
@@ -199,12 +312,16 @@ pub const BINDABLE_KEYS: &[char] = &[
     ' ',
 ];
 
-/// Human-readable cap label for a printable leader key. Space is printable
+/// Human-readable cap label for a configured leader key. Space is printable
 /// but invisible in a table, so it must never be rendered as an empty box.
-pub fn key_label(key: char) -> String {
+pub fn key_label(key: BindingKey) -> String {
     match key {
-        ' ' => "Space".to_string(),
-        _ => key.to_string(),
+        BindingKey::Character(' ') => "Space".to_string(),
+        BindingKey::Character(character) => character.to_string(),
+        BindingKey::Up => "↑".to_string(),
+        BindingKey::Down => "↓".to_string(),
+        BindingKey::PageUp => "Pg↑".to_string(),
+        BindingKey::PageDown => "Pg↓".to_string(),
     }
 }
 
@@ -239,153 +356,176 @@ impl KeymapPreset {
 /// screen both walk this table, so it is the only place a binding needs to
 /// be registered.
 pub const LEADER_BINDINGS: &[KeyBinding] = &[
+    // Keep tree traversal at the top of Settings and Help: it is a distinct
+    // navigation system with a dedicated prefix, rather than an incidental
+    // pane-focus action buried among general commands.
     KeyBinding {
-        letter: 'c',
+        key: BindingKey::Down,
+        action: Action::CycleNextInGroup,
+        description: "Cycle to the next pane in the current group",
+    },
+    KeyBinding {
+        key: BindingKey::Up,
+        action: Action::CyclePreviousInGroup,
+        description: "Cycle to the previous pane in the current group",
+    },
+    KeyBinding {
+        key: BindingKey::PageDown,
+        action: Action::JumpNextGroup,
+        description: "Jump to the first pane in the next group",
+    },
+    KeyBinding {
+        key: BindingKey::PageUp,
+        action: Action::JumpPreviousGroup,
+        description: "Jump to the first pane in the previous group",
+    },
+    KeyBinding {
+        key: BindingKey::Character('c'),
         action: Action::NewTerminal,
         description: "New terminal pane in the selected group",
     },
     KeyBinding {
-        letter: 'e',
+        key: BindingKey::Character('e'),
         action: Action::NewEditor,
         description: "New editor pane (opens a file picker)",
     },
     KeyBinding {
-        letter: 'B',
+        key: BindingKey::Character('B'),
         action: Action::NewBoard,
         description: "New board (choose storage format and location)",
     },
     KeyBinding {
-        letter: 'x',
+        key: BindingKey::Character('x'),
         action: Action::ClosePane,
         description: "Close the selected pane or group",
     },
     KeyBinding {
-        letter: 'g',
+        key: BindingKey::Character('g'),
         action: Action::NewGroup,
         description: "New group (choose where in a dialog)",
     },
     KeyBinding {
-        letter: 'W',
+        key: BindingKey::Character('W'),
         action: Action::NewSplitView,
         description: "New vertical or horizontal split view",
     },
     KeyBinding {
-        letter: 'f',
+        key: BindingKey::Character('f'),
         action: Action::NewFolder,
         description: "Open a folder in the sidebar",
     },
     KeyBinding {
-        letter: 'r',
+        key: BindingKey::Character('r'),
         action: Action::Rename,
         description: "Rename the selected node",
     },
     KeyBinding {
-        letter: 'm',
+        key: BindingKey::Character('m'),
         action: Action::ToggleMove,
         description: "Toggle move mode for the selected node (up/down to reorder, left/right to outdent/indent)",
     },
     KeyBinding {
-        letter: 't',
+        key: BindingKey::Character('t'),
         action: Action::FocusTree,
         description: "Focus the tree panel",
     },
     KeyBinding {
-        letter: 'p',
+        key: BindingKey::Character('p'),
         action: Action::FocusPane,
         description: "Focus the active pane",
     },
     KeyBinding {
-        letter: 'o',
+        key: BindingKey::Character('o'),
         action: Action::FocusNextPane,
         description: "Focus the next visible pane",
     },
     KeyBinding {
-        letter: ';',
+        key: BindingKey::Character(';'),
         action: Action::FocusPreviousPane,
         description: "Focus the previous visible pane",
     },
     KeyBinding {
-        letter: 'h',
+        key: BindingKey::Character('h'),
         action: Action::FocusPaneLeft,
         description: "Focus the visible pane to the left",
     },
     KeyBinding {
-        letter: 'l',
+        key: BindingKey::Character('l'),
         action: Action::FocusPaneRight,
         description: "Focus the visible pane to the right",
     },
     KeyBinding {
-        letter: 'k',
+        key: BindingKey::Character('k'),
         action: Action::FocusPaneUp,
         description: "Focus the visible pane above",
     },
     KeyBinding {
-        letter: 'j',
+        key: BindingKey::Character('j'),
         action: Action::FocusPaneDown,
         description: "Focus the visible pane below",
     },
     KeyBinding {
-        letter: '[',
+        key: BindingKey::Character('['),
         action: Action::ScrollbackUp,
         description: "Scroll the focused terminal one page up",
     },
     KeyBinding {
-        letter: ']',
+        key: BindingKey::Character(']'),
         action: Action::ScrollbackDown,
         description: "Scroll the focused terminal one page down",
     },
     KeyBinding {
-        letter: 's',
+        key: BindingKey::Character('s'),
         action: Action::Save,
         description: "Save the focused editor pane",
     },
     KeyBinding {
-        letter: '!',
+        key: BindingKey::Character('!'),
         action: Action::RunCommand,
         description: "Prompt for a command, run it in a new terminal pane in the selected group",
     },
     KeyBinding {
-        letter: '/',
+        key: BindingKey::Character('/'),
         action: Action::Search,
         description: "Search terminal history and open editor buffers",
     },
     KeyBinding {
-        letter: 'v',
+        key: BindingKey::Character('v'),
         action: Action::ToggleEditorViewMode,
         description: "Toggle the focused editor pane between Source and Rendered (markdown files only)",
     },
     KeyBinding {
-        letter: 'n',
+        key: BindingKey::Character('n'),
         action: Action::ToggleLineNumbers,
         description: "Toggle line numbers in the focused editor pane",
     },
     KeyBinding {
-        letter: 'b',
+        key: BindingKey::Character('b'),
         action: Action::ToggleMinimap,
         description: "Toggle the minimap in the focused editor pane",
     },
     KeyBinding {
-        letter: 'a',
+        key: BindingKey::Character('a'),
         action: Action::ToggleAutosave,
         description: "Toggle autosave (debounced ~1s after each edit) in the focused editor pane",
     },
     KeyBinding {
-        letter: 'S',
+        key: BindingKey::Character('S'),
         action: Action::Settings,
         description: "Open settings (also: use the tree footer gear)",
     },
     KeyBinding {
-        letter: '?',
+        key: BindingKey::Character('?'),
         action: Action::Help,
         description: "Show or hide this help screen",
     },
     KeyBinding {
-        letter: 'd',
+        key: BindingKey::Character('d'),
         action: Action::Detach,
         description: "Detach this client and leave the session running",
     },
     KeyBinding {
-        letter: 'Q',
+        key: BindingKey::Character('Q'),
         action: Action::Quit,
         description: "Kill this project session and disconnect every client",
     },
@@ -415,6 +555,10 @@ pub fn action_name(action: Action) -> &'static str {
         Action::FocusPaneRight => "focus_pane_right",
         Action::FocusPaneUp => "focus_pane_up",
         Action::FocusPaneDown => "focus_pane_down",
+        Action::CycleNextInGroup => "cycle_next_in_group",
+        Action::CyclePreviousInGroup => "cycle_previous_in_group",
+        Action::JumpNextGroup => "jump_next_group",
+        Action::JumpPreviousGroup => "jump_previous_group",
         Action::ScrollbackUp => "scrollback_up",
         Action::ScrollbackDown => "scrollback_down",
         Action::Save => "save",
@@ -453,6 +597,10 @@ pub const fn action_label(action: Action) -> &'static str {
         Action::FocusPaneRight => "Focus pane right",
         Action::FocusPaneUp => "Focus pane above",
         Action::FocusPaneDown => "Focus pane below",
+        Action::CycleNextInGroup => "Cycle next in group",
+        Action::CyclePreviousInGroup => "Cycle previous in group",
+        Action::JumpNextGroup => "Jump next group",
+        Action::JumpPreviousGroup => "Jump previous group",
         Action::ScrollbackUp => "Scrollback up",
         Action::ScrollbackDown => "Scrollback down",
         Action::Save => "Save editor",
@@ -747,6 +895,12 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "south",
             },
         ],
+        // Arrow/page defaults intentionally have no printable-key mnemonic.
+        // The Keyboard settings view renders their actual keycap instead.
+        Action::CycleNextInGroup
+        | Action::CyclePreviousInGroup
+        | Action::JumpNextGroup
+        | Action::JumpPreviousGroup => &[],
         Action::ScrollbackUp => &[
             Mnemonic {
                 key: 'b',
@@ -1005,21 +1159,21 @@ pub fn is_leader_key(key: &KeyEvent, base: ShortcutBase) -> bool {
     }
 }
 
-/// Looks up the action bound to a letter pressed right after the leader,
+/// Looks up the action bound to a key pressed right after the leader,
 /// searching [`effective_bindings`] (the possibly-user-remapped table)
 /// rather than [`LEADER_BINDINGS`] directly.
-pub fn action_for(letter: char) -> Option<Action> {
-    action_for_table(effective_bindings(), letter)
+pub fn action_for(key: BindingKey) -> Option<Action> {
+    action_for_table(effective_bindings(), key)
 }
 
 /// The lookup [`action_for`] runs, parameterized over an explicit table
 /// rather than the global [`effective_bindings`] -- lets `crate::config`'s
 /// tests exercise a merged table's lookup behavior without touching
 /// [`EFFECTIVE_BINDINGS`]' process-lifetime `OnceLock`.
-pub fn action_for_table(bindings: &[KeyBinding], letter: char) -> Option<Action> {
+pub fn action_for_table(bindings: &[KeyBinding], key: BindingKey) -> Option<Action> {
     bindings
         .iter()
-        .find(|binding| binding.letter == letter)
+        .find(|binding| binding.key == key)
         .map(|binding| binding.action)
 }
 
@@ -1027,18 +1181,24 @@ pub fn action_for_table(bindings: &[KeyBinding], letter: char) -> Option<Action>
 /// the single collision gate used by both the visual picker and preset load;
 /// callers can report a refusal without ever transiently installing an
 /// ambiguous map.
-pub fn assign_key(bindings: &mut [KeyBinding], action: Action, key: char) -> Result<(), Action> {
-    if !BINDABLE_KEYS.contains(&key) {
-        return Err(action);
+pub fn assign_key(
+    bindings: &mut [KeyBinding],
+    action: Action,
+    key: BindingKey,
+) -> Result<(), Action> {
+    if let BindingKey::Character(character) = key {
+        if !BINDABLE_KEYS.contains(&character) {
+            return Err(action);
+        }
     }
-    if let Some(existing) = bindings.iter().find(|binding| binding.letter == key) {
+    if let Some(existing) = bindings.iter().find(|binding| binding.key == key) {
         if existing.action != action {
             return Err(existing.action);
         }
         return Ok(());
     }
     if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
-        binding.letter = key;
+        binding.key = key;
     }
     Ok(())
 }
@@ -1050,7 +1210,11 @@ pub fn available_keys(bindings: &[KeyBinding]) -> Vec<char> {
     BINDABLE_KEYS
         .iter()
         .copied()
-        .filter(|key| !bindings.iter().any(|binding| binding.letter == *key))
+        .filter(|key| {
+            !bindings
+                .iter()
+                .any(|binding| binding.key == BindingKey::Character(*key))
+        })
         .collect()
 }
 
@@ -1132,7 +1296,7 @@ pub fn preset_bindings(preset: KeymapPreset) -> Vec<KeyBinding> {
             .iter_mut()
             .find(|binding| binding.action == *action)
             .expect("every preset action is registered in LEADER_BINDINGS");
-        binding.letter = *key;
+        binding.key = BindingKey::Character(*key);
     }
     bindings
 }
@@ -1213,14 +1377,39 @@ mod tests {
 
     #[test]
     fn action_for_known_letter() {
-        assert_eq!(action_for('d'), Some(Action::Detach));
-        assert_eq!(action_for('c'), Some(Action::NewTerminal));
-        assert_eq!(action_for('!'), Some(Action::RunCommand));
+        assert_eq!(action_for(BindingKey::Character('d')), Some(Action::Detach));
+        assert_eq!(
+            action_for(BindingKey::Character('c')),
+            Some(Action::NewTerminal)
+        );
+        assert_eq!(
+            action_for(BindingKey::Character('!')),
+            Some(Action::RunCommand)
+        );
     }
 
     #[test]
     fn action_for_unknown_letter() {
-        assert_eq!(action_for('z'), None);
+        assert_eq!(action_for(BindingKey::Character('z')), None);
+    }
+
+    #[test]
+    fn default_navigation_actions_use_the_requested_arrow_and_page_keys() {
+        assert_eq!(ShortcutBase::default(), ShortcutBase::A);
+        assert_eq!(DEFAULT_NAVIGATION_SHORTCUT_BASE, ShortcutBase::B);
+        assert_eq!(action_for(BindingKey::Down), Some(Action::CycleNextInGroup));
+        assert_eq!(
+            action_for(BindingKey::Up),
+            Some(Action::CyclePreviousInGroup)
+        );
+        assert_eq!(
+            action_for(BindingKey::PageDown),
+            Some(Action::JumpNextGroup)
+        );
+        assert_eq!(
+            action_for(BindingKey::PageUp),
+            Some(Action::JumpPreviousGroup)
+        );
     }
 
     /// Every binding's `action_name` round-trips back through
@@ -1268,16 +1457,19 @@ mod tests {
         ];
         for bindings in maps {
             for binding in bindings {
+                let Some(character) = binding.key.character() else {
+                    continue;
+                };
                 let has_no_honest_word = matches!(
-                    (binding.action, binding.letter.to_ascii_lowercase()),
+                    (binding.action, character.to_ascii_lowercase()),
                     (Action::FocusPaneUp, 'k')
                 );
-                if binding.letter.is_ascii_alphabetic() && !has_no_honest_word {
+                if character.is_ascii_alphabetic() && !has_no_honest_word {
                     assert!(
-                        mnemonic_for(binding.action, binding.letter).is_some(),
+                        mnemonic_for(binding.action, character).is_some(),
                         "{} on {:?} needs a mnemonic",
                         action_name(binding.action),
-                        binding.letter,
+                        character,
                     );
                 }
             }
@@ -1300,10 +1492,13 @@ mod tests {
     fn assignment_refuses_a_key_already_owned_by_another_action() {
         let mut bindings = LEADER_BINDINGS.to_vec();
         assert_eq!(
-            assign_key(&mut bindings, Action::Quit, 'c'),
+            assign_key(&mut bindings, Action::Quit, BindingKey::Character('c')),
             Err(Action::NewTerminal)
         );
-        assert_eq!(action_for_table(&bindings, 'Q'), Some(Action::Quit));
+        assert_eq!(
+            action_for_table(&bindings, BindingKey::Character('Q')),
+            Some(Action::Quit)
+        );
     }
 
     #[test]
@@ -1312,14 +1507,17 @@ mod tests {
             let bindings = preset_bindings(preset);
             let unique = bindings
                 .iter()
-                .map(|binding| binding.letter)
+                .map(|binding| binding.key)
                 .collect::<std::collections::HashSet<_>>();
             assert_eq!(unique.len(), bindings.len());
         }
         assert_eq!(KeymapPreset::Screen.shortcut_base(), ShortcutBase::A);
         assert_eq!(KeymapPreset::Tmux.shortcut_base(), ShortcutBase::B);
         assert_eq!(
-            action_for_table(&preset_bindings(KeymapPreset::Tmux), 'x'),
+            action_for_table(
+                &preset_bindings(KeymapPreset::Tmux),
+                BindingKey::Character('x')
+            ),
             Some(Action::ClosePane)
         );
     }

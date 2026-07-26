@@ -80,7 +80,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SEND_TO_TERMINAL_TOOL_NAME,
-            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane and submit it with a final Enter key. Omit target for the currently active/open pane. Every call submits; this tool cannot leave text staged or unsent. Never merely say the text as a substitute for calling this tool.",
+            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane and submit it with a final Enter key. Omit target for the currently active/open pane. When the live context identifies that pane as a detected coding agent, this is also the default for any utterance that is not clearly an ilium-control command, even when the user never says type, send, agent, or a destination. Every call submits; this tool cannot leave text staged or unsent. Never merely say the text as a substitute for calling this tool.",
             json!({
                 "type": "object",
                 "properties": {
@@ -304,6 +304,10 @@ mod tests {
 
         assert_eq!(send_tool.parameters["required"], json!(["text"]));
         assert!(send_tool.description.contains("currently active/open pane"));
+        assert!(send_tool.description.contains("default for any utterance"));
+        assert!(send_tool
+            .description
+            .contains("never says type, send, agent"));
         assert!(send_tool.description.contains("final Enter key"));
         assert!(send_tool.description.contains("Never merely say the text"));
         assert!(send_tool.parameters["properties"]

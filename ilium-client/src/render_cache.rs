@@ -37,11 +37,12 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         ServerEvent::ScreenUpdate {
             pane_id,
+            first_sequence,
             sequence,
             bytes,
         } => {
             if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                view.apply_live_output(sequence, &bytes);
+                view.apply_live_output(first_sequence, sequence, &bytes);
             }
             None
         }
@@ -258,13 +259,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.ui_settings.agent_debug_menu_enabled = enabled;
             let is_agent_debug_flow = matches!(
                 app.mode,
-                crate::app::Mode::AgentPaneContextMenu(_)
-                    | crate::app::Mode::AgentDebugLog(_)
-                    | crate::app::Mode::AgentDebugSavePath(..)
+                crate::app::Mode::AgentDebugLog(_) | crate::app::Mode::AgentDebugSavePath(..)
             ) || app
                 .modal_stack
                 .iter()
                 .any(|mode| matches!(mode, crate::app::Mode::AgentDebugLog(_)));
+            if !enabled {
+                app.remove_agent_debug_action_from_terminal_menu();
+            }
             if !enabled && is_agent_debug_flow {
                 app.close_modal_flow();
             }
@@ -335,6 +337,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
     app.restore_expanded_groups();
+    app.reconcile_selected_tree_path();
     app.bump_tree_version();
     app.prune_recently_created();
 
@@ -370,12 +373,12 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.agent_debug_logs
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     let debug_target_closed = match &app.mode {
-        crate::app::Mode::AgentPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
+        crate::app::Mode::TerminalPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
         crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
         crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
         _ => false,
     } || app.modal_stack.iter().any(|mode| match mode {
-        crate::app::Mode::AgentPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
+        crate::app::Mode::TerminalPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
         crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
         crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
         _ => false,
@@ -391,7 +394,10 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     }
 
     let (rows, cols) = app.last_known_pane_size;
-    let mut newly_opened_editor: Option<NodeId> = None;
+    // Editors and boards already need a local runtime before they can be
+    // presented. Terminal/agent panes now use the same focus path once this
+    // client confirms it requested that exact new node.
+    let mut newly_opened_pane: Option<NodeId> = None;
     let new_pane_nodes: Vec<_> = app
         .tree
         .panes()
@@ -412,6 +418,9 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                         app.terminal_settings.scrollback_budget_mib,
                     ))),
                 );
+                if app.take_matching_pending_pane_focus(pane_id, PaneContentKind::Terminal, &name) {
+                    newly_opened_pane = Some(pane_id);
+                }
             }
             PaneContentKind::Editor => {
                 let pending_open = app
@@ -437,7 +446,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                         }
                         app.panes
                             .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
-                        newly_opened_editor = Some(pane_id);
+                        newly_opened_pane = Some(pane_id);
                     }
                     Err(error) => {
                         app.status_message = Some(format!("Failed to open file: {error}"));
@@ -461,7 +470,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                     Ok(board) => {
                         app.panes
                             .insert(pane_id, PaneRuntime::Board(Box::new(board)));
-                        newly_opened_editor = Some(pane_id);
+                        newly_opened_pane = Some(pane_id);
                     }
                     Err(error) => {
                         app.status_message = Some(format!("Failed to open board: {error}"))
@@ -471,7 +480,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         }
     }
     app.reconcile_right_panel_target();
-    if let Some(pane_id) = newly_opened_editor {
+    if let Some(pane_id) = newly_opened_pane {
         app.focus_pane(pane_id);
     } else if let SelectionReconciliation::Removed(replacement) = selection_reconciliation {
         if let Some(node_id) = replacement {
@@ -594,6 +603,62 @@ mod tests {
             app.panes.get(&pane_id),
             Some(PaneRuntime::Terminal(_))
         ));
+    }
+
+    #[test]
+    fn locally_created_terminal_opens_in_the_right_panel_after_confirmation() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+
+        app.request_new_terminal(group);
+        app.take_outbound_requests();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(app.active_pane_id(), Some(pane_id));
+        assert_eq!(app.focus, crate::app::FocusTarget::Pane);
+        assert_eq!(
+            app.right_panel_target,
+            crate::app::RightPanelTarget::Pane { pane_id }
+        );
+    }
+
+    #[test]
+    fn locally_created_agent_opens_in_the_right_panel_after_confirmation() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+
+        app.request_new_command_pane(group, "codex".to_string());
+        app.take_outbound_requests();
+        let pane_id = tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(app.active_pane_id(), Some(pane_id));
+        assert_eq!(app.focus, crate::app::FocusTarget::Pane);
+    }
+
+    #[test]
+    fn unrequested_terminal_snapshot_does_not_steal_right_panel_focus() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(app.active_pane_id(), None);
+        assert_eq!(app.right_panel_target, crate::app::RightPanelTarget::Empty);
+        assert!(app.panes.contains_key(&pane_id));
     }
 
     #[test]
@@ -767,6 +832,28 @@ mod tests {
         assert_eq!(app.selected_node_id(), Some(next));
         assert_eq!(app.active_pane_id(), Some(next));
         assert_eq!(app.focus, crate::app::FocusTarget::Pane);
+    }
+
+    #[test]
+    fn selected_pane_path_is_rebuilt_after_the_pane_moves_to_another_group() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let source_group = tree.add_group(ROOT_ID, "source").unwrap();
+        let destination_group = tree.add_group(ROOT_ID, "destination").unwrap();
+        let pane_id = tree
+            .add_pane(source_group, "selected", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        app.focus_pane(pane_id);
+        assert_eq!(app.tree_state.selected(), &[source_group, pane_id]);
+
+        tree.move_node(pane_id, destination_group, None).unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(app.selected_node_id(), Some(pane_id));
+        assert_eq!(app.tree_state.selected(), &[destination_group, pane_id]);
+        assert!(app.tree_state.opened().contains(&vec![destination_group]));
+        assert_eq!(app.active_pane_id(), Some(pane_id));
     }
 
     #[test]
@@ -1177,6 +1264,7 @@ mod tests {
             &mut app,
             ServerEvent::ScreenUpdate {
                 pane_id,
+                first_sequence: 1,
                 sequence: 1,
                 bytes: b"hello".to_vec(),
             },

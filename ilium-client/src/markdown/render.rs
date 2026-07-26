@@ -21,6 +21,16 @@ use ratatui_image::{FilterType, Resize};
 use super::document::{Block, Document, ImagePath};
 use super::raster::HeaderRasterizer;
 
+/// How Rendered-mode headings reach the terminal. Rasterized headings use a
+/// terminal graphics protocol, while text headings keep the same Markdown
+/// structure readable in terminals without graphics support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeadingRendering {
+    #[default]
+    Rasterized,
+    PlainText,
+}
+
 /// One block of a document, ready to render: text and authored spacing
 /// passed through as-is, or a header/image converted to a graphics protocol.
 pub enum RenderedBlock {
@@ -53,12 +63,22 @@ pub fn render(
     picker: &Picker,
     rasterizer: &mut HeaderRasterizer,
     width_cols: u16,
+    heading_rendering: HeadingRendering,
 ) -> RenderedDocument {
     let cell_px = super::raster::cell_pixel_size(picker);
     let blocks = document
         .blocks
         .iter()
-        .map(|block| render_block(block, picker, rasterizer, width_cols, cell_px))
+        .map(|block| {
+            render_block(
+                block,
+                picker,
+                rasterizer,
+                width_cols,
+                cell_px,
+                heading_rendering,
+            )
+        })
         .collect();
     RenderedDocument { blocks }
 }
@@ -69,11 +89,15 @@ fn render_block(
     rasterizer: &mut HeaderRasterizer,
     width_cols: u16,
     cell_px: (u16, u16),
+    heading_rendering: HeadingRendering,
 ) -> RenderedBlock {
     match block {
         Block::Text(lines) => RenderedBlock::Text(Arc::clone(lines)),
         Block::BlankLines(lines) => RenderedBlock::BlankLines(Arc::clone(lines)),
         Block::Heading { text, level } => {
+            if heading_rendering == HeadingRendering::PlainText {
+                return RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]));
+            }
             let image = rasterizer.rasterize(text, *level, width_cols, cell_px);
             let size = ratatui::layout::Size::new(width_cols, 2);
             match picker.new_protocol(
@@ -127,6 +151,18 @@ fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -
     }
 }
 
+/// Creates the graphics-free heading shown when the current terminal cannot
+/// display raster protocols. Bold accent text preserves hierarchy without
+/// adding Markdown syntax back into the rendered document.
+fn plain_heading_line(text: &str) -> Line<'static> {
+    Line::styled(
+        text.to_string(),
+        Style::new()
+            .fg(super::document::HEADING_FG)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )
+}
+
 fn heading_fallback_line(text: &str, level: u8) -> Line<'static> {
     Line::styled(
         format!("{} {text}", "#".repeat(level.max(1) as usize)),
@@ -162,9 +198,47 @@ mod tests {
         };
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&doc, &picker, &mut rasterizer, 40);
+        let rendered = render(
+            &doc,
+            &picker,
+            &mut rasterizer,
+            40,
+            HeadingRendering::Rasterized,
+        );
         assert_eq!(rendered.blocks.len(), 1);
         assert!(matches!(rendered.blocks[0], RenderedBlock::Header(_)));
+    }
+
+    #[test]
+    fn plain_text_heading_avoids_the_graphics_protocol_and_remains_bold() {
+        let doc = Document {
+            blocks: vec![Block::Heading {
+                text: "Portable title".to_string(),
+                level: 1,
+            }],
+        };
+        let picker = Picker::halfblocks();
+        let mut rasterizer = HeaderRasterizer::new();
+        let rendered = render(
+            &doc,
+            &picker,
+            &mut rasterizer,
+            40,
+            HeadingRendering::PlainText,
+        );
+
+        let RenderedBlock::Text(lines) = &rendered.blocks[0] else {
+            panic!("plain-text heading must not create a graphics protocol");
+        };
+        assert_eq!(lines[0].spans[0].content, "Portable title");
+        assert!(
+            lines[0]
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "heading style: {:?}",
+            lines[0].style
+        );
     }
 
     #[test]
@@ -177,7 +251,13 @@ mod tests {
         };
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&doc, &picker, &mut rasterizer, 40);
+        let rendered = render(
+            &doc,
+            &picker,
+            &mut rasterizer,
+            40,
+            HeadingRendering::Rasterized,
+        );
         assert!(matches!(rendered.blocks[0], RenderedBlock::Placeholder(_)));
     }
 
@@ -190,12 +270,24 @@ mod tests {
             super::super::document::parse("first\n\nsecond", std::path::Path::new("/tmp"));
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&document, &picker, &mut rasterizer, 20);
+        let rendered = render(
+            &document,
+            &picker,
+            &mut rasterizer,
+            20,
+            HeadingRendering::Rasterized,
+        );
 
         let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
         terminal
             .draw(|frame| {
-                super::super::view::render(frame, Rect::new(0, 0, 20, 3), &rendered, 0);
+                super::super::view::render(
+                    frame,
+                    Rect::new(0, 0, 20, 3),
+                    &rendered,
+                    0,
+                    crate::config::LineDisplay::Wrap,
+                );
             })
             .unwrap();
 
@@ -211,12 +303,24 @@ mod tests {
             super::super::document::parse("# Heading\n\nbody", std::path::Path::new("/tmp"));
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&document, &picker, &mut rasterizer, 20);
+        let rendered = render(
+            &document,
+            &picker,
+            &mut rasterizer,
+            20,
+            HeadingRendering::Rasterized,
+        );
 
         let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
         terminal
             .draw(|frame| {
-                super::super::view::render(frame, Rect::new(0, 0, 20, 4), &rendered, 0);
+                super::super::view::render(
+                    frame,
+                    Rect::new(0, 0, 20, 4),
+                    &rendered,
+                    0,
+                    crate::config::LineDisplay::Wrap,
+                );
             })
             .unwrap();
 
@@ -231,12 +335,24 @@ mod tests {
             super::super::document::parse("```\ncode\n```\n\nafter", std::path::Path::new("/tmp"));
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&document, &picker, &mut rasterizer, 20);
+        let rendered = render(
+            &document,
+            &picker,
+            &mut rasterizer,
+            20,
+            HeadingRendering::Rasterized,
+        );
 
         let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
         terminal
             .draw(|frame| {
-                super::super::view::render(frame, Rect::new(0, 0, 20, 3), &rendered, 0);
+                super::super::view::render(
+                    frame,
+                    Rect::new(0, 0, 20, 3),
+                    &rendered,
+                    0,
+                    crate::config::LineDisplay::Wrap,
+                );
             })
             .unwrap();
 
@@ -271,13 +387,25 @@ mod tests {
         };
         let picker = Picker::halfblocks();
         let mut rasterizer = HeaderRasterizer::new();
-        let rendered = render(&doc, &picker, &mut rasterizer, 40);
+        let rendered = render(
+            &doc,
+            &picker,
+            &mut rasterizer,
+            40,
+            HeadingRendering::Rasterized,
+        );
         assert!(matches!(rendered.blocks[0], RenderedBlock::Image(_)));
 
         let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
         terminal
             .draw(|frame| {
-                super::super::view::render(frame, Rect::new(0, 0, 40, 20), &rendered, 0);
+                super::super::view::render(
+                    frame,
+                    Rect::new(0, 0, 40, 20),
+                    &rendered,
+                    0,
+                    crate::config::LineDisplay::Wrap,
+                );
             })
             .unwrap();
         let cell = terminal.backend().buffer().cell((0, 0)).unwrap();

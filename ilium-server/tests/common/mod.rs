@@ -183,6 +183,7 @@ impl TestServer {
             session_name: session_name.to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
+            ready_log_metadata: None,
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
             detection_config,

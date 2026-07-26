@@ -289,6 +289,7 @@ mod tests {
             ServerEvent::TreeSnapshot(sample_tree()),
             ServerEvent::ScreenUpdate {
                 pane_id: NodeId(2),
+                first_sequence: 7,
                 sequence: 7,
                 bytes: b"hello from the pty".to_vec(),
             },

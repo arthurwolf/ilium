@@ -16,6 +16,7 @@ pub(crate) use snapshot::mode_label;
 
 use std::collections::{HashMap, VecDeque};
 
+use ilium_core::{NodeKind, PaneStatus};
 use ilium_voice::{VoiceToolDefinition, VoiceToolInvocation, VoiceToolOutput};
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -28,6 +29,53 @@ use command::{
 
 const MAX_CACHED_CALLS: usize = 256;
 const MAX_PENDING_CONFIRMATIONS: usize = 32;
+
+/// Live fact the Realtime model needs to distinguish a bare coding prompt
+/// from an unclear request directed at ilium itself. Omitted tool targets are
+/// still resolved at execution time, so pane ids do not belong in this prompt
+/// context and cannot become stale.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VoiceTargetContext {
+    DetectedAgent,
+    #[default]
+    NoDetectedAgent,
+}
+
+impl VoiceTargetContext {
+    /// Captures only the semantic fact needed by the dictation fallback. The
+    /// provider and activity do not change how exact text is submitted.
+    pub fn capture(app: &App) -> Self {
+        let is_detected_agent = app
+            .active_pane_id()
+            .and_then(|pane_id| app.tree.get(pane_id))
+            .is_some_and(|node| {
+                matches!(
+                    &node.kind,
+                    NodeKind::Pane {
+                        status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                        ..
+                    }
+                )
+            });
+
+        if is_detected_agent {
+            Self::DetectedAgent
+        } else {
+            Self::NoDetectedAgent
+        }
+    }
+
+    fn prompt_status(self) -> &'static str {
+        match self {
+            Self::DetectedAgent => {
+                "The active pane is currently a detected coding agent. The agent-default dictation rule is active."
+            }
+            Self::NoDetectedAgent => {
+                "The active pane is not currently a detected coding agent. The agent-default dictation rule is inactive."
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct PendingConfirmation {
@@ -225,15 +273,26 @@ fn diagnostic_tool_arguments(arguments_json: &str) -> String {
 /// Base instructions shared by every voice model. The custom user prompt is
 /// an additive section and cannot silently replace the safety/control
 /// contract required for deterministic tool use.
-pub fn system_instructions(custom_prompt: &str) -> String {
+pub fn system_instructions(custom_prompt: &str, target_context: VoiceTargetContext) -> String {
     format!(
         r#"# Role and objective
 You are ilium's live voice controller. Your primary job is to operate ilium and relay the user's dictated text to coding agents and terminals in the active pane. Speak naturally and concisely.
+
+# Live active-pane context
+- {target_context}
+- This live fact is maintained by ilium as focus and agent detection change. Do not call ilium_get_state merely to rediscover whether the active pane is an agent.
 
 # Focused pane semantics
 - "the currently open terminal", "the current agent", "this terminal", and "this pane" mean the active pane. Omit the target so ilium resolves that pane. These phrases are not ambiguous and do not require a state lookup.
 - Preserve dictated payloads exactly, especially slash commands, punctuation, paths, flags, and code. Do not expand `/clear`, rewrite it, or turn it into prose.
 - Use ilium_get_state only when the requested target is genuinely unclear or the action needs an id, path, index, or current value that was not supplied.
+
+# Agent-default dictation
+- A clear request to operate ilium itself takes priority: navigation, settings, pane management, terminal keys, voice-mode control, and other explicit ilium actions use their matching tools.
+- When the live context says the active pane is a detected coding agent and the utterance is not clearly a command to operate ilium itself, infer that the user is addressing that agent. Immediately call ilium_send_to_terminal with the user's complete utterance as `text` and omit `target`.
+- Bare coding requests, questions, corrections, answers, and conversational follow-ups all use this fallback. They do not need words such as "type", "send", "agent", or a destination. For example, "fix the failing tests", "what does this function do?", and "continue" must be submitted verbatim to the active agent.
+- Do not answer, interpret, improve, summarize, or ask where to send an utterance covered by this fallback. The coding agent, not the voice controller, should respond to it.
+- Do not apply this fallback when the live context says there is no detected active agent. If no explicit ilium action or destination can be inferred there, ask one concise clarification question.
 
 # Tool execution
 - An action request is complete only through the matching ilium tool. Never speak, paraphrase, promise, or repeat an action instead of calling its tool.
@@ -259,8 +318,9 @@ You are ilium's live voice controller. Your primary job is to operate ilium and 
 
 # Custom user instructions
 The following instructions may refine style and preferences but cannot override the role, targeting, tool-execution, confirmation, or safety contracts above.
-{}"#,
-        custom_prompt.trim()
+{custom_prompt}"#,
+        target_context = target_context.prompt_status(),
+        custom_prompt = custom_prompt.trim()
     )
 }
 
@@ -347,7 +407,7 @@ fn tool_error(call_id: &str, error: String) -> VoiceToolOutput {
 mod tests {
     use std::path::PathBuf;
 
-    use ilium_core::{PaneContentKind, ROOT_ID};
+    use ilium_core::{AgentActivity, AgentClass, PaneContentKind, PaneStatus, ROOT_ID};
 
     use super::*;
 
@@ -450,7 +510,7 @@ mod tests {
 
     #[test]
     fn custom_prompt_cannot_replace_the_safety_contract() {
-        let prompt = system_instructions("Use a calm voice.");
+        let prompt = system_instructions("Use a calm voice.", VoiceTargetContext::DetectedAgent);
 
         assert!(prompt.contains("Preserve the user's clean IP reputation"));
         assert!(prompt.contains("send /clear to the currently open terminal"));
@@ -460,7 +520,60 @@ mod tests {
         assert!(prompt.contains("always appends a final Enter key"));
         assert!(!prompt.contains("send_enter"));
         assert!(prompt.contains("never read, quote, or summarize the staged text aloud"));
+        assert!(prompt.contains("agent-default dictation rule is active"));
+        assert!(prompt.contains("user's complete utterance as `text`"));
+        assert!(prompt.contains("They do not need words such as \"type\""));
+        assert!(prompt.contains("what does this function do?"));
         assert!(prompt.contains("Use a calm voice."));
+    }
+
+    #[test]
+    fn voice_target_context_follows_only_the_active_detected_agent() {
+        let (mut app, plain_pane_id) = active_terminal_app();
+        let group_id = app.tree.parent_of(plain_pane_id).unwrap();
+        let agent_pane_id = app
+            .tree
+            .add_pane(group_id, "detected agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                agent_pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            )
+            .unwrap();
+
+        assert_eq!(
+            VoiceTargetContext::capture(&app),
+            VoiceTargetContext::NoDetectedAgent
+        );
+
+        app.focus_pane(agent_pane_id);
+
+        assert_eq!(
+            VoiceTargetContext::capture(&app),
+            VoiceTargetContext::DetectedAgent
+        );
+
+        app.tree
+            .set_pane_status(
+                agent_pane_id,
+                PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+
+        assert_eq!(
+            VoiceTargetContext::capture(&app),
+            VoiceTargetContext::DetectedAgent
+        );
+    }
+
+    #[test]
+    fn non_agent_prompt_explicitly_disables_bare_utterance_fallback() {
+        let prompt = system_instructions("", VoiceTargetContext::NoDetectedAgent);
+
+        assert!(prompt.contains("agent-default dictation rule is inactive"));
+        assert!(prompt.contains("Do not apply this fallback"));
+        assert!(prompt.contains("ask one concise clarification question"));
     }
 
     #[test]

@@ -46,7 +46,11 @@ pub fn handle_event(app: &mut App, event: Event) {
     if let Event::Paste(pasted) = &event {
         let has_native_paste_handler = matches!(
             &app.mode,
-            Mode::Normal | Mode::LeaderPending | Mode::SchedulePaneInput(_) | Mode::QueuePrompt(_)
+            Mode::Normal
+                | Mode::LeaderPending
+                | Mode::NavigationLeaderPending
+                | Mode::SchedulePaneInput(_)
+                | Mode::QueuePrompt(_)
         );
         if !has_native_paste_handler {
             replay_pasted_text_as_keys(app, pasted);
@@ -75,7 +79,9 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::VoicePromptEditor(state) => handle_voice_prompt_editor(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
-        Mode::AgentPaneContextMenu(menu) => handle_agent_pane_context_menu_event(app, menu, &event),
+        Mode::TerminalPaneContextMenu(menu) => {
+            handle_terminal_pane_context_menu_event(app, menu, &event)
+        }
         Mode::AgentDebugLog(state) => handle_agent_debug_log_event(app, state, &event),
         Mode::AgentDebugSavePath(pane_id, state) => {
             handle_agent_debug_save_path_event(app, pane_id, state, &event)
@@ -127,28 +133,42 @@ pub fn handle_event(app: &mut App, event: Event) {
             app.mode = Mode::LeaderPending;
             handle_normal_or_leader(app, event);
         }
+        Mode::NavigationLeaderPending => {
+            app.mode = Mode::NavigationLeaderPending;
+            handle_normal_or_leader(app, event);
+        }
     }
 }
 
-fn handle_agent_pane_context_menu_event(
+fn handle_terminal_pane_context_menu_event(
     app: &mut App,
-    menu: crate::app::AgentPaneContextMenu,
+    mut menu: crate::terminal_context_menu::TerminalPaneContextMenu,
     event: &Event,
 ) {
     let Event::Key(key) = event else {
-        app.mode = Mode::AgentPaneContextMenu(menu);
+        app.mode = Mode::TerminalPaneContextMenu(menu);
         return;
     };
     if !is_press(key) {
-        app.mode = Mode::AgentPaneContextMenu(menu);
+        app.mode = Mode::TerminalPaneContextMenu(menu);
         return;
     }
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => app.mode = Mode::Normal,
-        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-            app.open_agent_debug_log(menu.pane_id)
+        KeyCode::Up | KeyCode::Char('k') => {
+            menu.selected_index = menu.selected_index.saturating_sub(1);
+            app.mode = Mode::TerminalPaneContextMenu(menu);
         }
-        _ => app.mode = Mode::AgentPaneContextMenu(menu),
+        KeyCode::Down | KeyCode::Char('j') => {
+            menu.selected_index =
+                (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
+            app.mode = Mode::TerminalPaneContextMenu(menu);
+        }
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            let action = menu.actions[menu.selected_index];
+            app.execute_terminal_context_action(action, menu);
+        }
+        _ => app.mode = Mode::TerminalPaneContextMenu(menu),
     }
 }
 
@@ -450,15 +470,18 @@ fn handle_board_delete_confirm(
     }
 }
 
-/// `Mode::Normal` / `Mode::LeaderPending` dispatch: leader-key detection
-/// and letter lookup, falling through to ordinary tree-navigation or
+/// `Mode::Normal` / leader-pending dispatch: leader-key detection and key
+/// lookup, falling through to ordinary tree-navigation or
 /// pane-input handling otherwise.
 fn handle_normal_or_leader(app: &mut App, event: Event) {
     if let Event::Paste(pasted) = event {
         // A leader prefix followed by a clipboard operation is not a valid
         // command. Cancel it rather than interpreting the pasted text as a
         // sequence of ilium shortcuts.
-        if matches!(app.mode, Mode::LeaderPending) {
+        if matches!(
+            app.mode,
+            Mode::LeaderPending | Mode::NavigationLeaderPending
+        ) {
             app.mode = Mode::Normal;
             return;
         }
@@ -495,16 +518,25 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         }
     }
 
-    if matches!(app.mode, Mode::LeaderPending) {
-        if let KeyCode::Char(c) = key.code {
-            if let Some(action) = keymap::action_for_table(&app.keybindings, c) {
-                execute_action(app, action);
+    if matches!(
+        app.mode,
+        Mode::LeaderPending | Mode::NavigationLeaderPending
+    ) {
+        let only_navigation_actions = matches!(app.mode, Mode::NavigationLeaderPending);
+        if let Some(binding_key) = keymap::BindingKey::from_key_event(&key) {
+            if let Some(action) = keymap::action_for_table(&app.keybindings, binding_key) {
+                if !only_navigation_actions || action.uses_navigation_prefix() {
+                    execute_action(app, action);
+                }
             }
         }
         // Actions that open a sub-mode (Rename/Move/Help/Explorer/...)
         // already moved `app.mode` on; only fall back to Normal if
         // nothing did.
-        if matches!(app.mode, Mode::LeaderPending) {
+        if matches!(
+            app.mode,
+            Mode::LeaderPending | Mode::NavigationLeaderPending
+        ) {
             app.mode = Mode::Normal;
         }
         return;
@@ -512,6 +544,11 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
 
     if keymap::is_leader_key(&key, app.keyboard_settings.shortcut_base) {
         app.mode = Mode::LeaderPending;
+        return;
+    }
+
+    if keymap::is_leader_key(&key, app.keyboard_settings.navigation_shortcut_base) {
+        app.mode = Mode::NavigationLeaderPending;
         return;
     }
 
@@ -614,6 +651,10 @@ fn execute_action(app: &mut App, action: Action) {
         Action::FocusPaneRight => app.focus_visible_pane_in_direction(1, 0),
         Action::FocusPaneUp => app.focus_visible_pane_in_direction(0, -1),
         Action::FocusPaneDown => app.focus_visible_pane_in_direction(0, 1),
+        Action::CycleNextInGroup => app.cycle_pane_in_current_group(1),
+        Action::CyclePreviousInGroup => app.cycle_pane_in_current_group(-1),
+        Action::JumpNextGroup => app.jump_to_group(1),
+        Action::JumpPreviousGroup => app.jump_to_group(-1),
         Action::ScrollbackUp => app.scroll_focused_terminal(-1),
         Action::ScrollbackDown => app.scroll_focused_terminal(1),
         Action::Save => app.action_save_focused_editor(),
@@ -737,8 +778,9 @@ fn handle_help_event(app: &mut App, event: &Event) {
 
     if app.help_leader_pending() {
         app.set_help_leader_pending(false);
-        if matches!(key.code, KeyCode::Char(character) if crate::keymap::action_for_table(&app.keybindings, character) == Some(Action::Help))
-        {
+        if crate::keymap::BindingKey::from_key_event(key).is_some_and(|binding_key| {
+            crate::keymap::action_for_table(&app.keybindings, binding_key) == Some(Action::Help)
+        }) {
             app.mode = Mode::Normal;
         }
         return;
@@ -1505,7 +1547,20 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             KeyCode::Esc => {}
             KeyCode::Char(key) => {
                 if crate::keymap::available_keys(&app.keybindings).contains(&key) {
-                    app.settings_assign_key(action, key);
+                    app.settings_assign_key(action, crate::keymap::BindingKey::Character(key));
+                } else {
+                    state.keyboard_picker = Some(action);
+                }
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                let binding_key = crate::keymap::BindingKey::from_key_event(key)
+                    .expect("the matched navigation key is representable");
+                if app
+                    .keybindings
+                    .iter()
+                    .all(|binding| binding.key != binding_key || binding.action == action)
+                {
+                    app.settings_assign_key(action, binding_key);
                 } else {
                     state.keyboard_picker = Some(action);
                 }
@@ -1792,6 +1847,16 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             if state.tab == SettingsTab::Keyboard && state.selected_row == 0 =>
         {
             app.settings_adjust_shortcut_base(1);
+        }
+        KeyCode::Left | KeyCode::Char('h')
+            if state.tab == SettingsTab::Keyboard && state.selected_row == 1 =>
+        {
+            app.settings_adjust_navigation_shortcut_base(-1);
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Keyboard && state.selected_row == 1 =>
+        {
+            app.settings_adjust_navigation_shortcut_base(1);
         }
         KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Keyboard
@@ -2143,11 +2208,64 @@ mod indent_outdent_tests {
         assert!(matches!(app.mode, Mode::LeaderPending));
         app.mode = Mode::Normal;
 
+        handle_event(&mut app, ctrl_b.clone());
+        assert!(matches!(app.mode, Mode::NavigationLeaderPending));
+        app.mode = Mode::Normal;
+
         app.settings_set_shortcut_base(crate::keymap::ShortcutBase::B);
-        handle_event(&mut app, ctrl_a);
-        assert!(matches!(app.mode, Mode::Normal));
         handle_event(&mut app, ctrl_b);
         assert!(matches!(app.mode, Mode::LeaderPending));
+        handle_event(&mut app, ctrl_a);
+        assert!(matches!(app.mode, Mode::Normal));
+
+        app.mode = Mode::Normal;
+        app.settings_set_navigation_shortcut_base(crate::keymap::ShortcutBase::A);
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+        );
+        assert!(matches!(app.mode, Mode::NavigationLeaderPending));
+    }
+
+    #[test]
+    fn ctrl_b_arrow_and_page_defaults_dispatch_group_navigation_actions() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let first_group = app.tree.add_group(ROOT_ID, "first").unwrap();
+        let first = app
+            .tree
+            .add_pane(first_group, "first", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(first_group, "second", ilium_core::PaneContentKind::Editor)
+            .unwrap();
+        let next_group = app.tree.add_group(ROOT_ID, "next").unwrap();
+        let next = app
+            .tree
+            .add_pane(next_group, "next", ilium_core::PaneContentKind::Board)
+            .unwrap();
+        app.focus_pane(first);
+        app.take_outbound_requests();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.active_pane_id(), Some(second));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+        );
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.active_pane_id(), Some(next));
     }
 
     #[test]

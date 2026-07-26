@@ -7,6 +7,7 @@
 //! (`ServerState::events` broadcast vs. this connection's own `direct_tx`)
 //! are wired together on the write side.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ilium_agent_debug::{
@@ -14,9 +15,9 @@ use ilium_agent_debug::{
     AgentDebugSource, PaneResizeCause,
 };
 use ilium_core::{
-    AgentActivity, NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource,
-    PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput,
-    SessionIdentityTransitionRule, Tree, TreeError,
+    NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, PromptQueueDelivery,
+    QueuedPrompt, RestructurePlan, ScheduledPaneInput, SessionIdentityTransitionRule, Tree,
+    TreeError,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
@@ -663,9 +664,84 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
 /// and post-recovery resolution use this exact path so the startup trigger
 /// always observes the same state boundary.
 async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<ServerEvent>) {
-    let snapshot = state.tree.read().await.clone();
-    send_direct(direct_tx, ServerEvent::TreeSnapshot(snapshot)).await;
+    for event in initial_state_events(state, true).await {
+        send_direct(direct_tx, event).await;
+    }
+}
 
+/// Selects how terminal journals synchronize for one connection. Attach has
+/// no prior parser and needs full replays; live recovery appends exact missing
+/// deltas while retained, falling back to replay only past the journal window.
+enum TerminalOutputSynchronization<'a> {
+    All,
+    RecoverAfter(&'a HashMap<NodeId, u64>),
+}
+
+impl TerminalOutputSynchronization<'_> {
+    /// Builds the smallest event that makes one terminal parser current.
+    fn event_for(&self, pane_id: NodeId, session: &ilium_pty::PtySession) -> Option<ServerEvent> {
+        match self {
+            Self::All => Some(terminal_replay_event(pane_id, session.output_replay())),
+            Self::RecoverAfter(delivered_sequences) => {
+                let after_sequence = delivered_sequences
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default();
+                match session.output_recovery_after(after_sequence) {
+                    Some(ilium_pty::PtyOutputRecovery::Delta(chunk)) => {
+                        Some(ServerEvent::ScreenUpdate {
+                            pane_id,
+                            first_sequence: after_sequence.saturating_add(1),
+                            sequence: chunk.sequence,
+                            bytes: chunk.bytes,
+                        })
+                    }
+                    Some(ilium_pty::PtyOutputRecovery::Replay(replay)) => {
+                        Some(terminal_replay_event(pane_id, replay))
+                    }
+                    None => None,
+                }
+            }
+        }
+    }
+}
+
+/// Builds the complete attach stream. Startup alone gets the explicit
+/// completion boundary used by automatic triggers.
+pub(crate) async fn initial_state_events(
+    state: &ServerState,
+    include_initial_sync_complete: bool,
+) -> Vec<ServerEvent> {
+    state_synchronization_events(
+        state,
+        TerminalOutputSynchronization::All,
+        include_initial_sync_complete,
+    )
+    .await
+}
+
+/// Builds a live lag-recovery stream without replaying terminal histories
+/// this exact connection has already received. Tree and pane metadata remain
+/// full snapshots because they are small and replaceable; raw PTY history is
+/// the expensive, parser-resetting state that must stay pane-scoped.
+pub(crate) async fn resynchronization_events(
+    state: &ServerState,
+    delivered_terminal_sequences: &HashMap<NodeId, u64>,
+) -> Vec<ServerEvent> {
+    state_synchronization_events(
+        state,
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        false,
+    )
+    .await
+}
+
+/// Builds one ordered render-cache seed from current server authority.
+async fn state_synchronization_events(
+    state: &ServerState,
+    terminal_output_synchronization: TerminalOutputSynchronization<'_>,
+    include_initial_sync_complete: bool,
+) -> Vec<ServerEvent> {
     // Terminal scrollback, session IDs, and editor paths belong to live pane
     // resources rather than the persisted tree wire shape, so replay them
     // explicitly after the attachment snapshot has established matching node
@@ -673,28 +749,25 @@ async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<Server
     // `PtySession`; the client uses that sequence to drop any duplicate live
     // update that was queued while this attach was in flight.
     //
-    // Collect the replay events under the read lock, then drop the lock
-    // before sending any of them -- same rationale as every other handler
-    // in this module (`handle_key_input`, `handle_resize_pane`, ...):
-    // `send_direct` awaits capacity on this connection's bounded
-    // direct-reply queue, and `state.panes` is a write-preferring lock, so
-    // a slow-draining attaching client awaited while still holding this
-    // read lock would stall every other connection's pending
-    // `state.panes.write()` (every key/mouse/resize/new-pane/close-pane
-    // request) behind it.
-    let replay_events: Vec<ServerEvent> = {
+    // Capture tree and pane resources under the documented tree-before-panes
+    // lock order. Otherwise a concurrent create/close could put output for a
+    // pane outside the accompanying tree snapshot, making the client discard
+    // bytes while this connection incorrectly advanced its delivery
+    // watermark. No socket write occurs under either lock.
+    let (snapshot, replay_events): (Tree, Vec<ServerEvent>) = {
+        let tree = state.tree.read().await;
         let panes = state.panes.read().await;
-        panes
+        let snapshot = tree.clone();
+        let replay_events = panes
             .iter()
             .flat_map(|(pane_id, resource)| match resource {
                 PaneResource::Terminal(runtime) => {
-                    let replay = runtime.session.output_replay();
-                    let mut events = vec![ServerEvent::TerminalReplay {
-                        pane_id: *pane_id,
-                        through_sequence: replay.through_sequence,
-                        bytes: replay.bytes,
-                        is_complete: replay.is_complete,
-                    }];
+                    let mut events = Vec::new();
+                    if let Some(event) =
+                        terminal_output_synchronization.event_for(*pane_id, &runtime.session)
+                    {
+                        events.push(event);
+                    }
                     if let Some(session_id) = runtime.session_id.clone() {
                         events.push(ServerEvent::PaneSessionIdResolved {
                             pane_id: *pane_id,
@@ -710,13 +783,15 @@ async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<Server
                     path: path.clone(),
                 }],
             })
-            .collect()
+            .collect();
+        (snapshot, replay_events)
     };
-
-    for event in replay_events {
-        send_direct(direct_tx, event).await;
+    let mut events = vec![ServerEvent::TreeSnapshot(snapshot)];
+    events.extend(replay_events);
+    if include_initial_sync_complete {
+        events.push(ServerEvent::InitialStateSyncComplete);
     }
-    send_direct(direct_tx, ServerEvent::InitialStateSyncComplete).await;
+    events
 }
 
 async fn handle_session_recovery_resolution(
@@ -1094,31 +1169,13 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
     }
 }
 
-/// Records whether the attached client currently has `pane_id` as its
-/// active view, and forces an immediate (debounced) recheck on every
-/// focus transition -- see `crate::detection::interval_for` (the
-/// client-focused fast tier) and `crate::detection::force_check`. No
-/// `direct_tx`/error surfaced on a missing pane: a focus message racing a
-/// pane's closure is an entirely ordinary, harmless timing window (the
-/// client can't always know a `ClosePane` beat its `SetPaneFocus` to the
-/// server), not something the user needs to see.
-///
-/// A focus-gain that finds the pane `Done` also clears it to `Idle`
-/// synchronously, right here, instead of leaving that solely to the
-/// detection loop's forced recheck. A focus-then-unfocus faster than the
-/// focused polling interval
-/// (an entirely ordinary quick glance) can flip `client_focused` back to
-/// `false` before any tick ever observes it `true`, so the tree's
-/// authoritative status never actually leaves `Done` -- the next tick then
-/// sees `raw_activity == Idle`, `client_focused == false`, `previous ==
-/// Done` and `promote_to_done`'s stickiness re-stamps `Done`, silently
-/// overwriting the client's own local `Done -> Idle` clear (`app.rs`'s
-/// `mark_seen`) and resurrecting the "look at me" badge on a pane the user
-/// already looked at.
+/// Records whether the attached client currently has `pane_id` as its active
+/// view and forces an immediate (debounced) recheck on every focus transition.
+/// Entering a pane also acknowledges its completed turn: the bell is an
+/// unread-work indicator, so it must clear after the user opens that pane. No
+/// error is surfaced for a missing pane because focus can harmlessly race pane
+/// closure.
 async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focused: bool) {
-    // Lock ordering: `tree` before `panes` (see `ServerState` docs) --
-    // needed together here since a focus-gain may also clear tree status.
-    let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
         return;
@@ -1126,37 +1183,31 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
     runtime.detection_schedule.client_focused = focused;
     let detection_was_forced =
         crate::detection::force_check(&mut runtime.detection_schedule, std::time::Instant::now());
-
-    let cleared_status = focused
-        .then(|| match tree.get(pane_id).map(|node| &node.kind) {
-            Some(NodeKind::Pane { status, .. }) => {
-                let new_status = match status {
-                    PaneStatus::Agent(class, AgentActivity::Done) => {
-                        Some(PaneStatus::Agent(class.clone(), AgentActivity::Idle))
-                    }
-                    PaneStatus::AgentWithGoal(class, AgentActivity::Done) => Some(
-                        PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle),
-                    ),
-                    _ => None,
-                };
-                new_status.and_then(|new_status| {
-                    tree.set_pane_status(pane_id, new_status.clone())
-                        .ok()
-                        .map(|()| new_status)
-                })
-            }
-            _ => None,
-        })
-        .flatten();
-
     drop(panes);
-    drop(tree);
+
+    // The server remains authoritative for the acknowledgement. A client must
+    // wait for this broadcast rather than mutating its cached tree locally, so
+    // every attachment sees the same bell state and a concurrent detector can
+    // still win with newer Working/Waiting activity.
+    let acknowledged_status = if focused {
+        let mut tree = state.tree.write().await;
+        match tree.acknowledge_agent_completion(pane_id) {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::error!(
+                    "agent completion acknowledgement on focus rejected for pane {pane_id:?}: {error}"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     if detection_was_forced {
         state.detection_schedule_changed.notify_one();
     }
-
-    if let Some(status) = cleared_status {
+    if let Some(status) = acknowledged_status {
         state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
     }
     let _ = crate::agent_debug::record(
@@ -1266,21 +1317,6 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
     }
 }
 
-/// Encodes multi-line textarea content as one bracketed paste so embedded
-/// newlines remain part of the agent prompt; the final Enter is sent
-/// separately by `handle_new_pane` and remains the only submission keystroke.
-fn initial_input_bytes(initial_input: &str) -> Vec<u8> {
-    if !initial_input.contains('\n') {
-        return initial_input.as_bytes().to_vec();
-    }
-
-    let mut bytes = Vec::with_capacity(initial_input.len() + 12);
-    bytes.extend_from_slice(b"\x1b[200~");
-    bytes.extend_from_slice(initial_input.as_bytes());
-    bytes.extend_from_slice(b"\x1b[201~");
-    bytes
-}
-
 async fn handle_new_pane(
     state: &Arc<ServerState>,
     parent_group: NodeId,
@@ -1363,16 +1399,7 @@ async fn handle_new_pane(
     .await;
 
     if let Some(initial_input) = plan.initial_input {
-        let bytes = initial_input_bytes(&initial_input);
-        handle_key_input(state, pane_id, &bytes, None, direct_tx).await;
-        handle_key_input(
-            state,
-            pane_id,
-            b"\r",
-            Some(PromptSubmissionSource::InitialAgentPrompt),
-            direct_tx,
-        )
-        .await;
+        crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
     }
 }
 
@@ -1512,8 +1539,10 @@ async fn forward_output_bytes(
                 // a single chatty pane cannot monopolize a client turn even
                 // after batching.
                 const MAX_MERGED_BYTES: usize = 16 * 1024;
-                let mut sequence = first_chunk.sequence;
+                let first_sequence = first_chunk.sequence;
+                let mut sequence = first_sequence;
                 let mut bytes = first_chunk.bytes;
+                let mut replay_required = false;
                 for _ in 1..MAX_MERGED_CHUNKS {
                     if bytes.len() >= MAX_MERGED_BYTES {
                         break;
@@ -1528,13 +1557,19 @@ async fn forward_output_bytes(
                             tracing::warn!(
                                 "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                             );
+                            replay_required = true;
                             break;
                         }
                         Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
                     }
                 }
+                if replay_required {
+                    broadcast_terminal_replay(&state, pane_id).await;
+                    continue;
+                }
                 state.broadcast(ServerEvent::ScreenUpdate {
                     pane_id,
+                    first_sequence,
                     sequence,
                     bytes,
                 });
@@ -1543,9 +1578,36 @@ async fn forward_output_bytes(
                 tracing::warn!(
                     "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                 );
+                broadcast_terminal_replay(&state, pane_id).await;
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
+    }
+}
+
+/// Repairs every attached client's terminal parser after this pane's
+/// server-side output forwarder misses raw chunks. The PTY journal is the
+/// authoritative replay source and carries a sequence watermark, so queued
+/// live bytes at or below it are safely ignored by clients.
+async fn broadcast_terminal_replay(state: &ServerState, pane_id: NodeId) {
+    let replay_event = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return;
+        };
+        terminal_replay_event(pane_id, runtime.session.output_replay())
+    };
+    state.broadcast(replay_event);
+}
+
+/// Converts one atomically captured PTY journal snapshot into the protocol
+/// event used by both attach-time reconstruction and live lag recovery.
+fn terminal_replay_event(pane_id: NodeId, replay: ilium_pty::PtyOutputReplay) -> ServerEvent {
+    ServerEvent::TerminalReplay {
+        pane_id,
+        through_sequence: replay.through_sequence,
+        bytes: replay.bytes,
+        is_complete: replay.is_complete,
     }
 }
 
@@ -1768,6 +1830,11 @@ pub(crate) async fn write_key_input(
     let mut conversation_title_generation_before = None;
     let error_message = match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => {
+            if !bytes.is_empty()
+                && !matches!(submission, Some(PromptSubmissionSource::InitialAgentPrompt))
+            {
+                runtime.cancel_initial_prompt_delivery();
+            }
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
                 && matches!(
                     (
@@ -1892,6 +1959,27 @@ pub(crate) async fn write_key_input(
 
     if let Some(message) = error_message {
         return Err(message);
+    }
+
+    // Fresh terminal input also acknowledges a completed turn. This
+    // conditional tree transition cannot overwrite a concurrent detector's
+    // newer Working/Waiting state.
+    if !bytes.is_empty() {
+        let acknowledged_status = {
+            let mut tree = state.tree.write().await;
+            match tree.acknowledge_agent_completion(pane_id) {
+                Ok(status) => status,
+                Err(error) => {
+                    tracing::error!(
+                        "agent completion acknowledgement rejected for pane {pane_id:?}: {error}"
+                    );
+                    None
+                }
+            }
+        };
+        if let Some(status) = acknowledged_status {
+            state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
+        }
     }
 
     if submission.is_some() || tracked_submission.is_some() {
@@ -2208,6 +2296,31 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::initial_prompt::initial_input_bytes;
+    use ilium_core::NodeId;
+    use std::time::Duration;
+
+    /// Waits for the command-backed test pane's reader thread to journal at
+    /// least one chunk without relying on scheduler timing.
+    async fn wait_for_output_sequence(state: &ServerState, pane_id: NodeId) -> u64 {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let sequence = {
+                    let panes = state.panes.read().await;
+                    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                        panic!("test terminal pane must remain registered");
+                    };
+                    runtime.session.output_replay().through_sequence
+                };
+                if sequence > 0 {
+                    return sequence;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("test terminal should produce output")
+    }
 
     #[test]
     fn single_line_initial_input_is_written_verbatim() {
@@ -2220,5 +2333,115 @@ mod tests {
             initial_input_bytes("/goal first\nsecond"),
             b"\x1b[200~/goal first\nsecond\x1b[201~"
         );
+    }
+
+    #[test]
+    fn terminal_replay_event_preserves_the_journal_watermark() {
+        let event = terminal_replay_event(
+            NodeId(7),
+            ilium_pty::PtyOutputReplay {
+                through_sequence: 19,
+                bytes: b"full terminal state".to_vec(),
+                is_complete: true,
+            },
+        );
+        assert_eq!(
+            event,
+            ServerEvent::TerminalReplay {
+                pane_id: NodeId(7),
+                through_sequence: 19,
+                bytes: b"full terminal state".to_vec(),
+                is_complete: true,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_recovery_emits_only_the_missing_pane_tail() {
+        let directory = tempfile::tempdir().expect("create recovery test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "pane-scoped-recovery".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("pane-scoped-recovery.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let (missing_pane_id, current_pane_id) = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree
+                .project_ids()
+                .into_iter()
+                .next()
+                .expect("fresh state has one launch project");
+            let group_id = tree
+                .add_group(project_id, "recovery")
+                .expect("launch project accepts a group");
+            let missing_pane_id = tree
+                .add_pane(group_id, "missing", PaneContentKind::Terminal)
+                .expect("group accepts first terminal");
+            let current_pane_id = tree
+                .add_pane(group_id, "current", PaneContentKind::Terminal)
+                .expect("group accepts second terminal");
+            (missing_pane_id, current_pane_id)
+        };
+        for (pane_id, marker) in [
+            (missing_pane_id, "missing-pane-marker"),
+            (current_pane_id, "current-pane-marker"),
+        ] {
+            spawn_and_register_pane(
+                &state,
+                pane_id,
+                PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                    "printf '{marker}\\n'"
+                ))),
+            )
+            .await
+            .expect("register command-backed test terminal");
+        }
+
+        let missing_sequence = wait_for_output_sequence(&state, missing_pane_id).await;
+        let current_sequence = wait_for_output_sequence(&state, current_pane_id).await;
+        let delivered_sequences = HashMap::from([
+            (missing_pane_id, missing_sequence.saturating_sub(1)),
+            (current_pane_id, current_sequence),
+        ]);
+
+        let events = resynchronization_events(&state, &delivered_sequences).await;
+        let terminal_events: Vec<&ServerEvent> = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ServerEvent::ScreenUpdate { .. } | ServerEvent::TerminalReplay { .. }
+                )
+            })
+            .collect();
+
+        assert_eq!(terminal_events.len(), 1);
+        assert!(matches!(
+            terminal_events[0],
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence,
+                sequence,
+                bytes,
+            } if *pane_id == missing_pane_id
+                && *first_sequence == missing_sequence
+                && *sequence == missing_sequence
+                && !bytes.is_empty()
+        ));
+        assert!(!events.contains(&ServerEvent::InitialStateSyncComplete));
+
+        let resources: Vec<_> = state.panes.write().await.drain().collect();
+        for (pane_id, resource) in resources {
+            teardown_pane_resource(pane_id, resource);
+        }
+        sound_task.abort();
     }
 }
