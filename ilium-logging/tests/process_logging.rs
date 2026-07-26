@@ -29,6 +29,8 @@ fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
         .expect("same-path role handoff");
     tracing::info!(request_body = %expensive_field(), "HTTP request started");
     tracing::error!(response_body = "provider failure", "HTTP request failed");
+    tracing::debug!(target: "ilium_inference", request_body = "complete provider payload", "provider payload detail");
+    tracing::debug!(target: "ilium_client", evidence = "unrelated sensitive evidence", "unrelated debug detail");
     emit_repeated_diagnostic();
     assert_eq!(FORMATTED_FIELDS.load(Ordering::Relaxed), 2);
 
@@ -37,6 +39,8 @@ fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
     assert!(enabled_log.contains("integration-test-handoff"));
     assert!(enabled_log.contains("complete prompt"));
     assert!(enabled_log.contains("provider failure"));
+    assert!(enabled_log.contains("complete provider payload"));
+    assert!(!enabled_log.contains("unrelated sensitive evidence"));
     assert!(enabled_log.contains("repeated diagnostic call site"));
     assert_eq!(
         enabled_log.matches("repeated diagnostic call site").count(),

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use tracing_subscriber::filter::{FilterExt, LevelFilter};
+use tracing_subscriber::filter::{FilterExt, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -188,10 +188,16 @@ pub fn initialize(
     let filter_state = Arc::clone(&state);
     let configured_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    // Debug logging promises the complete info-level diagnostic contract even
-    // when the parent shell has a narrower `RUST_LOG`; an explicit broader
-    // filter can still opt into debug/trace traffic for deeper investigation.
-    let verbosity_filter = LevelFilter::INFO.or(configured_filter);
+    // The Debug-tab contract includes complete HTTP and LLM text payloads,
+    // which deliberately live at DEBUG inside the two provider adapters so
+    // unrelated agent-history evidence remains outside the process log. An
+    // explicit broader `RUST_LOG` can still opt into other debug/trace traffic.
+    let provider_payload_filter = Targets::new()
+        .with_target("ilium_inference", LevelFilter::DEBUG)
+        .with_target("ilium_kilo_gateway", LevelFilter::DEBUG);
+    let verbosity_filter = LevelFilter::INFO
+        .or(provider_payload_filter)
+        .or(configured_filter);
     let enabled_filter = tracing_subscriber::filter::filter_fn(move |_metadata| {
         filter_state.enabled.load(Ordering::Acquire)
     });

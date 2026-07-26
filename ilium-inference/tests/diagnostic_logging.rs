@@ -9,8 +9,8 @@ use ilium_inference::{
 };
 
 /// Serves one deterministic provider failure and returns the complete request
-/// captured by the fixture so the test proves transport payloads remain exact
-/// while standard diagnostics record only safe metadata.
+/// captured by the fixture so the test proves transport payloads and durable
+/// diagnostics both retain the complete non-credential exchange.
 fn spawn_http_error_fixture() -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind local HTTP fixture");
     let address = listener.local_addr().expect("fixture address");
@@ -61,7 +61,7 @@ fn spawn_http_error_fixture() -> (String, mpsc::Receiver<String>) {
 }
 
 #[test]
-fn file_log_records_failure_metadata_without_sensitive_payloads() {
+fn file_log_records_complete_llm_and_http_failure_context_without_credentials() {
     let directory = tempfile::tempdir().expect("temporary log directory");
     let log_path = directory.path().join("diagnostic-log.txt");
     ilium_logging::initialize(&log_path, true, "inference-diagnostic-test")
@@ -108,9 +108,9 @@ fn file_log_records_failure_metadata_without_sensitive_payloads() {
     assert!(log.contains("LLM inference failed"));
     assert!(log.contains("error_kind=\"http\""));
     assert!(log.contains("<redacted>"));
-    assert!(!log.contains("diagnostic-system-prompt"));
-    assert!(!log.contains("diagnostic-user-prompt"));
-    assert!(!log.contains("provider-overloaded-detail"));
+    assert!(log.contains("diagnostic-system-prompt"));
+    assert!(log.contains("diagnostic-user-prompt"));
+    assert!(log.contains("provider-overloaded-detail"));
     assert!(!log.contains(api_key));
     assert!(!log.contains("provider-secret-cookie"));
 }
