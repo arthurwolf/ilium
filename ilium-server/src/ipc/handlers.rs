@@ -1052,7 +1052,7 @@ async fn handle_automatic_pane_title(
     short_title: Option<String>,
     inferred_icon: Option<String>,
 ) {
-    let title_changed = {
+    let tree_changed = {
         let mut tree = state.tree.write().await;
         match tree.set_automatic_pane_title(pane_id, title, short_title, inferred_icon) {
             Ok(changed) => changed,
@@ -1062,7 +1062,7 @@ async fn handle_automatic_pane_title(
             }
         }
     };
-    if title_changed {
+    if tree_changed {
         broadcast_and_persist(state).await;
     }
 }
@@ -2232,11 +2232,13 @@ pub(crate) async fn write_key_input(
     let title_changed = {
         let mut tree = state.tree.write().await;
         if cleared_conversation_title_generation.is_some() {
-            match tree.reset_terminal_pane_title(pane_id, crate::pane::FRESH_AGENT_TITLE) {
+            match tree
+                .reset_terminal_pane_for_fresh_conversation(pane_id, crate::pane::FRESH_AGENT_TITLE)
+            {
                 Ok(changed) => changed,
                 Err(error) => {
                     tracing::error!(
-                        "fresh-agent title reset rejected for pane {pane_id:?}: {error}"
+                        "fresh-agent title and placement reset rejected for pane {pane_id:?}: {error}"
                     );
                     false
                 }

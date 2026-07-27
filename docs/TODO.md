@@ -1,3 +1,9 @@
+# Fresh `/clear` project-level placement
+
+- [x] Define one atomic domain transition that resets a cleared agent's title and moves its pane directly under its owning project.
+- [x] Route the authoritative Claude/Codex `/clear` input path through that transition and cover nested-container plus live provider behavior.
+- [ ] Run focused and workspace gates, rebuild/install, and verify the relocation through the installed controlled TUI.
+
 # Right-panel pane-switch integrity
 
 - [x] Trace tree selection, right-panel targeting, render-cache ownership, terminal replay, output sequencing, and exact `tui-term` clearing behavior.

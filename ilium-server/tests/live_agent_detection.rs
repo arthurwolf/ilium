@@ -764,8 +764,8 @@ fn write_verified_codex_transcript(server: &TestServer, session_id: &str) -> std
 /// invoked with a `--resume <uuid>` argument and holding that transcript open
 /// must broadcast that exact uuid as a real `ServerEvent::PaneSessionIdResolved`
 /// to a real connected IPC client. It then proves `/clear` discards that ID,
-/// every old title field, and the old descriptor before `/resume` repeats the
-/// same invalidation contract.
+/// every old title field and grouping, and the old descriptor before `/resume`
+/// repeats the same invalidation contract.
 #[tokio::test]
 async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
@@ -823,6 +823,10 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         unreachable!("predicate only matches TreeSnapshot");
     };
     let pane_id = first_launch_project_pane(&tree);
+    let project_id = tree
+        .project_ancestor(pane_id)
+        .expect("the launched pane must belong to a project");
+    assert_ne!(tree.parent_of(pane_id), Some(project_id));
 
     let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
@@ -915,6 +919,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
                     node.name == "<new>"
                         && node.short_name.is_none()
                         && node.inferred_icon.is_none()
+                        && node.parent == Some(project_id)
                         && matches!(
                             &node.kind,
                             ilium_core::NodeKind::Pane {
@@ -1264,6 +1269,10 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         unreachable!("predicate only matches TreeSnapshot");
     };
     let pane_id = first_launch_project_pane(&tree);
+    let project_id = tree
+        .project_ancestor(pane_id)
+        .expect("the launched pane must belong to a project");
+    assert_ne!(tree.parent_of(pane_id), Some(project_id));
 
     let initial_resolution = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
@@ -1331,7 +1340,9 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         matches!(
             event,
             ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "<new>")
+                if tree.get(pane_id).is_some_and(|node| {
+                    node.name == "<new>" && node.parent == Some(project_id)
+                })
         )
     })
     .await;

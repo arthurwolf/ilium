@@ -762,6 +762,8 @@ pub enum TreeError {
         from_project: NodeId,
         to_project: NodeId,
     },
+    #[error("node {0:?} is not inside a project")]
+    NodeOutsideProject(NodeId),
     #[error("split views must be direct children of a normal group")]
     SplitViewRequiresGroup,
     #[error("split views can contain panes only")]
@@ -1761,27 +1763,32 @@ impl Tree {
         Ok(true)
     }
 
-    /// Replaces every title field for a terminal whose agent conversation
-    /// started over. Unlike ordinary automatic inference, this deliberately
-    /// discards a user-specified title: that title described the cleared
-    /// conversation and must not block naming the next detected session.
-    pub fn reset_terminal_pane_title(
+    /// Resets a terminal whose agent conversation started over. The old title
+    /// and tree grouping both described the cleared conversation, so this
+    /// discards every title field and moves the pane directly under its
+    /// owning project. The transition is applied to a clone first so a
+    /// structural rejection cannot leave either half committed.
+    pub fn reset_terminal_pane_for_fresh_conversation(
         &mut self,
         id: NodeId,
         title: impl Into<String>,
     ) -> Result<bool, TreeError> {
-        let node = self.get_mut(id)?;
-        let NodeKind::Pane {
-            content,
-            title_source,
-            ..
-        } = &mut node.kind
-        else {
+        let mut updated_tree = self.clone();
+        let node = updated_tree.get(id).ok_or(TreeError::NodeNotFound(id))?;
+        let NodeKind::Pane { content, .. } = &node.kind else {
             return Err(TreeError::NotAPane(id));
         };
         if *content != PaneContentKind::Terminal {
             return Err(TreeError::NotATerminal(id));
         }
+
+        let project_id = updated_tree
+            .project_ancestor(id)
+            .ok_or(TreeError::NodeOutsideProject(id))?;
+        let node = updated_tree.get_mut(id)?;
+        let NodeKind::Pane { title_source, .. } = &mut node.kind else {
+            unreachable!("the pane kind was validated before the project move");
+        };
 
         let title = title.into();
         let changed = node.name != title
@@ -1792,7 +1799,14 @@ impl Tree {
         node.short_name = None;
         node.inferred_icon = None;
         *title_source = PaneTitleSource::Automatic;
-        Ok(changed)
+
+        let placement_changed = node.parent != Some(project_id);
+        if placement_changed {
+            updated_tree.move_node(id, project_id, None)?;
+        }
+
+        *self = updated_tree;
+        Ok(changed || placement_changed)
     }
 
     pub fn toggle_expanded(&mut self, id: NodeId) -> Result<(), TreeError> {
@@ -3412,13 +3426,28 @@ mod tests {
     }
 
     #[test]
-    fn fresh_agent_session_reset_discards_every_old_terminal_title_field() {
+    fn fresh_agent_session_reset_discards_old_title_and_grouping() {
         let mut tree = Tree::new();
         let project = tree
             .ensure_launch_project(PathBuf::from("/tmp/project"))
             .unwrap();
+        let direct_pane = tree
+            .add_pane(project, "Keep me first", PaneContentKind::Terminal)
+            .unwrap();
+        let group = tree.add_group(project, "Old work").unwrap();
         let pane_id = tree
-            .add_pane(project, "Old inferred title", PaneContentKind::Terminal)
+            .add_pane(group, "Old inferred title", PaneContentKind::Terminal)
+            .unwrap();
+        let split_peer = tree
+            .add_pane(group, "Split peer", PaneContentKind::Terminal)
+            .unwrap();
+        let split = tree
+            .create_split_view(
+                group,
+                "Old split",
+                SplitOrientation::Vertical,
+                &[pane_id, split_peer],
+            )
             .unwrap();
         tree.rename_node(
             pane_id,
@@ -3428,16 +3457,46 @@ mod tests {
         )
         .unwrap();
 
-        assert!(tree.reset_terminal_pane_title(pane_id, "<new>").unwrap());
+        assert!(tree
+            .reset_terminal_pane_for_fresh_conversation(pane_id, "<new>")
+            .unwrap());
         let pane = tree.get(pane_id).unwrap();
         assert_eq!(pane.name, "<new>");
         assert_eq!(pane.short_name, None);
         assert_eq!(pane.inferred_icon, None);
+        assert_eq!(pane.parent, Some(project));
+        assert_eq!(
+            tree.children_of(project).unwrap(),
+            &[direct_pane, group, pane_id]
+        );
+        assert_eq!(tree.children_of(split).unwrap(), &[split_peer]);
         let NodeKind::Pane { title_source, .. } = &pane.kind else {
             panic!("expected terminal pane");
         };
         assert_eq!(*title_source, PaneTitleSource::Automatic);
-        assert!(!tree.reset_terminal_pane_title(pane_id, "<new>").unwrap());
+        assert!(!tree
+            .reset_terminal_pane_for_fresh_conversation(pane_id, "<new>")
+            .unwrap());
+    }
+
+    #[test]
+    fn fresh_agent_session_reset_is_atomic_without_an_owning_project() {
+        let mut tree = Tree::new();
+        let legacy_group = tree.add_group(ROOT_ID, "Legacy work").unwrap();
+        let pane_id = tree
+            .add_pane(
+                legacy_group,
+                "Title that must survive rejection",
+                PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let before = tree.clone();
+
+        assert!(matches!(
+            tree.reset_terminal_pane_for_fresh_conversation(pane_id, "<new>"),
+            Err(TreeError::NodeOutsideProject(changed_id)) if changed_id == pane_id
+        ));
+        assert_eq!(tree, before);
     }
 
     #[test]
