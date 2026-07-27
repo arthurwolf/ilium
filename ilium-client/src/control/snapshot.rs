@@ -41,7 +41,11 @@ pub fn capture(
     detail: StateDetail,
     target: &NodeTarget,
 ) -> Result<ControlSnapshot, String> {
-    let requested_node = if target.id.is_some() || target.name.is_some() || target.path.is_some() {
+    // A blank `name`/`path` (e.g. `{"path": ""}`) must behave exactly like an
+    // omitted target: falling through to `resolve_node` for it would let a
+    // request with no active/selected node hard-fail the whole snapshot,
+    // where truly omitting the field succeeds (see `NodeTarget::is_specified`).
+    let requested_node = if target.is_specified() {
         Some(resolve_node(app, target)?)
     } else {
         None
@@ -118,16 +122,29 @@ fn pane_content_snapshot(app: &App, pane_id: NodeId) -> Option<Value> {
                 "scrollback_total": terminal.scrollback_total(),
             }))
         }
-        PaneRuntime::Editor(editor) => Some(json!({
-            "path": editor.path.as_ref().map(|path| path.display().to_string()),
-            "dirty": editor.dirty,
-            "view_mode": format!("{:?}", editor.view_mode).to_ascii_lowercase(),
-            "line_numbers": editor.show_line_numbers,
-            "minimap": editor.show_minimap,
-            "autosave": editor.show_autosave,
-            "cursor": { "line": editor.textarea.cursor().0 + 1, "column": editor.textarea.cursor().1 + 1 },
-            "text": suffix_by_characters(&editor.textarea.lines().join("\n"), MAX_PANE_CONTENT_CHARACTERS),
-        })),
+        PaneRuntime::Editor(editor) => {
+            let full_text = editor.textarea.lines().join("\n");
+            let truncation_start = suffix_start_index(&full_text, MAX_PANE_CONTENT_CHARACTERS);
+            // `cursor.line` is a buffer-absolute line number, but `text` may be
+            // only the tail of the buffer once it exceeds the character
+            // budget. Without `text_start_line`, a consumer combining the two
+            // fields has no way to tell that "line 500" isn't the 500th line
+            // of the (truncated) `text` string -- report where `text` actually
+            // starts so the two stay mutually consistent.
+            let text_start_line = full_text[..truncation_start].matches('\n').count() + 1;
+            Some(json!({
+                "path": editor.path.as_ref().map(|path| path.display().to_string()),
+                "dirty": editor.dirty,
+                "view_mode": format!("{:?}", editor.view_mode).to_ascii_lowercase(),
+                "line_numbers": editor.show_line_numbers,
+                "minimap": editor.show_minimap,
+                "autosave": editor.show_autosave,
+                "cursor": { "line": editor.textarea.cursor().0 + 1, "column": editor.textarea.cursor().1 + 1 },
+                "text": &full_text[truncation_start..],
+                "text_truncated": truncation_start > 0,
+                "text_start_line": text_start_line,
+            }))
+        }
         PaneRuntime::Board(board) => Some(json!({
             "storage": board.storage.path().display().to_string(),
             "selected_column": board.selected_column,
@@ -248,6 +265,20 @@ fn settings_snapshot(app: &App) -> Value {
                 "model": app.inference_settings.ollama.model,
                 "available_models": app.ollama_models,
             },
+            "openai": {
+                "url": app.inference_settings.openai.base_url,
+                "model": app.inference_settings.openai.model,
+                "api_key_configured": !app.inference_settings.openai.api_key.is_empty(),
+            },
+            "anthropic": {
+                "url": app.inference_settings.anthropic.base_url,
+                "model": app.inference_settings.anthropic.model,
+                "api_key_configured": !app.inference_settings.anthropic.api_key.is_empty(),
+            },
+            "openrouter": {
+                "model": app.inference_settings.openrouter.model,
+                "api_key_configured": !app.inference_settings.openrouter.api_key.is_empty(),
+            },
             "credentials": "redacted",
         },
         "triggers": &app.trigger_settings,
@@ -335,13 +366,19 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
 }
 
 fn suffix_by_characters(text: &str, maximum_characters: usize) -> String {
-    let start = text
-        .char_indices()
+    let start = suffix_start_index(text, maximum_characters);
+    text[start..].to_owned()
+}
+
+/// Byte offset of the first character kept by [`suffix_by_characters`], so
+/// callers that also need to describe *where* the kept suffix begins (e.g.
+/// which source line) don't have to redo the same char-boundary walk.
+fn suffix_start_index(text: &str, maximum_characters: usize) -> usize {
+    text.char_indices()
         .rev()
         .nth(maximum_characters)
         .map(|(index, character)| index + character.len_utf8())
-        .unwrap_or(0);
-    text[start..].to_owned()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

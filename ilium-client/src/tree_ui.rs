@@ -1700,6 +1700,20 @@ pub fn render(
             options.transitions,
             options.elapsed_ms,
         );
+        // The buffer now holds the presentation tree's rows (rendered just
+        // above, after the `Clear`), not the authoritative tree's -- this
+        // pass must therefore key off the presentation flattening/state too.
+        // Using the authoritative `flattened_items`/`state` here would look
+        // up the selected node's row in a layout that isn't the one actually
+        // on screen, painting the highlight over a different (wrong) row
+        // whenever the two trees' row counts differ above the selection,
+        // exactly the add/remove-in-flight case this frame exists for.
+        paint_selected_row(
+            frame,
+            list,
+            &flattened_presentation_items,
+            &presentation_state,
+        );
     } else {
         apply_row_motions(
             frame,
@@ -1709,13 +1723,13 @@ pub fn render(
             options.transitions,
             options.elapsed_ms,
         );
+        // Keep the selected-node visual independent from `TreeState`'s
+        // full-path comparison. Snapshot reconciliation normally maintains
+        // that path, but this final cell-level pass also protects the row
+        // during width changes the tree widget's own highlight pass doesn't
+        // fully repaint (see the function's own doc comment).
+        paint_selected_row(frame, list, &flattened_items, state);
     }
-
-    // Keep the selected-node visual independent from `TreeState`'s full-path
-    // comparison. Snapshot reconciliation normally maintains that path, but
-    // this final cell-level pass also protects the row while a presentation
-    // snapshot temporarily shows its pre-mutation ancestry.
-    paint_selected_row(frame, list, &flattened_items, state);
 
     draw_scrollbar(frame, area, flattened_items.len(), state);
 
@@ -1973,6 +1987,15 @@ fn draw_row_actions(
     icons: &IconSettings,
     use_stable_glyphs: bool,
 ) {
+    // `row` is a hover hit-test result cached from a previous frame (see
+    // `App`'s hover tracking); it can outlive a terminal resize that shrank
+    // the tree panel before the next mouse-move refreshes it. Indexing the
+    // buffer with a stale row that now falls outside the panel would panic,
+    // so bail out exactly like `row_action_at`'s own bounds check does.
+    let list = list_area(area);
+    if row < list.y || row >= list.bottom() {
+        return;
+    }
     let Some(action_strip) = TreeRowActionStrip::from_tree_area(area) else {
         return;
     };
@@ -2253,6 +2276,51 @@ mod tests {
         );
         assert!(!buffer_row_text(&gone, pane_row).contains("departing-pane"));
         assert_eq!(transitions.presentation_tree(220), None);
+    }
+
+    #[test]
+    fn selected_row_highlight_tracks_the_presentation_tree_during_a_removal_transition() {
+        // Regression test for a stale-data bug: `paint_selected_row` used to
+        // be called with the *authoritative* (new-tree) flattened items/state
+        // even on frames where the buffer actually holds the *presentation*
+        // (previous-tree) rows -- see `render`'s doc comments. When a node
+        // above the selection is mid-removal, the two trees disagree on the
+        // selected node's row, so the bug painted the highlight over the
+        // wrong (departing) row in addition to the widget's own correct one.
+        let mut previous_tree = Tree::new();
+        let group_id = previous_tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_a = previous_tree
+            .add_pane(group_id, "pane-a", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let pane_b = previous_tree
+            .add_pane(group_id, "pane-b", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let mut new_tree = previous_tree.clone();
+        new_tree.remove_node(pane_a).unwrap();
+        let mut transitions = TreeTransitions::default();
+        transitions.observe_snapshot_change(&previous_tree, &new_tree, 0);
+
+        let mut state = TreeState::default();
+        state.open(vec![group_id]);
+        state.select(vec![group_id, pane_b]);
+
+        let buffer = render_tree_buffer(&new_tree, &mut state, &transitions, &HashMap::new(), 0);
+        let list = list_area(Rect::new(0, 0, 40, 8));
+
+        let pane_b_row = (list.y..list.bottom())
+            .find(|&row| buffer_row_text(&buffer, row).contains("pane-b"))
+            .expect("pane-b is still visible during the removal transition");
+        let highlighted_rows: Vec<u16> = (list.y..list.bottom())
+            .filter(|&row| {
+                (list.x..list.right()).any(|column| buffer[(column, row)].bg == theme::accent_bg())
+            })
+            .collect();
+
+        assert_eq!(
+            highlighted_rows,
+            vec![pane_b_row],
+            "exactly the row actually showing the selected node's text should be highlighted"
+        );
     }
 
     #[test]

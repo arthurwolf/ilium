@@ -44,10 +44,10 @@ impl TerminalGuard {
             EnableFocusChange
         ) {
             // `execute!` writes each command's escape sequence in order and
-            // bails out on the first failure, so any prefix of these three
+            // bails out on the first failure, so any prefix of these four
             // commands may already have taken effect on the real terminal
             // even though we're about to return an error. Best-effort undo
-            // all three (mirrors the Drop impl / the keyboard-enhancement
+            // all four (mirrors the Drop impl / the keyboard-enhancement
             // error path below) rather than leaving the terminal stuck in
             // the alternate screen or with mouse capture enabled.
             let _ = execute!(

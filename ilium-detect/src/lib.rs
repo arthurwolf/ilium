@@ -2,8 +2,10 @@
 //!
 //! `identify_agent` walks an already-populated `sysinfo::System` process
 //! tree to answer "which agent CLI (if any) is running below this pane's
-//! shell" -- the *identity* signal, driven by the [`AGENT_SIGNATURES`]
-//! registry table. `classify_activity` scans the pane's rendered
+//! shell" -- the *identity* signal, driven by the first-party
+//! `BuiltinAgentProvider::ALL` table plus this crate's own
+//! [`GENERIC_AGENT_SIGNATURES`] registry. `classify_activity` scans the
+//! pane's rendered
 //! plain-text screen contents to answer "is that agent working, blocked on
 //! a confirmation, or idle" -- the *activity* signal.
 //!
@@ -48,7 +50,7 @@ pub fn configure_process_refresh() {
 /// rather than that config surface needing a parallel matching code path.
 ///
 /// `name_substring` is `Cow<'static, str>` rather than plain `&'static
-/// str` so the same type serves both the compile-time [`AGENT_SIGNATURES`]
+/// str` so the same type serves both the compile-time [`GENERIC_AGENT_SIGNATURES`]
 /// table (`Cow::Borrowed`) and signatures built at runtime from an owned
 /// `String` read out of a config file (`Cow::Owned`), with no separate
 /// "config signature" type needed. `class_of` stays a plain `fn` pointer
@@ -329,21 +331,28 @@ pub fn is_fresh_agent_screen(class: &AgentClass, screen_text: &str) -> bool {
 /// The server uses this only for the one-shot initial prompt attached to a
 /// newly-created agent pane. Unknown/custom agents fail closed because their
 /// prompt chrome is not a stable contract ilium can safely infer.
+///
+/// The composer-visible check alone is not enough for any provider: some
+/// providers (Codex confirmed) keep their composer hint rendered on screen
+/// underneath an approval dialog or other modal, so a provider-specific
+/// composer marker must still be combined with the shared activity gate --
+/// otherwise a one-shot initial prompt gets injected into the modal instead
+/// of the composer it was meant for.
 pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
     let normalized = screen_text.to_ascii_lowercase();
-    match class {
+    let composer_visible = match class {
         AgentClass::Codex => normalized.contains("send a message"),
-        AgentClass::Claude => {
-            !matches!(
-                classify_activity_for_agent(class, screen_text),
-                AgentActivity::Working
-                    | AgentActivity::WaitingBackground
-                    | AgentActivity::WaitingApproval
-            ) && screen_has_claude_composer_cursor(screen_text)
-        }
+        AgentClass::Claude => screen_has_claude_composer_cursor(screen_text),
         AgentClass::Antigravity => normalized.contains("type a message"),
-        AgentClass::Other(_) => false,
-    }
+        AgentClass::Other(_) => return false,
+    };
+    composer_visible
+        && !matches!(
+            classify_activity_for_agent(class, screen_text),
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::WaitingApproval
+        )
 }
 
 /// Claude's empty composer is a bordered terminal field whose content row is
@@ -622,11 +631,19 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
         if !trimmed.ends_with('?') {
             return false;
         }
-        // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
-        let lower = trimmed.to_ascii_lowercase();
-        lower.contains(" yes") && lower.contains(" no")
-            || lower.contains("yes ") && lower.contains("no ")
-            || lower.contains("yes)") && lower.contains("no)")
+        // Split on non-alphanumeric boundaries so "yes"/"no" are matched as whole
+        // words -- a naive substring check (" yes"/" no") false-positives on
+        // ordinary words like "yesterday" or "nothing"/"not"/"now"/"north".
+        let mut has_yes_word = false;
+        let mut has_no_word = false;
+        for word in trimmed.split(|character: char| !character.is_alphanumeric()) {
+            if word.eq_ignore_ascii_case("yes") {
+                has_yes_word = true;
+            } else if word.eq_ignore_ascii_case("no") {
+                has_no_word = true;
+            }
+        }
+        has_yes_word && has_no_word
     })
 }
 
@@ -754,7 +771,8 @@ impl ProcessChildrenIndex {
 /// Given the OS pid of a pane's directly-spawned child (typically the
 /// user's shell), walks the process tree looking for a descendant process
 /// whose name matches a known agent CLI signature (see
-/// [`AGENT_SIGNATURES`]), and returns the first match found.
+/// `BuiltinAgentProvider::ALL` and [`GENERIC_AGENT_SIGNATURES`]), and
+/// returns the first match found.
 ///
 /// Returns `None` if no descendant process matches.
 ///
@@ -777,7 +795,8 @@ pub fn identify_agent(system: &System, shell_pid: Pid) -> Option<AgentIdentity> 
 
 /// Same as [`identify_agent`], but also checks `extra_signatures` (e.g.
 /// user-configured `[[detection.custom_signatures]]` entries) alongside
-/// the built-in [`AGENT_SIGNATURES`] table -- the registry-driven
+/// the built-in `BuiltinAgentProvider::ALL` and [`GENERIC_AGENT_SIGNATURES`]
+/// tables -- the registry-driven
 /// extension point `CLAUDE.md`'s layering rule calls for, rather than a
 /// second, parallel matching code path for config-provided signatures.
 ///
@@ -998,6 +1017,17 @@ mod tests {
     }
 
     #[test]
+    fn question_with_yes_no_as_substrings_of_other_words_is_not_waiting_approval() {
+        // "yesterday" contains " yes" and "nothing" contains " no" as raw
+        // substrings -- confirms the whole-word tokenizer in
+        // `looks_like_confirmation_prompt` doesn't false-positive on them.
+        assert_eq!(
+            classify_activity("Did yesterday's changes land, or is there nothing new?"),
+            AgentActivity::Idle
+        );
+    }
+
+    #[test]
     fn numbered_analysis_with_stray_cursor_elsewhere_is_idle() {
         assert_eq!(
             classify_activity(&fixture(
@@ -1075,6 +1105,16 @@ mod tests {
             &AgentClass::Other("opencode".to_owned()),
             "Type a message"
         ));
+    }
+
+    #[test]
+    fn codex_composer_hint_under_a_live_modal_is_not_prompt_ready() {
+        // Codex can keep its composer hint rendered on screen underneath an
+        // approval dialog or other modal; prompt-readiness must gate on the
+        // shared activity classification too, not just the composer marker,
+        // or a one-shot initial prompt gets injected into the modal instead.
+        let screen = "Allow this command?\n❯ 1. Yes\n  2. No\n\nSend a message";
+        assert!(!is_agent_prompt_ready(&AgentClass::Codex, screen));
     }
 
     #[test]

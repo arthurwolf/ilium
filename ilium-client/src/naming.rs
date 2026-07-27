@@ -100,9 +100,10 @@ fn render_prompt<T: Serialize>(
 }
 
 /// Bounds one independently meaningful LLM context value by keeping its first
-/// and last 1,000 Unicode characters. Applying this per field/entry rather than
-/// to the final rendered prompt prevents one large terminal screen or tool
-/// result from erasing the metadata and recent conversation around it.
+/// and last `LLM_CONTEXT_EDGE_CHARS` Unicode characters. Applying this per
+/// field/entry rather than to the final rendered prompt prevents one large
+/// terminal screen or tool result from erasing the metadata and recent
+/// conversation around it.
 pub fn clip_llm_context_value(value: &str) -> String {
     let value = value.trim();
     let character_count = value.chars().count();

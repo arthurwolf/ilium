@@ -228,6 +228,27 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     )
     .await
     .expect("write cat input");
+    // Wait for proof the write actually reached the pane before asking for
+    // a fresh snapshot below. Without this, the upcoming `Attach` could be
+    // processed (and its `TreeSnapshot` reply generated) before the
+    // `KeyInput` above finishes on the server -- since both are just
+    // separate frames on the same connection with no ordering guarantee
+    // from the client side alone -- and the final assertion would then
+    // pass by coincidence (nothing happened yet) rather than by evidence
+    // that a non-shell command genuinely never triggers a retitle. `cat`'s
+    // PTY line discipline echoes typed input, so its marker text is
+    // guaranteed to show up in a `ScreenUpdate` for this pane once the
+    // server has processed the write.
+    let marker = "not-a-shell-command-title";
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(
+            event,
+            ServerEvent::ScreenUpdate { pane_id: event_pane_id, bytes, .. }
+                if *event_pane_id == pane_id
+                    && String::from_utf8_lossy(bytes).contains(marker)
+        )
+    })
+    .await;
     write_frame(
         &mut client,
         &ClientRequest::Attach {
@@ -236,9 +257,11 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     )
     .await
     .expect("request snapshot");
-    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
+    let event = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some()),
+    )
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches tree snapshots");

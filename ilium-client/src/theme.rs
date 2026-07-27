@@ -104,10 +104,14 @@ pub enum ColorScheme {
 }
 
 /// The effective theme for the process's lifetime. Installed once at
-/// startup (`crate::run`, after `crate::config::load`), but -- unlike
-/// `keymap::EFFECTIVE_BINDINGS` -- mutable afterward: the settings screen
-/// (`crate::app::Mode::Settings`) can switch the active [`ColorScheme`] live,
-/// so this needs a real "reload theme" path, not just a one-time install.
+/// startup (`crate::run`, after `crate::config::load`), but mutable
+/// afterward: the settings screen (`crate::app::Mode::Settings`) can switch
+/// the active [`ColorScheme`] live, so this needs a real "reload theme"
+/// path, not just a one-time install. `keymap`'s live binding table takes
+/// the opposite approach -- `App::keybindings`, an ordinary field the
+/// settings screen mutates directly -- because its consumers (`keys.rs`'s
+/// dispatch, `help.rs`'s render) already receive `&App`/its fields, unlike
+/// this module's render call sites below.
 ///
 /// Still a legitimate use of a global, not a smell: ilium-client is a
 /// single-process TUI with exactly one render loop, so a `RwLock` guarding

@@ -183,7 +183,7 @@ impl IconTarget {
             Self::TopLevel => &["⌂", "⌘", "🏠", "◆"],
             Self::SplitVertical | Self::SplitHorizontal => &["▥", "▤", "⊞", "▦"],
             Self::Terminal => &["📟", "▸", "⌘", "🖥️"],
-            Self::Editor => &["📝", "✎", "📄", "✦"],
+            Self::Editor => &["🗒️", "📝", "✎", "📄"],
             Self::Board => &["▦", "▤", "☷", "🗃️"],
             Self::Claude => &["🧠", "🪄", "🧭", "🦀"],
             Self::Codex => &["⚙️", "🛠️", "🧬", "📖"],

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use ilium_core::{
     AgentProvider, BuiltinAgentProvider, PromptQueueDelivery, SplitOrientation, TreeMoveDirection,
+    MAXIMUM_SPLIT_VIEW_PANES,
 };
 use ilium_ipc::{ClientRequest, PromptSubmissionSource};
 use serde::Serialize;
@@ -168,10 +169,10 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
                 }
                 state.selected_index = index;
             }
-            let result = state
-                .selected_result()
-                .cloned()
-                .ok_or("There is no selected search result")?;
+            let Some(result) = state.selected_result().cloned() else {
+                app.mode = Mode::Search(state);
+                return Err("There is no selected search result".to_owned());
+            };
             app.activate_search_result(result);
             return Ok(ExecutionReceipt::immediate(
                 "Opened the selected search result",
@@ -401,8 +402,10 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                 .iter()
                 .map(|target| resolve_node(app, target))
                 .collect::<Result<Vec<_>, _>>()?;
-            if pane_ids.len() > 4 {
-                return Err("A split view can contain at most four panes".to_owned());
+            if pane_ids.len() > MAXIMUM_SPLIT_VIEW_PANES {
+                return Err(format!(
+                    "A split view can contain at most {MAXIMUM_SPLIT_VIEW_PANES} panes"
+                ));
             }
             app.queue_request(ClientRequest::CreateSplitView {
                 parent_group,

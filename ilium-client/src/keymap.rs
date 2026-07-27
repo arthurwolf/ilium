@@ -3,23 +3,24 @@
 //! ilium's general shortcut base defaults to `Ctrl+A` (Screen's classic
 //! prefix),
 //! followed by a configured key. The base is configurable to any
-//! ASCII letter through the Keyboard settings tab. Both the
-//! input-dispatch logic (`app.rs`) and the help screen render from
-//! [`effective_bindings`] (defaulting to [`LEADER_BINDINGS`] until
-//! [`init_effective_bindings`] runs at startup), so the two can't drift out
-//! of sync — add a new leader shortcut to `LEADER_BINDINGS` and both
-//! consumers pick it up automatically.
+//! ASCII letter through the Keyboard settings tab. [`LEADER_BINDINGS`] is
+//! only the *default* table; the table actually in effect for the running
+//! process is `App::keybindings` (`crate::app`) -- `crate::run` seeds it
+//! from `config.toml`'s `[keybindings]` overrides at startup
+//! (`crate::config::load`), and the Keyboard settings screen mutates it
+//! live via [`assign_key`]/[`preset_bindings`]. Both the input-dispatch
+//! logic (`keys.rs`, via [`action_for_table`]) and the help screen
+//! (`help.rs`) are handed that same `&App::keybindings` slice, so the two
+//! can never drift out of sync — add a new leader shortcut to
+//! [`LEADER_BINDINGS`] and both consumers pick it up automatically once it
+//! flows through `App::keybindings`.
 //!
 //! A user may remap which key triggers an existing [`Action`] via
 //! `config.toml`'s `[keybindings]` table (`crate::config`) — see
 //! [`action_name`]/[`action_from_name`] for the stable string each
-//! `Action` is addressed by in that config, and [`init_effective_bindings`]
-//! for how the override table replaces [`LEADER_BINDINGS`] as the table
-//! `action_for` searches. Deliberately scoped to *remapping* only: `config.toml`
-//! cannot define a brand-new action, only change which letter dispatches
-//! one of the actions already listed here.
-
-use std::sync::OnceLock;
+//! `Action` is addressed by in that config. Deliberately scoped to
+//! *remapping* only: `config.toml` cannot define a brand-new action, only
+//! change which letter dispatches one of the actions already listed here.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -1117,31 +1118,6 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         .find(|&action| action_name(action) == name)
 }
 
-/// The table [`action_for`] and the help screen actually search: either
-/// the startup-computed override table (see [`init_effective_bindings`])
-/// or, absent that (no config file, or a test that never calls it),
-/// [`LEADER_BINDINGS`] unchanged.
-static EFFECTIVE_BINDINGS: OnceLock<Vec<KeyBinding>> = OnceLock::new();
-
-/// Installs the effective leader-key binding table for the rest of the
-/// process's lifetime -- called once at client startup (`crate::run`)
-/// after merging `config.toml`'s `[keybindings]` overrides onto
-/// [`LEADER_BINDINGS`] (see `crate::config::load`). A second call is a
-/// no-op: there is no "reload config" request yet, so nothing should ever
-/// attempt one.
-pub fn init_effective_bindings(bindings: Vec<KeyBinding>) {
-    let _ = EFFECTIVE_BINDINGS.set(bindings);
-}
-
-/// The binding table currently in effect -- what [`action_for`] and the
-/// help screen (`crate::help`) search.
-pub fn effective_bindings() -> &'static [KeyBinding] {
-    EFFECTIVE_BINDINGS
-        .get()
-        .map(Vec::as_slice)
-        .unwrap_or(LEADER_BINDINGS)
-}
-
 /// True if this key event matches the currently configured `Ctrl+letter`
 /// shortcut base. ASCII control-letter events are portable across ordinary
 /// terminals without requiring an enhanced keyboard protocol.
@@ -1159,17 +1135,11 @@ pub fn is_leader_key(key: &KeyEvent, base: ShortcutBase) -> bool {
     }
 }
 
-/// Looks up the action bound to a key pressed right after the leader,
-/// searching [`effective_bindings`] (the possibly-user-remapped table)
-/// rather than [`LEADER_BINDINGS`] directly.
-pub fn action_for(key: BindingKey) -> Option<Action> {
-    action_for_table(effective_bindings(), key)
-}
-
-/// The lookup [`action_for`] runs, parameterized over an explicit table
-/// rather than the global [`effective_bindings`] -- lets `crate::config`'s
-/// tests exercise a merged table's lookup behavior without touching
-/// [`EFFECTIVE_BINDINGS`]' process-lifetime `OnceLock`.
+/// Looks up the action bound to a key pressed right after the leader.
+/// `crate::keys`/`crate::help` always pass `&App::keybindings` -- the one
+/// live, possibly-user-remapped table (see this module's doc comment) --
+/// while `crate::config`'s tests pass a freshly merged table without
+/// needing an `App` at all.
 pub fn action_for_table(bindings: &[KeyBinding], key: BindingKey) -> Option<Action> {
     bindings
         .iter()
@@ -1377,37 +1347,46 @@ mod tests {
 
     #[test]
     fn action_for_known_letter() {
-        assert_eq!(action_for(BindingKey::Character('d')), Some(Action::Detach));
         assert_eq!(
-            action_for(BindingKey::Character('c')),
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('d')),
+            Some(Action::Detach)
+        );
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('c')),
             Some(Action::NewTerminal)
         );
         assert_eq!(
-            action_for(BindingKey::Character('!')),
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('!')),
             Some(Action::RunCommand)
         );
     }
 
     #[test]
     fn action_for_unknown_letter() {
-        assert_eq!(action_for(BindingKey::Character('z')), None);
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Character('z')),
+            None
+        );
     }
 
     #[test]
     fn default_navigation_actions_use_the_requested_arrow_and_page_keys() {
         assert_eq!(ShortcutBase::default(), ShortcutBase::A);
         assert_eq!(DEFAULT_NAVIGATION_SHORTCUT_BASE, ShortcutBase::B);
-        assert_eq!(action_for(BindingKey::Down), Some(Action::CycleNextInGroup));
         assert_eq!(
-            action_for(BindingKey::Up),
+            action_for_table(LEADER_BINDINGS, BindingKey::Down),
+            Some(Action::CycleNextInGroup)
+        );
+        assert_eq!(
+            action_for_table(LEADER_BINDINGS, BindingKey::Up),
             Some(Action::CyclePreviousInGroup)
         );
         assert_eq!(
-            action_for(BindingKey::PageDown),
+            action_for_table(LEADER_BINDINGS, BindingKey::PageDown),
             Some(Action::JumpNextGroup)
         );
         assert_eq!(
-            action_for(BindingKey::PageUp),
+            action_for_table(LEADER_BINDINGS, BindingKey::PageUp),
             Some(Action::JumpPreviousGroup)
         );
     }
@@ -1475,17 +1454,6 @@ mod tests {
             }
         }
         assert_eq!(mnemonic_for(Action::Search, '/'), None);
-    }
-
-    /// `effective_bindings` falls back to `LEADER_BINDINGS` unchanged in
-    /// this test binary, since nothing here ever calls
-    /// `init_effective_bindings` (a deliberately untested global -- see
-    /// `crate::config`'s tests for the pure merge logic that would feed
-    /// it, kept separate from this `OnceLock` so tests never race on
-    /// shared global state).
-    #[test]
-    fn effective_bindings_defaults_to_leader_bindings() {
-        assert_eq!(effective_bindings().len(), LEADER_BINDINGS.len());
     }
 
     #[test]

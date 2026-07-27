@@ -4,6 +4,8 @@
 //! hit-testing all originate here so changing the preview-line setting cannot
 //! make clicks drift away from what the terminal actually shows.
 
+use std::borrow::Cow;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -246,8 +248,9 @@ pub fn hit_test(
     }
     if let Some(scrollbar_area) = layout.horizontal_scrollbar_area {
         if scrollbar_area.contains(position) {
-            return horizontal_scroll_target(board, scrollbar_area, minimum_column_width, position)
-                .map(|column_scroll| BoardHit::HorizontalScrollbar { column_scroll });
+            let column_scroll =
+                horizontal_scroll_target(board, scrollbar_area, minimum_column_width, position);
+            return Some(BoardHit::HorizontalScrollbar { column_scroll });
         }
     }
     for (column_index, column_area) in
@@ -324,18 +327,16 @@ fn horizontal_scroll_target(
     scrollbar_area: Rect,
     minimum_column_width: u16,
     position: Position,
-) -> Option<usize> {
+) -> usize {
     let visible_column_count =
         visible_column_count(scrollbar_area, board.columns.len(), minimum_column_width);
     let maximum_scroll = board.columns.len().saturating_sub(visible_column_count);
     if maximum_scroll == 0 || scrollbar_area.width <= 1 {
-        return Some(0);
+        return 0;
     }
     let position_in_track = usize::from(position.x.saturating_sub(scrollbar_area.x));
-    Some(
-        position_in_track.saturating_mul(maximum_scroll)
-            / usize::from(scrollbar_area.width.saturating_sub(1)),
-    )
+    position_in_track.saturating_mul(maximum_scroll)
+        / usize::from(scrollbar_area.width.saturating_sub(1))
 }
 
 /// Draws columns, contiguous card previews, the optional editor panel, and
@@ -441,7 +442,7 @@ fn render_columns(
                     Style::new()
                 };
                 frame.render_widget(
-                    Paragraph::new(Span::styled(card.title.as_str(), text_style))
+                    Paragraph::new(Span::styled(atomic_checkbox_title(&card.title), text_style))
                         .block(Block::bordered().border_style(border_style))
                         .wrap(Wrap { trim: true }),
                     area,
@@ -525,17 +526,60 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, editor: &CardDetailEditor)
 }
 
 fn detail_close_area(detail_area: Rect) -> Rect {
+    // For a narrow panel (width 1 or 2 -- content_area.width in 3..=5 yields
+    // a detail_width of 1 in `compute_layout`), `right() - 2` lands to the
+    // left of `detail_area.x`, i.e. inside the columns area. Clamping to
+    // `detail_area.x` keeps both the rendered "x" and its hit-test target
+    // inside the panel instead of drifting onto whatever is drawn behind it.
+    let x = detail_area.right().saturating_sub(2).max(detail_area.x);
     Rect::new(
-        detail_area.right().saturating_sub(2),
+        x,
         detail_area.y,
         detail_area.width.min(1),
         detail_area.height.min(1),
     )
 }
 
+/// Replaces an *unchecked* checkbox marker's fill space with a non-breaking
+/// space so Ratatui's word-wrap can never split "[ ]" across two lines (its
+/// "[" and "]" are otherwise two separate words joined by an ordinary space,
+/// which the wrapper is free to break between). Checked markers ("[x]"/"[X]")
+/// contain no whitespace at all, so they are already one unbreakable word and
+/// are left untouched -- substituting their fill character would render every
+/// checked box as visually unchecked. Both the visible card render and the
+/// hit-test buffer in `card_checkbox_areas` must render this exact text: if
+/// only one of them substituted, a checkbox that wraps mid-marker would be
+/// found in one but not the other, and every checkbox_index after the
+/// skipped one would point at the wrong checkbox.
+fn atomic_checkbox_title(title: &str) -> Cow<'_, str> {
+    let occurrences = checkbox_occurrences(title);
+    if occurrences.is_empty() {
+        return Cow::Borrowed(title);
+    }
+    let mut atomic = String::with_capacity(title.len());
+    let mut cursor = 0;
+    for (byte_index, is_checked) in occurrences {
+        // `byte_index` is always an ASCII '[' byte (see `checkbox_occurrences`),
+        // so these slice points can never land mid-character.
+        atomic.push_str(&title[cursor..byte_index + 1]);
+        if is_checked {
+            atomic.push_str(&title[byte_index + 1..byte_index + 2]);
+        } else {
+            atomic.push('\u{00A0}');
+        }
+        cursor = byte_index + 2;
+    }
+    atomic.push_str(&title[cursor..]);
+    Cow::Owned(atomic)
+}
+
 /// Uses Ratatui itself to wrap the card title into an off-screen buffer, then
-/// reports the exact visible three-cell checkbox rectangles. Pointer targets
-/// therefore cannot drift from word wrapping or wide-character behavior.
+/// reports the exact visible three-cell checkbox rectangles, in on-screen
+/// reading order -- which, thanks to `atomic_checkbox_title`, is always the
+/// same order `checkbox_occurrences` returns. Pointer targets therefore
+/// cannot drift from word wrapping or wide-character behavior, and the
+/// position of a found rectangle in this list is always its true occurrence
+/// index (used directly as `checkbox_index` by callers).
 fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
     let expected_count = checkbox_occurrences(&card.title).len();
     if expected_count == 0 {
@@ -546,7 +590,7 @@ fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
         return Vec::new();
     }
     let mut buffer = Buffer::empty(inner);
-    Paragraph::new(card.title.as_str())
+    Paragraph::new(atomic_checkbox_title(&card.title))
         .wrap(Wrap { trim: true })
         .render(inner, &mut buffer);
     let mut areas = Vec::new();
@@ -555,7 +599,17 @@ fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
             let left = buffer[(x, y)].symbol();
             let middle = buffer[(x + 1, y)].symbol();
             let right = buffer[(x + 2, y)].symbol();
-            if left == "[" && matches!(middle, " " | "x" | "X") && right == "]" {
+            // The non-breaking space only ever appears here because
+            // `atomic_checkbox_title` put it there for a real occurrence. A
+            // title containing a literal, pre-existing "[<NBSP>]" (e.g.
+            // pasted from a browser) would also match and be counted before
+            // any real checkbox after it in reading order, but
+            // `checkbox_occurrences` never counts it, so `expected_count` is
+            // reached early: the affected click falls back to selecting the
+            // card rather than toggling the wrong checkbox. Rare and
+            // fails safe; a full fix would require normalizing pre-existing
+            // NBSPs out of the title before rendering.
+            if left == "[" && matches!(middle, " " | "\u{00A0}" | "x" | "X") && right == "]" {
                 areas.push(Rect::new(x, y, 3, 1));
                 if areas.len() == expected_count {
                     return areas;
@@ -575,7 +629,10 @@ mod tests {
     use super::*;
     use crate::board::{BoardColumn, BoardPane};
 
-    fn board() -> BoardPane {
+    // Returns the backing `TempDir` alongside the board: dropping it deletes
+    // the directory `board.storage`'s path points at, so it must outlive
+    // every use of the returned `BoardPane` in the calling test.
+    fn board() -> (tempfile::TempDir, BoardPane) {
         let directory = tempfile::tempdir().unwrap();
         let mut board = BoardPane::create(BoardStorage::MarkdownFile {
             path: directory.path().join("board.md"),
@@ -596,7 +653,7 @@ mod tests {
         }];
         board.selected_column = 0;
         board.selected_card = Some(0);
-        board
+        (directory, board)
     }
 
     #[test]
@@ -610,7 +667,7 @@ mod tests {
 
     #[test]
     fn minimum_width_pages_columns_and_exposes_horizontal_scrollbar() {
-        let mut board = board();
+        let (_directory, mut board) = board();
         board.columns = (0..5)
             .map(|index| BoardColumn {
                 title: format!("Column {index}"),
@@ -653,7 +710,7 @@ mod tests {
 
     #[test]
     fn hit_testing_uses_the_same_three_line_card_geometry() {
-        let board = board();
+        let (_directory, board) = board();
         let area = Rect::new(0, 0, 60, 20);
 
         assert_eq!(
@@ -667,7 +724,7 @@ mod tests {
 
     #[test]
     fn render_shows_three_wrapped_lines_without_a_blank_card_row() {
-        let board = board();
+        let (_directory, board) = board();
         let backend = TestBackend::new(18, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -692,7 +749,7 @@ mod tests {
 
     #[test]
     fn checkbox_hit_uses_the_wrapped_card_rendering() {
-        let mut board = board();
+        let (_directory, mut board) = board();
         board.columns[0].cards[0].title = "prefix [ ] complete this".to_string();
         let area = Rect::new(0, 0, 30, 20);
         let layout = compute_layout(area, false, 1, 20);
@@ -717,7 +774,7 @@ mod tests {
 
     #[test]
     fn active_drag_renders_a_visible_insertion_line() {
-        let mut board = board();
+        let (_directory, mut board) = board();
         board.drag_source = Some((0, 0));
         board.drag_target = Some((0, 1));
         let backend = TestBackend::new(30, 20);
@@ -733,5 +790,82 @@ mod tests {
             .content()
             .iter()
             .any(|cell| cell.symbol() == "━"));
+    }
+
+    #[test]
+    fn atomic_checkbox_title_keeps_each_marker_as_one_unbreakable_word() {
+        // An unchecked marker's "[" and "]" are separated by a literal space,
+        // which word-wrap would otherwise treat as two independent words.
+        let atomic = atomic_checkbox_title("aaaa [ ] bbbb [x] cccc [X] dddd");
+
+        assert!(atomic.split(' ').all(|word| word != "[" && word != "]"));
+        // Checked markers contain no whitespace, so they are already
+        // unbreakable and must be left as-is -- otherwise every checked box
+        // would render as visually unchecked.
+        assert!(atomic.contains("[x]"));
+        assert!(atomic.contains("[X]"));
+        assert!(atomic.contains("[\u{00A0}]"));
+    }
+
+    #[test]
+    fn checkbox_marker_survives_a_wrap_point_between_its_brackets() {
+        let card = BoardCard {
+            title: "AAAA [ ]".to_string(),
+            body: String::new(),
+        };
+        // Width 9 leaves 7 inner columns after the card's own border --
+        // exactly enough for "AAAA" but not "AAAA [ ]" together, so a plain
+        // (non-atomic) render would wrap between "[" and "]" and this
+        // checkbox would go undetected.
+        let area = Rect::new(0, 0, 9, 6);
+
+        let areas = card_checkbox_areas(&card, area);
+
+        assert_eq!(
+            areas.len(),
+            1,
+            "a checkbox marker must never be split across a wrap point"
+        );
+    }
+
+    #[test]
+    fn checkbox_index_stays_aligned_when_an_earlier_marker_would_have_wrapped() {
+        let (_directory, mut board) = board();
+        board.columns[0].cards[0].title = "AAAA [ ] second [x] third".to_string();
+        let area = Rect::new(0, 0, 11, 20);
+        let minimum_column_width = 11;
+        let preview_lines = 5;
+
+        // Same layout pipeline `hit_test` uses internally, so the computed
+        // card area matches exactly what `hit_test` will hit-test against.
+        let layout = compute_layout(area, false, 1, minimum_column_width);
+        let card_rect = card_area(
+            Block::bordered().inner(layout.columns_area),
+            0,
+            preview_lines,
+        )
+        .unwrap();
+        let areas = card_checkbox_areas(&board.columns[0].cards[0], card_rect);
+        // Without the atomic-marker fix the first "[ ]" would wrap between
+        // its brackets and go undetected, shifting the second checkbox's
+        // reported index from 1 down to 0.
+        assert_eq!(areas.len(), 2);
+
+        let hit = hit_test(
+            &board,
+            area,
+            preview_lines,
+            minimum_column_width,
+            Position::new(areas[1].x + 1, areas[1].y),
+        );
+
+        assert_eq!(
+            hit,
+            Some(BoardHit::CardCheckbox {
+                column_index: 0,
+                card_index: 0,
+                checkbox_index: 1,
+            })
+        );
     }
 }

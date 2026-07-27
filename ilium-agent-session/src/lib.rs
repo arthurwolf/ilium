@@ -50,14 +50,17 @@ impl TranscriptLocator {
             return None;
         }
 
+        // `transcript_from_path` re-derives its session id from the same
+        // `path` the preceding filter already constrained to `session_id`,
+        // so every yielded transcript is already known to match; no further
+        // filtering on `transcript.session_id` is needed here.
         let mut matches = self
             .candidate_paths(class)
             .into_iter()
             .filter(|path| {
                 session_id_from_transcript_path(class, path).as_deref() == Some(session_id)
             })
-            .filter_map(|path| self.transcript_from_path(class, &path))
-            .filter(|transcript| transcript.session_id == session_id);
+            .filter_map(|path| self.transcript_from_path(class, &path));
         let transcript = matches.next()?;
         if matches.next().is_some() {
             return None;
@@ -139,6 +142,13 @@ impl TranscriptLocator {
     /// appends the authoritative project binding to `history.jsonl`. The
     /// database filename proves the conversation id held open by this exact
     /// process; the history record proves that id belongs to this project.
+    ///
+    /// `history.jsonl` is append-only, so a given `conversationId` can appear
+    /// on more than one line. Only its first recorded workspace binding is
+    /// authoritative -- mirroring `transcript_metadata_matches`, where later
+    /// content can never redefine a rollout's owner -- so a later, unrelated
+    /// line pairing this id with a different workspace must not be able to
+    /// grant a second project ownership of the same conversation.
     fn antigravity_history_matches(&self, expected_session_id: &str) -> bool {
         let history_path = self
             .home
@@ -151,19 +161,19 @@ impl TranscriptLocator {
         BufReader::new(file)
             .lines()
             .map_while(Result::ok)
-            .any(|line| {
-                let Ok(entry) = serde_json::from_str::<Value>(&line) else {
-                    return false;
-                };
-                let Some(session_id) = entry.get("conversationId").and_then(Value::as_str) else {
-                    return false;
-                };
-                let Some(workspace) = entry.get("workspace").and_then(Value::as_str) else {
-                    return false;
-                };
-                session_id == expected_session_id
-                    && same_canonical_project(Path::new(workspace), &self.project_cwd)
+            .find_map(|line| {
+                let entry = serde_json::from_str::<Value>(&line).ok()?;
+                let session_id = entry.get("conversationId").and_then(Value::as_str)?;
+                if session_id != expected_session_id {
+                    return None;
+                }
+                let workspace = entry.get("workspace").and_then(Value::as_str)?;
+                Some(same_canonical_project(
+                    Path::new(workspace),
+                    &self.project_cwd,
+                ))
             })
+            .unwrap_or(false)
     }
 }
 
@@ -290,10 +300,9 @@ fn session_id_from_transcript_path(class: &AgentClass, path: &Path) -> Option<St
                 && looks_like_uuid(candidate))
             .then(|| candidate.to_string())
         }
-        AgentClass::Antigravity => (path.extension().and_then(|value| value.to_str())
-            == Some("db")
-            && looks_like_uuid(stem))
-        .then(|| stem.to_string()),
+        // The extension was already confirmed to be "db" by the
+        // `expected_extension` check above; only the UUID shape remains.
+        AgentClass::Antigravity => looks_like_uuid(stem).then(|| stem.to_string()),
         AgentClass::Other(_) => None,
     }
 }
@@ -379,14 +388,19 @@ mod tests {
         std::fs::create_dir_all(&conversations).unwrap();
         let path = conversations.join(format!("{session_id}.db"));
         std::fs::write(&path, "sqlite fixture placeholder").unwrap();
+        // Trailing newline mirrors the real append-only `history.jsonl`, so
+        // tests can append further lines behind this one without corrupting
+        // it into one unparseable line.
         std::fs::write(
             root.join("history.jsonl"),
-            serde_json::json!({
-                "display": "write a provider adapter",
-                "workspace": metadata_cwd,
-                "conversationId": session_id,
-            })
-            .to_string(),
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "display": "write a provider adapter",
+                    "workspace": metadata_cwd,
+                    "conversationId": session_id,
+                })
+            ),
         )
         .unwrap();
         path
@@ -451,6 +465,53 @@ mod tests {
                 .transcript_from_path(&AgentClass::Antigravity, &conversation)
                 .map(|transcript| transcript.session_id),
             Some(session_id.to_string())
+        );
+    }
+
+    #[test]
+    fn antigravity_history_first_workspace_binding_wins_over_a_later_rebind() {
+        let home = tempfile::tempdir().unwrap();
+        let session_id = "2b222222-2222-4222-8222-222222222222";
+        let conversation =
+            write_antigravity_conversation(home.path(), Path::new("/work/ilium"), session_id);
+        // Simulate an append-only history log that later pairs the same
+        // conversation id with a different workspace (a stale entry or a
+        // hostile append). The first-recorded binding must still win.
+        let history_path = home
+            .path()
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("history.jsonl");
+        let mut history = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&history_path)
+            .unwrap();
+        use std::io::Write as _;
+        writeln!(
+            history,
+            "{}",
+            serde_json::json!({
+                "display": "later rebind attempt",
+                "workspace": "/work/money",
+                "conversationId": session_id,
+            })
+        )
+        .unwrap();
+
+        let original_project = TranscriptLocator::new(home.path(), Path::new("/work/ilium"));
+        assert_eq!(
+            original_project
+                .transcript_from_path(&AgentClass::Antigravity, &conversation)
+                .map(|transcript| transcript.session_id),
+            Some(session_id.to_string()),
+            "the first recorded workspace binding must still be honored"
+        );
+
+        let later_rebind_project = TranscriptLocator::new(home.path(), Path::new("/work/money"));
+        assert_eq!(
+            later_rebind_project.transcript_from_path(&AgentClass::Antigravity, &conversation),
+            None,
+            "a later history line must not be able to rebind an already-owned conversation"
         );
     }
 

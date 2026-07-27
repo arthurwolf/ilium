@@ -193,7 +193,12 @@ async fn output_bytes_broadcast_carries_the_raw_pty_bytes() {
                         return collected;
                     }
                 }
-                Err(_) => return collected,
+                // `Lagged` means chunks were skipped, not that the channel is
+                // done -- the sender (owned by the still-running reader
+                // thread) is very much alive, so keep receiving. Only
+                // `Closed` (sender dropped) means nothing more is coming.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return collected,
             }
         }
     })

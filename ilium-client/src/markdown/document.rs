@@ -59,7 +59,14 @@ const QUOTE_FG: Color = Color::Rgb(0x7a, 0x8a, 0xa0);
 /// `render.rs` (as the plain-text fallback when rasterization fails), so
 /// a header reads the same accent color whether it renders as a pixel
 /// image or falls back to text.
-pub const HEADING_FG: Color = Color::Rgb(0xe0, 0xaf, 0x68);
+pub const HEADING_FG: Color = Color::Rgb(HEADING_FG_RGB.0, HEADING_FG_RGB.1, HEADING_FG_RGB.2);
+
+/// Raw RGB components behind [`HEADING_FG`], exposed separately because
+/// `raster.rs` needs to build a `cosmic_text::Color` from the same three
+/// bytes rather than a `ratatui::style::Color` -- keeping one literal here
+/// instead of two (one per color type) is what actually keeps the pixel
+/// and plain-text header colors from drifting apart.
+pub const HEADING_FG_RGB: (u8, u8, u8) = (0xe0, 0xaf, 0x68);
 const LINK_FG: Color = Color::Cyan;
 const RULE_WIDTH: usize = 400;
 
@@ -387,6 +394,14 @@ impl<'a> Builder<'a> {
                 )])));
             }
             Event::TaskListMarker(checked) => {
+                // A checkbox glyph is visible content just like any other
+                // span pushed via `push_text` -- without this, a task-list
+                // item whose only other content is an image would still
+                // look like a "paragraph containing nothing but a single
+                // image" to `TagEnd::Paragraph`, which clears `self.spans`
+                // (including this glyph) and replaces the whole line with a
+                // bare `Block::Image`, silently dropping the checkbox.
+                self.paragraph_is_lone_image = Some(false);
                 let glyph = if *checked { "[x] " } else { "[ ] " };
                 self.spans.push(Span::raw(glyph));
             }
@@ -1057,6 +1072,19 @@ mod tests {
             );
         };
         assert_eq!(line_text(&second_paragraph[0]), "  second para");
+    }
+
+    #[test]
+    fn loose_task_list_item_with_a_lone_image_keeps_its_checkbox() {
+        let document = parse("- [ ] ![x](pic.png)\n\n- [ ] second", Path::new("/tmp"));
+        assert!(
+            !document
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::Image { .. })),
+            "expected the checkbox marker to disqualify lone-image handling, got {:?}",
+            document.blocks
+        );
     }
 
     #[test]

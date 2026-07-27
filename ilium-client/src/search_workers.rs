@@ -5,6 +5,7 @@
 //! keys. This manager permits one scan at a time, tracks its thread, and
 //! lets the UI discard results by revision when newer typing supersedes it.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -71,8 +72,26 @@ impl SearchWorkers {
             .name("ilium-workspace-search".to_string())
             .spawn(move || {
                 crate::background_priority::lower_current_thread();
-                let results = search_ui::search_workspace(&request, || {
-                    worker_cancellation.load(Ordering::Relaxed)
+                // `is_idle` has no way to observe this thread's death other
+                // than the completion event it promises to send (see the
+                // doc comment on `start`): a scan across arbitrary retained
+                // terminal text can hit an edge case (e.g. a byte-slicing
+                // bug on a UTF-8 boundary) and panic. Contain that here so a
+                // single bad scan degrades to "no results" instead of
+                // wedging `SearchWorkers` in `is_idle() == false` forever,
+                // which would silently disable workspace search for the
+                // rest of the client's run.
+                let results = panic::catch_unwind(AssertUnwindSafe(|| {
+                    search_ui::search_workspace(&request, || {
+                        worker_cancellation.load(Ordering::Relaxed)
+                    })
+                }))
+                .unwrap_or_else(|panic_payload| {
+                    tracing::error!(
+                        "workspace search worker panicked: {}",
+                        panic_payload_message(&panic_payload)
+                    );
+                    Vec::new()
                 });
                 if worker_cancellation.load(Ordering::Relaxed) {
                     return;
@@ -111,6 +130,20 @@ impl SearchWorkers {
         // no longer tracked here.
         drop(active.handle);
     }
+}
+
+/// Extracts a human-readable message from a caught panic payload for the log
+/// line in `start`. `std::panic!` payloads are almost always `&str` or
+/// `String`; anything else still logs usefully rather than silently
+/// swallowing the panic's presence.
+fn panic_payload_message(panic_payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = panic_payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = panic_payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "non-string panic payload".to_string()
 }
 
 impl Drop for SearchWorkers {

@@ -41,6 +41,13 @@ struct MarkdownHeading {
 
 /// Parses semantic headings so fenced code and escaped Markdown never become
 /// false chapter boundaries merely because they look like a `#` prefix.
+///
+/// Also drops headings nested inside a block quote or list item (`> ## Not a
+/// chapter`, `- ## Not a chapter`): pulldown-cmark's source range for those
+/// starts right after the container marker, not at the physical line start.
+/// Treating them as real headings would truncate the enclosing chapter at an
+/// arbitrary mid-blockquote point and, if picked as the containing heading,
+/// hand back a range missing its own `>`/list prefix.
 fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -53,6 +60,9 @@ fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
             let Event::Start(Tag::Heading { level, .. }) = event else {
                 return None;
             };
+            if !starts_its_own_physical_line(markdown, source_range.start) {
+                return None;
+            }
             Some(MarkdownHeading {
                 level: heading_level_number(level),
                 source_line_index: source_line_index_for_offset(markdown, source_range.start),
@@ -60,6 +70,19 @@ fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
             })
         })
         .collect()
+}
+
+/// True when nothing but Markdown's own optional leading whitespace (up to
+/// three spaces, per the ATX heading rule) separates `offset` from the start
+/// of its line -- as opposed to a block quote (`> `) or list marker
+/// (`- `, `1. `) prefix, which contains non-whitespace bytes in that span.
+fn starts_its_own_physical_line(markdown: &str, offset: usize) -> bool {
+    let line_start = markdown[..offset]
+        .rfind('\n')
+        .map_or(0, |newline_byte_index| newline_byte_index + 1);
+    markdown[line_start..offset]
+        .bytes()
+        .all(|byte| byte == b' ' || byte == b'\t')
 }
 
 /// Converts pulldown-cmark's source byte offset to the editor's line index.
@@ -112,5 +135,16 @@ mod tests {
         let range = source_range_for_chapter_containing_line(markdown, 3).unwrap();
 
         assert_eq!(&markdown[range], markdown);
+    }
+
+    #[test]
+    fn ignores_headings_nested_inside_a_block_quote_or_list_item() {
+        let markdown = "# Root\n\n## Chapter A\n\n> ## Not a real chapter\n> quoted\n\nbody of A\n\n## Chapter B\nbody of B\n";
+        let range = source_range_for_chapter_containing_line(markdown, 5).unwrap();
+
+        assert_eq!(
+            &markdown[range],
+            "## Chapter A\n\n> ## Not a real chapter\n> quoted\n\nbody of A\n\n"
+        );
     }
 }

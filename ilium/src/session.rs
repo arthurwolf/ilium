@@ -34,6 +34,11 @@ const MAX_SOCKET_SLUG_BYTES: usize = 48;
 const DEBUG_LOG_ROOT: &str = "/tmp/.ilium";
 const ACTIVE_LOG_PATH_FILE: &str = ".active-log-path";
 const SERVER_START_LOCK_FILE: &str = ".server-start.lock";
+/// How many timestamped debug logs `prune_stale_logs` leaves behind per
+/// session on every server start. `/tmp` is commonly tmpfs, so an unrotated
+/// log directory consumes RAM, not just disk, across the lifetime of the
+/// machine -- this bounds it instead of leaving retention unbounded.
+const RETAINED_LOG_FILE_COUNT: usize = 5;
 
 /// Ready metadata format emitted by current `ilium-server` processes. A
 /// legacy marker containing only the log path is still understood so an
@@ -248,16 +253,36 @@ fn socket_key(project_root: &Path, session_name: &str) -> String {
     format!("{readable_slug}-{digest_prefix}-{session_name}")
 }
 
-/// True if the socket accepts a connection. A dead filesystem entry is
-/// removed so a replacement server can bind it.
+/// True only for a connect error that proves the filesystem entry is a dead
+/// listener rather than a live one this process merely failed to reach.
+/// `ConnectionRefused` is the kernel's answer when nothing is `accept()`ing
+/// on the socket; `NotFound` covers a path removed by a concurrent racer
+/// between the caller's existence check and this connect attempt. Anything
+/// else -- `EMFILE`/`ENFILE` (fd exhaustion, not exotic in a process that
+/// spawns many PTYs), `EACCES`, a transient `EINTR`, and similar -- says
+/// nothing about the listener's liveness, so the socket must be left alone:
+/// deleting it out from under a healthy server would let a caller spawn a
+/// second server for the same project.
+fn connect_error_proves_dead_listener(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+    )
+}
+
+/// True if the socket accepts a connection. A filesystem entry proven dead
+/// (see `connect_error_proves_dead_listener`) is removed so a replacement
+/// server can bind it; any other connect failure leaves it in place.
 pub fn is_session_live(socket_path: &Path) -> bool {
     if !socket_path.exists() {
         return false;
     }
     match StdUnixStream::connect(socket_path) {
         Ok(_) => true,
-        Err(_) => {
-            let _ = std::fs::remove_file(socket_path);
+        Err(error) => {
+            if connect_error_proves_dead_listener(&error) {
+                let _ = std::fs::remove_file(socket_path);
+            }
             false
         }
     }
@@ -366,6 +391,10 @@ fn locate_server_binary() -> PathBuf {
 /// immediately below, so this still leaves nothing unwaited.
 fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> {
     let server_binary = locate_server_binary();
+    // Runs while this function's only caller (`ensure_server_running`) still
+    // holds the server-start lock, so a concurrent attach cannot race a
+    // delete against a server that just started writing its own fresh log.
+    prune_stale_logs(session);
     let log_path = log_path_for_new_server(session);
     let mut command = Command::new(&server_binary);
     command
@@ -527,6 +556,103 @@ fn log_path_for_new_server(session: &ProjectSession) -> PathBuf {
     session.log_directory.join(format!("log-{timestamp}.txt"))
 }
 
+/// True for filenames produced by `log_path_for_new_server`, so pruning
+/// never touches `.active-log-path`, `.server-start.lock`, or anything else
+/// an operator might have dropped into the session's log directory.
+fn is_debug_log_file_name(file_name: &str) -> bool {
+    file_name.starts_with("log-") && file_name.ends_with(".txt")
+}
+
+/// Decides which debug-log filenames are stale given the full set present in
+/// a session's log directory. Pure and independent of the filesystem so the
+/// retention policy is unit-testable without a real directory: everything
+/// beyond the `RETAINED_LOG_FILE_COUNT` most recent files is stale, except
+/// `active_log_file_name` (when present) is always kept even if it falls
+/// outside that window -- a slow-starting server's own log must survive its
+/// own start.
+///
+/// Filenames use the fixed-width, zero-padded `log-<YYYY-MM-DD_HH-MM-SS.mmm>.txt`
+/// scheme from `log_path_for_new_server`, so lexical order is chronological
+/// order and no timestamp parsing is needed.
+fn select_stale_log_file_names(
+    existing_log_file_names: &[String],
+    active_log_file_name: Option<&str>,
+) -> Vec<String> {
+    let mut sorted_names = existing_log_file_names.to_vec();
+    sorted_names.sort();
+
+    let stale_count = sorted_names.len().saturating_sub(RETAINED_LOG_FILE_COUNT);
+    sorted_names
+        .into_iter()
+        .take(stale_count)
+        .filter(|file_name| Some(file_name.as_str()) != active_log_file_name)
+        .collect()
+}
+
+/// Deletes debug logs beyond the retained window in `session.log_directory`,
+/// so every server start (each `ilium` launch, `--restart-server`,
+/// `--reset-session`) doesn't leave behind one full debug log for the
+/// lifetime of the machine's `/tmp`. Nothing else in this crate or in
+/// `ilium-server` ever prunes this directory: `stop_server` removes only the
+/// socket, and `reset_storage_paths` removes only the snapshot -- this is the
+/// one place log retention is enforced.
+///
+/// This is best-effort maintenance, not part of the server-start contract:
+/// a listing or delete failure is logged to stderr and otherwise ignored
+/// rather than propagated, so a permissions hiccup in an old log file can
+/// never block starting the actual server.
+fn prune_stale_logs(session: &ProjectSession) {
+    let entries = match std::fs::read_dir(&session.log_directory) {
+        Ok(entries) => entries,
+        // A brand-new session has no log directory contents to prune yet.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            eprintln!(
+                "ilium: warning: could not list {:?} to prune stale debug logs: {error}",
+                session.log_directory
+            );
+            return;
+        }
+    };
+
+    let mut existing_log_file_names = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let Ok(file_name) = entry.file_name().into_string() else {
+            // Not valid UTF-8, so it cannot be a filename this CLI ever
+            // wrote -- leave it alone rather than guessing.
+            continue;
+        };
+        if is_debug_log_file_name(&file_name) {
+            existing_log_file_names.push(file_name);
+        }
+    }
+
+    // A dead marker (server process no longer running) must not pin its log
+    // forever; only a marker whose PID is still alive is honored.
+    let active_log_file_name = read_active_log_metadata(session)
+        .ok()
+        .filter(|metadata| metadata.server_pid.is_some_and(is_process_running))
+        .and_then(|metadata| {
+            metadata
+                .log_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        });
+
+    let stale_file_names =
+        select_stale_log_file_names(&existing_log_file_names, active_log_file_name.as_deref());
+    for file_name in stale_file_names {
+        let path = session.log_directory.join(&file_name);
+        if let Err(error) = std::fs::remove_file(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("ilium: warning: failed to prune stale debug log {path:?}: {error}");
+            }
+        }
+    }
+}
+
 /// Resolves the timestamped path selected when an already-running server
 /// successfully bound. The detached server publishes this atomically after
 /// binding its listener, rather than the launcher publishing a speculative
@@ -645,13 +771,18 @@ async fn request_graceful_restart(session: &ProjectSession) -> Result<(), std::i
 }
 
 /// Returns the process ID at the other end of a live session socket. A
-/// connection failure means the filesystem entry is stale; normal session
-/// discovery removes it and reports that no server needs replacing.
+/// connection failure that proves the listener is dead (see
+/// `connect_error_proves_dead_listener`) removes the stale filesystem entry
+/// and reports that no server needs replacing; any other connect failure
+/// (fd exhaustion, permissions, a transient interrupt) leaves the socket in
+/// place, since it says nothing about whether a server is still listening.
 async fn server_process_id(socket_path: &Path) -> Result<Option<u32>, CliError> {
     let stream = match tokio::net::UnixStream::connect(socket_path).await {
         Ok(stream) => stream,
-        Err(_) => {
-            let _ = std::fs::remove_file(socket_path);
+        Err(error) => {
+            if connect_error_proves_dead_listener(&error) {
+                let _ = std::fs::remove_file(socket_path);
+            }
             return Ok(None);
         }
     };
@@ -867,6 +998,85 @@ mod tests {
             read_active_log_path(&session).expect("read metadata"),
             log_path
         );
+    }
+
+    #[test]
+    fn select_stale_log_file_names_keeps_only_the_most_recent_files() {
+        let names: Vec<String> = (0..8)
+            .map(|index| format!("log-2026-07-19_00-00-0{index}.000.txt"))
+            .collect();
+
+        let stale = select_stale_log_file_names(&names, None);
+
+        assert_eq!(stale, names[..3].to_vec());
+    }
+
+    #[test]
+    fn select_stale_log_file_names_never_marks_the_active_log_stale() {
+        let names: Vec<String> = (0..8)
+            .map(|index| format!("log-2026-07-19_00-00-0{index}.000.txt"))
+            .collect();
+
+        let stale = select_stale_log_file_names(&names, Some(&names[0]));
+
+        assert!(!stale.contains(&names[0]));
+        assert_eq!(stale, names[1..3].to_vec());
+    }
+
+    #[test]
+    fn prune_stale_logs_deletes_only_files_beyond_the_retention_window() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+
+        let mut created_file_names = Vec::new();
+        for index in 0..8 {
+            let file_name = format!("log-2026-07-19_00-00-0{index}.000.txt");
+            std::fs::write(session.log_directory.join(&file_name), b"").expect("write log fixture");
+            created_file_names.push(file_name);
+        }
+
+        prune_stale_logs(&session);
+
+        let mut remaining: Vec<String> = std::fs::read_dir(&session.log_directory)
+            .expect("read log directory")
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| is_debug_log_file_name(name))
+            .collect();
+        remaining.sort();
+
+        assert_eq!(remaining, created_file_names[3..].to_vec());
+    }
+
+    #[test]
+    fn prune_stale_logs_never_deletes_the_active_log_of_a_live_process() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+
+        // Older than the retention window on its own -- pruning must still
+        // leave it in place because it is published as the active log for
+        // this test process, which is guaranteed live for the test's
+        // duration.
+        let active_file_name = "log-2020-01-01_00-00-00.000.txt";
+        let active_log_path = session.log_directory.join(active_file_name);
+        std::fs::write(&active_log_path, b"").expect("write active log fixture");
+        for index in 0..8 {
+            let file_name = format!("log-2026-07-19_00-00-0{index}.000.txt");
+            std::fs::write(session.log_directory.join(&file_name), b"").expect("write log fixture");
+        }
+        std::fs::write(
+            &session.active_log_path_file,
+            format!(
+                "pid={}\nlog_path={}",
+                std::process::id(),
+                active_log_path.display()
+            ),
+        )
+        .expect("write active-log-path marker");
+
+        prune_stale_logs(&session);
+
+        assert!(active_log_path.exists());
     }
 
     #[test]

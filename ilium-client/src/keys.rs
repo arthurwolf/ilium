@@ -1553,16 +1553,20 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 }
             }
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
-                let binding_key = crate::keymap::BindingKey::from_key_event(key)
-                    .expect("the matched navigation key is representable");
-                if app
-                    .keybindings
-                    .iter()
-                    .all(|binding| binding.key != binding_key || binding.action == action)
-                {
-                    app.settings_assign_key(action, binding_key);
-                } else {
-                    state.keyboard_picker = Some(action);
+                // `from_key_event` only recognizes these codes when no
+                // modifier is held (e.g. Shift+Up has none of the plain
+                // `BindingKey` variants), so a held modifier must fall back
+                // to keeping the picker open rather than assume the key is
+                // always representable.
+                match crate::keymap::BindingKey::from_key_event(key) {
+                    Some(binding_key)
+                        if app.keybindings.iter().all(|binding| {
+                            binding.key != binding_key || binding.action == action
+                        }) =>
+                    {
+                        app.settings_assign_key(action, binding_key);
+                    }
+                    _ => state.keyboard_picker = Some(action),
                 }
             }
             _ => state.keyboard_picker = Some(action),
@@ -1778,7 +1782,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Terminal => {
             state.selected_row =
-                (state.selected_row + 1).min(crate::app::TerminalRow::ALL.len() - 1)
+                (state.selected_row + 1).min(crate::app::TerminalRow::ALL.len().saturating_sub(1))
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Terminal => {
             if let Some(row) = crate::app::TerminalRow::ALL
@@ -1802,7 +1806,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.selected_row = state.selected_row.saturating_sub(1)
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Editor => {
-            state.selected_row = (state.selected_row + 1).min(crate::app::EditorRow::ALL.len() - 1)
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::EditorRow::ALL.len().saturating_sub(1))
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Editor => {
             if let Some(row) = crate::app::EditorRow::ALL.get(state.selected_row).copied() {
@@ -1816,12 +1821,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_adjust_editor_row(row, 1);
             }
         }
-        KeyCode::Left
-        | KeyCode::Char('h')
-        | KeyCode::Right
-        | KeyCode::Char('l')
-        | KeyCode::Enter
-        | KeyCode::Char(' ')
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Session => {
+            if let Some(row) = crate::app::SessionRow::ALL.get(state.selected_row).copied() {
+                app.settings_adjust_session_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Session =>
         {
             if let Some(row) = crate::app::SessionRow::ALL.get(state.selected_row).copied() {

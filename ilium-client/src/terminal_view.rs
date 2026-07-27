@@ -271,7 +271,18 @@ impl TerminalView {
         const CLOSE: &[u8] = b"\x1b]8;;";
         loop {
             let Some(open_start) = find_bytes(&self.osc8_stream, OPEN) else {
-                self.osc8_stream.truncate(OPEN.len().saturating_sub(1));
+                // No opener anywhere in the buffer. Keep only the longest
+                // tail that is itself a genuine prefix of `OPEN` -- that's
+                // the part that can still complete once the next chunk
+                // arrives. `truncate` would keep the *head* of the buffer
+                // instead, which discards exactly the partial-opener bytes
+                // this cross-chunk parse depends on.
+                let partial_opener_len = (1..OPEN.len())
+                    .rev()
+                    .find(|length| self.osc8_stream.ends_with(&OPEN[..*length]))
+                    .unwrap_or(0);
+                let drop_through = self.osc8_stream.len().saturating_sub(partial_opener_len);
+                self.osc8_stream.drain(..drop_through);
                 return;
             };
             if open_start > 0 {
@@ -480,6 +491,21 @@ mod tests {
         view.feed(b"s\x1b]8;;\x1b\\");
         assert_eq!(
             view.osc8_link_at("docs", 1),
+            Some("https://example.test".to_string())
+        );
+    }
+
+    #[test]
+    fn osc8_links_survive_a_split_that_lands_inside_the_opener_marker() {
+        let mut view = TerminalView::new(4, 40);
+        // The opener escape itself is split mid-marker, with unrelated
+        // preceding output in the same first chunk. A buggy cross-chunk
+        // parser that keeps the wrong end of its scratch buffer here would
+        // discard the partial "\x1b]8" prefix and never recover it.
+        view.feed(b"hello\x1b]8");
+        view.feed(b";;https://example.test\x1b\\label\x1b]8;;\x1b\\");
+        assert_eq!(
+            view.osc8_link_at("label", 1),
             Some("https://example.test".to_string())
         );
     }

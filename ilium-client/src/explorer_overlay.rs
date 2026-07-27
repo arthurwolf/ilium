@@ -305,6 +305,15 @@ impl ExplorerOverlay {
         mouse: MouseEvent,
         screen_area: Rect,
     ) -> anyhow::Result<Option<PathBuf>> {
+        // The manual-path text field is a modal sub-state: `handle_key`
+        // routes every key into editing it while it's open. Mouse events
+        // must be gated the same way, or a click/scroll landing on the
+        // still-rendered background table would change the selection --
+        // or, worse, activate a row and close the picker -- silently
+        // discarding whatever path the user was mid-way through typing.
+        if self.manual_path.is_some() {
+            return Ok(None);
+        }
         let layout = layout_for(screen_area);
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -784,6 +793,64 @@ mod tests {
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("manual path should select its directory");
         assert_eq!(selected, Some(selected_directory));
+    }
+
+    #[test]
+    fn mouse_events_are_ignored_while_a_manual_path_is_being_typed() {
+        let dir = scratch_dir("manual-path-mouse-guard");
+        std::fs::create_dir(dir.join("sub")).expect("mkdir");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let index = overlay
+            .entries
+            .iter()
+            .position(|entry| entry.name == "sub")
+            .expect("sub dir listed");
+        let selected_before = overlay.selected;
+        assert_ne!(
+            selected_before, index,
+            "the clicked row must differ from the current selection for this test to be meaningful"
+        );
+
+        overlay
+            .handle(
+                &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
+                SCREEN,
+            )
+            .expect("open manual path entry");
+        overlay
+            .handle(
+                &key_event(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                SCREEN,
+            )
+            .expect("clear manual path entry");
+        overlay
+            .handle(&key_event(KeyCode::Char('x'), KeyModifiers::NONE), SCREEN)
+            .expect("type into manual path entry");
+
+        let layout = layout_for(SCREEN);
+        let row = layout.rows_area.y + index as u16;
+        let click = mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.rows_area.x,
+            row,
+        );
+        let picked = overlay
+            .handle(&click, SCREEN)
+            .expect("click while typing a manual path should not error");
+
+        assert_eq!(
+            picked, None,
+            "a background click must not activate a row while the manual path field is open"
+        );
+        assert_eq!(
+            overlay.selected, selected_before,
+            "a background click must not move the row selection while the manual path field is open"
+        );
+        assert_eq!(
+            overlay.manual_path.as_deref(),
+            Some("x"),
+            "the manual path being typed must survive an unrelated background mouse event"
+        );
     }
 
     #[test]

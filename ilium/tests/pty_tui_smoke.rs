@@ -2277,8 +2277,11 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         wait_until(
             || {
                 let screen = tui.screen_text();
+                // The board renderer substitutes the fill space of an unchecked
+                // checkbox with a non-breaking space (see `atomic_checkbox_title`
+                // in board_ui.rs) so wrapping can never split "[ ]" mid-marker.
                 screen.contains("Context column")
-                    && screen.contains("[ ] Context task")
+                    && screen.contains("[\u{a0}] Context task")
                     && screen.contains("drop a card here")
             },
             WAIT_TIMEOUT,
@@ -2317,7 +2320,8 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 
     // Cards use border state for selection and do not repeat generic `card`
     // or `selected` titles along their top edge.
-    let context_card_row = tui.with_screen(|screen| rows_containing(screen, "[ ] Context task")[0]);
+    let context_card_row =
+        tui.with_screen(|screen| rows_containing(screen, "[\u{a0}] Context task")[0]);
     let context_card_border = tui.with_screen(|screen| {
         let border_row = context_card_row.saturating_sub(1);
         let columns = screen.size().1;
@@ -2489,7 +2493,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Dialog column") && screen.contains("[ ] Dialog task")
+                screen.contains("Dialog column") && screen.contains("[\u{a0}] Dialog task")
             },
             WAIT_TIMEOUT,
         )
@@ -2555,7 +2559,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Second task") && screen.contains("[ ] Dialog task")
+                screen.contains("Second task") && screen.contains("[\u{a0}] Dialog task")
             },
             WAIT_TIMEOUT,
         )
@@ -2565,7 +2569,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     );
     let (second_task_column, second_task_row, dialog_task_row) = tui.with_screen(|screen| {
         let second_task_row = rows_containing(screen, "Second task")[0];
-        let dialog_task_row = rows_containing(screen, "[ ] Dialog task")[0];
+        let dialog_task_row = rows_containing(screen, "[\u{a0}] Dialog task")[0];
         let columns = screen.size().1;
         let second_task_column = (25..columns)
             .find(|column| {

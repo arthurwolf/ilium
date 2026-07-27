@@ -84,7 +84,15 @@ pub enum PromptOutcome {
 
 /// Applies one key press to `state`. Shared by every text-prompt modal so
 /// cursor movement/editing behaves identically everywhere it's used.
+///
+/// `TextPromptState::buf`/`cursor` are public (callers and tests poke `cursor`
+/// directly, e.g. after a click), so this entry point re-establishes the
+/// `cursor <= buf.chars().count()` invariant before dispatching. Without it, a
+/// stale/out-of-range cursor reaching `backspace()` would decrement past the
+/// end and panic in `String::remove` -- clamping here is cheaper and safer
+/// than trusting every call site to keep the invariant itself.
 pub fn handle_key(state: &mut TextPromptState, code: KeyCode) -> PromptOutcome {
+    state.cursor = state.cursor.min(state.buf.chars().count());
     match code {
         KeyCode::Enter => return PromptOutcome::Commit,
         KeyCode::Esc => return PromptOutcome::Cancel,

@@ -1,6 +1,6 @@
 //! End-to-end test of the *whole* live agent-detection pipeline: process
 //! spawn -> `sysinfo` sees it -> `ilium_detect::identify_agent` matches
-//! `"claude"` by real process name -> screen text scraped from a real,
+//! `"codex"` by real process name -> screen text scraped from a real,
 //! live `vt100` parser feed (`ilium-pty`) -> `ilium_detect::classify_activity`
 //! -> a `PaneStatus` change reaches a connected IPC client. This is
 //! meaningfully different from `ilium-detect`'s own fixture-based unit
@@ -13,23 +13,23 @@
 //! fixture text, never by shelling out to the real CLI." This test
 //! doesn't violate that: it never invokes a real `claude`/`codex`
 //! binary. Instead, it writes a tiny fake shell script literally named
-//! `claude` into a tempdir and spawns it by its *absolute* path, so
+//! `codex` into a tempdir and spawns it by its *absolute* path, so
 //! `ilium_detect::identify_agent`'s real, unmodified process-name
-//! matching (`AGENT_SIGNATURES`, checked against `sysinfo`'s real process
+//! matching (`BuiltinAgentProvider::ALL`, checked against `sysinfo`'s real process
 //! list -- the kernel names a process after the file it was exec'd from,
 //! not the path used to reach it, so an absolute-path-invoked script
-//! named `claude` is still reported as `claude`) genuinely finds it,
-//! exactly as it would find a real Claude Code process, without this
-//! workspace's tests ever shelling out to Anthropic's actual CLI or
+//! named `codex` is still reported as `codex`) genuinely finds it,
+//! exactly as it would find a real Codex process, without this
+//! workspace's tests ever shelling out to OpenAI's actual CLI or
 //! requiring it to be installed on the machine running this suite.
 //!
-//! Deliberately an absolute path, not a bare `claude` added to `PATH`:
+//! Deliberately an absolute path, not a bare `codex` added to `PATH`:
 //! this test's own development turned up that a login shell's rc files
 //! (`~/.zshenv`, etc. -- `TerminalOrigin::Command` runs `$SHELL -c
 //! "<command_line>"`, and most interactive shells still source at least
 //! one rc file even in `-c` mode) can silently re-order or rewrite
 //! `PATH`, so a `PATH`-prepended fake binary can lose a race against a
-//! *real* `claude` install already on the developer's machine -- exactly
+//! *real* `codex` install already on the developer's machine -- exactly
 //! the failure mode this whole test exists to never risk. An absolute
 //! path sidesteps `PATH`/rc-file resolution entirely and is
 //! unconditionally deterministic.
@@ -59,7 +59,7 @@ use ilium_server::SoundPlayer;
 mod common;
 use common::{expect_event, TestServer};
 
-/// How long the fake `claude` script prints the `"esc to interrupt"`
+/// How long the fake `codex` script prints the `"esc to interrupt"`
 /// marker before switching to its idle phase. Long enough to comfortably
 /// span at least one real detection-loop tick (`ilium-server::detection`'s
 /// `BASE_TICK_INTERVAL` is a fixed 1s -- not configurable via
@@ -352,8 +352,13 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     };
     let pane_id = first_launch_project_pane(&tree);
 
-    // A visible pane must still enter the durable completed-turn state. Focus
-    // only controls polling cadence; it no longer acknowledges completion.
+    // Focus is set here, before any turn has completed, so
+    // `handle_set_pane_focus`'s completion acknowledgement has nothing to
+    // acknowledge yet (see `focusing_a_finished_agent_clears_its_bell_through_live_ipc`
+    // for the case where focus arrives *after* completion and does clear it).
+    // The later Working -> Done transition below must therefore still happen
+    // on its own, and the later Done -> Idle transition must come from the
+    // queued prompt's delivery gate, not from this early focus call.
     write_frame(
         &mut client,
         &ClientRequest::SetPaneFocus {
@@ -383,7 +388,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // Structural assertion #1: the real detection loop, walking the real
     // `sysinfo` process tree, must identify the spawned process as a
     // Codex agent (by real process name, via
-    // `ilium_detect::AGENT_SIGNATURES`) and classify it `Working` (by
+    // `ilium_detect::BuiltinAgentProvider::ALL`) and classify it `Working` (by
     // real `vt100` screen-text scrape, via `ilium_detect::classify_activity`
     // matching the literal `"esc to interrupt"` marker this fake script
     // prints), and preserve the `Pursuing goal (5m)` suffix at the end of its
@@ -628,10 +633,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
 /// Writes an executable POSIX shell script named exactly `name` (same
 /// absolute-path-spawn rationale as [`write_fake_codex_binary`]) that just
 /// idles -- the argument-based session-ID-discovery tests below only care about
-/// `crate::session_id::discover`'s first admissible source (an explicit resume argument on
-/// the command line), not activity classification, so unlike
-/// [`write_fake_codex_binary`] neither ever needs to print the "esc to
-/// interrupt" working marker.
+/// `ilium_server::session_id::discover_with_trace`'s second admissible source
+/// (an explicit resume argument on the command line), not activity
+/// classification, so unlike [`write_fake_codex_binary`] neither ever needs
+/// to print the "esc to interrupt" working marker.
 fn write_idle_fake_agent_binary(bin_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     let script_path = bin_dir.join(name);
     let script = "#!/bin/sh\nsleep 60\n";
@@ -753,8 +758,9 @@ fn write_verified_codex_transcript(server: &TestServer, session_id: &str) -> std
 }
 
 /// End-to-end test of `ilium-server::session_id`'s live wiring into the
-/// detection loop: a real spawned process (named `claude`, exactly like
-/// [`a_real_process_named_claude_drives_working_to_idle_through_the_whole_pipeline`])
+/// detection loop: a real spawned process (named `claude`, using the same
+/// absolute-path spawn mechanism as
+/// [`a_real_process_named_codex_preserves_its_pursuing_goal_status_through_the_whole_pipeline`])
 /// invoked with a `--resume <uuid>` argument and holding that transcript open
 /// must broadcast that exact uuid as a real `ServerEvent::PaneSessionIdResolved`
 /// to a real connected IPC client. It then proves `/clear` discards that ID,
@@ -1119,7 +1125,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
-/// Proves the second admissible source end-to-end: an agent with no session
+/// Proves the first admissible source end-to-end: an agent with no session
 /// ID in argv is resolved only from a project-verified transcript held open by
 /// that exact detected process.
 #[tokio::test]

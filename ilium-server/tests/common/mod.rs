@@ -1,5 +1,6 @@
 //! Shared test infrastructure for `ilium-server`'s integration test
-//! binaries (`smoke.rs`, `live_agent_detection.rs`): a real
+//! binaries (`smoke.rs`, `live_agent_detection.rs`, `shell_command_titles.rs`,
+//! `debug_logging_process.rs`): a real
 //! `ilium_server::run` bound to a tempdir UDS socket, plus the small
 //! polling/frame-reading helpers every one of those tests needs. Lives
 //! under `tests/common/` (not a top-level `tests/*.rs` file) specifically

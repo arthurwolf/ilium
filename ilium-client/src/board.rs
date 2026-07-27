@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use ilium_core::BoardStorage;
@@ -371,7 +372,10 @@ impl BoardPane {
             return Err("A column with that name already exists".to_string());
         }
         let previous = self.clone();
-        if let BoardStorage::Folder { path } = &self.storage {
+        // Captured up front (rather than re-derived from `self` in the
+        // failure branch below) so the rollback path does not depend on how
+        // much of `self` the save failure already reverted.
+        let renamed_directory = if let BoardStorage::Folder { path } = &self.storage {
             let source = path.join(&current_title);
             let destination = path.join(&title);
             if destination.exists() {
@@ -379,9 +383,23 @@ impl BoardPane {
             }
             fs::rename(&source, &destination)
                 .map_err(|error| format!("Could not rename {}: {error}", source.display()))?;
-        }
+            Some((source, destination))
+        } else {
+            None
+        };
         self.columns[self.selected_column].title = title;
-        self.persist_or_restore(previous)
+        if let Err(error) = self.save() {
+            if let Some((source, destination)) = &renamed_directory {
+                // Best-effort: undo the already-committed directory rename so
+                // disk state matches the in-memory board `*self = previous`
+                // is about to restore. The save error above is the one
+                // reported to the caller either way.
+                let _ = fs::rename(destination, source);
+            }
+            *self = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Replaces one card's semantic fields through the board's existing
@@ -453,7 +471,10 @@ impl BoardPane {
         if !column.cards.is_empty() {
             return Err("Move or remove this column's cards first".to_string());
         }
-        if let BoardStorage::Folder { path } = &self.storage {
+        // Captured up front so the rollback path below can recreate exactly
+        // the (empty, per the check above) directory that was removed, even
+        // after `*self = previous` restores the in-memory column list.
+        let removed_directory = if let BoardStorage::Folder { path } = &self.storage {
             let column_path = path.join(&column.title);
             if column_path.exists() {
                 fs::remove_dir(&column_path).map_err(|error| {
@@ -462,15 +483,31 @@ impl BoardPane {
                         column_path.display()
                     )
                 })?;
+                Some(column_path)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
         self.columns.remove(self.selected_column);
         self.selected_column = self
             .selected_column
             .min(self.columns.len().saturating_sub(1));
         self.selected_card = None;
         self.close_card_details();
-        self.persist_or_restore(previous)
+        if let Err(error) = self.save() {
+            if let Some(column_path) = &removed_directory {
+                // Best-effort: recreate the empty directory removed above so
+                // disk state matches the in-memory board `*self = previous`
+                // is about to restore. The save error above is the one
+                // reported to the caller either way.
+                let _ = fs::create_dir_all(column_path);
+            }
+            *self = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Gives keyboard input to one detail field without changing the selected
@@ -805,7 +842,15 @@ fn parse_folder_card(source: &str, fallback_title: String) -> (String, String) {
     let Some(first_line) = lines.next() else {
         return (fallback_title, String::new());
     };
-    let Some(title) = first_line.strip_prefix("# ").map(str::trim) else {
+    // A marker-only first line ("# " with nothing after it) is treated the
+    // same as no heading at all, matching `markdown_heading`'s rule and the
+    // other branch of this `else`, rather than silently loading a
+    // blank-titled card.
+    let Some(title) = first_line
+        .strip_prefix("# ")
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    else {
         return (fallback_title, source.trim_end().to_string());
     };
     let mut body_lines = lines.collect::<Vec<_>>();
@@ -1051,10 +1096,15 @@ fn serialize_markdown_board(columns: &[BoardColumn]) -> String {
     source
 }
 
-/// Saves one Markdown board while holding an advisory exclusive lock across
-/// revision comparison and replacement. Every ilium client therefore sees a
-/// stale-write error instead of silently overwriting another client's newer
-/// board state.
+/// Saves one Markdown board while holding an advisory exclusive lock (via
+/// `flock`) across revision comparison and replacement, so two ilium clients
+/// racing on the same file cannot each read the same "current" content,
+/// both pass the revision check, and have the second silently clobber the
+/// first's write. This only serializes ilium-client against itself: an
+/// external editor takes no `flock`, and editors that write-then-rename
+/// replace the file's inode entirely, so the lock held on the old inode
+/// would not even apply to them -- those cases are still caught below by
+/// the plain revision-content comparison, not by this lock.
 fn save_markdown_board(
     path: &Path,
     source: &str,
@@ -1071,38 +1121,60 @@ fn save_markdown_board(
         .write(true)
         .open(path)
         .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    let mut current_source = String::new();
-    file.read_to_string(&mut current_source)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    let revision_matches = match expected_revision {
-        Some(expected) => current_source == expected,
-        None => current_source.is_empty(),
-    };
-    if !revision_matches {
-        let display_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_else(|| path.as_os_str().to_string_lossy());
+    // SAFETY: `file` owns a valid descriptor for the duration of this call,
+    // and the descriptor is not shared with another thread here.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
         return Err(format!(
-            "{} changed outside this board; press r to reload before editing",
-            display_name
+            "Could not lock {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
         ));
     }
-    file.set_len(0)
-        .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
-    file.seek(SeekFrom::Start(0))
-        .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
-    file.write_all(source.as_bytes())
-        .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
-    file.sync_all()
-        .map_err(|error| format!("Could not sync {}: {error}", path.display()))
+    let write_result = (|| -> Result<(), String> {
+        let mut current_source = String::new();
+        file.read_to_string(&mut current_source)
+            .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+        let revision_matches = match expected_revision {
+            Some(expected) => current_source == expected,
+            None => current_source.is_empty(),
+        };
+        if !revision_matches {
+            let display_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_else(|| path.as_os_str().to_string_lossy());
+            return Err(format!(
+                "{} changed outside this board; press r to reload before editing",
+                display_name
+            ));
+        }
+        file.set_len(0)
+            .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
+        file.write_all(source.as_bytes())
+            .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("Could not sync {}: {error}", path.display()))
+    })();
+    // Best-effort: the descriptor closing at end of scope would release the
+    // lock regardless, but unlocking explicitly keeps the held-lock window
+    // as tight as the read-compare-write section it protects.
+    let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    write_result
 }
 fn read_sorted(path: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut paths: Vec<_> = fs::read_dir(path)
+    // `.flatten()` on the per-entry `Result`s below would silently drop any
+    // entry the OS failed to read instead of surfacing it, which could make
+    // a column or card quietly vanish from a load with no indication why.
+    let mut paths = fs::read_dir(path)
         .map_err(|error| format!("Could not read {}: {error}", path.display()))?
-        .flatten()
-        .map(|entry| entry.path())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|error| format!("Could not read an entry in {}: {error}", path.display()))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     paths.sort();
     Ok(paths)
 }

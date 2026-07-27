@@ -181,7 +181,13 @@ impl KiloGatewayClient {
             stream: false,
         };
         let attempts = self.retry_policy.max_attempts.max(1);
-        let mut delay = self.retry_policy.initial_delay;
+        // Clamp up front, not just on the doubling step below: a caller-built
+        // `RetryPolicy` with `initial_delay > max_delay` would otherwise let
+        // the very first sleep exceed the policy's own stated ceiling.
+        let mut delay = self
+            .retry_policy
+            .initial_delay
+            .min(self.retry_policy.max_delay);
 
         for attempt in 1..=attempts {
             tracing::info!(

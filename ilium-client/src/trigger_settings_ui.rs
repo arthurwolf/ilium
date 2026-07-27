@@ -121,7 +121,11 @@ pub fn scroll_for_selection(
     }
     let visible_bottom = current_scroll.saturating_add(area.height.saturating_sub(1));
     if end > visible_bottom {
-        return end.saturating_add(1).saturating_sub(area.height);
+        // When the event's own block (heading through its last chip row) is
+        // taller than the viewport, bottom-anchoring alone would scroll the
+        // heading off the top -- clamp to `start` so the heading stays
+        // visible even if the block's tail does not fully fit.
+        return end.saturating_add(1).saturating_sub(area.height).min(start);
     }
     current_scroll
 }

@@ -949,29 +949,62 @@ fn collect_referenced_ids(nodes: &[LlmRestructureNode], out: &mut Vec<NodeId>) {
 fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
     for node in nodes {
         match node {
-            LlmRestructureNode::Pane { title, .. } | LlmRestructureNode::Folder { title, .. } => {
-                if title.trim().is_empty() {
-                    anyhow::bail!("restructure response contained an empty title");
-                }
-                if title.chars().any(char::is_control) {
-                    anyhow::bail!("restructure response contained a control character in a title");
-                }
+            LlmRestructureNode::Pane {
+                title, short_title, ..
+            }
+            | LlmRestructureNode::Folder {
+                title, short_title, ..
+            } => {
+                validate_title_field(title)?;
+                validate_optional_title_field(short_title)?;
             }
             LlmRestructureNode::Group {
-                title, children, ..
+                title,
+                short_title,
+                children,
+                ..
             }
             | LlmRestructureNode::SplitView {
-                title, children, ..
+                title,
+                short_title,
+                children,
+                ..
             } => {
-                if title.trim().is_empty() {
-                    anyhow::bail!("restructure response contained an empty title");
-                }
-                if title.chars().any(char::is_control) {
-                    anyhow::bail!("restructure response contained a control character in a title");
-                }
+                validate_title_field(title)?;
+                validate_optional_title_field(short_title)?;
                 validate_titles(children)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Rejects a blank title, or one containing a control character (e.g. an
+/// embedded terminal escape sequence), before it can reach
+/// `ilium_core::Node::name` and be rendered verbatim in the tree UI.
+fn validate_title_field(title: &str) -> anyhow::Result<()> {
+    if title.trim().is_empty() {
+        anyhow::bail!("restructure response contained an empty title");
+    }
+    if title.chars().any(char::is_control) {
+        anyhow::bail!("restructure response contained a control character in a title");
+    }
+    Ok(())
+}
+
+/// `short_title` is optional, and a present-but-blank value is dropped later
+/// by `normalize_optional`, so only a control character is rejected here --
+/// the same rule `validate_title_field` applies to `title`, covering the
+/// field that ends up in `ilium_core::Node::short_name`. Without this check,
+/// `title` was validated but `short_title` was not, letting a model response
+/// smuggle an unvalidated control character into the tree UI through the
+/// short-form field alone.
+fn validate_optional_title_field(short_title: &Option<String>) -> anyhow::Result<()> {
+    let Some(short_title) = short_title else {
+        return Ok(());
+    };
+    if short_title.chars().any(char::is_control) {
+        anyhow::bail!("restructure response contained a control character in a short title");
     }
     Ok(())
 }

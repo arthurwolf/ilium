@@ -148,6 +148,16 @@ pub enum ConfigLoadError {
     /// signature this crate knows how to build.
     #[error("invalid detection.custom_signatures entry: {0}")]
     InvalidCustomSignature(String),
+    /// `[session] recovery_policy` parsed as a string but was not one of
+    /// `"restore_automatically"`, `"ask_before_restore"`, or `"start_fresh"`.
+    /// Kept strict (rather than silently falling back to the default)
+    /// because this value controls whether an `AskBeforeRestore` gate that
+    /// prevents orphaned crash-recovered panes runs at all -- a silently
+    /// ignored typo here must not resolve to the setting most likely to
+    /// surprise the user. Mirrors `ilium_client`'s identical validation for
+    /// the client-side copy of this same string.
+    #[error("session.recovery_policy = {0:?} is not supported")]
+    InvalidSessionRecoveryPolicy(String),
 }
 
 /// Why a crash-recovery snapshot read/write failed.
@@ -161,4 +171,12 @@ pub enum SnapshotError {
     /// says which one happened.
     #[error("(de)serializing snapshot JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    /// The snapshot parsed as valid JSON but its tree fails
+    /// [`ilium_core::Tree::validate`] (e.g. a hand-edited or
+    /// crash-truncated file left a dangling parent or a cycle). Loading
+    /// such a tree wholesale would let a later, unrelated tree operation
+    /// panic or silently corrupt state instead of failing here where the
+    /// cause is still obvious.
+    #[error("tree structure failed validation: {0}")]
+    InvalidTree(#[from] TreeError),
 }

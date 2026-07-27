@@ -97,7 +97,14 @@ impl PendingNotification {
 /// though this crate's own call sites are async, so the actual call runs on
 /// a `spawn_blocking` thread rather than inline on a tokio worker thread --
 /// see `CLAUDE.md`'s async-task rule and `detection.rs`'s identical
-/// treatment of the `sysinfo` refresh for the same reason.
+/// treatment of the `sysinfo` refresh for the same reason. The returned
+/// `NotificationHandle` is dropped inside the closure (not returned out of
+/// it): on macOS's default `NSUserNotificationCenter` backend, `show()`
+/// only stages the notification and the actual OS delivery call happens in
+/// the handle's `Drop` impl, so letting the handle escape `spawn_blocking`
+/// would move that same blocking delivery call onto the tokio worker thread
+/// that awaits this function -- exactly the foot-gun `spawn_blocking` exists
+/// to avoid.
 ///
 /// Never propagates a failure: no notification daemon/D-Bus session (this
 /// sandboxed environment, most containers, some window managers) is a
@@ -115,11 +122,12 @@ pub async fn send(pending: PendingNotification) {
             .summary(&pending.summary())
             .body(&pending.body())
             .show()
+            .map(drop)
     })
     .await;
 
     match result {
-        Ok(Ok(_handle)) => {}
+        Ok(Ok(())) => {}
         Ok(Err(error)) => {
             tracing::warn!(
                 "desktop notification failed (no notification daemon? continuing): {error}"
@@ -256,6 +264,39 @@ mod tests {
         let claude_working = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
         let codex_idle = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
         assert!(is_finished_transition(Some(&claude_working), &codex_idle));
+    }
+
+    #[test]
+    fn agent_with_goal_working_to_agent_with_goal_idle_notifies() {
+        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
+        let goal_idle = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Idle);
+        assert!(is_finished_transition(Some(&goal_working), &goal_idle));
+    }
+
+    #[test]
+    fn agent_with_goal_working_to_plain_agent_idle_notifies_when_goal_clears_on_completion() {
+        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
+        let plain_idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
+        assert!(is_finished_transition(Some(&goal_working), &plain_idle));
+    }
+
+    #[test]
+    fn agent_with_goal_waiting_background_to_agent_with_goal_done_notifies() {
+        let goal_waiting =
+            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingBackground);
+        let goal_done = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done);
+        assert!(is_finished_transition(Some(&goal_waiting), &goal_done));
+    }
+
+    #[test]
+    fn agent_with_goal_working_to_agent_with_goal_waiting_approval_does_not_notify() {
+        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
+        let goal_waiting_approval =
+            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval);
+        assert!(!is_finished_transition(
+            Some(&goal_working),
+            &goal_waiting_approval
+        ));
     }
 
     #[test]

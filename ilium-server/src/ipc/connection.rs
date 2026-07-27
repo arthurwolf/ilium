@@ -196,12 +196,16 @@ async fn write_replies<W>(
 
         let event = tokio::select! {
             biased;
-            attach_changed = attach_phase_rx.changed() => {
-                if attach_changed.is_err() {
-                    return;
-                }
-                continue;
-            },
+            // Checked ahead of `attach_changed`: this connection's reader
+            // task owns both `direct_tx` and `attach_phase_tx` and drops
+            // them together when it returns, so on every normal disconnect
+            // `direct_rx` (buffered replies, then `None`) and the watch
+            // channel closing become ready in the same poll. `changed()`
+            // resolves to `Err` immediately and forever once its sender is
+            // gone, so under `biased` it would otherwise win this race on
+            // every single disconnect -- listing it first previously made
+            // the `None` arm below (and its broadcast drain) unreachable.
+            // Draining `direct_rx` first guarantees that never happens.
             direct_event = direct_rx.recv() => match direct_event {
                 Some(event) => event,
                 // The reader loop ended (Detach/KillSession/EOF/decode
@@ -224,6 +228,24 @@ async fn write_replies<W>(
                     drain_pending_broadcasts(&mut broadcast_rx, &mut write_half).await;
                     break;
                 }
+            },
+            // Still checked ahead of `broadcast_result`: on reattachment
+            // this must engage the replay gate before one more broadcast
+            // slips across the replay boundary (see the module-level
+            // comment on `attach_phase_tx`).
+            attach_changed = attach_phase_rx.changed() => {
+                if attach_changed.is_err() {
+                    // Unreachable today -- `direct_event`'s `None` arm above
+                    // always wins this race first, since both channels close
+                    // together (see the comment on that branch). Drain
+                    // defensively anyway so a future change that decouples
+                    // `attach_phase_tx` from `direct_tx` cannot silently
+                    // drop already-queued broadcasts instead of merely
+                    // hitting dead code.
+                    drain_pending_broadcasts(&mut broadcast_rx, &mut write_half).await;
+                    break;
+                }
+                continue;
             },
             broadcast_result = broadcast_rx.recv() => match broadcast_result {
                 Ok(event) => event,

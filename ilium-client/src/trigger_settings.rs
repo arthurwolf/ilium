@@ -316,13 +316,20 @@ impl TriggerSettings {
     /// action list, so it cannot coexist with active actions. Project-scoped
     /// and all-project restructuring are mutually exclusive because running
     /// both for one occurrence would duplicate the project call.
+    ///
+    /// An `action` that is not available for `event` is a caller error, not
+    /// a request to clear the mapping, so it is ignored rather than wiping
+    /// out whatever was already configured for that event.
     pub fn toggle(&mut self, event: TriggerEvent, action: Option<TriggerAction>) {
         let available = event.available_actions();
         let actions = self.actions_for_mut(event);
-        let Some(action) = action.filter(|action| available.contains(action)) else {
+        let Some(action) = action else {
             actions.clear();
             return;
         };
+        if !available.contains(&action) {
+            return;
+        }
 
         if let Some(index) = actions.iter().position(|candidate| *candidate == action) {
             actions.remove(index);

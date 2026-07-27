@@ -223,8 +223,8 @@ impl EditorPane {
         self.set_line_display(settings.line_display);
         self.show_line_numbers = settings.show_line_numbers;
         self.show_minimap = settings.show_minimap;
-        self.show_autosave = settings.autosave_enabled;
         self.autosave_delay = Duration::from_millis(u64::from(settings.autosave_delay_ms));
+        self.set_autosave_enabled(settings.autosave_enabled);
         if settings.markdown_rendered_by_default && self.is_markdown() {
             self.view_mode = EditorViewMode::Rendered;
         }
@@ -238,6 +238,25 @@ impl EditorPane {
         self.path
             .as_ref()
             .is_some_and(|path| is_markdown_path(path))
+    }
+
+    /// Repoints this pane at `new_path` after a successful Save As,
+    /// keeping `view_mode`/`rendered` consistent with the new file's type.
+    /// Renaming a Markdown file to a non-Markdown extension while it was in
+    /// `Rendered` mode would otherwise strand the pane there: `is_markdown`
+    /// flips to `false`, so the toolbar's Source/Rendered buttons disappear
+    /// (see `editor_toolbar::buttons_for`) and `toggle_view_mode` becomes a
+    /// no-op, leaving no control able to get back to Source. Forcing
+    /// `Source` here -- and dropping the now-stale rendered document, which
+    /// was parsed against the old path's base directory -- keeps that
+    /// invariant ("non-Markdown implies Source") true everywhere at once.
+    pub fn retarget_path(&mut self, new_path: PathBuf) {
+        self.path = Some(new_path);
+        if !self.is_markdown() {
+            self.view_mode = EditorViewMode::Source;
+            self.rendered = None;
+            self.rendered_scroll = 0;
+        }
     }
 
     /// Flips `Source` <-> `Rendered`. A no-op for non-markdown files --
@@ -307,15 +326,26 @@ impl EditorPane {
         self.show_minimap = !self.show_minimap;
     }
 
-    /// Flips autosave on/off. Turning it on while the buffer already has
-    /// unsaved edits schedules an immediate debounce window rather than
-    /// waiting for the next keystroke; turning it off drops any pending
-    /// debounce so a stale toggle never fires a write after the fact.
+    /// Flips autosave on/off. See `set_autosave_enabled` for the shared
+    /// dirty-aware bookkeeping this delegates to.
     pub fn toggle_autosave(&mut self) {
-        self.show_autosave = !self.show_autosave;
-        if self.show_autosave && self.dirty {
+        self.set_autosave_enabled(!self.show_autosave);
+    }
+
+    /// Enables or disables autosave, applying the same dirty-aware
+    /// bookkeeping whether the change comes from an explicit toggle
+    /// (`toggle_autosave`) or a live settings reload (`apply_defaults`):
+    /// turning it on while the buffer already has unsaved edits schedules
+    /// an immediate debounce window rather than waiting for the next
+    /// keystroke, so a config reload can't silently strand a dirty pane
+    /// with no scheduled write until its next edit; turning it off drops
+    /// any pending debounce so a stale toggle never fires a write after
+    /// the fact.
+    fn set_autosave_enabled(&mut self, enabled: bool) {
+        self.show_autosave = enabled;
+        if enabled && self.dirty {
             self.autosave_pending_since = Some(Instant::now());
-        } else if !self.show_autosave {
+        } else if !enabled {
             self.autosave_pending_since = None;
         }
     }
@@ -459,10 +489,15 @@ impl EditorPane {
                 .collect()
         };
         self.textarea = TextArea::from(lines);
+        // A fresh `TextArea` always comes back with the crate's default wrap
+        // mode (`WrapMode::None`), regardless of this pane's `line_display` --
+        // re-apply it here, or a Wrap-mode pane would keep computing wrapped
+        // `source_visual_rows` (scrollbar, mouse hit-testing, scroll mirrors)
+        // against a widget that silently reverted to clipping. This also
+        // resets `source_scroll_col`/`source_scroll_should_follow_cursor`.
+        self.set_line_display(self.line_display);
         self.apply_line_number_style();
         self.source_scroll_row.set(0);
-        self.source_scroll_col.set(0);
-        self.source_scroll_should_follow_cursor.set(true);
         self.mark_dirty();
     }
 
@@ -870,6 +905,26 @@ mod tests {
         assert_eq!(pane.source_visual_rows(3).len(), 3);
         assert_eq!(pane.source_visual_rows(3)[1].start_column, 3);
         assert_eq!(pane.textarea.lines(), &["abcdefgh".to_string()]);
+    }
+
+    #[test]
+    fn replace_contents_preserves_wrap_mode() {
+        let mut pane = EditorPane::empty();
+        let settings = crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        };
+        pane.apply_defaults(&settings);
+        assert_eq!(pane.textarea.wrap_mode(), WrapMode::Glyph);
+
+        // A fresh `TextArea::from(..)` (built inside `replace_contents`)
+        // defaults to `WrapMode::None` -- this must not leak past the
+        // pane's own `line_display` setting.
+        pane.replace_contents("abcdefgh");
+
+        assert_eq!(pane.textarea.wrap_mode(), WrapMode::Glyph);
+        assert_eq!(pane.source_visual_rows(3).len(), 3);
     }
 
     #[test]

@@ -277,18 +277,30 @@ mod tests {
     #[test]
     fn rejects_non_json_and_out_of_range_word_counts() {
         assert!(parse_terminal_title_response("Build Rust Project").is_err());
+        // "icon" is present in every case below so each assertion actually
+        // fails for the word-count reason it's named for, rather than
+        // short-circuiting on the unrelated missing-icon check that
+        // `parse_dual_bounded_word_json` runs first.
         assert!(parse_terminal_title_response(
-            r#"{"terminal_title_short":"Build","terminal_title_long":"Build Rust Project With Cargo"}"#
+            r#"{"icon":"🦀","terminal_title_short":"Build","terminal_title_long":"Build Rust Project With Cargo"}"#
         )
         .is_err());
         assert!(parse_terminal_title_response(
-            r#"{"terminal_title_short":"Rust Build","terminal_title_long":"Build The Whole Rust Project With Cargo Today"}"#
+            r#"{"icon":"🦀","terminal_title_short":"Rust Build","terminal_title_long":"Build The Whole Rust Project With Cargo Today"}"#
         )
         .is_err());
         assert!(parse_terminal_title_response(
             r#"{"icon":"🦀","terminal_title_short":"Rust Build","terminal_title_long":"Cargo"}"#
         )
         .is_ok());
+    }
+
+    #[test]
+    fn rejects_a_response_missing_the_icon_field() {
+        assert!(parse_terminal_title_response(
+            r#"{"terminal_title_short":"Rust Build","terminal_title_long":"Build Rust Project With Cargo"}"#
+        )
+        .is_err());
     }
 
     #[test]

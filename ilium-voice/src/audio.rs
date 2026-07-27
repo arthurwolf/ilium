@@ -120,7 +120,15 @@ impl AudioEngine {
         self.capture_enabled.store(is_enabled, Ordering::Release);
     }
 
+    /// Marks the start of a new response item's audio. Also drops any
+    /// samples still queued from a previous item: `response.created`/new
+    /// `item_id` deltas can arrive before the device has finished draining
+    /// the prior item's tail, and without clearing here those leftover
+    /// samples would keep incrementing `played_output_frames` after the
+    /// reset below, misattributing the old item's playback time to the new
+    /// item's `audio_end_ms` on a later `conversation.item.truncate`.
     pub(crate) fn begin_response_audio(&self) {
+        lock_recovering_poison(&self.playback_samples).clear();
         self.played_output_frames.store(0, Ordering::Release);
     }
 
@@ -355,10 +363,21 @@ where
                 let mut queue = lock_recovering_poison(&playback_samples);
                 let mut emitted_frames = 0_u64;
                 for frame in output.chunks_mut(channels.max(1)) {
-                    let sample = queue.pop_front().unwrap_or(0.0);
-                    if sample != 0.0 || !queue.is_empty() {
-                        emitted_frames = emitted_frames.saturating_add(1);
-                    }
+                    // Distinguish "real (possibly silent) queued sample" from
+                    // "underrun padding" using `pop_front`'s `Option` itself,
+                    // not the sample's value -- a value-based check (e.g.
+                    // `sample != 0.0`) misclassifies a genuine trailing
+                    // silent sample or a fully muted (volume 0) response as
+                    // underrun, undercounting `played_output_frames` and
+                    // skewing the elapsed-ms calculation in
+                    // `interrupt_playback`.
+                    let sample = match queue.pop_front() {
+                        Some(sample) => {
+                            emitted_frames = emitted_frames.saturating_add(1);
+                            sample
+                        }
+                        None => 0.0,
+                    };
                     for channel in frame {
                         *channel = T::from_sample(sample);
                     }
@@ -430,7 +449,16 @@ impl StreamingLinearResampler {
             self.source_position += self.step;
         }
 
-        let consumed = self.source_position.floor() as usize;
+        // The loop's final iteration can advance `source_position` by up to
+        // `step` past the last index it actually consumed (it adds `step`
+        // after passing the `+ 1.0 < len` check), so for step > 2 -- i.e.
+        // input sample rates above 48 kHz being downsampled to
+        // REALTIME_SAMPLE_RATE -- the floor of `source_position` can exceed
+        // `buffered_samples.len()`. Clamp the drain to what actually exists;
+        // `source_position` keeps the (now-negative-after-subtraction)
+        // leftover offset so the next call's `extend_from_slice` lines the
+        // fractional position back up correctly.
+        let consumed = (self.source_position.floor() as usize).min(self.buffered_samples.len());
         if consumed > 0 {
             self.buffered_samples.drain(..consumed);
             self.source_position -= consumed as f64;
@@ -472,5 +500,36 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert!(actual.len().abs_diff(2_400) <= 1);
+    }
+
+    #[test]
+    fn streaming_resampler_does_not_panic_downsampling_high_rate_inputs_in_small_chunks() {
+        // step > 2 (96 kHz and 192 kHz down to 24 kHz) is the regime where the
+        // final loop iteration can push `source_position` past
+        // `buffered_samples.len()`; varied small chunk sizes exercise every
+        // possible remainder against `step` so a fixed chunk size can't hide
+        // the out-of-bounds drain.
+        for input_sample_rate in [96_000_u32, 192_000_u32] {
+            let step = f64::from(input_sample_rate) / f64::from(24_000_u32);
+            let input = (0..20_000)
+                .map(|index| ((index as f32) / 40.0).sin())
+                .collect::<Vec<_>>();
+
+            let mut whole = StreamingLinearResampler::new(input_sample_rate, 24_000);
+            let expected = whole.process(&input);
+
+            for chunk_size in [5_usize, 6, 7, 137] {
+                let mut chunked = StreamingLinearResampler::new(input_sample_rate, 24_000);
+                let actual = input
+                    .chunks(chunk_size)
+                    .flat_map(|chunk| chunked.process(chunk))
+                    .collect::<Vec<_>>();
+
+                assert_eq!(
+                    actual, expected,
+                    "mismatch for input_sample_rate={input_sample_rate}, chunk_size={chunk_size}, step={step}"
+                );
+            }
+        }
     }
 }

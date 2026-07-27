@@ -196,11 +196,14 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
 
     // Flush any crash-recovery mutation too recent for the background
     // debounced writer's window to have picked up yet (a `KillSession`
-    // shutdown will usually have already cleared the dirty flag itself
-    // and removed the snapshot file -- see `ipc::handlers::handle_kill_session`
-    // -- making this a no-op in that case), then wait for the shared
-    // write lock to confirm any write that writer already had in flight
-    // has fully finished, before finally stopping it. See
+    // shutdown has already cleared the dirty flag itself, removed the
+    // snapshot file, and set `state.session_killed` -- see
+    // `ipc::handlers::handle_kill_session` and `ServerState::session_killed`
+    // -- so this is a guaranteed no-op in that case even though the
+    // connections still alive during `SHUTDOWN_GRACE_PERIOD` above could
+    // otherwise have re-dirtied the flag), then wait for the shared write
+    // lock to confirm any write that writer already had in flight has
+    // fully finished, before finally stopping it. See
     // `persistence::spawn_snapshot_writer`'s doc comment for why this
     // task is never aborted any earlier than this.
     persistence::flush_pending_snapshot(&state).await;
@@ -421,6 +424,17 @@ pub(crate) async fn restore_snapshot(
         // repeating this same failed respawn on every future restart.
         state.request_snapshot_save();
     }
+
+    // The replaced tree may carry scheduled pane inputs restored from disk.
+    // `scheduled_input::run` only rescans its nearest deadline on this
+    // signal or its own timer firing; a restore reached through
+    // `handle_session_recovery_resolution` (after the executor already
+    // started against an empty tree under `AskBeforeRestore`) would
+    // otherwise leave every restored countdown parked forever. Deferred
+    // until every pane above has finished (attempting) respawn so an
+    // already-due schedule cannot race the executor into finding no
+    // registered pane to write to yet.
+    state.scheduled_input_changed.notify_one();
 }
 
 /// End-to-end test of the crash-recovery restore path: writes a

@@ -99,10 +99,22 @@ impl AgentDebugRecorder {
             return None;
         }
 
+        // A clock read failure (system time before the Unix epoch) must not
+        // silently fabricate a `0` timestamp in the durable journal -- log it
+        // and drop this one entry, mirroring `scheduled_input.rs`'s handling
+        // of the same failure mode.
+        let occurred_at_unix_millis = match current_unix_millis() {
+            Ok(millis) => millis,
+            Err(message) => {
+                tracing::error!("agent debug journal clock failed: {message}");
+                return None;
+            }
+        };
+
         let mut logs = self.logs.write().await;
         logs.entry(pane_id)
             .or_default()
-            .append(current_unix_millis(), source, context, draft)
+            .append(occurred_at_unix_millis, source, context, draft)
     }
 
     pub async fn snapshot(&self) -> Vec<PaneDebugLogSnapshot> {
@@ -429,10 +441,12 @@ async fn current_context(state: &ServerState, pane_id: NodeId) -> Option<AgentDe
     })
 }
 
-fn current_unix_millis() -> i64 {
-    SystemTime::now()
+fn current_unix_millis() -> Result<i64, String> {
+    let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis() as i64)
+        .map_err(|error| format!("system clock is before Unix epoch: {error}"))?
+        .as_millis();
+    i64::try_from(millis).map_err(|_| "system clock is outside supported range".to_string())
 }
 
 #[cfg(test)]

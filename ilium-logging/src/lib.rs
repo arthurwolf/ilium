@@ -107,11 +107,16 @@ impl LoggerState {
     }
 }
 
-/// A cloning writer lets tracing format one complete event while the setting
-/// may be changed by another runtime task. Each physical write is serialized
-/// inside this process; `O_APPEND` keeps server/client appends from overwriting
-/// each other when both processes target the same file.
-#[derive(Clone)]
+/// `tracing_subscriber` mints one fresh writer per event via `with_writer`'s
+/// closure (`Fn() -> W`, no `Clone` bound), and the `Drop` impl below flushes
+/// that writer's buffered bytes exactly once. That pairing -- one writer, one
+/// event, one flush -- is what keeps a formatted event atomic while the
+/// enabled setting may change concurrently on another runtime task; `Clone`
+/// must not be added back here, since two writers cloned from the same
+/// in-progress event would each flush the shared buffer on drop and append
+/// the event twice. Each physical write is serialized inside this process;
+/// `O_APPEND` keeps server/client appends from overwriting each other when
+/// both processes target the same file.
 struct DynamicFileWriter {
     state: Arc<LoggerState>,
     event_buffer: Vec<u8>,

@@ -15,6 +15,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -122,7 +123,22 @@ pub fn save(cwd: &Path, workspace: &WorkspaceFile) -> anyhow::Result<()> {
     std::fs::create_dir_all(parent)?;
 
     let yaml = serde_norway::to_string(workspace)?;
-    let temp_path = parent.join(format!(".sessions.yml.tmp-{}", std::process::id()));
+    // Process id alone is not enough to make this path unique: two calls
+    // to `save` for the same `cwd` racing within the same process (for
+    // example a debounced autosave firing at the same moment as an
+    // explicit save-on-quit) would otherwise both target the identical
+    // temp file, and since `File::create` truncates rather than failing
+    // on an existing file, their writes could interleave and corrupt the
+    // temp file's contents before either side gets to rename it -- which
+    // defeats the atomicity this whole write-then-rename dance exists
+    // for. A process-wide counter makes every call's temp path distinct
+    // regardless of which thread or task it runs on.
+    static SAVE_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let call_id = SAVE_CALL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".sessions.yml.tmp-{}-{call_id}",
+        std::process::id()
+    ));
 
     // Written as an inner closure so any failure after the temp file was
     // created -- a failed write, a failed fsync, or a failed rename -- can

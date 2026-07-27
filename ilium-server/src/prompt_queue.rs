@@ -18,6 +18,12 @@ use crate::state::ServerState;
 /// A queue mutation and the write/ack pair share one transaction, so Clear
 /// cannot race a just-completed agent into sending a prompt the user removed.
 pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: NodeId) {
+    // Held only across peek -> write -> acknowledge, matching the drop point
+    // `handle_enqueue_prompt`/`handle_clear_prompt_queue` use in
+    // `ipc/handlers.rs`. The slow follow-up work below (PTY write aside,
+    // which must stay inside the transaction) -- broadcasting the snapshot
+    // to every client and recording a debug event -- must not serialize
+    // every other pane's queue mutations behind it.
     let _transaction = state.prompt_queue_transaction.lock().await;
     let prompt = {
         let tree = state.tree.read().await;
@@ -43,6 +49,9 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     )
     .await
     {
+        // Delivery is aborted -- no acknowledgement will follow, so the
+        // transaction has nothing left to protect against a racing Clear.
+        drop(_transaction);
         tracing::error!("queued prompt delivery failed for pane {pane_id:?}: {error}");
         let _ = crate::agent_debug::record(
             state,
@@ -64,6 +73,10 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
         let mut tree = state.tree.write().await;
         acknowledge_delivery(&mut tree, pane_id, &prompt)
     };
+    // The protected region ends at acknowledgement; release before the
+    // broadcast/persist and debug-record calls below so they don't hold up
+    // every other pane's queue mutations.
+    drop(_transaction);
     match acknowledged {
         Ok(true) => {
             broadcast_and_persist(state).await;

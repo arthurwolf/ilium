@@ -875,25 +875,32 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
         Paragraph::new(Line::from(vec![name_label, name_value])),
         layout.name_row,
     );
-    // `saturating_add` throughout -- `state.name.cursor` grows with every
-    // typed/pasted character and is otherwise unbounded, so a plain `+`
-    // here could overflow `u16` (panic in debug, wrap to a bogus column in
-    // release) before the `.min()` clamp below ever got a chance to run --
-    // see the identical fix (and its rationale) in
-    // `modal::render_text_prompt`.
-    let cursor_x = layout
-        .name_row
-        .x
-        .saturating_add(6)
-        .saturating_add(u16::try_from(state.name.cursor).unwrap_or(u16::MAX));
-    // `Rect::right()` is exclusive (the first column *outside* the rect), so
-    // clamping to it directly would let the cursor land one cell past the
-    // row's real last cell -- see the identical fix in
-    // `modal::render_text_prompt` for the same `Rect::right()` pitfall.
-    frame.set_cursor_position(Position::new(
-        cursor_x.min(layout.name_row.right().saturating_sub(1)),
-        layout.name_row.y,
-    ));
+    // `state.name.cursor` (see `TextPromptState`) is a *char* index, not a
+    // display column -- measuring the prefix's `UnicodeWidthStr::width()`
+    // (like `draw_scheduled_input_field` does) rather than the raw char
+    // count is required so a wide (CJK/emoji) name doesn't land the cursor
+    // to the left of where the character actually renders.
+    if layout.name_row.width > 0 {
+        let prefix: String = state.name.buf.chars().take(state.name.cursor).collect();
+        // `saturating_add` throughout -- an unbounded prefix width could
+        // otherwise overflow `u16` (panic in debug, wrap to a bogus column
+        // in release) before the `.min()` clamp below ever got a chance to
+        // run -- see the identical fix (and its rationale) in
+        // `modal::render_text_prompt`.
+        let cursor_x = layout
+            .name_row
+            .x
+            .saturating_add(6)
+            .saturating_add(u16::try_from(prefix.width()).unwrap_or(u16::MAX));
+        // `Rect::right()` is exclusive (the first column *outside* the rect),
+        // so clamping to it directly would let the cursor land one cell past
+        // the row's real last cell -- see the identical fix in
+        // `modal::render_text_prompt` for the same `Rect::right()` pitfall.
+        frame.set_cursor_position(Position::new(
+            cursor_x.min(layout.name_row.right().saturating_sub(1)),
+            layout.name_row.y,
+        ));
+    }
 
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -1017,7 +1024,15 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 term.with_screen(|screen| {
                     frame.render_widget(PseudoTerminal::new(screen), action.terminal_area);
                 });
-                draw_terminal_scrollbar(frame, action.terminal_area, term.as_ref());
+                // `action.terminal_area` is already inset inside the block's
+                // border (it's carved out of `viewport.content_area` to leave
+                // room for the close-agent button row), so a scrollbar drawn
+                // against it would land one column inside the border, on top
+                // of real terminal text, instead of merging into the border
+                // like the ordinary (non-completed) branch below does --
+                // `viewport.outer_area` is the area that actually lines up
+                // with the border column.
+                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
             } else {
                 term.with_screen(|screen| {
                     let widget = PseudoTerminal::new(screen)
@@ -1627,22 +1642,24 @@ mod tests {
             pane_id,
             crate::app::AgentDebugLogCache {
                 through_sequence: 1,
-                retained_from_sequence: 1,
-                entries: vec![ilium_ipc::AgentDebugEntry {
-                    sequence: 1,
-                    occurred_at_unix_millis: 1_700_000_000_000,
-                    severity: ilium_ipc::AgentDebugSeverity::Success,
-                    source: ilium_ipc::AgentDebugSource::SessionDiscovery,
-                    kind: ilium_ipc::AgentDebugEventKind::SessionResolved,
-                    summary: "Project-verified agent session resolved".to_string(),
-                    fields: vec![ilium_ipc::AgentDebugField::sensitive(
-                        "session ID",
-                        "session-123",
-                    )],
-                    correlation_id: None,
-                    context: ilium_ipc::AgentDebugContext::default(),
-                    metadata: Default::default(),
-                }],
+                log: ilium_ipc::PaneDebugLog {
+                    entries: vec![ilium_ipc::AgentDebugEntry {
+                        sequence: 1,
+                        occurred_at_unix_millis: 1_700_000_000_000,
+                        severity: ilium_ipc::AgentDebugSeverity::Success,
+                        source: ilium_ipc::AgentDebugSource::SessionDiscovery,
+                        kind: ilium_ipc::AgentDebugEventKind::SessionResolved,
+                        summary: "Project-verified agent session resolved".to_string(),
+                        fields: vec![ilium_ipc::AgentDebugField::sensitive(
+                            "session ID",
+                            "session-123",
+                        )],
+                        correlation_id: None,
+                        context: ilium_ipc::AgentDebugContext::default(),
+                        metadata: Default::default(),
+                    }],
+                    ..Default::default()
+                },
                 ..crate::app::AgentDebugLogCache::default()
             },
         );

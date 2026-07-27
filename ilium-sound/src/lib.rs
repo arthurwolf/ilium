@@ -8,7 +8,7 @@
 //! continue alerting while no TUI client is attached.
 
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
@@ -404,19 +404,19 @@ fn existing_sound_directories() -> Vec<SoundDirectory> {
 #[cfg(target_os = "linux")]
 fn platform_sound_directories() -> Vec<SoundDirectory> {
     let mut directories = Vec::new();
-    if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+    if let Some(data_home) = non_empty(std::env::var_os("XDG_DATA_HOME")) {
         directories.push(sound_directory(
             PathBuf::from(data_home).join("sounds"),
             "User sounds",
         ));
-    } else if let Some(home) = std::env::var_os("HOME") {
+    } else if let Some(home) = non_empty(std::env::var_os("HOME")) {
         directories.push(sound_directory(
             PathBuf::from(&home).join(".local/share/sounds"),
             "User sounds",
         ));
     }
 
-    let xdg_data_dirs = std::env::var_os("XDG_DATA_DIRS")
+    let xdg_data_dirs = non_empty(std::env::var_os("XDG_DATA_DIRS"))
         .unwrap_or_else(|| OsStr::new("/usr/local/share:/usr/share").to_os_string());
     for base in std::env::split_paths(&xdg_data_dirs) {
         directories.push(sound_directory(base.join("sounds"), "XDG sound themes"));
@@ -443,7 +443,7 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
         sound_directory("/System/Library/Sounds", "macOS system sounds"),
         sound_directory("/Library/Sounds", "Shared macOS sounds"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = non_empty(std::env::var_os("HOME")) {
         directories.push(sound_directory(
             PathBuf::from(home).join("Library/Sounds"),
             "User sounds",
@@ -455,13 +455,15 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
 #[cfg(target_os = "windows")]
 fn platform_sound_directories() -> Vec<SoundDirectory> {
     let mut directories = Vec::new();
-    if let Some(windows) = std::env::var_os("WINDIR").or_else(|| std::env::var_os("SystemRoot")) {
+    if let Some(windows) =
+        non_empty(std::env::var_os("WINDIR")).or_else(|| non_empty(std::env::var_os("SystemRoot")))
+    {
         directories.push(sound_directory(
             PathBuf::from(windows).join("Media"),
             "Windows system sounds",
         ));
     }
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+    if let Some(local_app_data) = non_empty(std::env::var_os("LOCALAPPDATA")) {
         directories.push(sound_directory(
             PathBuf::from(&local_app_data).join("Microsoft/Windows/Sounds"),
             "User Windows sounds",
@@ -471,7 +473,7 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
             "Local Windows themes",
         ));
     }
-    if let Some(app_data) = std::env::var_os("APPDATA") {
+    if let Some(app_data) = non_empty(std::env::var_os("APPDATA")) {
         directories.push(sound_directory(
             PathBuf::from(app_data).join("Microsoft/Windows/Themes"),
             "Roaming Windows themes",
@@ -490,6 +492,16 @@ fn sound_directory(path: impl Into<PathBuf>, origin: &str) -> SoundDirectory {
         path: path.into(),
         origin: origin.to_string(),
     }
+}
+
+/// Treats a set-but-empty environment variable as unset, per the XDG Base
+/// Directory spec's rule for `XDG_DATA_HOME`/`XDG_DATA_DIRS` (and applied
+/// here to every platform's discovery variables for the same reason): an
+/// empty value must never resolve to a CWD-relative path via `PathBuf::from`,
+/// which would present a stray `./sounds` (or `./Media`, `./Themes`, ...)
+/// directory as a legitimate system sound theme.
+fn non_empty(value: Option<OsString>) -> Option<OsString> {
+    value.filter(|value| !value.is_empty())
 }
 
 const fn platform_label() -> &'static str {
@@ -628,25 +640,56 @@ impl<'a> OwnedCommandSpec<'a> {
 }
 
 fn run_first_available(commands: &[CommandSpec<'_>]) -> Result<(), SoundError> {
-    let mut last_error = None;
-    for command in commands {
-        match run_command(command.program, command.arguments.iter().map(OsStr::new)) {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or(SoundError::NoPlaybackBackend))
+    resolve_playback_attempts(
+        commands
+            .iter()
+            .map(|command| run_command(command.program, command.arguments.iter().map(OsStr::new))),
+    )
 }
 
 fn run_first_available_owned(commands: &[OwnedCommandSpec<'_>]) -> Result<(), SoundError> {
-    let mut last_error = None;
-    for command in commands {
-        match run_command(command.program, command.arguments.iter().copied()) {
+    resolve_playback_attempts(
+        commands
+            .iter()
+            .map(|command| run_command(command.program, command.arguments.iter().copied())),
+    )
+}
+
+/// Runs each candidate player attempt in order (the iterator is lazy, so a
+/// player later in the list never launches once an earlier one succeeds) and
+/// picks the most useful outcome.
+///
+/// A `Launch` failure whose underlying error is `NotFound` just means that
+/// particular binary is not installed -- expected on most systems and not
+/// worth reporting. It must never shadow a more diagnostic failure from a
+/// player that *did* launch (unsupported codec, no audio device, timed out,
+/// ...), so we keep the first such error rather than the last "not found"
+/// one, and only fall back to [`SoundError::NoPlaybackBackend`] when every
+/// candidate was missing.
+fn resolve_playback_attempts(
+    attempts: impl Iterator<Item = Result<(), SoundError>>,
+) -> Result<(), SoundError> {
+    let mut diagnostic_error = None;
+    for attempt in attempts {
+        match attempt {
             Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
+            Err(error) if is_backend_missing(&error) => {}
+            Err(error) => {
+                diagnostic_error.get_or_insert(error);
+            }
         }
     }
-    Err(last_error.unwrap_or(SoundError::NoPlaybackBackend))
+    Err(diagnostic_error.unwrap_or(SoundError::NoPlaybackBackend))
+}
+
+/// True when a launch failure means the player binary is simply absent
+/// (`ErrorKind::NotFound`), as opposed to a permissions error, a launch
+/// failure for another reason, or a failure after the process started.
+fn is_backend_missing(error: &SoundError) -> bool {
+    matches!(
+        error,
+        SoundError::Launch { source, .. } if source.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 fn run_command<I, S>(program: &str, arguments: I) -> Result<(), SoundError>

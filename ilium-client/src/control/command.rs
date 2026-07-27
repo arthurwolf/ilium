@@ -12,6 +12,26 @@ pub struct NodeTarget {
     pub path: Option<String>,
 }
 
+impl NodeTarget {
+    /// True when at least one identifying field actually pins a node. A
+    /// blank `name`/`path` (e.g. `{"path": ""}`) must be treated exactly
+    /// like an omitted field -- both `resolve_node` and any caller that
+    /// decides whether to resolve a target at all need this same
+    /// trim-aware check, or a blank string silently takes a different
+    /// path than omitting the field (see `resolve_node`'s own filtering).
+    pub fn is_specified(&self) -> bool {
+        self.id.is_some()
+            || self
+                .name
+                .as_deref()
+                .is_some_and(|name| !name.trim().is_empty())
+            || self
+                .path
+                .as_deref()
+                .is_some_and(|path| !path.trim().is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateCommand {

@@ -281,14 +281,20 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         } => {
             let cache = app.agent_debug_logs.entry(pane_id).or_default();
             for entry in entries {
-                merge_debug_entry(&mut cache.entries, entry);
+                cache.log.merge_synced_entry(entry);
             }
-            cache
-                .entries
-                .retain(|entry| entry.sequence >= retained_from_sequence);
+            // `merge_synced_entry` already enforces the same
+            // count/byte-budget retention the server itself applies, but a
+            // reconciled snapshot also carries the server's authoritative
+            // `retained_from_sequence`, so apply it directly rather than
+            // trusting only the client's own approximate byte accounting.
+            // This goes through `retain_from_sequence` (not a direct filter
+            // on `entries`) so `retained_approximate_bytes` stays correct --
+            // otherwise a later live append's retention pass could try to
+            // evict from an already-empty vector and panic.
+            cache.log.retain_from_sequence(retained_from_sequence);
             cache.through_sequence = cache.through_sequence.max(through_sequence);
-            cache.retained_from_sequence = retained_from_sequence;
-            cache.dropped_entry_count = dropped_entry_count;
+            cache.log.dropped_entry_count = cache.log.dropped_entry_count.max(dropped_entry_count);
             cache.has_loaded_retained_history = true;
             cache.is_loading = false;
             None
@@ -296,19 +302,15 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         ServerEvent::PaneDebugEntryAppended { pane_id, entry } => {
             let cache = app.agent_debug_logs.entry(pane_id).or_default();
             cache.through_sequence = cache.through_sequence.max(entry.sequence);
-            merge_debug_entry(&mut cache.entries, entry);
+            // `PaneDebugLog::merge_synced_entry` enforces the same
+            // `MAXIMUM_AGENT_DEBUG_ENTRIES`/`_BYTES` retention on this
+            // live-append path that the snapshot branch above enforces on
+            // replay, so a pane whose debug log the operator never opens
+            // still cannot accumulate broadcasts unbounded for the life of
+            // the pane.
+            cache.log.merge_synced_entry(entry);
             None
         }
-    }
-}
-
-fn merge_debug_entry(
-    entries: &mut Vec<ilium_ipc::AgentDebugEntry>,
-    entry: ilium_ipc::AgentDebugEntry,
-) {
-    match entries.binary_search_by_key(&entry.sequence, |candidate| candidate.sequence) {
-        Ok(index) => entries[index] = entry,
-        Err(index) => entries.insert(index, entry),
     }
 }
 
@@ -372,6 +374,23 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id| live_pane_ids.contains(pane_id));
     app.agent_debug_logs
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    // Same idea as the pane-keyed caches above, but keyed by project Group
+    // id: a project removed from the tree must not leave its restructure
+    // job/retry state (and, via `restructure_status_text`, a permanent
+    // footer entry) behind for the life of the client process.
+    let live_project_ids: std::collections::HashSet<_> =
+        app.tree.project_ids().into_iter().collect();
+    let restructure_jobs_before = app.project_restructure_jobs.len();
+    app.project_restructure_jobs
+        .retain(|project_id, _| live_project_ids.contains(project_id));
+    app.automatic_restructure_retries
+        .retain(|project_id, _| live_project_ids.contains(project_id));
+    if app.project_restructure_jobs.len() != restructure_jobs_before {
+        // A pruned job may have been the last Queued/Running entry keeping
+        // the loading spinner lit, so recompute it from the pruned map
+        // rather than leaving a stale "still loading" state behind.
+        app.refresh_structure_loading();
+    }
     let debug_target_closed = match &app.mode {
         crate::app::Mode::TerminalPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
         crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
@@ -549,7 +568,13 @@ fn load_restored_editor(app: &mut App, pane_id: NodeId) {
         return;
     };
     match EditorPane::load(path) {
-        Ok(editor) => {
+        Ok(mut editor) => {
+            // `EditorPane::load` only sets hard-coded defaults; without this
+            // call a restored editor's line numbers/minimap/autosave/markdown
+            // rendering would silently depend on whether `TreeSnapshot` or
+            // `PaneEditorPathResolved` arrived first, since the snapshot-arm
+            // sibling in `apply_tree_snapshot` always applies it.
+            editor.apply_defaults(&app.editor_settings);
             app.panes
                 .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
         }
@@ -694,13 +719,14 @@ mod tests {
         let cache = app.agent_debug_logs.get(&pane_id).unwrap();
         assert_eq!(
             cache
+                .log
                 .entries
                 .iter()
                 .map(|entry| entry.sequence)
                 .collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
-        assert_eq!(cache.entries[2].summary, "third replay copy");
+        assert_eq!(cache.log.entries[2].summary, "third replay copy");
         assert_eq!(cache.through_sequence, 3);
         assert!(!cache.is_loading);
 
@@ -717,13 +743,46 @@ mod tests {
         let cache = app.agent_debug_logs.get(&pane_id).unwrap();
         assert_eq!(
             cache
+                .log
                 .entries
                 .iter()
                 .map(|entry| entry.sequence)
                 .collect::<Vec<_>>(),
             vec![3]
         );
-        assert_eq!(cache.dropped_entry_count, 2);
+        assert_eq!(cache.log.dropped_entry_count, 2);
+    }
+
+    /// Regression test: the server broadcasts `PaneDebugEntryAppended` to
+    /// every connected client for every recorded entry whenever the
+    /// agent-debug journal is enabled, whether or not that client ever
+    /// opened the debug view for that pane (which is the only path that
+    /// sends a `PaneDebugLogSnapshot`). Driving `apply()` with nothing but
+    /// live appends -- no snapshot ever received -- past
+    /// `MAXIMUM_AGENT_DEBUG_ENTRIES` proves the live-append arm alone keeps
+    /// this cache bounded, not just the on-demand replay path.
+    #[test]
+    fn live_appends_alone_stay_within_the_retention_cap_without_a_snapshot() {
+        let mut app = app();
+        let pane_id = ilium_core::NodeId(7);
+
+        for sequence in 1..=(ilium_agent_debug::MAXIMUM_AGENT_DEBUG_ENTRIES as u64 + 25) {
+            apply(
+                &mut app,
+                ServerEvent::PaneDebugEntryAppended {
+                    pane_id,
+                    entry: debug_entry(sequence, &format!("event {sequence}")),
+                },
+            );
+        }
+
+        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
+        assert_eq!(
+            cache.log.entries.len(),
+            ilium_agent_debug::MAXIMUM_AGENT_DEBUG_ENTRIES
+        );
+        assert_eq!(cache.log.dropped_entry_count, 25);
+        assert!(cache.log.retained_from_sequence() > 1);
     }
 
     #[test]

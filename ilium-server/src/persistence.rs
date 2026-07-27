@@ -208,7 +208,18 @@ fn normalize_agent_resumes(
         let is_project_verified = locator
             .transcript_for_session(&binding.provider.class(), &binding.session_id)
             .is_some();
-        let is_unique = seen_resumes.insert(binding.session_id);
+        // Only a project-verified session id occupies the "already resumed"
+        // slot. Inserting unconditionally would let an unverifiable (e.g.
+        // cross-project) binding claim a session id first and then falsely
+        // flag a *different*, later-processed pane's legitimately verified
+        // resume of that same session as a duplicate -- destroying the one
+        // binding this function exists to protect, purely because of Vec
+        // iteration order.
+        let is_unique = if is_project_verified {
+            seen_resumes.insert(binding.session_id)
+        } else {
+            true
+        };
         if is_project_verified && is_unique {
             continue;
         }
@@ -581,8 +592,22 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
     let snapshot: SessionSnapshot =
         serde_json::from_slice(&contents).map_err(|source| ServerError::Snapshot {
             operation: "parse",
-            path: path_buf,
+            path: path_buf.clone(),
             source: SnapshotError::Json(source),
+        })?;
+    // `Tree` derives `Deserialize` so it can be loaded wholesale above, but
+    // that bypasses every invariant this crate's own tree mutations
+    // (`add_pane`, `move_node`, ...) normally enforce -- a hand-edited or
+    // crash-truncated snapshot file can deserialize into a structurally
+    // invalid tree without a JSON parse error. Reject it here, loudly,
+    // rather than let some later, unrelated tree operation panic on it.
+    snapshot
+        .tree
+        .validate()
+        .map_err(|source| ServerError::Snapshot {
+            operation: "validate",
+            path: path_buf,
+            source: SnapshotError::InvalidTree(source),
         })?;
     Ok(Some(snapshot))
 }
@@ -792,6 +817,35 @@ mod tests {
 
         let result = load_snapshot(&path).await;
         assert!(matches!(result, Err(ServerError::Snapshot { .. })));
+    }
+
+    /// A snapshot can be syntactically valid JSON that still deserializes
+    /// into a structurally invalid `Tree` (e.g. hand-edited, or truncated
+    /// mid-write by a crash) -- distinct from
+    /// `corrupt_snapshot_file_is_an_error_not_a_panic` above, which only
+    /// covers a JSON syntax error. Without `Tree::validate` this loads
+    /// successfully and panics much later, in an unrelated tree operation
+    /// that assumes the invariant the corruption broke.
+    #[tokio::test]
+    async fn structurally_corrupt_tree_is_rejected_at_load_not_panicked_on_later() {
+        let path = scratch_snapshot_path();
+        let mut corrupted = serde_json::to_value(sample_snapshot()).unwrap();
+        // `next_id` colliding with an id already in use would let a later
+        // `alloc_id` silently overwrite an existing node.
+        corrupted["tree"]["next_id"] = serde_json::json!(0);
+        tokio::fs::write(&path, serde_json::to_vec(&corrupted).unwrap())
+            .await
+            .unwrap();
+
+        let result = load_snapshot(&path).await;
+
+        assert!(matches!(
+            result,
+            Err(ServerError::Snapshot {
+                source: SnapshotError::InvalidTree(_),
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
@@ -1040,6 +1094,102 @@ root:
             "Verified Project Title"
         );
         assert_eq!(snapshot.tree.get(duplicate_pane).unwrap().name, "codex");
+    }
+
+    #[test]
+    fn an_earlier_unverified_duplicate_does_not_block_a_later_verified_resume() {
+        // Regression test: `normalize_agent_resumes` must only let a
+        // *project-verified* session id occupy the "already claimed" slot.
+        // Two panes can end up sharing one corrupted/duplicated session id
+        // across two different projects (exactly the scenario this function
+        // exists to repair); only one of them can possibly be the real
+        // owner. Processing the unverifiable one first must not cause the
+        // later, legitimately verified pane to be misdiagnosed as a
+        // duplicate and have its valid resume destroyed.
+        let directory = tempfile::tempdir().unwrap();
+        let owning_project_cwd = directory.path().join("owner");
+        let other_project_cwd = directory.path().join("other");
+        std::fs::create_dir_all(&owning_project_cwd).unwrap();
+        std::fs::create_dir_all(&other_project_cwd).unwrap();
+        let session_id = "55555555-5555-4555-8555-555555555555";
+        let rollout_directory = directory.path().join(".codex/sessions/2026/07/14");
+        std::fs::create_dir_all(&rollout_directory).unwrap();
+        std::fs::write(
+            rollout_directory.join(format!("rollout-2026-07-14T12-00-00-{session_id}.jsonl")),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": owning_project_cwd}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut tree = Tree::new();
+        // The unverified pane's project is added -- and therefore appears
+        // first in `snapshot.panes` -- so it is the one that would have
+        // wrongly claimed `session_id` under the pre-fix logic.
+        let other_project = tree.add_project(other_project_cwd).unwrap();
+        let other_group = tree.add_group(other_project, "restored").unwrap();
+        let unverified_pane = tree
+            .add_pane(other_group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+
+        let owning_project = tree.add_project(owning_project_cwd.clone()).unwrap();
+        let owning_group = tree.add_group(owning_project, "restored").unwrap();
+        let verified_pane = tree
+            .add_pane(owning_group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+
+        let mut snapshot = SessionSnapshot {
+            version: CURRENT_SNAPSHOT_VERSION,
+            tree,
+            panes: vec![
+                PaneSnapshot {
+                    node_id: unverified_pane,
+                    kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                        "codex resume '{session_id}'"
+                    ))),
+                },
+                PaneSnapshot {
+                    node_id: verified_pane,
+                    kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(format!(
+                        "codex resume '{session_id}'"
+                    ))),
+                },
+            ],
+            agent_debug_logs: Vec::new(),
+        };
+
+        assert!(normalize_agent_resumes(
+            &mut snapshot,
+            directory.path(),
+            &owning_project_cwd,
+        ));
+
+        let command_for = |node_id: NodeId| {
+            snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.node_id == node_id)
+                .and_then(|pane| match &pane.kind {
+                    PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) => {
+                        Some(command.clone())
+                    }
+                    _ => None,
+                })
+                .expect("pane command")
+        };
+
+        assert_eq!(
+            command_for(unverified_pane),
+            "codex",
+            "the pane in the non-owning project must not resume another project's session"
+        );
+        assert_eq!(
+            command_for(verified_pane),
+            format!("codex resume '{session_id}'"),
+            "an earlier unverified duplicate must not block a later pane's verified resume"
+        );
     }
 
     #[test]

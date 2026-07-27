@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_norway::Value;
 
 const RELATIVE_PATH: &str = ".ilium/config.yaml";
 
@@ -29,6 +29,10 @@ pub struct ProjectConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub project_icon: Option<String>,
+    // `serde_norway::Value`, not `serde_json::Value`: the JSON data model has
+    // no representation for YAML-only values (non-finite floats like `.inf`,
+    // `.nan`), so round-tripping through it silently rewrote them to `null`
+    // and violated the "unknown fields preserved" contract above.
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -122,6 +126,22 @@ mod tests {
             "project name: Ilium\n"
         );
         assert_eq!(load(&cwd).unwrap().project_name.as_deref(), Some("Ilium"));
+    }
+
+    #[test]
+    fn saving_a_name_preserves_a_non_finite_float_in_unknown_configuration() {
+        // Regression test: `extra` used to be `BTreeMap<String, serde_json::Value>`,
+        // and JSON has no representation for non-finite floats, so re-saving
+        // this file used to silently rewrite `ratio: .inf` to `ratio: null`.
+        let cwd = scratch_dir();
+        std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
+        std::fs::write(cwd.join(RELATIVE_PATH), "ratio: .inf\n").unwrap();
+
+        let config = load(&cwd).unwrap();
+        save(&cwd, &config).unwrap();
+
+        let saved = std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("ratio: .inf"), "got: {saved}");
     }
 
     #[test]

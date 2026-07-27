@@ -125,7 +125,12 @@ impl VoiceService {
     /// Stops the actor and waits for every owned stream and task to drop.
     pub async fn shutdown(mut self) {
         let _ = self.shutdown_sender.send(true);
-        let _ = (&mut self.task).await;
+        // A `JoinError` here means the session task panicked (it never
+        // otherwise returns `Err`) or was cancelled out from under us -
+        // either is a real fault that must not vanish silently.
+        if let Err(join_error) = (&mut self.task).await {
+            tracing::error!(%join_error, "voice session task did not exit cleanly");
+        }
     }
 
     /// Completes a self-stop function call before ending the actor. Falling
@@ -140,7 +145,11 @@ impl VoiceService {
         {
             let _ = self.shutdown_sender.send(true);
         }
-        let _ = (&mut self.task).await;
+        // Same rationale as `shutdown`: surface a panicked/cancelled task
+        // instead of discarding the `JoinError`.
+        if let Err(join_error) = (&mut self.task).await {
+            tracing::error!(%join_error, "voice session task did not exit cleanly");
+        }
     }
 }
 

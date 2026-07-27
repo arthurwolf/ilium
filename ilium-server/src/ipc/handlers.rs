@@ -470,6 +470,10 @@ async fn tree_snapshot(state: &ServerState) -> Tree {
 /// writer (see `ServerState`'s lock-ordering docs).
 pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     let snapshot = tree_snapshot(state).await;
+    // Takes its own fresh tree read rather than reusing `snapshot` above --
+    // see `ServerState::prune_stale_restructure_undo`'s doc comment for why
+    // that snapshot, taken moments earlier, is not safe to reuse here.
+    state.prune_stale_restructure_undo().await;
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
 }
@@ -1015,14 +1019,23 @@ async fn handle_revert_project_restructure(
             // function's docs.
             if !orphaned_pane_ids.is_empty() {
                 let mut panes = state.panes.write().await;
-                for pane_id in orphaned_pane_ids {
-                    if let Some(resource) = panes.remove(&pane_id) {
-                        teardown_pane_resource(pane_id, resource);
+                for pane_id in &orphaned_pane_ids {
+                    if let Some(resource) = panes.remove(pane_id) {
+                        teardown_pane_resource(*pane_id, resource);
                     }
                 }
                 drop(panes);
             }
             drop(tree);
+            // Mirrors `handle_close_pane`'s teardown ordering -- evict the
+            // orphaned panes' `AgentDebugRecorder` journals (and their
+            // change-only observation state) once the tree/panes locks are
+            // released, so a reverted restructure never leaves a dangling
+            // per-pane journal that keeps being re-persisted into every
+            // future session snapshot (see `AgentDebugRecorder` docs).
+            if !orphaned_pane_ids.is_empty() {
+                state.agent_debug.remove(&orphaned_pane_ids).await;
+            }
 
             broadcast_and_persist(state).await;
         }
@@ -1321,7 +1334,7 @@ async fn handle_new_pane(
     state: &Arc<ServerState>,
     parent_group: NodeId,
     kind: NewPaneKind,
-    _working_directory: NewPaneWorkingDirectory,
+    working_directory: NewPaneWorkingDirectory,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let plan = new_pane_plan(kind);
@@ -1354,8 +1367,12 @@ async fn handle_new_pane(
     // eventual broadcast snapshot's O(n) clone -- see `broadcast_and_persist`.
     drop(tree);
 
-    match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &project_cwd).await
-    {
+    // The client only names a *policy*; the server alone holds the live PTY
+    // process state (`panes`) and last-launch memory needed to resolve it to
+    // an actual directory -- see `NewPaneWorkingDirectory`'s doc comment.
+    let cwd = resolve_new_pane_working_directory(state, working_directory, &project_cwd).await;
+
+    match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
         Err(RegisterPaneError::NodeRemoved(_)) => {
             // A concurrent request (`ClosePane` on an ancestor group,
@@ -1393,13 +1410,50 @@ async fn handle_new_pane(
         )
         .with_fields(vec![
             AgentDebugField::plain("origin", spawn_description),
-            AgentDebugField::plain("working directory", project_cwd.display().to_string()),
+            AgentDebugField::plain("working directory", cwd.display().to_string()),
         ]),
     )
     .await;
 
     if let Some(initial_input) = plan.initial_input {
         crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
+    }
+}
+
+/// Resolves a client's `NewPaneWorkingDirectory` policy to an actual starting
+/// directory. `FocusedTerminal` and `LastUsed` both fall back to
+/// `project_cwd` whenever no live candidate is available -- no pane is
+/// currently client-focused, its cwd cannot be read on this platform, or no
+/// terminal has launched yet this session -- mirroring
+/// `PtySession::current_working_directory`'s own "fall back to the project
+/// root safely" contract.
+async fn resolve_new_pane_working_directory(
+    state: &ServerState,
+    working_directory: NewPaneWorkingDirectory,
+    project_cwd: &std::path::Path,
+) -> std::path::PathBuf {
+    match working_directory {
+        NewPaneWorkingDirectory::ProjectRoot => project_cwd.to_path_buf(),
+        NewPaneWorkingDirectory::FocusedTerminal => {
+            let panes = state.panes.read().await;
+            panes
+                .values()
+                .find_map(|resource| match resource {
+                    PaneResource::Terminal(runtime)
+                        if runtime.detection_schedule.client_focused =>
+                    {
+                        runtime.session.current_working_directory()
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| project_cwd.to_path_buf())
+        }
+        NewPaneWorkingDirectory::LastUsed => state
+            .last_terminal_working_directory
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_else(|| project_cwd.to_path_buf()),
     }
 }
 
@@ -1924,16 +1978,18 @@ pub(crate) async fn write_key_input(
                     });
                 }
                 if conversation_cleared {
-                    // A provider may replace its persisted identity while
-                    // retaining the same process. Both transitions share one
-                    // generation so stale title workers have one atomic fence.
-                    if !session_identity_invalidated {
-                        conversation_title_generation_before = Some(runtime.title_generation);
-                        runtime.title_generation = runtime.title_generation.wrapping_add(1);
-                    } else {
-                        conversation_title_generation_before =
-                            Some(runtime.title_generation.wrapping_sub(1));
-                    }
+                    // `conversation_cleared` only becomes true when
+                    // `session_transition_rule` matched
+                    // `ClaudeOrCodexClearStartsFreshSession` above, so
+                    // `session_identity_invalidated` is always true here too
+                    // and that branch above has already bumped
+                    // `title_generation` for this same submitted line. Both
+                    // transitions share that one generation bump so stale
+                    // title workers have one atomic fence; "before" is simply
+                    // that bump's predecessor.
+                    debug_assert!(session_identity_invalidated);
+                    conversation_title_generation_before =
+                        Some(runtime.title_generation.wrapping_sub(1));
                     runtime.is_showing_fresh_agent_screen = true;
                     cleared_conversation_title_generation = Some(runtime.title_generation);
                 }
@@ -2259,8 +2315,14 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
 
-    // A cleanly-killed session has nothing left worth recovering. Clear
-    // the dirty flag first so the background debounced writer
+    // A cleanly-killed session has nothing left worth recovering. Set
+    // `session_killed` first: `crate::run`'s shutdown grace period keeps
+    // other attached connections alive for a short window after this
+    // returns, and without this flag one of them could still call
+    // `request_snapshot_save` (e.g. via `NewPane`) and resurrect a
+    // snapshot for a session already decided to be unrecoverable -- see
+    // `ServerState::session_killed`'s doc comment. Then clear the dirty
+    // flag so the background debounced writer
     // (`crate::persistence::spawn_snapshot_writer`) never recreates the
     // file after we remove it below just because an earlier mutation's
     // dirty flag was still set; then take the same write lock
@@ -2268,6 +2330,9 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     // build+serialize+write+rename, so a write already in flight when
     // this handler runs is guaranteed to finish (writing the *old*
     // snapshot) before we remove the file, rather than racing it.
+    state
+        .session_killed
+        .store(true, std::sync::atomic::Ordering::Release);
     state
         .snapshot_dirty
         .store(false, std::sync::atomic::Ordering::Release);
@@ -2442,6 +2507,101 @@ mod tests {
         for (pane_id, resource) in resources {
             teardown_pane_resource(pane_id, resource);
         }
+        sound_task.abort();
+    }
+
+    /// Regression test for the leak fixed in `handle_revert_project_restructure`:
+    /// a pane created after a restructure (so it is absent from the tree the
+    /// revert restores) must have its `AgentDebugRecorder` journal evicted,
+    /// not just its tree node and `PaneResource` -- otherwise the orphaned
+    /// journal keeps being written into every future session snapshot.
+    #[tokio::test]
+    async fn reverting_a_restructure_evicts_the_orphaned_panes_agent_debug_journal() {
+        let directory = tempfile::tempdir().expect("create revert test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "revert-orphan-debug".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("revert-orphan-debug.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: true,
+        }));
+
+        let project_id = state
+            .tree
+            .read()
+            .await
+            .project_ids()
+            .into_iter()
+            .next()
+            .expect("fresh state has one launch project");
+
+        // Snapshot the tree before the soon-to-be-orphaned pane exists --
+        // mirrors what `handle_apply_project_restructure_plan` stores in
+        // `state.restructure_undo` as the pre-restructure `before` tree.
+        let previous_tree = state.tree.read().await.clone();
+
+        let orphaned_pane_id = {
+            let mut tree = state.tree.write().await;
+            let group_id = tree
+                .add_group(project_id, "orphaned-group")
+                .expect("launch project accepts a group");
+            tree.add_pane(group_id, "orphaned", PaneContentKind::Terminal)
+                .expect("group accepts a terminal pane")
+        };
+        spawn_and_register_pane(
+            &state,
+            orphaned_pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(
+                "printf 'orphan-marker\\n'".to_string(),
+            )),
+        )
+        .await
+        .expect("register command-backed test terminal");
+        state
+            .agent_debug
+            .append(
+                orphaned_pane_id,
+                AgentDebugSource::Pty,
+                ilium_agent_debug::AgentDebugContext::default(),
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::PromptSubmitted,
+                    "orphaned pane journal entry",
+                ),
+            )
+            .await
+            .expect("enabled recorder appends");
+
+        state
+            .restructure_undo
+            .lock()
+            .await
+            .insert(project_id, previous_tree);
+
+        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        handle_revert_project_restructure(&state, project_id, &direct_tx).await;
+        drop(direct_tx);
+        assert!(
+            direct_rx.recv().await.is_none(),
+            "revert of a freshly recorded restructure must not error"
+        );
+
+        assert!(state.tree.read().await.get(orphaned_pane_id).is_none());
+        assert!(!state.panes.read().await.contains_key(&orphaned_pane_id));
+        assert!(
+            state
+                .agent_debug
+                .replay(orphaned_pane_id, None)
+                .await
+                .is_none(),
+            "reverted restructure must evict the orphaned pane's agent-debug journal"
+        );
+
         sound_task.abort();
     }
 }

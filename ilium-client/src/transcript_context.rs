@@ -276,7 +276,7 @@ fn textual_value(value: Option<&Value>) -> Option<String> {
                 .filter_map(|item| {
                     item.get("text")
                         .and_then(Value::as_str)
-                        .map(str::to_string)
+                        .and_then(non_empty)
                         .or_else(|| textual_value(item.get("content")))
                 })
                 .collect::<Vec<_>>()
@@ -309,7 +309,16 @@ fn antigravity_recent_entries(transcript_path: &Path) -> anyhow::Result<Vec<Tran
     let Some(antigravity_dir) = transcript_path.parent().and_then(Path::parent) else {
         return Ok(Vec::new());
     };
-    let file = std::fs::File::open(antigravity_dir.join("history.jsonl"))?;
+    // `history.jsonl` is an inferred sibling, not a path the caller already
+    // verified (unlike `transcript_path` itself). A session whose history
+    // file has not been written yet is "no context available", the same as
+    // the two soft exits above -- not a hard failure worth aborting the
+    // retitle attempt over.
+    let file = match std::fs::File::open(antigravity_dir.join("history.jsonl")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
     #[allow(clippy::lines_filter_map_ok)]
     let lines = BufReader::new(file).lines().filter_map(Result::ok);
     let mut recent = RecentEntries::default();
@@ -424,6 +433,12 @@ mod tests {
     }
 
     #[test]
+    fn textual_value_falls_back_to_content_when_text_is_blank() {
+        let item = serde_json::json!([{"text": "   ", "content": "real text"}]);
+        assert_eq!(textual_value(Some(&item)), Some("real text".to_string()));
+    }
+
+    #[test]
     fn other_agent_class_never_touches_the_filesystem() {
         let missing = Path::new("/nonexistent/ilium-transcript-context/session.jsonl");
         assert!(
@@ -468,6 +483,24 @@ mod tests {
                     content: "second task".to_string(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn antigravity_missing_history_file_returns_empty_instead_of_erroring() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("antigravity-cli");
+        let conversations = root.join("conversations");
+        std::fs::create_dir_all(&conversations).unwrap();
+        let session_id = "4b444444-4444-4444-8444-444444444444";
+        let conversation_path = conversations.join(format!("{session_id}.db"));
+        std::fs::write(&conversation_path, "fixture").unwrap();
+        // No history.jsonl written at all -- the session simply has no
+        // recorded history yet, distinct from a real I/O failure.
+
+        assert_eq!(
+            recent_transcript_entries(&AgentClass::Antigravity, &conversation_path).unwrap(),
+            Vec::new()
         );
     }
 }

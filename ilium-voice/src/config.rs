@@ -197,6 +197,14 @@ impl VadEagerness {
 }
 
 fn stepped_value<T: Copy + PartialEq>(values: &[T], current: T, direction: i32) -> T {
+    // `rem_euclid` below panics on a zero divisor; every real caller passes a
+    // fixed non-empty `Self::ALL` array, but guard defensively instead of
+    // trusting that invariant silently, since this helper is generic and could
+    // be handed an empty slice in the future.
+    if values.is_empty() {
+        return current;
+    }
+
     let index = values
         .iter()
         .position(|candidate| *candidate == current)

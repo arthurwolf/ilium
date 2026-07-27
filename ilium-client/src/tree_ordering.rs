@@ -39,11 +39,13 @@ fn compare_nodes(
     right_id: NodeId,
     tree_order: TreeOrder,
 ) -> Ordering {
-    let Some(left) = tree.get(left_id) else {
-        return Ordering::Greater;
-    };
-    let Some(right) = tree.get(right_id) else {
-        return Ordering::Less;
+    let (left, right) = match (tree.get(left_id), tree.get(right_id)) {
+        (Some(left), Some(right)) => (left, right),
+        // Both stale: equal rather than an order-dependent Greater/Less, so
+        // the comparator stays antisymmetric even with multiple bad ids.
+        (None, None) => return Ordering::Equal,
+        (None, Some(_)) => return Ordering::Greater,
+        (Some(_), None) => return Ordering::Less,
     };
 
     match tree_order {

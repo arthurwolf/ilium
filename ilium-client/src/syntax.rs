@@ -70,9 +70,19 @@ pub fn highlight(path: &Path, lines: &[String]) -> Option<Vec<LineTokens>> {
         lines
             .iter()
             .map(|line| {
+                // `highlight_line` can fail (e.g. a pathological line tripping
+                // syntect's regex-engine timeout) -- that must not be a silent
+                // swallow, so log it and fall back to no tokens for this one
+                // line; the renderer (`editor_highlight::render_row_spans`)
+                // already defaults every byte to an unstyled `Style` before
+                // overlaying tokens, so an empty token list just means this
+                // line renders unhighlighted, not that text goes missing.
                 highlighter
                     .highlight_line(line, &SYNTAX_SET)
-                    .unwrap_or_default()
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, "failed to highlight source line, rendering it unstyled");
+                        Vec::new()
+                    })
                     .into_iter()
                     .scan(0usize, |next_byte, (style, text)| {
                         let start = *next_byte;

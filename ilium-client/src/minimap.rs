@@ -230,7 +230,14 @@ fn render_bucket_row<'a, S: AsRef<str>>(
     let total_len: usize = content_lines.iter().map(|line| line.chars().count()).sum();
     let mean_len = total_len / content_lines.len().max(1);
 
-    let indent_cols = scale_to_width(leading_whitespace(widest_line), content_width, area_width);
+    // Capped to `area_width - 1` (never the full row) so a line whose
+    // leading whitespace alone reaches or exceeds `content_width` -- e.g.
+    // deeply nested code, or a minimap column narrower than the indent
+    // depth -- can't consume every column and leave zero room for the
+    // glyph run below. Without this cap a non-blank bucket could render as
+    // pure spaces, indistinguishable from a genuinely blank row.
+    let indent_cols = scale_to_width(leading_whitespace(widest_line), content_width, area_width)
+        .min(area_width.saturating_sub(1));
     let mut bar_cols = scale_to_width(max_len, content_width, area_width)
         .saturating_sub(indent_cols)
         .max(1);

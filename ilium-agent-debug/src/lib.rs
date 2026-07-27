@@ -339,6 +339,45 @@ impl PaneDebugLog {
         Some(entry)
     }
 
+    /// Merges one already-sequenced entry into the log at its sorted
+    /// position, replacing any existing entry with the same sequence, then
+    /// enforces the same retention policy `append` uses. Unlike `append`,
+    /// this never stamps a sequence of its own: it exists for a mirror that
+    /// receives entries whose sequence was assigned by the journal's real
+    /// owner and that can arrive out of order relative to each other (a
+    /// connected client reconciling a retained-history snapshot with live
+    /// broadcasts -- see `ilium-client`'s `render_cache` module). Keeping
+    /// this retention logic here, instead of duplicating it client-side,
+    /// means that mirror can never grow past the same bound this journal
+    /// itself enforces.
+    pub fn merge_synced_entry(&mut self, entry: AgentDebugEntry) {
+        let entry_bytes = approximate_entry_bytes(&entry) as u64;
+        match self
+            .entries
+            .binary_search_by_key(&entry.sequence, |candidate| candidate.sequence)
+        {
+            Ok(index) => {
+                let previous_bytes = approximate_entry_bytes(&self.entries[index]) as u64;
+                self.retained_approximate_bytes = self
+                    .retained_approximate_bytes
+                    .saturating_sub(previous_bytes)
+                    .saturating_add(entry_bytes);
+                self.entries[index] = entry;
+            }
+            Err(index) => {
+                self.retained_approximate_bytes =
+                    self.retained_approximate_bytes.saturating_add(entry_bytes);
+                self.entries.insert(index, entry);
+            }
+        }
+        self.next_sequence = self.next_sequence.max(
+            self.entries
+                .last()
+                .map_or(1, |entry| entry.sequence.saturating_add(1)),
+        );
+        self.enforce_retention();
+    }
+
     /// Re-establishes all derived retention metadata after deserialization.
     /// The server invokes this for every restored pane before the journal can
     /// receive a new entry.
@@ -351,6 +390,30 @@ impl PaneDebugLog {
             .max(self.next_sequence);
         self.retained_approximate_bytes = approximate_entries_bytes(&self.entries) as u64;
         self.enforce_retention();
+    }
+
+    /// Drops every entry older than `floor_sequence`, keeping
+    /// `retained_approximate_bytes` in lockstep. A reconciled snapshot's
+    /// authoritative `retained_from_sequence` can be stricter than this
+    /// mirror's own approximate byte/count retention (see
+    /// `merge_synced_entry`), so a caller reconciling a mirror against it
+    /// must trim through this method rather than filtering `entries`
+    /// directly -- doing that would desynchronize the byte accounting
+    /// `enforce_retention` relies on, and a later append could then try to
+    /// evict from an already-empty vector.
+    pub fn retain_from_sequence(&mut self, floor_sequence: u64) {
+        let mut removed_bytes: u64 = 0;
+        self.entries.retain(|entry| {
+            if entry.sequence >= floor_sequence {
+                true
+            } else {
+                removed_bytes = removed_bytes.saturating_add(approximate_entry_bytes(entry) as u64);
+                false
+            }
+        });
+        self.retained_approximate_bytes = self
+            .retained_approximate_bytes
+            .saturating_sub(removed_bytes);
     }
 
     pub fn retained_from_sequence(&self) -> u64 {
@@ -368,8 +431,15 @@ impl PaneDebugLog {
     }
 
     fn enforce_retention(&mut self) {
-        while self.entries.len() > MAXIMUM_AGENT_DEBUG_ENTRIES
-            || self.retained_approximate_bytes > MAXIMUM_AGENT_DEBUG_BYTES as u64
+        // `retained_approximate_bytes` is normally kept in lockstep with the
+        // real sum of entry sizes by every mutator in this type, but every
+        // field here is `pub` for (de)serialization, so a caller can load a
+        // stale or hand-edited snapshot whose byte count no longer matches
+        // its (possibly empty) `entries`. Guarding on emptiness keeps
+        // `remove(0)` panic-free instead of trusting that invariant blindly.
+        while !self.entries.is_empty()
+            && (self.entries.len() > MAXIMUM_AGENT_DEBUG_ENTRIES
+                || self.retained_approximate_bytes > MAXIMUM_AGENT_DEBUG_BYTES as u64)
         {
             let removed_entry = self.entries.remove(0);
             let removed_bytes = approximate_entry_bytes(&removed_entry) as u64;
@@ -379,6 +449,12 @@ impl PaneDebugLog {
             self.retained_approximate_bytes = self
                 .retained_approximate_bytes
                 .saturating_sub(removed_bytes);
+        }
+        // An empty journal always has zero retained bytes; self-heal any
+        // residual drift from a corrupted or externally mutated count rather
+        // than leaving it permanently wrong until the next full restore.
+        if self.entries.is_empty() {
+            self.retained_approximate_bytes = 0;
         }
     }
 }
@@ -590,6 +666,111 @@ mod tests {
             log.retained_approximate_bytes,
             approximate_entries_bytes(&log.entries) as u64
         );
+    }
+
+    #[test]
+    fn merge_synced_entry_inserts_out_of_order_and_replaces_duplicates() {
+        let mut log = PaneDebugLog::default();
+        let entry = |sequence: u64, summary: &str| AgentDebugEntry {
+            sequence,
+            occurred_at_unix_millis: 1_700_000_000_000 + sequence as i64,
+            severity: AgentDebugSeverity::Information,
+            source: AgentDebugSource::Detector,
+            kind: AgentDebugEventKind::DetectionCycle,
+            summary: summary.to_string(),
+            fields: Vec::new(),
+            correlation_id: None,
+            context: AgentDebugContext::default(),
+            metadata: AgentDebugEventMetadata::default(),
+        };
+
+        log.merge_synced_entry(entry(1, "first"));
+        log.merge_synced_entry(entry(3, "third"));
+        log.merge_synced_entry(entry(2, "second"));
+        log.merge_synced_entry(entry(3, "third replay copy"));
+
+        assert_eq!(
+            log.entries
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(log.entries[2].summary, "third replay copy");
+    }
+
+    #[test]
+    fn merge_synced_entry_enforces_the_same_retention_cap_as_append_alone() {
+        let mut log = PaneDebugLog::default();
+        for sequence in 1..=(MAXIMUM_AGENT_DEBUG_ENTRIES as u64 + 50) {
+            log.merge_synced_entry(AgentDebugEntry {
+                sequence,
+                occurred_at_unix_millis: sequence as i64,
+                severity: AgentDebugSeverity::Information,
+                source: AgentDebugSource::Detector,
+                kind: AgentDebugEventKind::ActivityChanged,
+                summary: format!("event {sequence}"),
+                fields: Vec::new(),
+                correlation_id: None,
+                context: AgentDebugContext::default(),
+                metadata: AgentDebugEventMetadata::default(),
+            });
+        }
+
+        assert_eq!(log.entries.len(), MAXIMUM_AGENT_DEBUG_ENTRIES);
+        assert_eq!(log.dropped_entry_count, 50);
+        assert_eq!(log.retained_from_sequence(), 51);
+        assert!(log.retained_approximate_bytes <= MAXIMUM_AGENT_DEBUG_BYTES as u64);
+    }
+
+    #[test]
+    fn retain_from_sequence_keeps_byte_accounting_consistent_with_a_trimmed_empty_log() {
+        let mut log = PaneDebugLog::default();
+        for sequence in 1..=3u64 {
+            log.merge_synced_entry(AgentDebugEntry {
+                sequence,
+                occurred_at_unix_millis: sequence as i64,
+                severity: AgentDebugSeverity::Information,
+                source: AgentDebugSource::Detector,
+                kind: AgentDebugEventKind::ActivityChanged,
+                summary: format!("event {sequence}"),
+                fields: Vec::new(),
+                correlation_id: None,
+                context: AgentDebugContext::default(),
+                metadata: AgentDebugEventMetadata::default(),
+            });
+        }
+
+        // A reconciled snapshot can report a floor sequence past every entry
+        // this mirror currently holds (e.g. the mirror was stale and the
+        // server has since retention-dropped all of it). This is exactly
+        // what `ilium-client`'s `render_cache` applies after replaying a
+        // `PaneDebugLogSnapshot`.
+        log.retain_from_sequence(100);
+
+        assert!(log.entries.is_empty());
+        assert_eq!(
+            log.retained_approximate_bytes, 0,
+            "trimming to empty must not leave stale bytes behind"
+        );
+
+        // Regression guard: before `retain_from_sequence` existed, trimming
+        // `entries` directly left `retained_approximate_bytes` stale and
+        // positive, and the next mutation's retention pass would then call
+        // `Vec::remove(0)` on an already-empty vector and panic.
+        let appended = log
+            .append(
+                1_700_000_000_000,
+                AgentDebugSource::Detector,
+                AgentDebugContext::default(),
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::ActivityChanged,
+                    "event after trim",
+                ),
+            )
+            .expect("append after an empty trim must not panic");
+        assert_eq!(appended.sequence, 4);
+        assert_eq!(log.entries.len(), 1);
     }
 
     #[test]

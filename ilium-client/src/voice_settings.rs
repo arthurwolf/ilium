@@ -60,11 +60,14 @@ pub struct VoicePromptEditorState {
 
 impl VoicePromptEditorState {
     pub fn new(prompt: &str) -> Self {
-        let lines = if prompt.is_empty() {
-            vec![String::new()]
-        } else {
-            prompt.lines().map(str::to_owned).collect()
-        };
+        // `str::lines()` drops a trailing newline (and any trailing blank
+        // line it implies), so loading "foo\n" and saving back without
+        // touching a single character would silently rewrite the setting to
+        // "foo". Splitting on '\n' instead is lossless: for every `s`,
+        // `s.split('\n').collect::<Vec<_>>().join("\n") == s`, including the
+        // empty-string case (which yields a single empty line, matching the
+        // editor's one-empty-line-minimum invariant).
+        let lines: Vec<String> = prompt.split('\n').map(str::to_owned).collect();
         Self {
             textarea: TextArea::from(lines),
         }

@@ -57,12 +57,16 @@ impl TerminalOrigin {
 
     /// Name shown after a known session is invalidated. Standard persisted
     /// resume commands drop their now-stale ID; arbitrary user commands keep
-    /// their exact launch text.
+    /// their exact launch text. Routed through the shared
+    /// `BuiltinAgentProvider` registry (rather than one hardcoded prefix
+    /// literal per provider) so a new registry entry does not also need a
+    /// matching branch here -- see CLAUDE.md's registry-not-if/else rule.
     pub fn pane_name_without_stale_session(&self) -> &str {
         match self {
-            TerminalOrigin::Command(command) if command.starts_with("claude --resume ") => "claude",
-            TerminalOrigin::Command(command) if command.starts_with("codex resume ") => "codex",
-            _ => self.default_pane_name(),
+            TerminalOrigin::Command(command) => BuiltinAgentProvider::resume_binding(command)
+                .map(|(provider, _session_id)| provider.command_line())
+                .unwrap_or_else(|| self.default_pane_name()),
+            TerminalOrigin::PlainShell => self.default_pane_name(),
         }
     }
 }
@@ -255,17 +259,19 @@ pub fn clears_agent_goal(submitted_line: &str) -> bool {
 }
 
 impl Drop for TerminalPaneRuntime {
-    /// Belt-and-braces guard against a leaked forwarder task: dropping a
-    /// `JoinHandle` on its own does *not* cancel the underlying tokio task
-    /// (it merely detaches it), so if some future close/teardown path ever
-    /// forgot to call `abort_background_tasks` before letting this value
-    /// go out of scope, `forward_task` would keep running -- and keep
-    /// whatever it captured (the pty's output receiver, the broadcast
-    /// sender) alive -- for the rest of the process's life. `abort` is
-    /// idempotent, so this is a no-op on the normal path where the caller
-    /// already aborted it explicitly.
+    /// Belt-and-braces guard against leaked tasks: dropping a `JoinHandle`
+    /// on its own does *not* cancel the underlying tokio task (it merely
+    /// detaches it), so if some future close/teardown path ever forgot to
+    /// call `abort_background_tasks` before letting this value go out of
+    /// scope, `forward_task` would keep running -- and keep whatever it
+    /// captured (the pty's output receiver, the broadcast sender) alive --
+    /// for the rest of the process's life, and a still-pending
+    /// `initial_prompt_task` would eventually fire and write its one-shot
+    /// prompt into whatever pty session has since reused this pane's slot.
+    /// Both aborts are idempotent, so this is a no-op on the normal path
+    /// where the caller already aborted them explicitly.
     fn drop(&mut self) {
-        self.forward_task.abort();
+        self.abort_background_tasks();
     }
 }
 
@@ -476,6 +482,24 @@ mod tests {
             )
             .pane_name_without_stale_session(),
             "claude"
+        );
+        assert_eq!(
+            TerminalOrigin::Command(
+                "codex resume '11111111-1111-4111-8111-111111111111'".to_string()
+            )
+            .pane_name_without_stale_session(),
+            "codex"
+        );
+        // Regression test: Antigravity is a full `BuiltinAgentProvider::ALL`
+        // registry entry alongside Claude and Codex, so its persisted resume
+        // command must drop its stale ID exactly like the other two instead
+        // of falling through to the raw, still-stale command line.
+        assert_eq!(
+            TerminalOrigin::Command(
+                "agy --conversation '11111111-1111-4111-8111-111111111111'".to_string()
+            )
+            .pane_name_without_stale_session(),
+            "agy"
         );
         assert_eq!(
             TerminalOrigin::Command("custom resume value".to_string())

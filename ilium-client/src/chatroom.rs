@@ -146,10 +146,32 @@ pub fn context(project_root: &Path, limit: usize) -> anyhow::Result<String> {
     for message in messages {
         output.push_str(&format!(
             "- {} | {} | {}\n",
-            message.timestamp, message.author, message.content
+            flatten_for_hook_output(&message.timestamp),
+            flatten_for_hook_output(&message.author),
+            flatten_for_hook_output(&message.content)
         ));
     }
     Ok(output)
+}
+
+/// Collapses a stored field to a single safe line for hook output. Stored
+/// content can carry real newlines/tabs (from a sent multi-line message) or,
+/// since `CHATROOM.md` is human-editable, arbitrary control bytes such as raw
+/// terminal escapes. Left verbatim, a real newline could forge additional
+/// `- timestamp | author | content` records in the hook text and raw control
+/// codes could reach the model context unsanitized, which the doc comment on
+/// `context` promises never happens. `|` is left untouched: hook consumers
+/// read this as prose, not as another escaped record to re-split.
+fn flatten_for_hook_output(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\n' => "\\n".to_string(),
+            '\t' => "\\t".to_string(),
+            other if other.is_control() => String::new(),
+            other => other.to_string(),
+        })
+        .collect()
 }
 
 fn write_new_chatroom(path: &Path) -> anyhow::Result<()> {
@@ -164,9 +186,26 @@ fn write_new_chatroom(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Reads a text file that may legitimately not exist yet. A missing file
+/// reads as empty (the normal "nothing to merge into" case); any other read
+/// failure (permissions, non-UTF-8 content, ...) is propagated instead of
+/// being papered over, because every caller here follows up with a full
+/// `fs::write` that would otherwise silently truncate a real, unreadable
+/// file down to just the generated ilium block.
+fn read_existing_or_empty(path: &Path) -> anyhow::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(anyhow::anyhow!(
+            "failed to read {}: {error}",
+            path.display()
+        )),
+    }
+}
+
 fn ensure_gitignore(project_root: &Path) -> anyhow::Result<()> {
     let path = project_root.join(".gitignore");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let existing = read_existing_or_empty(&path)?;
     if existing.lines().any(|line| line.trim() == "/CHATROOM.md") {
         return Ok(());
     }
@@ -197,7 +236,7 @@ fn ensure_guidance(project_root: &Path) -> anyhow::Result<()> {
 }
 
 fn append_guidance(path: &Path) -> anyhow::Result<()> {
-    let existing = fs::read_to_string(path).unwrap_or_default();
+    let existing = read_existing_or_empty(path)?;
     fs::write(path, upsert_guidance(&existing))?;
     Ok(())
 }
@@ -253,7 +292,12 @@ fn ensure_hook_file(path: &Path, events: &[&str]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let existing = fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
+    let existing = read_existing_or_empty(path)?;
+    let existing = if existing.trim().is_empty() {
+        "{}".to_string()
+    } else {
+        existing
+    };
     let mut root: Value = serde_json::from_str(&existing)
         .map_err(|error| anyhow::anyhow!("could not merge {}: {error}", path.display()))?;
     let root_object = root
@@ -326,10 +370,12 @@ fn with_project_lock<T>(
         return Err(std::io::Error::last_os_error().into());
     }
     let result = operation();
-    let unlock_result = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
-    if unlock_result != 0 && result.is_ok() {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    // `lock` (the fd) releases the flock unconditionally on drop, so a failed
+    // explicit unlock here is not itself a correctness problem. Treating it
+    // as fatal would turn an already-succeeded `operation()` (e.g. a message
+    // already appended and fsynced) into a reported failure, inviting a
+    // caller retry that re-runs the operation and duplicates its effect.
+    let _ = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
     result
 }
 

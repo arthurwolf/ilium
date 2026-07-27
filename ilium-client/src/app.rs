@@ -959,6 +959,7 @@ impl AgentDebugLogFilter {
 
     pub fn visible_entry_count(self, cache: &AgentDebugLogCache) -> usize {
         cache
+            .log
             .entries
             .iter()
             .filter(|entry| self.includes(entry))
@@ -967,6 +968,7 @@ impl AgentDebugLogFilter {
 
     pub fn hidden_entry_count(self, cache: &AgentDebugLogCache) -> usize {
         cache
+            .log
             .entries
             .len()
             .saturating_sub(self.visible_entry_count(cache))
@@ -975,10 +977,19 @@ impl AgentDebugLogFilter {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentDebugLogCache {
-    pub entries: Vec<ilium_ipc::AgentDebugEntry>,
+    /// Bounded, sequence-ordered mirror of the server-owned per-pane debug
+    /// journal (`ilium_ipc::PaneDebugLog`, the exact schema and retention
+    /// policy the server's own on-disk journal uses). Delegating to it here,
+    /// instead of a raw `Vec`, means every insertion path -- the initial
+    /// retained-history snapshot fetched via `GetPaneDebugLog`, and every
+    /// subsequent `PaneDebugEntryAppended` broadcast for as long as the pane
+    /// stays open -- is capped by the same `MAXIMUM_AGENT_DEBUG_ENTRIES` /
+    /// `MAXIMUM_AGENT_DEBUG_BYTES` budget the server enforces, so a pane held
+    /// open for the life of a long-running client session cannot grow this
+    /// cache without bound (see `render_cache::apply`'s
+    /// `PaneDebugEntryAppended` and `PaneDebugLogSnapshot` arms).
+    pub log: ilium_ipc::PaneDebugLog,
     pub through_sequence: u64,
-    pub retained_from_sequence: u64,
-    pub dropped_entry_count: u64,
     /// Live broadcasts may populate the cache before the operator first opens
     /// the log. Only a replay snapshot proves that the retained prefix was
     /// fetched, so those broadcasts must not be mistaken for complete history.
@@ -1134,7 +1145,7 @@ impl RestructureRequestOrigin {
 /// client-local because it protects the current attachment's provider budget;
 /// the source evidence itself remains the durable retry key.
 #[derive(Debug, Clone)]
-struct AutomaticRestructureRetry {
+pub(crate) struct AutomaticRestructureRetry {
     input_fingerprint: u64,
     consecutive_failures: u32,
     retry_after: Instant,
@@ -1396,7 +1407,7 @@ pub struct App {
     pub project_restructure_jobs: HashMap<NodeId, ProjectRestructureJob>,
     /// Per-project circuit breakers for failed automatic inference. A changed
     /// content/structure fingerprint clears the relevant breaker.
-    automatic_restructure_retries: HashMap<NodeId, AutomaticRestructureRetry>,
+    pub(crate) automatic_restructure_retries: HashMap<NodeId, AutomaticRestructureRetry>,
     /// Project workers waiting for the event loop to spawn them.
     pending_restructure_requests: Vec<PendingRestructureRequest>,
     /// Bumped every time `render_cache::apply_tree_snapshot` replaces
@@ -2083,6 +2094,11 @@ impl App {
         let mut available = HashSet::new();
         let mut has_changed = false;
         let project_ids = self.tree.project_ids();
+        // Snapshot the live project set before consuming `project_ids` below so
+        // stale `self.chatrooms` entries (keyed by a project node the server
+        // tree no longer has, e.g. after project removal) can be dropped in the
+        // same pass instead of accumulating for the life of the client.
+        let live_project_ids: HashSet<NodeId> = project_ids.iter().copied().collect();
         for project_id in project_ids {
             let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) else {
                 continue;
@@ -2101,6 +2117,10 @@ impl App {
                 }
             }
         }
+        let chatrooms_before = self.chatrooms.len();
+        self.chatrooms
+            .retain(|project_id, _| live_project_ids.contains(project_id));
+        has_changed |= self.chatrooms.len() != chatrooms_before;
         if available == self.chatroom_projects {
             return has_changed;
         }
@@ -2586,6 +2606,12 @@ impl App {
     pub fn update_voice_connection_state(&mut self, state: ilium_voice::VoiceConnectionState) {
         if let ilium_voice::VoiceConnectionState::Failed(error) = &state {
             self.status_message = Some(format!("Voice control failed: {error}"));
+        }
+        // `Thinking` always precedes the first `AssistantTranscript` delta of a
+        // response (see ilium-voice/src/openai.rs), so it is the turn boundary:
+        // clear the previous utterance here rather than growing it forever.
+        if matches!(state, ilium_voice::VoiceConnectionState::Thinking) {
+            self.voice_last_assistant_transcript = None;
         }
         self.voice_connection_state = state;
     }
@@ -3911,11 +3937,19 @@ impl App {
     /// Rebuilds a focused editor pane's Rendered-mode document at the
     /// current layout width. A no-op for anything but an editor pane
     /// actually in `EditorViewMode::Rendered`.
+    ///
+    /// Uses `editor_content_area(id)` -- the same toolbar/minimap-aware
+    /// width `ui::draw_editor` hands to `markdown::view::render` -- rather
+    /// than the raw pane interior width. Rasterized headers/images bake in
+    /// a fixed cell width at build time (see `markdown::render::render`'s
+    /// `width_cols`), and `ratatui_image::Image` silently refuses to draw
+    /// a protocol wider than the `Rect` it's given (see
+    /// `ratatui-image::Image::render`'s clipping guard): building at the
+    /// raw pane width while the minimap reserves 8 columns of that width
+    /// at draw time made every header/image in Rendered mode invisible
+    /// whenever the minimap was showing -- the default.
     pub fn rebuild_rendered_markdown(&mut self, id: NodeId) {
-        let width = self
-            .pane_viewport(id)
-            .map(|viewport| viewport.content_area.width)
-            .unwrap_or(self.layout.pane_content_area.width);
+        let width = self.editor_content_area(id).width;
         let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
             return;
         };
@@ -5833,7 +5867,7 @@ impl App {
         };
         match editor.save_to(&path) {
             Ok(()) => {
-                editor.path = Some(path.clone());
+                editor.retarget_path(path.clone());
                 if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
                     self.request_rename(id, name.to_string(), None, None);
                 }
@@ -6925,7 +6959,7 @@ impl App {
         })
     }
 
-    fn refresh_structure_loading(&mut self) {
+    pub(crate) fn refresh_structure_loading(&mut self) {
         self.structure_loading = self.project_restructure_jobs.values().any(|job| {
             matches!(
                 job.state,
@@ -7043,11 +7077,22 @@ impl App {
                         .unwrap_or_default()
                         .to_string()
                 });
-                let link = crate::terminal_links::link_at(&line, column, &self.session_cwd)
-                    .or_else(|| {
-                        view.osc8_link_at(&line, column)
-                            .map(crate::terminal_links::TerminalLink::Url)
-                    });
+                // Resolved once per click (not cached on `App`): a Ctrl+click
+                // is not a hot path, and computing it here keeps
+                // `terminal_links::link_at` itself free of I/O so it stays a
+                // plain, unit-testable function.
+                let home_dir = directories::BaseDirs::new()
+                    .map(|directories| directories.home_dir().to_path_buf());
+                let link = crate::terminal_links::link_at(
+                    &line,
+                    column,
+                    &self.session_cwd,
+                    home_dir.as_deref(),
+                )
+                .or_else(|| {
+                    view.osc8_link_at(&line, column)
+                        .map(crate::terminal_links::TerminalLink::Url)
+                });
                 if let Some(link) = link {
                     self.status_message = Some(format!(
                         "Link selected: {} — Ctrl+O opens, Ctrl+C copies, Esc cancels",
@@ -7428,12 +7473,13 @@ impl App {
                         .flatten();
                 if let Some((row, bracket_col, checked)) = clicked_checkbox {
                     editor.toggle_checkbox(row, bracket_col, checked);
-                    let _ = self.tree.set_pane_status(
-                        id,
-                        PaneStatus::Editor {
-                            dirty: editor.dirty,
-                        },
-                    );
+                    let dirty = editor.dirty;
+                    if let Err(error) = self.tree.set_pane_status(id, PaneStatus::Editor { dirty })
+                    {
+                        tracing::warn!(
+                            "could not mirror editor dirty state for pane {id:?}: {error}"
+                        );
+                    }
                 }
                 return;
             }
@@ -7802,6 +7848,43 @@ mod tests {
             .unwrap();
         app.request_automatic_project_restructure(project_id);
         assert_eq!(app.take_pending_restructure_requests().len(), 1);
+    }
+
+    #[test]
+    fn removed_project_prunes_its_restructure_job_and_retry_state() {
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/pruned-project"))
+            .unwrap();
+        let group_id = app.tree.add_group(project_id, "initial work").unwrap();
+        app.tree
+            .add_pane(group_id, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        app.request_automatic_project_restructure(project_id);
+        let automatic_request = app.take_pending_restructure_requests().remove(0);
+        app.finish_project_restructure(
+            project_id,
+            &automatic_request.current_structure,
+            Err(anyhow::anyhow!("gateway timed out")),
+        );
+        assert!(app.project_restructure_jobs.contains_key(&project_id));
+        assert!(app.automatic_restructure_retries.contains_key(&project_id));
+
+        // A fresh authoritative snapshot without the project (e.g. it was
+        // removed, or its chatroom/project entry deleted from disk) must
+        // drop both maps' entries in the same reconciliation pass that
+        // prunes every other per-node cache, not leave them behind for the
+        // life of the client process.
+        crate::render_cache::apply(
+            &mut app,
+            ilium_ipc::ServerEvent::TreeSnapshot(ilium_core::Tree::new()),
+        );
+
+        assert!(!app.project_restructure_jobs.contains_key(&project_id));
+        assert!(!app.automatic_restructure_retries.contains_key(&project_id));
+        assert!(!app.structure_loading);
     }
 
     #[test]
@@ -9718,24 +9801,25 @@ mod tests {
         app.agent_debug_logs.insert(
             pane_id,
             AgentDebugLogCache {
-                entries: vec![ilium_ipc::AgentDebugEntry {
-                    sequence: 1,
-                    occurred_at_unix_millis: 1_700_000_000_000,
-                    severity: ilium_ipc::AgentDebugSeverity::Information,
-                    source: ilium_ipc::AgentDebugSource::Detector,
-                    kind: ilium_ipc::AgentDebugEventKind::DetectionCycle,
-                    summary: "Detected Codex and classified it as working".to_string(),
-                    fields: vec![ilium_ipc::AgentDebugField::plain(
-                        "Activity decision",
-                        "Working because a live status marker was visible.",
-                    )],
-                    correlation_id: None,
-                    context: ilium_ipc::AgentDebugContext::default(),
-                    metadata: Default::default(),
-                }],
+                log: ilium_ipc::PaneDebugLog {
+                    entries: vec![ilium_ipc::AgentDebugEntry {
+                        sequence: 1,
+                        occurred_at_unix_millis: 1_700_000_000_000,
+                        severity: ilium_ipc::AgentDebugSeverity::Information,
+                        source: ilium_ipc::AgentDebugSource::Detector,
+                        kind: ilium_ipc::AgentDebugEventKind::DetectionCycle,
+                        summary: "Detected Codex and classified it as working".to_string(),
+                        fields: vec![ilium_ipc::AgentDebugField::plain(
+                            "Activity decision",
+                            "Working because a live status marker was visible.",
+                        )],
+                        correlation_id: None,
+                        context: ilium_ipc::AgentDebugContext::default(),
+                        metadata: Default::default(),
+                    }],
+                    ..Default::default()
+                },
                 through_sequence: 1,
-                retained_from_sequence: 1,
-                dropped_entry_count: 0,
                 is_loading: false,
                 has_loaded_retained_history: true,
             },
@@ -10397,6 +10481,47 @@ mod tests {
             panic!("disabled pixel headers must render as plain text");
         };
         assert_eq!(lines[0].spans[0].content, "Portable title");
+    }
+
+    #[test]
+    fn save_as_away_from_markdown_forces_the_pane_back_to_source() {
+        // Renaming a Rendered-mode Markdown pane to a non-Markdown extension
+        // must not strand it: `is_markdown` flips to `false`, which hides
+        // the toolbar's Source/Rendered buttons and turns `toggle_view_mode`
+        // into a no-op, so `view_mode` itself has to be the thing that
+        // resets -- see `EditorPane::retarget_path`.
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "notes.md", PaneContentKind::Editor)
+            .unwrap();
+        let mut editor = EditorPane::empty();
+        editor.path = Some(project.path().join("notes.md"));
+        editor.textarea = ratatui_textarea::TextArea::from(["# Notes"]);
+        editor.view_mode = EditorViewMode::Rendered;
+        editor.rendered = Some(crate::markdown::render::render(
+            &crate::markdown::document::parse("# Notes", project.path()),
+            &app.markdown_picker,
+            &mut app.markdown_rasterizer,
+            80,
+            editor.heading_rendering,
+        ));
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+
+        app.action_save_as(
+            editor_id,
+            project.path().join("notes.txt").display().to_string(),
+        );
+
+        let PaneRuntime::Editor(editor) = app.panes.get(&editor_id).unwrap() else {
+            panic!("test pane must remain an editor");
+        };
+        assert!(!editor.is_markdown());
+        assert_eq!(editor.view_mode, EditorViewMode::Source);
+        assert!(editor.rendered.is_none());
     }
 
     #[test]

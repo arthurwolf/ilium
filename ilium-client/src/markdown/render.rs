@@ -106,7 +106,16 @@ fn render_block(
                 Resize::Fit(None),
             ) {
                 Ok(protocol) => RenderedBlock::Header(protocol),
-                Err(_) => RenderedBlock::Placeholder(heading_fallback_line(text, *level)),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        heading = %text,
+                        level,
+                        "failed to encode rasterized heading as a terminal graphics protocol, \
+                         falling back to plain text"
+                    );
+                    RenderedBlock::Placeholder(heading_fallback_line(text, *level))
+                }
             }
         }
         Block::Image { alt, path } => render_image(alt, path, picker, width_cols),
@@ -128,9 +137,30 @@ fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -
     };
 
     let dyn_image = image::ImageReader::open(path)
+        .inspect_err(|error| {
+            tracing::warn!(%error, path = %path.display(), "failed to open markdown image file");
+        })
         .ok()
-        .and_then(|reader| reader.with_guessed_format().ok())
-        .and_then(|reader| reader.decode().ok());
+        .and_then(|reader| {
+            reader
+                .with_guessed_format()
+                .inspect_err(|error| {
+                    tracing::warn!(
+                        %error,
+                        path = %path.display(),
+                        "failed to guess markdown image format"
+                    );
+                })
+                .ok()
+        })
+        .and_then(|reader| {
+            reader
+                .decode()
+                .inspect_err(|error| {
+                    tracing::warn!(%error, path = %path.display(), "failed to decode markdown image");
+                })
+                .ok()
+        });
 
     let Some(dyn_image) = dyn_image else {
         return RenderedBlock::Placeholder(Line::styled(
@@ -144,10 +174,17 @@ fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -
     let size = resize.size_for(&dyn_image, picker.font_size(), available);
     match picker.new_protocol(dyn_image, size, resize) {
         Ok(protocol) => RenderedBlock::Image(protocol),
-        Err(_) => RenderedBlock::Placeholder(Line::styled(
-            format!("[image failed to render: {alt}]"),
-            Style::new().fg(Color::DarkGray).italic(),
-        )),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                path = %path.display(),
+                "failed to encode markdown image as a terminal graphics protocol"
+            );
+            RenderedBlock::Placeholder(Line::styled(
+                format!("[image failed to render: {alt}]"),
+                Style::new().fg(Color::DarkGray).italic(),
+            ))
+        }
     }
 }
 

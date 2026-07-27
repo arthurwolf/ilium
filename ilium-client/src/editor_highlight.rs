@@ -14,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 use crate::editor_pane::{EditorPane, SourceVisualRow};
 use crate::syntax::LineTokens;
@@ -64,7 +64,13 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &EditorPane, tokens: &[Line
     };
 
     let visual_rows = editor.source_visual_rows(area.width);
-    let top_row = usize::from(editor.source_scroll_row());
+    // Clamped defensively rather than trusted outright: the caller is
+    // documented to call `update_source_scroll_mirror` with this same
+    // `area` first (which keeps the mirrored row within bounds), but this
+    // is a `pub fn` and a future/refactored caller that skips or
+    // mis-sequences that call must not turn into a slice-index panic that
+    // takes down the whole client below.
+    let top_row = usize::from(editor.source_scroll_row()).min(visual_rows.len());
     let bottom_row = (top_row + usize::from(area.height)).min(visual_rows.len());
     let cursor = editor.textarea.cursor();
     let (cursor_row, cursor_col) = (cursor.0, cursor.1);
@@ -215,7 +221,16 @@ fn render_row_spans(
     let mut run_style: Option<Style> = None;
     let mut run_text = String::new();
     let tab_width = usize::from(tab_len).max(1);
-    let mut visual_col = UnicodeWidthStr::width(&line[..visual_row.start_byte]);
+    // Tab-stop width tracking restarts at 0 for every visual row, not the
+    // physical line -- matches `ratatui_textarea`'s own wrapped rendering,
+    // which builds a fresh `DisplayTextBuilder` (width starts at 0) per
+    // wrapped fragment (see that crate's private `textarea::line_spans_segment`
+    // / `highlight::DisplayTextBuilder`), and matches `EditorPane::visual_rows_for_line`,
+    // which resets its own `segment_width` at each wrap point for the same
+    // reason. Starting from the physical line's cumulative width here would
+    // desync tab padding from where `visual_rows_for_line` decided to wrap,
+    // visibly misaligning continuation rows that contain a tab.
+    let mut visual_col = 0usize;
     for (relative_byte, ch) in line[visual_row.start_byte..visual_row.end_byte].char_indices() {
         let byte_index = visual_row.start_byte + relative_byte;
         let style = per_byte[byte_index];
@@ -405,6 +420,37 @@ mod tests {
             buffer.cell((6, 1)).unwrap().fg,
             Color::Reset,
             "wrapped string text should retain its token color"
+        );
+    }
+
+    #[test]
+    fn wrapped_continuation_row_expands_a_tab_relative_to_its_own_start() {
+        // Row 0 is exactly 10 plain columns ("//abcdefgh"), so the wrap
+        // point falls right after it; row 1 starts with "12" (2 columns)
+        // before the tab. `EditorPane::visual_rows_for_line` decides that
+        // wrap using a tab-stop counter that resets to 0 at the start of
+        // each visual row (matching `ratatui_textarea`'s own wrapped
+        // rendering, which builds a fresh highlighter per fragment) --
+        // so this tab must expand to 2 columns (4 - 2 % 4), landing "XYZ"
+        // at column 4 of row 1. Before the `visual_col` fix, this row's
+        // renderer measured the tab from the physical line's start (10
+        // columns already consumed) and expanded it to 4 columns instead,
+        // pushing "XYZ" out to column 6.
+        let mut editor = load_pane("sample.rs", "//abcdefgh12\tXYZ");
+        editor.apply_defaults(&crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        });
+
+        let buffer = render_to_buffer(&editor, 10, 3);
+        let second_row = (0..8)
+            .map(|column| buffer.cell((column, 1)).unwrap().symbol())
+            .collect::<String>();
+
+        assert_eq!(
+            second_row, "12  XYZ ",
+            "tab should expand relative to this visual row's own start, not the physical line's"
         );
     }
 }

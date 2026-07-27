@@ -95,7 +95,13 @@ impl HeaderRasterizer {
         let img_width = width_px.round().max(1.0) as u32;
         let img_height = line_height.round().max(1.0) as u32;
         let mut image = RgbaImage::from_pixel(img_width, img_height, Rgba([0, 0, 0, 0]));
-        let fg = CosmicColor::rgb(0xe0, 0xaf, 0x68);
+        // Shares its literal with `super::document::HEADING_FG` (via
+        // `HEADING_FG_RGB`) rather than restating the three bytes here, so
+        // a header can't render one accent color as a pixel image and a
+        // different one in the plain-text/fallback path (see that
+        // constant's doc comment).
+        let (heading_fg_r, heading_fg_g, heading_fg_b) = super::document::HEADING_FG_RGB;
+        let fg = CosmicColor::rgb(heading_fg_r, heading_fg_g, heading_fg_b);
 
         buffer.draw(
             &mut self.font_system,

@@ -28,7 +28,7 @@ pub fn render_report(
         "Saved: {}\n",
         crate::agent_debug_ui::format_timestamp(saved_at_unix_millis)
     ));
-    report.push_str(&format!("Retained events: {}\n", cache.entries.len()));
+    report.push_str(&format!("Retained events: {}\n", cache.log.entries.len()));
     report.push_str(&format!(
         "Exported events: {}\n",
         filter.visible_entry_count(cache)
@@ -38,17 +38,22 @@ pub fn render_report(
     } else {
         "Filter: left-panel focus/hover animation resize events included\n"
     });
-    if cache.dropped_entry_count > 0 {
+    if cache.log.dropped_entry_count > 0 {
         report.push_str(&format!(
             "Older events discarded by retention: {}\n",
-            cache.dropped_entry_count
+            cache.log.dropped_entry_count
         ));
     }
     report.push_str(
         "Detection policy: a detection decision is recorded only when identity, activity, goal, session, or supporting evidence changes.\n",
     );
 
-    for entry in cache.entries.iter().filter(|entry| filter.includes(entry)) {
+    for entry in cache
+        .log
+        .entries
+        .iter()
+        .filter(|entry| filter.includes(entry))
+    {
         append_entry(&mut report, entry);
     }
     report
@@ -172,30 +177,31 @@ mod tests {
     #[test]
     fn report_is_complete_human_readable_and_omits_internal_heartbeat_counters() {
         let cache = AgentDebugLogCache {
-            entries: vec![AgentDebugEntry {
-                sequence: 7,
-                occurred_at_unix_millis: 1_700_000_000_000,
-                severity: AgentDebugSeverity::Information,
-                source: AgentDebugSource::Detector,
-                kind: AgentDebugEventKind::DetectionCycle,
-                summary: "Detected Codex and classified it as working".to_string(),
-                fields: vec![ilium_ipc::AgentDebugField::plain(
-                    "Activity decision",
-                    "Working because the visible terminal contains a live status line.",
-                )],
-                correlation_id: Some("submission-7".to_string()),
-                context: AgentDebugContext {
-                    class: Some(AgentClass::Codex),
-                    activity: Some(AgentActivity::Working),
-                    process_id: Some(42),
-                    session_id: Some("session-a".to_string()),
-                    title_generation: 2,
-                },
-                metadata: Default::default(),
-            }],
+            log: ilium_ipc::PaneDebugLog {
+                entries: vec![AgentDebugEntry {
+                    sequence: 7,
+                    occurred_at_unix_millis: 1_700_000_000_000,
+                    severity: AgentDebugSeverity::Information,
+                    source: AgentDebugSource::Detector,
+                    kind: AgentDebugEventKind::DetectionCycle,
+                    summary: "Detected Codex and classified it as working".to_string(),
+                    fields: vec![ilium_ipc::AgentDebugField::plain(
+                        "Activity decision",
+                        "Working because the visible terminal contains a live status line.",
+                    )],
+                    correlation_id: Some("submission-7".to_string()),
+                    context: AgentDebugContext {
+                        class: Some(AgentClass::Codex),
+                        activity: Some(AgentActivity::Working),
+                        process_id: Some(42),
+                        session_id: Some("session-a".to_string()),
+                        title_generation: 2,
+                    },
+                    metadata: Default::default(),
+                }],
+                ..Default::default()
+            },
             through_sequence: 7,
-            retained_from_sequence: 7,
-            dropped_entry_count: 0,
             is_loading: false,
             has_loaded_retained_history: true,
         };
@@ -236,16 +242,18 @@ mod tests {
             },
         };
         let cache = AgentDebugLogCache {
-            entries: vec![
-                resize_entry(
-                    1,
-                    "tree animation resize",
-                    PaneResizeCause::TreePanelAnimation,
-                ),
-                resize_entry(2, "host terminal resize", PaneResizeCause::HostTerminal),
-            ],
+            log: ilium_ipc::PaneDebugLog {
+                entries: vec![
+                    resize_entry(
+                        1,
+                        "tree animation resize",
+                        PaneResizeCause::TreePanelAnimation,
+                    ),
+                    resize_entry(2, "host terminal resize", PaneResizeCause::HostTerminal),
+                ],
+                ..Default::default()
+            },
             through_sequence: 2,
-            retained_from_sequence: 1,
             has_loaded_retained_history: true,
             ..AgentDebugLogCache::default()
         };

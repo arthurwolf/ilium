@@ -69,11 +69,26 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
         }
         "ui.tree_width" => {
-            let target = unsigned(&value)? as i32;
-            app.settings_adjust_tree_width(target - i32::from(app.ui_settings.tree_width));
-            if i32::from(app.ui_settings.tree_width) != target {
+            // Bounds-check into `u16` (the field's real width) before ever mixing it into
+            // signed arithmetic below -- `unsigned(&value)? as i32` used to truncate huge
+            // JSON numbers into an arbitrary (possibly very negative) `i32`, which could
+            // overflow the subsequent subtraction and panic on a debug build.
+            let target = u16::try_from(unsigned(&value)?)
+                .map_err(|_| "tree width is outside ilium's allowed range".to_owned())?;
+            // Validate against the real allowed range *before* mutating anything: every
+            // other numeric arm in this file (scrollback budget, card preview lines,
+            // board column width) rejects an out-of-range target up front. Without this,
+            // `settings_adjust_tree_width` below clamps and persists a width the caller
+            // never asked for, then this arm reports failure anyway -- a rejected
+            // request must not have a visible side effect.
+            if !(crate::layout::MIN_TREE_WIDTH..=crate::layout::MAX_TREE_WIDTH).contains(&target) {
                 return Err("tree width is outside ilium's allowed range".to_owned());
             }
+            let target = i32::from(target);
+            app.settings_adjust_tree_width(target - i32::from(app.ui_settings.tree_width));
+            // Cannot fail: `target` was just proven to be inside
+            // `settings_adjust_tree_width`'s own clamp range, so the exact delta lands on it.
+            debug_assert_eq!(i32::from(app.ui_settings.tree_width), target);
         }
         "ui.tree_order" => {
             app.settings_set_tree_order(parse_tree_order(string(&value)?)?);
@@ -134,7 +149,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
         }
         path if path.starts_with("ui.icons.") => {
-            let key = path.trim_start_matches("ui.icons.");
+            // The guard above already proved the prefix is present, so this can never miss.
+            let key = path
+                .strip_prefix("ui.icons.")
+                .expect("guarded by starts_with(\"ui.icons.\") above");
             let target = IconTarget::from_key(key)
                 .ok_or_else(|| format!("Unknown configurable icon {key:?}"))?;
             app.settings_set_icon(target, string(&value)?.to_owned());
@@ -149,7 +167,23 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             {
                 return Err("scrollback budget must be 4-512 MiB in 4 MiB increments".to_owned());
             }
-            while app.terminal_settings.scrollback_budget_mib != target {
+            // Stepping moves the value by a fixed 4 MiB per adjustment (see
+            // `stepped_scrollback_budget_mib`), but a value loaded from a hand-edited
+            // config.toml is only range-checked at load time, not 4-MiB-aligned -- if its
+            // residue mod 4 differs from `target`'s (always 0 here), repeatedly stepping by
+            // 4 never lands on `target` and the old unconditional `while` loop spun forever
+            // oscillating between two values. Bound the loop to the most steps a full sweep
+            // of the allowed range could ever need, and fail loudly instead of hanging.
+            let max_steps = usize::from(
+                (crate::config::TerminalSettings::MAX_SCROLLBACK_BUDGET_MIB
+                    - crate::config::TerminalSettings::MIN_SCROLLBACK_BUDGET_MIB)
+                    / 4
+                    + 1,
+            );
+            for _ in 0..max_steps {
+                if app.terminal_settings.scrollback_budget_mib == target {
+                    break;
+                }
                 let direction = if app.terminal_settings.scrollback_budget_mib < target {
                     1
                 } else {
@@ -157,6 +191,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 };
                 app.settings_adjust_terminal_row(TerminalRow::ScrollbackBudget, direction);
             }
+            ensure_reached(app.terminal_settings.scrollback_budget_mib == target)?;
         }
         "terminal.new_pane_directory" => {
             let target = parse_new_pane_directory(string(&value)?)?;
@@ -230,7 +265,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             app.settings_apply_keymap_preset(preset);
         }
         path if path.starts_with("keyboard.bindings.") => {
-            let action_name = path.trim_start_matches("keyboard.bindings.");
+            // The guard above already proved the prefix is present, so this can never miss.
+            let action_name = path
+                .strip_prefix("keyboard.bindings.")
+                .expect("guarded by starts_with(\"keyboard.bindings.\") above");
             let action = crate::keymap::action_from_name(action_name)
                 .ok_or_else(|| format!("Unknown keyboard action {action_name:?}"))?;
             let key = crate::keymap::BindingKey::parse_config_value(string(&value)?).ok_or(
@@ -311,7 +349,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             set_sound_event(app, SoundEvent::WaitingBackground, boolean(&value)?)
         }
         path if path.starts_with("triggers.") => {
-            let event_key = path.trim_start_matches("triggers.");
+            // The guard above already proved the prefix is present, so this can never miss.
+            let event_key = path
+                .strip_prefix("triggers.")
+                .expect("guarded by starts_with(\"triggers.\") above");
             let event = TriggerEvent::from_key(event_key)
                 .ok_or_else(|| format!("Unknown trigger event {event_key:?}"))?;
             let values = value
@@ -760,5 +801,46 @@ mod tests {
 
         adjust_setting(&mut app, "inference.kilo_gateway.model", 1).unwrap();
         assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
+    }
+
+    #[test]
+    fn tree_width_rejects_out_of_range_values_without_mutating_state() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let original = app.ui_settings.tree_width;
+
+        // A value far outside `[MIN_TREE_WIDTH, MAX_TREE_WIDTH]` must be rejected up
+        // front, not silently clamped and persisted before the arm reports failure.
+        assert!(set_setting(&mut app, "ui.tree_width", json!(5)).is_err());
+        assert_eq!(
+            app.ui_settings.tree_width, original,
+            "a rejected ui.tree_width request must not have a visible side effect"
+        );
+
+        // A JSON number too large to even fit `u16` (let alone the real width range)
+        // used to be truncated with `as i32`, which could overflow the subsequent
+        // subtraction; it must now be rejected cleanly instead of panicking.
+        assert!(set_setting(&mut app, "ui.tree_width", json!(2_147_483_648_u64)).is_err());
+        assert_eq!(app.ui_settings.tree_width, original);
+
+        set_setting(&mut app, "ui.tree_width", json!(40)).unwrap();
+        assert_eq!(app.ui_settings.tree_width, 40);
+    }
+
+    #[test]
+    fn scrollback_budget_rejects_rather_than_hangs_when_misaligned() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+
+        // Config loading only range-checks `scrollback_budget_mib`, not 4 MiB
+        // alignment, so a hand-edited config.toml can leave an odd starting value.
+        // Stepping by a fixed 4 MiB per adjustment can then never land exactly on a
+        // 4-MiB-aligned target; this must return an error promptly instead of
+        // spinning forever oscillating between two values.
+        app.terminal_settings.scrollback_budget_mib = 5;
+        assert!(set_setting(&mut app, "terminal.scrollback_budget_mib", json!(8)).is_err());
+
+        // A reachable, aligned target still works normally.
+        app.terminal_settings.scrollback_budget_mib = 32;
+        set_setting(&mut app, "terminal.scrollback_budget_mib", json!(64)).unwrap();
+        assert_eq!(app.terminal_settings.scrollback_budget_mib, 64);
     }
 }

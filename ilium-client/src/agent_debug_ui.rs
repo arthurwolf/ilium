@@ -21,7 +21,7 @@ use crate::app::{
 use crate::theme;
 
 const BACK_BUTTON_WIDTH: u16 = 17;
-const SAVE_BUTTON_WIDTH: u16 = 14;
+const SAVE_BUTTON_WIDTH: u16 = 13;
 const RESIZE_FILTER_BUTTON_WIDTH: u16 = 24;
 const TOOLBAR_GAP: u16 = 2;
 
@@ -94,7 +94,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &AgentDebugLogVie
         regions[1],
     );
     if total_lines > visible_lines {
-        let mut scrollbar_state = ScrollbarState::new(maximum_top).position(top);
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(top);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
@@ -171,12 +171,12 @@ fn cache_summary(cache: Option<&AgentDebugLogCache>, filter: AgentDebugLogFilter
     if cache.is_loading {
         return "Loading complete retained history…".to_string();
     }
-    let dropped = if cache.dropped_entry_count == 0 {
+    let dropped = if cache.log.dropped_entry_count == 0 {
         String::new()
     } else {
         format!(
             " · {} older events discarded by retention",
-            cache.dropped_entry_count
+            cache.log.dropped_entry_count
         )
     };
     let visible_count = filter.visible_entry_count(cache);
@@ -196,7 +196,7 @@ fn history_lines(
     let Some(cache) = cache else {
         return vec![Line::from(""), Line::from("  ⏳ Requesting history…")];
     };
-    if cache.entries.is_empty() {
+    if cache.log.entries.is_empty() {
         return vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -227,7 +227,12 @@ fn history_lines(
     }
 
     let mut lines = Vec::new();
-    for entry in cache.entries.iter().filter(|entry| filter.includes(entry)) {
+    for entry in cache
+        .log
+        .entries
+        .iter()
+        .filter(|entry| filter.includes(entry))
+    {
         lines.push(Line::from(""));
         lines.push(event_heading(entry));
         lines.push(Line::from(vec![
@@ -375,7 +380,7 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
             ilium_core::AgentClass::Claude => "Claude Code".to_string(),
             ilium_core::AgentClass::Codex => "Codex".to_string(),
             ilium_core::AgentClass::Antigravity => "Antigravity".to_string(),
-            ilium_core::AgentClass::Other(name) => name.clone(),
+            ilium_core::AgentClass::Other(name) => sanitize_terminal_text(name),
         });
     }
     if let Some(activity) = entry.context.activity {
@@ -394,7 +399,7 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
         parts.push(format!("process {process_id}"));
     }
     if let Some(session_id) = entry.context.session_id.as_deref() {
-        parts.push(format!("session {session_id}"));
+        parts.push(format!("session {}", sanitize_terminal_text(session_id)));
     }
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
@@ -488,19 +493,22 @@ mod tests {
     #[test]
     fn default_filter_hides_only_typed_tree_panel_animation_resizes() {
         let cache = AgentDebugLogCache {
-            entries: vec![
-                resize_entry(
-                    1,
-                    "tree animation resize",
-                    Some(ilium_ipc::PaneResizeCause::TreePanelAnimation),
-                ),
-                resize_entry(
-                    2,
-                    "host terminal resize",
-                    Some(ilium_ipc::PaneResizeCause::HostTerminal),
-                ),
-                resize_entry(3, "legacy resize", None),
-            ],
+            log: ilium_ipc::PaneDebugLog {
+                entries: vec![
+                    resize_entry(
+                        1,
+                        "tree animation resize",
+                        Some(ilium_ipc::PaneResizeCause::TreePanelAnimation),
+                    ),
+                    resize_entry(
+                        2,
+                        "host terminal resize",
+                        Some(ilium_ipc::PaneResizeCause::HostTerminal),
+                    ),
+                    resize_entry(3, "legacy resize", None),
+                ],
+                ..Default::default()
+            },
             ..AgentDebugLogCache::default()
         };
         let default_filter = AgentDebugLogFilter::default();

@@ -32,8 +32,8 @@ mod tests {
     use std::path::PathBuf;
 
     use ilium_core::{
-        AgentActivity, AgentClass, BoardStorage, NodeId, PaneStatus, SplitOrientation, Tree,
-        TreeMoveDirection, ROOT_ID,
+        AgentActivity, AgentClass, BoardStorage, NodeId, PaneStatus, PromptQueueDelivery,
+        SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
     use ilium_sound::{SoundSettings, SoundSourceKind};
 
@@ -185,6 +185,22 @@ mod tests {
                 text: "cargo test".to_string(),
                 send_enter: true,
             },
+            ClientRequest::EnqueuePrompt {
+                pane_id: NodeId(2),
+                text: "cargo test".to_string(),
+                delivery: PromptQueueDelivery::Once,
+            },
+            ClientRequest::EnqueuePrompt {
+                pane_id: NodeId(2),
+                text: "cargo test".to_string(),
+                delivery: PromptQueueDelivery::Times { remaining_runs: 3 },
+            },
+            ClientRequest::EnqueuePrompt {
+                pane_id: NodeId(2),
+                text: "cargo test".to_string(),
+                delivery: PromptQueueDelivery::Forever,
+            },
+            ClientRequest::ClearPromptQueue { pane_id: NodeId(2) },
             ClientRequest::SetSessionPaneTitle {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
@@ -339,6 +355,7 @@ mod tests {
                 pane_id: NodeId(2),
                 path: None,
             },
+            ServerEvent::SessionRecoveryAvailable { pane_count: 3 },
             ServerEvent::InitialStateSyncComplete,
             ServerEvent::PanePromptSubmitted {
                 pane_id: NodeId(2),

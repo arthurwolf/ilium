@@ -245,6 +245,23 @@ impl NotificationsConfig {
     }
 }
 
+/// Parses `[session] recovery_policy` strictly -- an unrecognized value is a
+/// [`ConfigLoadError::InvalidSessionRecoveryPolicy`], not a silent fallback
+/// to the default, since this string controls a crash-recovery safety gate
+/// (see [`ConfigLoadError::InvalidSessionRecoveryPolicy`]'s doc comment).
+/// Mirrors `ilium_client`'s identical `parse_session_recovery_policy` for
+/// the client-side copy of this same setting.
+fn parse_session_recovery_policy(value: &str) -> Result<SessionRecoveryConfig, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "restore_automatically" => Ok(SessionRecoveryConfig::RestoreAutomatically),
+        "ask_before_restore" => Ok(SessionRecoveryConfig::AskBeforeRestore),
+        "start_fresh" => Ok(SessionRecoveryConfig::StartFresh),
+        _ => Err(ConfigLoadError::InvalidSessionRecoveryPolicy(
+            value.to_string(),
+        )),
+    }
+}
+
 /// Loads `<config_dir>/config.toml`. A missing file is not an error --
 /// most sessions never create one -- and loads as [`ServerConfig::default`].
 /// A file that exists but fails to read or parse *is* a
@@ -277,23 +294,24 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
             source,
         })?;
 
+    let session_recovery = raw
+        .session
+        .recovery_policy
+        .as_deref()
+        .map(parse_session_recovery_policy)
+        .transpose()
+        .map_err(|source| ServerError::ConfigLoad {
+            path: path.clone(),
+            source,
+        })?
+        .unwrap_or_default();
+
     Ok(ServerConfig {
         detection,
         notifications: NotificationsConfig::from_raw(raw.notifications),
         sound: raw.sound,
         custom_signatures,
-        session_recovery: match raw
-            .session
-            .recovery_policy
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .as_deref()
-        {
-            Some("start_fresh") => SessionRecoveryConfig::StartFresh,
-            Some("ask_before_restore") => SessionRecoveryConfig::AskBeforeRestore,
-            _ => SessionRecoveryConfig::RestoreAutomatically,
-        },
+        session_recovery,
         debug: DebugConfig {
             file_logging_enabled: raw.debug.file_logging_enabled.unwrap_or(false),
         },
@@ -536,6 +554,50 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn an_unrecognized_session_recovery_policy_is_a_config_load_error() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[session]\nrecovery_policy = \"resore_automatically\"\n",
+        )
+        .unwrap();
+
+        let result = load(&dir);
+        assert!(matches!(
+            result,
+            Err(ServerError::ConfigLoad {
+                source: ConfigLoadError::InvalidSessionRecoveryPolicy(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn session_recovery_policy_accepts_all_three_documented_values() {
+        for (value, expected) in [
+            (
+                "restore_automatically",
+                SessionRecoveryConfig::RestoreAutomatically,
+            ),
+            (
+                "ask_before_restore",
+                SessionRecoveryConfig::AskBeforeRestore,
+            ),
+            ("start_fresh", SessionRecoveryConfig::StartFresh),
+        ] {
+            let dir = scratch_dir();
+            std::fs::write(
+                dir.join("config.toml"),
+                format!("[session]\nrecovery_policy = \"{value}\"\n"),
+            )
+            .unwrap();
+
+            let config = load(&dir).expect("documented recovery_policy value should load");
+            assert_eq!(config.session_recovery, expected);
+        }
     }
 
     #[test]

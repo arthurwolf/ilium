@@ -662,8 +662,19 @@ async fn run_due_panes(
             // to a slow tier when a newer frame already exists. The focused-tier
             // delay converges promptly without turning animated output into an
             // unbounded process-table scan loop.
-            let screen_changed_after_snapshot =
-                runtime.session.screen_generation() != classified_pane.screen_generation;
+            //
+            // Scoped to panes where an agent process was actually identified:
+            // per README "Poll cadence", `Idle`/`Done`/`PlainShell` panes are
+            // meant to poll slow specifically *because* they don't change on
+            // their own -- but an ordinary shell can still produce continuous
+            // PTY output on its own (`tail -f`, a build log, `top`). Without
+            // this scope, such a pane's screen generation would keep bumping
+            // between snapshot and apply forever, pinning it to
+            // `FOCUSED_POLL_INTERVAL` and defeating the slow tier's entire
+            // purpose of not burning CPU on a process-table scan for panes
+            // that were never running an agent to begin with.
+            let screen_changed_after_snapshot = classified_pane.identity.is_some()
+                && runtime.session.screen_generation() != classified_pane.screen_generation;
 
             runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
 

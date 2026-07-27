@@ -250,18 +250,21 @@ impl ShellCommandTracker {
         if self.opaque_reason.is_none() && self.cursor > 0 {
             self.cursor -= 1;
             self.current_line.remove(self.cursor);
+            self.clear_truncation_flag_if_line_is_empty();
         }
     }
 
     fn delete_at_cursor(&mut self) {
         if self.opaque_reason.is_none() && self.cursor < self.current_line.len() {
             self.current_line.remove(self.cursor);
+            self.clear_truncation_flag_if_line_is_empty();
         }
     }
 
     fn delete_to_end(&mut self) {
         if self.opaque_reason.is_none() {
             self.current_line.truncate(self.cursor);
+            self.clear_truncation_flag_if_line_is_empty();
         }
     }
 
@@ -269,6 +272,20 @@ impl ShellCommandTracker {
         if self.opaque_reason.is_none() {
             self.current_line.drain(..self.cursor);
             self.cursor = 0;
+            self.clear_truncation_flag_if_line_is_empty();
+        }
+    }
+
+    /// Drops the stale truncation warning once every character that could
+    /// have been affected by it is gone. `was_truncated` otherwise stays set
+    /// for the rest of the pending line's life (it is only cleared wholesale
+    /// by `reset_pending_line`/`discard_pending_line`), which would wrongly
+    /// mark a fully cleared-and-retyped line -- e.g. an oversized paste
+    /// undone with Ctrl-U and replaced by a short command -- as untrustworthy
+    /// even though the retyped text is exact.
+    fn clear_truncation_flag_if_line_is_empty(&mut self) {
+        if self.current_line.is_empty() {
+            self.was_truncated = false;
         }
     }
 
@@ -312,6 +329,18 @@ fn decode_utf8_character(bytes: &[u8]) -> Option<(char, usize)> {
 
 fn escape_sequence_len(bytes: &[u8]) -> usize {
     if bytes.len() < 2 || bytes[1] != b'[' {
+        // A non-CSI escape (e.g. an unrecognized Alt+<key> or SS3 sequence)
+        // normally also consumes the byte right after ESC. But if that byte
+        // is a line terminator, consuming it would swallow the submission
+        // boundary itself rather than just marking the line's content
+        // opaque -- fail closed on the escape alone and let the terminator
+        // still end the line on the next loop iteration.
+        if bytes
+            .get(1)
+            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+        {
+            return 1;
+        }
         return bytes.len().min(2);
     }
     bytes
@@ -429,6 +458,43 @@ mod tests {
         assert_eq!(
             submission.opaque_reason,
             Some(OpaqueInputReason::HistoryNavigation)
+        );
+    }
+
+    #[test]
+    fn truncation_flag_clears_once_the_tracked_line_is_fully_cleared() {
+        let mut tracker = ShellCommandTracker::default();
+        // Mirrors two separate KeyInput arrivals: the oversized line lands in
+        // its own call, then Ctrl-U (delete-to-start) and the retyped
+        // command land in a second call.
+        let overflow = "x".repeat(MAX_TRACKED_COMMAND_CHARS + 10).into_bytes();
+        assert_eq!(tracker.observe_submission(&overflow), None);
+
+        let submission = tracker
+            .observe_submission(b"\x15ls\r")
+            .expect("enter commits the retyped line");
+
+        assert_eq!(submission.text.as_deref(), Some("ls"));
+        assert!(!submission.was_truncated);
+        assert_eq!(submission.opaque_reason, None);
+        assert_eq!(submission.exact_text(), Some("ls"));
+    }
+
+    #[test]
+    fn unrecognized_non_csi_escape_never_swallows_the_following_line_terminator() {
+        let mut tracker = ShellCommandTracker::default();
+        // An unrecognized non-CSI escape (e.g. an unmapped Alt+<key>) must
+        // still leave the very next `\r` as a real submission boundary,
+        // rather than being consumed alongside the escape byte and losing
+        // the commit entirely.
+        let submission = tracker
+            .observe_submission(b"typed\x1b\r")
+            .expect("the line terminator after the escape still submits");
+
+        assert_eq!(submission.text, None);
+        assert_eq!(
+            submission.opaque_reason,
+            Some(OpaqueInputReason::UnsupportedEscapeSequence)
         );
     }
 

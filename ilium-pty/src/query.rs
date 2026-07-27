@@ -149,4 +149,20 @@ mod tests {
         parser.process(b"\x1b[3;5H\x1b[6n");
         assert_eq!(sink.0.lock().unwrap().as_slice(), b"\x1b[3;5R");
     }
+
+    #[test]
+    fn private_marker_variants_are_left_unanswered() {
+        // `vte` (vt100's own CSI parser) routes the `?` private-marker byte
+        // into the `i1` callback parameter, distinct from `None`. This test
+        // pins that down: `CSI ? c` (a private-marker PDA variant) and
+        // `CSI ? 6 n` (DECXCPR, the extended cursor-position report) must
+        // NOT fall into the plain `(None, 'c')` / `(None, 'n')` arms above,
+        // because DECXCPR expects a differently-shaped reply
+        // (`CSI ? row ; col ; page R`) than the plain CPR this responder
+        // sends. Answering with the wrong shape would be worse than not
+        // answering at all, so both must produce no reply.
+        let (mut parser, sink) = parser_with_recording_responder();
+        parser.process(b"\x1b[?c\x1b[?6n");
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
 }

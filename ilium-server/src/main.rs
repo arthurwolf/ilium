@@ -9,6 +9,13 @@ const RUNTIME_WORKER_THREADS: usize = 2;
 const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
 const RUNTIME_THREAD_STACK_BYTES: usize = 1024 * 1024;
 const RUNTIME_BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(5);
+/// Bound on how long process exit may be blocked by still-running
+/// `spawn_blocking` work (e.g. a sound-player subprocess or a slow config
+/// reload) after `run()` has already aborted every tracked async task.
+/// Dropping a multi-thread `Runtime` with no explicit timeout waits
+/// indefinitely for blocking-pool threads to finish, which would let one
+/// stuck external player process hang the whole daemon's shutdown forever.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct ServerLaunch {
     session_name: String,
@@ -93,7 +100,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(async_main(launch, config_dir, server_config))
+    let exit_code = runtime.block_on(async_main(launch, config_dir, server_config));
+    // Explicit, bounded shutdown instead of letting `runtime` drop
+    // implicitly: an implicit drop of a multi-thread Runtime blocks the
+    // current thread indefinitely for any still-running blocking-pool
+    // thread (e.g. a stuck `paplay`/`mpv` sound-playback subprocess that
+    // `run()`'s task-abort pass could not actually interrupt).
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    exit_code
 }
 
 async fn async_main(

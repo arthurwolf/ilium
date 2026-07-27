@@ -3,8 +3,9 @@
 use crate::app::App;
 
 use super::command::{
-    BoardAction, ControlCommand, EditorAction, NodeTarget, SessionAction, TerminalAction,
-    TerminalCommand, TerminalKey, TerminalSubmissionCommand, TerminalTypingCommand, TreeAction,
+    BoardAction, ControlCommand, EditorAction, NodeTarget, PromptDeliveryChoice, SessionAction,
+    TerminalAction, TerminalCommand, TerminalKey, TerminalSubmissionCommand, TerminalTypingCommand,
+    TreeAction, TreeCommand,
 };
 use super::resolver::resolve_node;
 
@@ -31,10 +32,7 @@ pub fn confirmation_plan(
                 "Run the shell command {:?} in a new terminal pane?",
                 command.command_line.as_deref().unwrap_or_default()
             )),
-            TreeAction::Close => {
-                let node_id = resolve_node(app, &command.target)?;
-                app.close_confirmation_message(node_id)
-            }
+            TreeAction::Close => return pinned_close_plan(app, command),
             _ => None,
         },
         ControlCommand::Editor(command)
@@ -55,6 +53,21 @@ pub fn confirmation_plan(
                 TerminalAction::ScheduleInput => {
                     Some("Schedule this terminal input for automatic submission?".to_owned())
                 }
+                // Queuing a prompt is at least as consequential as scheduling one:
+                // `Forever`/`Times` delivery keeps auto-submitting into the pane
+                // long after this call returns, so it must be guarded the same way.
+                TerminalAction::QueuePrompt => Some(match command.delivery {
+                    Some(PromptDeliveryChoice::Forever) => {
+                        "Queue this prompt to be submitted automatically after every future completion, indefinitely?".to_owned()
+                    }
+                    Some(PromptDeliveryChoice::Times) => format!(
+                        "Queue this prompt to be submitted automatically for the next {} completions?",
+                        command.runs.unwrap_or(1)
+                    ),
+                    Some(PromptDeliveryChoice::Once) | None => {
+                        "Queue this prompt for automatic submission after the agent's next completion?".to_owned()
+                    }
+                }),
                 _ => None,
             }
         }
@@ -84,6 +97,34 @@ pub fn confirmation_plan(
         question,
         preparation: None,
         confirmed_command: command.clone(),
+        cancellation_message: "Cancelled the pending action".to_owned(),
+    }))
+}
+
+/// Resolves the close target once and pins it into the confirmed command's
+/// target. `command.target` is frequently empty (voice-driven "close this"),
+/// and an empty target re-resolves against whatever is focused/selected at
+/// execution time (see `resolve_node`). Confirmation is answered on a later
+/// round-trip, so focus can move in between; without pinning, confirming
+/// "close the agent pane" could silently close a different pane the user
+/// happened to focus while the question was pending.
+fn pinned_close_plan(app: &App, command: &TreeCommand) -> Result<Option<ConfirmationPlan>, String> {
+    let node_id = resolve_node(app, &command.target)?;
+    let Some(question) = app.close_confirmation_message(node_id) else {
+        return Ok(None);
+    };
+
+    Ok(Some(ConfirmationPlan {
+        question,
+        preparation: None,
+        confirmed_command: ControlCommand::Tree(TreeCommand {
+            target: NodeTarget {
+                id: Some(node_id.0),
+                name: None,
+                path: None,
+            },
+            ..command.clone()
+        }),
         cancellation_message: "Cancelled the pending action".to_owned(),
     }))
 }
@@ -168,6 +209,50 @@ mod tests {
     }
 
     #[test]
+    fn closing_with_an_empty_target_pins_the_resolved_node_for_confirmation() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        app.tree
+            .add_pane(group_id, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        // No pane is focused; only the tree selection resolves the empty
+        // target below, mirroring a voice-driven "close this" invocation.
+        app.select_node(group_id);
+
+        let command = ControlCommand::Tree(TreeCommand {
+            action: TreeAction::Close,
+            target: NodeTarget::default(),
+            parent: NodeTarget::default(),
+            name: None,
+            path: None,
+            command_line: None,
+            initial_input: None,
+            orientation: None,
+            members: Vec::new(),
+            index: None,
+            storage: None,
+            provider: None,
+        });
+
+        let plan = confirmation_plan(&app, &command)
+            .expect("policy should resolve")
+            .expect("closing a non-empty group must be guarded");
+
+        assert!(plan.question.contains("work"));
+        // The confirmed command must carry the node resolved *now*, not the
+        // empty target -- otherwise a later focus/selection change before
+        // the user answers would redirect the close to a different node.
+        assert!(matches!(
+            plan.confirmed_command,
+            ControlCommand::Tree(TreeCommand {
+                action: TreeAction::Close,
+                target: NodeTarget { id: Some(id), .. },
+                ..
+            }) if id == group_id.0
+        ));
+    }
+
+    #[test]
     fn terminal_submission_confirmation_defaults_to_immediate_execution() {
         let (app, _, command) = terminal_submission_fixture();
 
@@ -204,6 +289,32 @@ mod tests {
                 ..
             }) if id == pane_id.0
         ));
+    }
+
+    #[test]
+    fn enabled_terminal_confirmation_guards_forever_queued_prompts() {
+        let (mut app, pane_id, _) = terminal_submission_fixture();
+        app.voice_settings.confirm_terminal_submissions = true;
+        let command = ControlCommand::Terminal(TerminalCommand {
+            action: TerminalAction::QueuePrompt,
+            target: NodeTarget {
+                id: Some(pane_id.0),
+                name: None,
+                path: None,
+            },
+            text: Some("keep going".to_owned()),
+            key: None,
+            lines: None,
+            delay_seconds: None,
+            delivery: Some(PromptDeliveryChoice::Forever),
+            runs: None,
+        });
+
+        let plan = confirmation_plan(&app, &command)
+            .expect("policy should resolve")
+            .expect("an indefinitely-repeating queued prompt must be guarded");
+
+        assert!(plan.question.contains("indefinitely"));
     }
 
     fn terminal_submission_fixture() -> (App, ilium_core::NodeId, ControlCommand) {

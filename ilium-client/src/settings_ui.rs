@@ -473,7 +473,17 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             );
         }
         SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
-        SettingsTab::Icons => 0,
+        SettingsTab::Icons => {
+            // The icon table's `scroll` is an entry offset into `IconTarget::ALL`
+            // (see `render_icons_tab`), not a line count like every other tab --
+            // reproduce its exact visible-row arithmetic here so scrolling (mouse
+            // wheel or keyboard) is never clamped back to 0 while entries remain
+            // off-screen below the table.
+            let (left, _) = icon_tab_columns(content_area);
+            let table_height = usize::from(left.height.saturating_sub(2));
+            let visible_rows = table_height.saturating_sub(1) / 2;
+            return IconTarget::ALL.len().saturating_sub(visible_rows) as u16;
+        }
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
@@ -542,11 +552,11 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
     );
     frame.render_widget(table, left);
 
-    let mode = if state.icons_preview_real {
-        "[ Demo ]  [● Real tree]"
-    } else {
-        "[● Demo ]  [ Real tree ]"
-    };
+    let mode = format!(
+        "{}  {}",
+        icons_preview_demo_label(state.icons_preview_real),
+        icons_preview_real_label(state.icons_preview_real)
+    );
     let toolbar = vec![
         Line::from(Span::styled(
             mode,
@@ -1161,10 +1171,47 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     Some(IconTableHit { target, action })
 }
 
-pub fn icons_preview_mode_hit(area: Rect, position: Position) -> Option<bool> {
+/// Toolbar label for the "Demo" button -- includes the `●` selection marker
+/// only while demo mode is active. Shared by rendering and
+/// [`icons_preview_mode_hit`] so the two can never disagree about where the
+/// "Real tree" button begins: the marker's presence shifts that boundary by
+/// one column depending on which button currently owns it.
+fn icons_preview_demo_label(is_real_active: bool) -> &'static str {
+    if is_real_active {
+        "[ Demo ]"
+    } else {
+        "[● Demo ]"
+    }
+}
+
+/// Toolbar label for the "Real tree" button -- see
+/// [`icons_preview_demo_label`].
+fn icons_preview_real_label(is_real_active: bool) -> &'static str {
+    if is_real_active {
+        "[● Real tree]"
+    } else {
+        "[ Real tree ]"
+    }
+}
+
+pub fn icons_preview_mode_hit(
+    area: Rect,
+    position: Position,
+    is_real_active: bool,
+) -> Option<bool> {
     let (_, right) = icon_tab_columns(area);
     let right_start = right.x;
-    (position.y == area.y && position.x >= right_start).then_some(position.x >= right_start + 11)
+    if position.y != area.y || position.x < right_start {
+        return None;
+    }
+    // Boundary is the demo label's rendered width plus the two-space gap
+    // before the "Real tree" button -- reproduces the exact `mode` string
+    // `render_icons_tab` builds from these same two label functions, rather
+    // than a hardcoded column that only matched one of the two variants.
+    let boundary = right_start
+        .saturating_add(UnicodeWidthStr::width(icons_preview_demo_label(is_real_active)) as u16)
+        .saturating_add(2);
+    Some(position.x >= boundary)
 }
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
@@ -1247,12 +1294,20 @@ fn inference_value(
 
 fn masked_key(key: &str) -> String {
     if key.is_empty() {
-        "Not set (Enter to edit)".to_string()
-    } else {
-        // API keys are always ASCII; safe to use byte slicing to get last 4 chars
-        let start = key.len().saturating_sub(4);
-        format!("••••{}", &key[start..])
+        return "Not set (Enter to edit)".to_string();
     }
+    // Real API keys are ASCII, but this value comes straight from the free-text
+    // edit modal (`App::settings_apply_inference_field`), so nothing stops a
+    // pasted key from carrying a stray multi-byte character. Find the last-4
+    // window by char boundary, not byte length, so a non-ASCII paste can never
+    // slice mid-character and panic.
+    let start = key
+        .char_indices()
+        .rev()
+        .nth(3)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(0);
+    format!("••••{}", &key[start..])
 }
 fn inference_label(row: InferenceRow) -> &'static str {
     match row {
@@ -2100,6 +2155,15 @@ pub enum KeyboardTableAction {
 
 pub const KEYBOARD_TABLE_FIRST_ROW: u16 = 16;
 
+/// First content line of the "Complete presets" rows in [`keyboard_lines`]:
+/// blank, shortcut-base selector, its description, navigation-prefix
+/// selector, its description, blank, "Complete presets" heading -- seven
+/// lines, then one row per preset. Shared by [`keyboard_preset_at`] and
+/// [`keyboard_keymap_preset_at`] so adding a line above the preset rows can
+/// never silently desync the two from the renderer again (previously
+/// hardcoded to `5`, from before the navigation-prefix selector existed).
+const KEYBOARD_PRESET_FIRST_ROW: u16 = 7;
+
 pub fn keyboard_table_hit(
     content_area: Rect,
     scroll: u16,
@@ -2149,7 +2213,7 @@ pub fn keyboard_keymap_preset_at(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let preset_index = usize::from(line.checked_sub(5)?);
+    let preset_index = usize::from(line.checked_sub(KEYBOARD_PRESET_FIRST_ROW)?);
     KeymapPreset::ALL.get(preset_index).copied()
 }
 
@@ -2212,21 +2276,38 @@ fn render_keyboard_picker(frame: &mut Frame, area: Rect, app: &App, action: Acti
 /// the dialog or reach the assignment layer at all.
 pub fn keyboard_picker_key_at(area: Rect, position: Position, available: &[char]) -> Option<char> {
     let popup = centered_rect(78, 58, area);
+    // `render_keyboard_picker` draws into a bordered block (`theme::block`),
+    // so its `Paragraph` text is inset one row down and one column right of
+    // `popup.{y,x}` -- confirmed against the actual rendered buffer, not just
+    // read off the source. The `y` formula below already folds that border
+    // row into its `4`; `x` previously omitted the matching border column,
+    // silently shifting every keycap's hit zone (and the trailing edge of
+    // the row above it) one column left of where it's actually drawn.
+    const LEFT_BORDER_INSET: u16 = 1;
     for (row_index, row) in KEYBOARD_PICKER_ROWS.iter().enumerate() {
         let y = popup.y.saturating_add(4 + row_index as u16);
         if position.y != y {
             continue;
         }
-        let start_x = popup.x.saturating_add(2 + (row_index * 2) as u16);
-        let index = usize::from(position.x.saturating_sub(start_x) / 4);
+        let start_x = popup
+            .x
+            .saturating_add(LEFT_BORDER_INSET + 2 + (row_index * 2) as u16);
+        // A click left of the row's first bracket is blank indent, not key
+        // zero -- `saturating_sub` alone would silently clamp it to zero and
+        // register a false hit there.
+        if position.x < start_x {
+            return None;
+        }
+        let index = usize::from((position.x - start_x) / 4);
         return row.chars().nth(index).filter(|key| available.contains(key));
     }
     let space_y = popup
         .y
         .saturating_add(4 + KEYBOARD_PICKER_ROWS.len() as u16);
+    let space_start_x = popup.x.saturating_add(LEFT_BORDER_INSET + 18);
     if position.y == space_y
-        && position.x >= popup.x.saturating_add(18)
-        && position.x < popup.x.saturating_add(49)
+        && position.x >= space_start_x
+        && position.x < space_start_x.saturating_add(31)
         && available.contains(&' ')
     {
         return Some(' ');
@@ -2234,32 +2315,54 @@ pub fn keyboard_picker_key_at(area: Rect, position: Position, available: &[char]
     None
 }
 
-/// Returns the decrement/increment direction for the Keyboard tab's one
-/// selector. Geometry mirrors the selector line in [`keyboard_lines`].
-pub fn keyboard_content_hit(content_area: Rect, scroll: u16, position: Position) -> Option<i32> {
+/// `state.selected_row` value for the Keyboard tab's shortcut-base selector
+/// -- shared with `crate::keys`' `state.selected_row == 0` dispatch.
+pub const KEYBOARD_SHORTCUT_BASE_ROW: usize = 0;
+/// `state.selected_row` value for the Keyboard tab's navigation-prefix
+/// selector -- shared with `crate::keys`' `state.selected_row == 1` dispatch.
+pub const KEYBOARD_NAVIGATION_BASE_ROW: usize = 1;
+
+/// Returns `(row, direction)` for whichever of the Keyboard tab's two
+/// independent selectors -- shortcut base or navigation prefix -- was
+/// clicked. Geometry mirrors both selector lines in [`keyboard_lines`]: two
+/// content lines per selector (its control line, then its dim description),
+/// with no blank spacer between the two selectors, unlike every
+/// `setting_lines`-based tab.
+pub fn keyboard_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+) -> Option<(usize, i32)> {
     if !content_area.contains(position) {
         return None;
     }
     // Map screen position back to a content line index (the same
     // scroll-aware direction `appearance_content_hit` uses) rather than
-    // projecting the selector's fixed content line forward onto the screen
+    // projecting a selector's fixed content line forward onto the screen
     // -- the forward direction underflows via `saturating_sub` once `scroll`
     // exceeds `content_area.y + APPEARANCE_TOP_PADDING`, clamping to 0 and
     // producing a false-positive hit on whatever content has scrolled into
     // the first on-screen row.
     let line_index = i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll);
-    if line_index != i32::from(APPEARANCE_TOP_PADDING) {
+    let row = if line_index == i32::from(APPEARANCE_TOP_PADDING) {
+        KEYBOARD_SHORTCUT_BASE_ROW
+    } else if line_index == i32::from(APPEARANCE_TOP_PADDING) + 2 {
+        KEYBOARD_NAVIGATION_BASE_ROW
+    } else {
         return None;
-    }
+    };
     let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
     if position.x < control_start_x {
         return None;
     }
-    Some(if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
-        -1
-    } else {
-        1
-    })
+    Some((
+        row,
+        if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+            -1
+        } else {
+            1
+        },
+    ))
 }
 
 /// Returns the explicit A/B preset whose rendered row was clicked.
@@ -2275,9 +2378,7 @@ pub fn keyboard_preset_at(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    // `keyboard_lines`: blank, selector, description, blank, heading, then
-    // one row per preset.
-    let preset_index = usize::from(line_index.checked_sub(5)?);
+    let preset_index = usize::from(line_index.checked_sub(KEYBOARD_PRESET_FIRST_ROW)?);
     SHORTCUT_BASE_PRESETS.get(preset_index).copied()
 }
 
@@ -3181,6 +3282,29 @@ mod tests {
     }
 
     #[test]
+    fn masked_key_never_panics_on_a_non_ascii_key_cut_mid_character() {
+        // "aaa" + é (a 2-byte UTF-8 character) + "123": with the previous
+        // byte-length-based cut (`key.len() - 4`), this slices at byte index
+        // 4, which lands on the second byte of é and panics with "byte index
+        // 4 is not a char boundary". Real API keys are ASCII, but nothing
+        // stops a paste from carrying a stray non-ASCII character.
+        let key = "aaaé123";
+        assert_eq!(
+            key.len(),
+            8,
+            "the fixture must exercise the exact byte offset that used to panic"
+        );
+        assert_eq!(masked_key(key), "••••é123");
+    }
+
+    #[test]
+    fn masked_key_masks_short_ascii_keys_without_underflow() {
+        assert_eq!(masked_key(""), "Not set (Enter to edit)");
+        assert_eq!(masked_key("ab"), "••••ab");
+        assert_eq!(masked_key("abcdef"), "••••cdef");
+    }
+
+    #[test]
     fn inference_test_lifecycle_renders_a_boxed_running_log_and_failure() {
         let settings = ilium_inference::InferenceSettings::default();
         let running = inference_lines(
@@ -3366,7 +3490,7 @@ mod tests {
         let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
         assert_eq!(
             keyboard_content_hit(area, 0, Position::new(control_start_x, 1)),
-            Some(-1)
+            Some((KEYBOARD_SHORTCUT_BASE_ROW, -1))
         );
         assert_eq!(
             keyboard_content_hit(
@@ -3374,9 +3498,37 @@ mod tests {
                 0,
                 Position::new(control_start_x + DECREMENT_ZONE_WIDTH, 1)
             ),
-            Some(1)
+            Some((KEYBOARD_SHORTCUT_BASE_ROW, 1))
         );
         assert_eq!(keyboard_content_hit(area, 0, Position::new(2, 1)), None);
+    }
+
+    #[test]
+    fn keyboard_content_hit_also_reaches_the_navigation_prefix_selector() {
+        // Regression test: `keyboard_lines` grew a second, independent
+        // selector row (navigation prefix) below the shortcut-base row, but
+        // `keyboard_content_hit` used to only ever recognize the first one --
+        // its own doc comment called it "the Keyboard tab's one selector".
+        let area = Rect::new(0, 0, 60, 20);
+        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+        assert_eq!(
+            keyboard_content_hit(area, 0, Position::new(control_start_x, 3)),
+            Some((KEYBOARD_NAVIGATION_BASE_ROW, -1))
+        );
+        assert_eq!(
+            keyboard_content_hit(
+                area,
+                0,
+                Position::new(control_start_x + DECREMENT_ZONE_WIDTH, 3)
+            ),
+            Some((KEYBOARD_NAVIGATION_BASE_ROW, 1))
+        );
+        // The description line directly below the navigation selector is not
+        // itself a hit.
+        assert_eq!(
+            keyboard_content_hit(area, 0, Position::new(control_start_x, 4)),
+            None
+        );
     }
 
     #[test]
@@ -3414,15 +3566,36 @@ mod tests {
     #[test]
     fn keyboard_preset_hit_testing_maps_the_two_rendered_rows() {
         let area = Rect::new(0, 0, 60, 20);
+        // Cross-check against the real renderer instead of hardcoding rows a
+        // second time -- this is exactly the drift (`keyboard_lines` grew a
+        // "Tree navigation prefix" selector, shifting the preset rows down by
+        // two lines) that previously desynced this hit test from the screen.
+        let lines = keyboard_lines(&KeyboardSettings::default(), keymap::LEADER_BINDINGS)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        let screen_preset_row = lines
+            .iter()
+            .position(|line| line.contains("[GNU Screen preset]"))
+            .expect("GNU Screen preset row is rendered");
+        let tmux_preset_row = lines
+            .iter()
+            .position(|line| line.contains("[tmux preset]"))
+            .expect("tmux preset row is rendered");
+
         assert_eq!(
-            keyboard_preset_at(area, 0, Position::new(2, 5)),
+            keyboard_preset_at(area, 0, Position::new(2, screen_preset_row as u16)),
             Some(ShortcutBase::A)
         );
         assert_eq!(
-            keyboard_preset_at(area, 0, Position::new(2, 6)),
+            keyboard_preset_at(area, 0, Position::new(2, tmux_preset_row as u16)),
             Some(ShortcutBase::B)
         );
-        assert_eq!(keyboard_preset_at(area, 0, Position::new(2, 4)), None);
+        assert_eq!(
+            keyboard_preset_at(area, 0, Position::new(2, screen_preset_row as u16 - 1)),
+            None,
+            "the heading line just above the preset rows is not itself a hit"
+        );
     }
 
     #[test]
@@ -3509,24 +3682,99 @@ mod tests {
 
     #[test]
     fn staggered_keyboard_maps_clicks_to_the_rendered_keycaps() {
+        // Regression test: the previous version derived its expected columns
+        // from the same (buggy, border-blind) arithmetic the implementation
+        // used, so it happily enshrined an off-by-one instead of catching it.
+        // This version renders the real popup and reads back where each
+        // keycap actually lands, the same cross-check discipline used
+        // elsewhere in this file (e.g. `keyboard_preset_hit_testing_maps_...`).
         let area = Rect::new(0, 0, 120, 50);
         let popup = centered_rect(78, 58, area);
+        let app = App::new("probe".to_string(), std::path::PathBuf::from("/tmp"));
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_keyboard_picker(frame, area, &app, Action::CycleNextInGroup))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        // One string per terminal cell rather than one concatenated `String`:
+        // the popup border is `│` (a multi-byte UTF-8 character), so
+        // `String::find` on a concatenated row would return a *byte* offset
+        // that overcounts every column after the border -- exactly the kind
+        // of column/byte mix-up this whole file exists to avoid.
+        let row_columns = |y: u16| -> Vec<&str> {
+            (0..area.width)
+                .map(|x| buffer.cell((x, y)).unwrap().symbol())
+                .collect()
+        };
+        let find_bracketed = |row: &[&str], target: &str| -> u16 {
+            row.windows(3)
+                .position(|window| window[0] == "[" && window[1] == target && window[2] == "]")
+                .unwrap_or_else(|| panic!("row does not render a [{target}] keycap"))
+                as u16
+        };
         let available = vec!['1', 'q', ' '];
+
+        // Row 0 ("`1234567890-="): every column across the rendered "[1] "
+        // keycap must select '1'; the column immediately to its left belongs
+        // to the previous keycap ('`'), not to '1'.
+        let row0 = row_columns(popup.y + 4);
+        let one_x = find_bracketed(&row0, "1");
+        for offset in 0..4 {
+            assert_eq!(
+                keyboard_picker_key_at(
+                    area,
+                    Position::new(one_x + offset, popup.y + 4),
+                    &available
+                ),
+                Some('1'),
+                "column offset {offset} into the rendered [1] keycap"
+            );
+        }
         assert_eq!(
-            keyboard_picker_key_at(area, Position::new(popup.x + 6, popup.y + 4), &available),
-            Some('1')
+            keyboard_picker_key_at(area, Position::new(one_x - 1, popup.y + 4), &available),
+            None,
+            "one column left of [1] belongs to the previous keycap, not '1'"
         );
+
+        // Row 1 ("qwertyuiop[]\\"): the blank indent one column left of the
+        // rendered "[q]" keycap must never resolve to 'q'.
+        let row1 = row_columns(popup.y + 5);
+        let q_x = find_bracketed(&row1, "q");
         assert_eq!(
-            keyboard_picker_key_at(area, Position::new(popup.x + 4, popup.y + 5), &available),
+            keyboard_picker_key_at(area, Position::new(q_x, popup.y + 5), &available),
             Some('q')
         );
         assert_eq!(
-            keyboard_picker_key_at(area, Position::new(popup.x + 8, popup.y + 5), &available),
-            None
+            keyboard_picker_key_at(area, Position::new(q_x - 1, popup.y + 5), &available),
+            None,
+            "the blank indent left of the keycap is not itself a hit"
+        );
+
+        // Space bar row: both ends of its rendered bracket select ' ', and
+        // the blank indent just left of it is a miss.
+        let space_y = popup.y + 4 + KEYBOARD_PICKER_ROWS.len() as u16;
+        let space_row = row_columns(space_y);
+        let space_start = space_row
+            .iter()
+            .position(|symbol| *symbol == "[")
+            .expect("space row renders an opening bracket") as u16;
+        let space_end = space_row
+            .iter()
+            .rposition(|symbol| *symbol == "]")
+            .expect("space row renders a closing bracket") as u16;
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(space_start, space_y), &available),
+            Some(' ')
         );
         assert_eq!(
-            keyboard_picker_key_at(area, Position::new(popup.x + 18, popup.y + 12), &available),
+            keyboard_picker_key_at(area, Position::new(space_end, space_y), &available),
             Some(' ')
+        );
+        assert_eq!(
+            keyboard_picker_key_at(area, Position::new(space_start - 1, space_y), &available),
+            None,
+            "the blank indent left of the space bar is not itself a hit"
         );
     }
 
@@ -3573,6 +3821,30 @@ mod tests {
         );
         let area = Rect::new(0, 0, 60, 3);
         assert!(max_scroll(SettingsTab::Appearance, &app, 0, area) > 0);
+    }
+
+    #[test]
+    fn max_scroll_lets_the_icons_tab_scroll_past_a_short_viewport() {
+        // Regression test: `max_scroll` used to hardcode `0` for `Icons`,
+        // which fed straight into `state.scroll = state.scroll.min(max_scroll)`
+        // in both `keys.rs` and `mouse.rs` -- silently clamping every mouse
+        // wheel and keyboard scroll attempt back to zero, so entries beyond
+        // the first screenful were permanently unreachable.
+        let app = App::new(
+            "settings-test".to_string(),
+            std::path::PathBuf::from("/tmp"),
+        );
+        let short_area = Rect::new(0, 0, 60, 10);
+        assert!(
+            max_scroll(SettingsTab::Icons, &app, 0, short_area) > 0,
+            "IconTarget::ALL has far more entries than a 10-row viewport can show"
+        );
+        let tall_area = Rect::new(0, 0, 60, 500);
+        assert_eq!(
+            max_scroll(SettingsTab::Icons, &app, 0, tall_area),
+            0,
+            "a viewport tall enough to show every icon target needs no scroll"
+        );
     }
 
     fn sound_discovery_fixture() -> ilium_sound::SoundDiscovery {

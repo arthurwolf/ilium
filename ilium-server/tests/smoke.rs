@@ -382,29 +382,19 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     .await
     .expect("create command pane with initial input");
 
-    let no_early_submission = tokio::time::timeout(Duration::from_millis(600), async {
-        loop {
-            let event: ServerEvent = read_frame(&mut client)
-                .await
-                .expect("read events before fake agent prompt appears");
-            assert!(
-                !matches!(
-                    event,
-                    ServerEvent::PanePromptSubmitted {
-                        source: PromptSubmissionSource::InitialAgentPrompt,
-                        ..
-                    }
-                ),
-                "initial input must not arrive before the agent shows its composer"
-            );
-        }
-    })
-    .await;
-    assert!(
-        no_early_submission.is_err(),
-        "the fake agent deliberately hides its composer for 1 second"
-    );
-
+    // The fake agent deliberately hides its composer for 1 second, so any
+    // `InitialAgentPrompt` submission observed before this instant proves
+    // initial input raced the PTY spawn instead of waiting for visible
+    // readiness. This is checked inline in the single read loop below
+    // (rather than via a separate windowed `tokio::time::timeout` around
+    // its own `read_frame` call) because `read_frame` is not cancel-safe:
+    // it uses `AsyncReadExt::read_exact` under the hood, so dropping it
+    // mid-await on a timeout silently discards whatever prefix of the
+    // length header or payload the kernel had already delivered,
+    // desynchronizing this connection's framing for every later
+    // `read_frame` on the same stream -- exactly what continuing to read
+    // from `client` afterward would have needed to still work.
+    let composer_reveal_deadline = tokio::time::Instant::now() + Duration::from_millis(600);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut saw_prompt_event = false;
     let mut saw_submitted_output = false;
@@ -413,13 +403,19 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
             .await
             .expect("initial input events should arrive before timeout")
             .expect("read initial input event");
-        saw_prompt_event |= matches!(
+        if matches!(
             event,
             ServerEvent::PanePromptSubmitted {
                 source: PromptSubmissionSource::InitialAgentPrompt,
                 ..
             }
-        );
+        ) {
+            assert!(
+                tokio::time::Instant::now() >= composer_reveal_deadline,
+                "initial input must not arrive before the agent shows its composer"
+            );
+            saw_prompt_event = true;
+        }
         saw_submitted_output |= matches!(
             event,
             ServerEvent::ScreenUpdate { ref bytes, .. }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_core::NodeId;
-use ilium_ipc::{PromptSubmissionSource, ServerEvent};
+use ilium_ipc::PromptSubmissionSource;
 
 use crate::ipc::handlers::write_key_input;
 use crate::pane::PaneResource;
@@ -26,17 +26,24 @@ const READINESS_RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 /// Starts the pane-owned task that delivers one initial prompt after visible
 /// agent readiness. A caller may return to IPC immediately; the task is
 /// cancelled by pane teardown or by the user's first manual terminal input.
+///
+/// Takes the `panes` write lock *before* spawning: `write_key_input` cancels
+/// a pending delivery under that same lock the instant the user's own
+/// `KeyInput` reaches this pane (see `ipc::handlers::write_key_input`). If the
+/// task were spawned first and installed after, a manual keystroke landing in
+/// that window would find no handle yet installed, cancel nothing, and this
+/// task would later paste over text the user is already typing.
 pub(crate) async fn start(state: Arc<ServerState>, pane_id: NodeId, initial_input: String) {
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        return;
+    };
     let task = tokio::spawn(deliver_when_ready(
         Arc::clone(&state),
         pane_id,
         initial_input,
     ));
-    let mut panes = state.panes.write().await;
-    match panes.get_mut(&pane_id) {
-        Some(PaneResource::Terminal(runtime)) => runtime.set_initial_prompt_task(task),
-        Some(PaneResource::Editor { .. }) | None => task.abort(),
-    }
+    runtime.set_initial_prompt_task(task);
 }
 
 /// Waits on the PTY's screen-change signal until either the detector or one of
@@ -54,7 +61,12 @@ async fn deliver_when_ready(state: Arc<ServerState>, pane_id: NodeId, initial_in
     loop {
         if pane_has_ready_agent_composer(&state, pane_id).await {
             let bytes = initial_submission_bytes(&initial_input);
-            match write_key_input(
+            // `write_key_input` itself broadcasts `PanePromptSubmitted` on the
+            // `Ok` path whenever `submission` is `Some` -- broadcasting it
+            // again here would double every subscriber's prompt-submitted
+            // count for this one delivery, so only the failure path needs
+            // handling.
+            if let Err(error) = write_key_input(
                 &state,
                 pane_id,
                 &bytes,
@@ -62,14 +74,10 @@ async fn deliver_when_ready(state: Arc<ServerState>, pane_id: NodeId, initial_in
             )
             .await
             {
-                Ok(()) => state.broadcast(ServerEvent::PanePromptSubmitted {
-                    pane_id,
-                    source: PromptSubmissionSource::InitialAgentPrompt,
-                }),
-                Err(error) => tracing::warn!(
+                tracing::warn!(
                     pane_id = pane_id.0,
                     "initial agent prompt was not delivered after readiness: {error}"
-                ),
+                );
             }
             return;
         }
@@ -120,27 +128,69 @@ fn initial_submission_bytes(initial_input: &str) -> Vec<u8> {
 
 /// Encodes multiline editor content as one bracketed paste, leaving the
 /// caller responsible for the one semantic submission key that follows it.
+///
+/// Two boundary hazards are normalized before framing: a bare or CRLF `\r`
+/// (e.g. classic-Mac or Windows line endings surviving into an editor source
+/// line) reads to a composer as a premature Enter if written raw, and a
+/// literal bracketed-paste end marker embedded in the task text would close
+/// our paste early and let the remainder of the payload run as live
+/// keystrokes in whatever the agent CLI is doing at that moment.
 pub(crate) fn initial_input_bytes(initial_input: &str) -> Vec<u8> {
-    if !initial_input.contains('\n') {
-        return initial_input.as_bytes().to_vec();
+    let normalized_input = initial_input.replace("\r\n", "\n").replace('\r', "\n");
+
+    if !normalized_input.contains('\n') {
+        return normalized_input.into_bytes();
     }
 
-    let mut bracketed_paste = Vec::with_capacity(initial_input.len() + 12);
+    let sanitized_input = normalized_input.replace("\x1b[201~", "");
+    let mut bracketed_paste = Vec::with_capacity(sanitized_input.len() + 12);
     bracketed_paste.extend_from_slice(b"\x1b[200~");
-    bracketed_paste.extend_from_slice(initial_input.as_bytes());
+    bracketed_paste.extend_from_slice(sanitized_input.as_bytes());
     bracketed_paste.extend_from_slice(b"\x1b[201~");
     bracketed_paste
 }
 
 #[cfg(test)]
 mod tests {
-    use super::initial_submission_bytes;
+    use super::{initial_input_bytes, initial_submission_bytes};
 
     #[test]
     fn multiline_initial_prompt_is_one_bracketed_paste_with_final_enter() {
         assert_eq!(
             initial_submission_bytes("first\nsecond"),
             b"\x1b[200~first\nsecond\x1b[201~\r"
+        );
+    }
+
+    #[test]
+    fn single_line_initial_prompt_is_written_verbatim() {
+        assert_eq!(initial_input_bytes("do_work();"), b"do_work();");
+    }
+
+    #[test]
+    fn crlf_line_endings_are_normalized_before_bracketing() {
+        assert_eq!(
+            initial_input_bytes("first\r\nsecond"),
+            b"\x1b[200~first\nsecond\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn a_lone_carriage_return_becomes_a_line_break_not_a_premature_enter() {
+        // Classic-Mac-style line endings have no `\n` at all; without
+        // normalization this would take the unwrapped single-line branch and
+        // send a raw `\r` the composer could read as an early submission.
+        assert_eq!(
+            initial_input_bytes("first\rsecond"),
+            b"\x1b[200~first\nsecond\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn an_embedded_paste_end_marker_is_stripped_so_it_cannot_end_the_paste_early() {
+        assert_eq!(
+            initial_input_bytes("before\x1b[201~after\nnext"),
+            b"\x1b[200~beforeafter\nnext\x1b[201~"
         );
     }
 }

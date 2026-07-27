@@ -350,6 +350,11 @@ async fn handle_command(
                 audio.set_capture_enabled(false);
                 send_json(socket, &json!({ "type": "input_audio_buffer.commit" })).await?;
                 send_json(socket, &json!({ "type": "response.create" })).await?;
+                // Mirrors SendText's eager update: without this, a StartPushToTalk
+                // that arrives before the provider's own "response.created" event
+                // would see a stale `false` and skip cancelling the response this
+                // call just requested.
+                state.is_response_active = true;
                 send_event(
                     event_sender,
                     VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
@@ -436,29 +441,39 @@ async fn handle_provider_event(
         }
         "response.output_audio.delta" | "response.audio.delta" => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(delta) {
-                    let item_id = event
-                        .get("item_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned();
-                    let content_index = event
-                        .get("content_index")
-                        .and_then(Value::as_u64)
-                        .unwrap_or_default();
-                    if state.playing_item.as_ref().map(|item| &item.item_id) != Some(&item_id) {
-                        audio.begin_response_audio();
+                match base64::engine::general_purpose::STANDARD.decode(delta) {
+                    Ok(bytes) => {
+                        let item_id = event
+                            .get("item_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned();
+                        let content_index = event
+                            .get("content_index")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default();
+                        if state.playing_item.as_ref().map(|item| &item.item_id) != Some(&item_id) {
+                            audio.begin_response_audio();
+                        }
+                        state.playing_item = Some(PlayingItem {
+                            item_id,
+                            content_index,
+                        });
+                        audio.enqueue_realtime_pcm16(&bytes);
+                        send_event(
+                            event_sender,
+                            VoiceEvent::StateChanged(VoiceConnectionState::Speaking),
+                        )
+                        .await;
                     }
-                    state.playing_item = Some(PlayingItem {
-                        item_id,
-                        content_index,
-                    });
-                    audio.enqueue_realtime_pcm16(&bytes);
-                    send_event(
-                        event_sender,
-                        VoiceEvent::StateChanged(VoiceConnectionState::Speaking),
-                    )
-                    .await;
+                    Err(error) => {
+                        // Dropping a malformed chunk silently would hide a real
+                        // protocol problem behind an audio glitch with no trace.
+                        tracing::warn!(
+                            %error,
+                            "OpenAI Realtime sent an audio delta that was not valid base64"
+                        );
+                    }
                 }
             }
         }
@@ -686,9 +701,22 @@ fn tool_invocations_from_response(event: &Value) -> Vec<VoiceToolInvocation> {
         .flatten()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
         .filter_map(|item| {
+            let call_id = item.get("call_id").and_then(Value::as_str);
+            let name = item.get("name").and_then(Value::as_str);
+            let (Some(call_id), Some(name)) = (call_id, name) else {
+                // A function_call missing call_id/name can never be answered
+                // with a matching function_call_output, so the model is left
+                // waiting on a tool result that will never arrive. Surface it
+                // instead of silently dropping the invocation.
+                tracing::warn!(
+                    item = %diagnostic_json(item),
+                    "OpenAI Realtime sent a function_call missing call_id or name"
+                );
+                return None;
+            };
             Some(VoiceToolInvocation {
-                call_id: item.get("call_id")?.as_str()?.to_owned(),
-                name: item.get("name")?.as_str()?.to_owned(),
+                call_id: call_id.to_owned(),
+                name: name.to_owned(),
                 arguments_json: item
                     .get("arguments")
                     .and_then(Value::as_str)

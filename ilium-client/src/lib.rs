@@ -314,8 +314,10 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
 }
 
 /// Resolves `config.toml`'s client-side tables and installs the effective
-/// keybinding table / theme for the rest of the process's lifetime, also
-/// returning the full resolved config (for its `[ui]` table -- see
+/// theme for the rest of the process's lifetime, also returning the full
+/// resolved config (its `[keybindings]` table becomes `App::keybindings` --
+/// the single live table both input dispatch and the help screen read, see
+/// `keymap`'s module doc -- and its `[ui]` table feeds
 /// `App::apply_ui_settings`) and the config directory (for later writes --
 /// see `App::config_dir`). A config directory that can't be resolved, or a
 /// config file that fails to load, is logged and falls back to defaults
@@ -351,7 +353,6 @@ fn init_config(
             config
         }
     };
-    crate::keymap::init_effective_bindings(config.keybindings.clone());
     crate::theme::init(config.theme);
     (config, config_dir)
 }
@@ -432,8 +433,11 @@ async fn run_inner(
     match crate::project_naming::load_stored_project_name(&app.session_cwd) {
         Ok(Some(name)) => {
             app.project_name = Some(name);
-            app.project_icon =
-                crate::project_naming::load_stored_project_icon(&app.session_cwd).unwrap_or(None);
+            app.project_icon = crate::project_naming::load_stored_project_icon(&app.session_cwd)
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "failed to load stored project icon");
+                    None
+                });
         }
         Ok(None) => {
             app.is_project_name_loading = true;

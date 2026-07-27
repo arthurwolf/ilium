@@ -14,6 +14,18 @@ fn emit_repeated_diagnostic() {
 
 #[test]
 fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
+    // `initialize` reads `RUST_LOG` exactly once, at the first call below, to
+    // build the process-wide `EnvFilter`. An ambient `RUST_LOG=debug` (common
+    // on developer machines) would let the unrelated-target debug event
+    // through and break the redaction assertion later in this test, so pin
+    // the filter to this test's own expectations instead of the caller's
+    // shell. Safe here: this integration test binary runs this single
+    // `#[test]` function, with no other threads reading/writing the
+    // environment concurrently.
+    unsafe {
+        std::env::remove_var("RUST_LOG");
+    }
+
     let directory = tempfile::tempdir().expect("tempdir");
     let log_directory = directory.path().join("session");
     let log_path = log_directory.join("log-2026-07-19_12-00-00.000.txt");

@@ -517,6 +517,14 @@ impl QueuedPrompt {
 
 pub const MAXIMUM_SPLIT_VIEW_PANES: usize = 4;
 
+/// Hard cap on how many prompts one pane may hold in `prompt_queue`. Recurring
+/// entries (`Times`/`Forever`) are rotated to the tail on delivery rather than
+/// pinned at the head (see [`Tree::acknowledge_queued_prompt`]), so under
+/// normal operation the queue is bounded by what a user actually queued. This
+/// cap exists only to stop a misbehaving client or automation loop from
+/// growing the persisted/broadcast snapshot without bound.
+pub const MAXIMUM_PROMPT_QUEUE_LEN: usize = 100;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitOrientation {
     Vertical,
@@ -734,6 +742,8 @@ pub enum TreeError {
     EmptyScheduledInput,
     #[error("queued prompt must contain text and a positive delivery count")]
     EmptyQueuedPrompt,
+    #[error("pane {0:?} prompt queue already holds the maximum of {1} entries")]
+    PromptQueueFull(NodeId, usize),
     #[error("cannot remove the root group")]
     CannotRemoveRoot,
     #[error("cannot move the root group")]
@@ -774,6 +784,18 @@ pub enum TreeError {
         "restructure plan referenced {actual} existing pane/folder(s), expected exactly {expected}"
     )]
     RestructureLeafSetMismatch { expected: usize, actual: usize },
+    /// Raised only by [`Tree::validate`]: the tree's `nodes`/`next_id`
+    /// shape violates an invariant every other method on this type assumes
+    /// holds (e.g. every mutation method that reads a node's parent
+    /// container). `Tree` derives `Deserialize` so a crash-recovery
+    /// snapshot can be loaded wholesale (see `ilium-server`'s
+    /// `persistence` module); deserializing arbitrary JSON bypasses every
+    /// invariant `add_pane`/`move_node`/etc. normally enforce, so a
+    /// hand-edited or otherwise corrupted snapshot file must fail here,
+    /// loudly, rather than let a later operation panic or silently
+    /// corrupt state.
+    #[error("tree structure is invalid: {0}")]
+    InvalidStructure(String),
 }
 
 /// One node in a proposed new tree shape, as produced by a restructure
@@ -1900,6 +1922,9 @@ impl Tree {
         if *content != PaneContentKind::Terminal {
             return Err(TreeError::NotATerminal(id));
         }
+        if prompt_queue.len() >= MAXIMUM_PROMPT_QUEUE_LEN {
+            return Err(TreeError::PromptQueueFull(id, MAXIMUM_PROMPT_QUEUE_LEN));
+        }
         prompt_queue.push(prompt);
         Ok(())
     }
@@ -1944,6 +1969,15 @@ impl Tree {
     /// Acknowledges delivery only when the current FIFO head is still the
     /// entry the server read. This compare-and-advance prevents a concurrent
     /// clear or enqueue mutation from consuming the wrong prompt.
+    ///
+    /// A one-shot entry (`Once`, or `Times` on its last run) is removed
+    /// outright. A recurring entry that still has deliveries left (`Times`
+    /// with runs remaining, or `Forever`) is rotated to the *tail* of the
+    /// queue instead of being left pinned at the head: this keeps the FIFO a
+    /// true cycle, so a recurring prompt can never permanently block the
+    /// entries queued behind it (functional starvation) or accumulate
+    /// unreachable entries ahead of it (unbounded growth) -- every entry is
+    /// either eventually consumed or eventually delivered again.
     pub fn acknowledge_queued_prompt(
         &mut self,
         id: NodeId,
@@ -1953,23 +1987,25 @@ impl Tree {
         let NodeKind::Pane { prompt_queue, .. } = &mut node.kind else {
             return Err(TreeError::NotAPane(id));
         };
-        let Some(head) = prompt_queue.first_mut() else {
+        let Some(head) = prompt_queue.first() else {
             return Ok(false);
         };
         if head != expected {
             return Ok(false);
         }
-        match &mut head.delivery {
-            PromptQueueDelivery::Once => {
-                prompt_queue.remove(0);
-            }
+        // Removed before deciding delivery so a rotation and a permanent
+        // removal share the same single mutation site.
+        let mut delivered = prompt_queue.remove(0);
+        match &mut delivered.delivery {
+            PromptQueueDelivery::Once => {}
             PromptQueueDelivery::Times { remaining_runs } if *remaining_runs > 1 => {
                 *remaining_runs -= 1;
+                prompt_queue.push(delivered);
             }
-            PromptQueueDelivery::Times { .. } => {
-                prompt_queue.remove(0);
+            PromptQueueDelivery::Times { .. } => {}
+            PromptQueueDelivery::Forever => {
+                prompt_queue.push(delivered);
             }
-            PromptQueueDelivery::Forever => {}
         }
         Ok(true)
     }
@@ -2309,6 +2345,99 @@ impl Tree {
             }
             current_group = parent;
         }
+    }
+
+    /// Validates the structural invariants every other method on this type
+    /// assumes: the root is a parent-less group, every non-root node's
+    /// `parent` names a container that lists it back exactly once, every
+    /// node is reachable from the root (so parent-walking methods like
+    /// [`Self::project_ancestor`] and [`Self::is_ancestor_of`] cannot loop
+    /// forever on a cycle disconnected from the root), and `next_id` is
+    /// past every id already in use (so the next [`Self::alloc_id`] cannot
+    /// collide with, and silently overwrite, an existing node).
+    ///
+    /// This crate's own mutation methods (`add_pane`, `move_node`, ...)
+    /// always keep these invariants true, so a `Tree` built purely through
+    /// this crate's public API never needs this call. It exists for the
+    /// one path that bypasses that API entirely: `Tree` derives
+    /// `Deserialize` so `ilium-server` can load a crash-recovery snapshot
+    /// wholesale, and JSON deserialized straight into private fields
+    /// carries none of those invariants on its own. Callers on that path
+    /// must call this immediately after deserializing and reject the
+    /// snapshot on error rather than trust it.
+    pub fn validate(&self) -> Result<(), TreeError> {
+        let root = self
+            .nodes
+            .get(&ROOT_ID)
+            .ok_or(TreeError::NodeNotFound(ROOT_ID))?;
+        if root.parent.is_some() {
+            return Err(TreeError::InvalidStructure(format!(
+                "root {ROOT_ID:?} must have no parent"
+            )));
+        }
+        if !root.is_group() {
+            return Err(TreeError::InvalidStructure(format!(
+                "root {ROOT_ID:?} must be a group"
+            )));
+        }
+
+        // Breadth-first walk from the root through every container's
+        // children. Discovering every node this way, rather than trusting
+        // `self.nodes` directly, is what catches both a cycle (a node
+        // whose ancestry never reaches the root) and an orphan (a node
+        // present in the map but never listed as anyone's child): either
+        // one is invisible to a check that only looks at individual nodes
+        // in isolation.
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(ROOT_ID);
+        let mut frontier = vec![ROOT_ID];
+        while let Some(current_id) = frontier.pop() {
+            let current = self
+                .nodes
+                .get(&current_id)
+                .ok_or(TreeError::NodeNotFound(current_id))?;
+            let NodeKind::Container(container) = &current.kind else {
+                continue;
+            };
+            let mut children_of_current = std::collections::HashSet::new();
+            for &child_id in &container.children {
+                if child_id == current_id || !children_of_current.insert(child_id) {
+                    return Err(TreeError::InvalidStructure(format!(
+                        "node {current_id:?} lists child {child_id:?} more than once"
+                    )));
+                }
+                let child = self
+                    .nodes
+                    .get(&child_id)
+                    .ok_or(TreeError::NodeNotFound(child_id))?;
+                if child.parent != Some(current_id) {
+                    return Err(TreeError::InvalidStructure(format!(
+                        "node {child_id:?}'s parent does not match its listing under {current_id:?}"
+                    )));
+                }
+                if !visited.insert(child_id) {
+                    return Err(TreeError::InvalidStructure(format!(
+                        "node {child_id:?} is listed as a child of more than one parent"
+                    )));
+                }
+                frontier.push(child_id);
+            }
+        }
+        if visited.len() != self.nodes.len() {
+            return Err(TreeError::InvalidStructure(
+                "tree contains node(s) unreachable from the root".to_string(),
+            ));
+        }
+
+        let max_existing_id = self.nodes.keys().map(|id| id.0).max().unwrap_or(0);
+        if self.next_id <= max_existing_id {
+            return Err(TreeError::InvalidStructure(format!(
+                "next_id {} would collide with existing node id {max_existing_id}",
+                self.next_id
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -3106,6 +3235,94 @@ mod tests {
         assert_eq!(tree.prompt_queue_len(terminal), Some(0));
     }
 
+    /// Regression test for a leak/starvation bug: a `Forever` entry ahead of
+    /// other queued prompts used to stay pinned at index 0 forever, so
+    /// everything queued behind it was permanently unreachable and the queue
+    /// grew without bound as more prompts were enqueued. Acknowledging a
+    /// recurring entry must rotate it to the tail instead, so the queue stays
+    /// a bounded cycle and every one-shot entry behind it still drains.
+    #[test]
+    fn recurring_prompts_rotate_to_the_tail_instead_of_starving_the_queue() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let forever = QueuedPrompt {
+            text: "reminder".to_string(),
+            delivery: PromptQueueDelivery::Forever,
+        };
+        let once_a = QueuedPrompt {
+            text: "one-shot-a".to_string(),
+            delivery: PromptQueueDelivery::Once,
+        };
+        let once_b = QueuedPrompt {
+            text: "one-shot-b".to_string(),
+            delivery: PromptQueueDelivery::Once,
+        };
+        tree.enqueue_prompt(terminal, forever.clone()).unwrap();
+        tree.enqueue_prompt(terminal, once_a.clone()).unwrap();
+        tree.enqueue_prompt(terminal, once_b.clone()).unwrap();
+        assert_eq!(tree.prompt_queue_len(terminal), Some(3));
+
+        // First completion delivers the Forever prompt; it rotates to the
+        // tail rather than staying at the head, so the queue length is
+        // unchanged and the one-shots are now reachable.
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&forever));
+        assert!(tree.acknowledge_queued_prompt(terminal, &forever).unwrap());
+        assert_eq!(tree.prompt_queue_len(terminal), Some(3));
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once_a));
+
+        // Both one-shots drain permanently.
+        assert!(tree.acknowledge_queued_prompt(terminal, &once_a).unwrap());
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&once_b));
+        assert!(tree.acknowledge_queued_prompt(terminal, &once_b).unwrap());
+        assert_eq!(tree.prompt_queue_len(terminal), Some(1));
+
+        // Only the Forever entry remains, and it keeps cycling without ever
+        // growing the queue on repeated completions.
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&forever));
+        for _ in 0..5 {
+            assert!(tree.acknowledge_queued_prompt(terminal, &forever).unwrap());
+            assert_eq!(tree.prompt_queue_len(terminal), Some(1));
+        }
+    }
+
+    #[test]
+    fn enqueue_prompt_rejects_growth_past_the_bounded_maximum() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        for index in 0..MAXIMUM_PROMPT_QUEUE_LEN {
+            tree.enqueue_prompt(
+                terminal,
+                QueuedPrompt {
+                    text: format!("prompt-{index}"),
+                    delivery: PromptQueueDelivery::Once,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            tree.prompt_queue_len(terminal),
+            Some(MAXIMUM_PROMPT_QUEUE_LEN)
+        );
+        let overflow = QueuedPrompt {
+            text: "one-too-many".to_string(),
+            delivery: PromptQueueDelivery::Once,
+        };
+        assert!(matches!(
+            tree.enqueue_prompt(terminal, overflow),
+            Err(TreeError::PromptQueueFull(id, MAXIMUM_PROMPT_QUEUE_LEN)) if id == terminal
+        ));
+        assert_eq!(
+            tree.prompt_queue_len(terminal),
+            Some(MAXIMUM_PROMPT_QUEUE_LEN)
+        );
+    }
+
     #[test]
     fn replacing_and_compare_clearing_scheduled_input_is_race_safe() {
         let mut tree = Tree::new();
@@ -3604,5 +3821,113 @@ mod tests {
         );
         assert_eq!(tree.group_ids_in_tree_order(), vec![group, nested_group]);
         assert!(tree.get(split).unwrap().is_split_view());
+    }
+
+    #[test]
+    fn validate_accepts_every_tree_built_through_the_public_api() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/validate")).unwrap();
+        let group = tree.add_group(project, "work").unwrap();
+        let first = tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(group, "second", PaneContentKind::Editor)
+            .unwrap();
+        tree.create_split_view(group, "split", SplitOrientation::Vertical, &[first, second])
+            .unwrap();
+        tree.add_folder(group, PathBuf::from("/tmp/validate/src"))
+            .unwrap();
+
+        assert!(tree.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_a_root_that_is_not_a_group() {
+        let mut tree = Tree::new();
+        tree.nodes.get_mut(&ROOT_ID).unwrap().kind = NodeKind::Folder {
+            path: PathBuf::from("/tmp/not-a-group"),
+        };
+
+        assert!(matches!(
+            tree.validate(),
+            Err(TreeError::InvalidStructure(_))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_a_node_whose_parent_is_not_a_container() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        // Corrupt as a hand-edited/crash-truncated snapshot would: insert a
+        // node whose `parent` points at the pane instead of at a
+        // container. `Pane` has no children list, so nothing can ever list
+        // this node back -- it is simultaneously an orphan (unreachable
+        // from the root) and, if some other id-holding code path (e.g. a
+        // stale `NodeId` a client still holds) ever named it directly,
+        // exactly the shape that panics `reorder_sibling`'s
+        // `unreachable!("parent of a node is always a group")`. Every safe
+        // mutation method keeps this from happening; only a `Deserialize`
+        // straight into private fields can produce it.
+        tree.nodes.insert(
+            NodeId(9999),
+            Node {
+                id: NodeId(9999),
+                parent: Some(pane),
+                name: "orphaned under a pane".to_string(),
+                short_name: None,
+                inferred_icon: None,
+                structure_source: StructureSource::Manual,
+                kind: NodeKind::Container(ContainerNode::group()),
+            },
+        );
+
+        assert!(matches!(
+            tree.validate(),
+            Err(TreeError::InvalidStructure(_))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_a_parent_child_cycle_disconnected_from_the_root() {
+        let mut tree = Tree::new();
+        let a = tree.add_group(ROOT_ID, "a").unwrap();
+        let b = tree.add_group(ROOT_ID, "b").unwrap();
+        // Detach both from the root's own child list and wire them into a
+        // two-node cycle instead: `a`'s parent is `b` and `b`'s parent is
+        // `a`, with matching (also cyclic) child listings. No sequence of
+        // `move_node`/`add_group` calls can produce this; only bypassing
+        // the API via `Deserialize` can.
+        if let NodeKind::Container(root) = &mut tree.nodes.get_mut(&ROOT_ID).unwrap().kind {
+            root.children.clear();
+        }
+        tree.nodes.get_mut(&a).unwrap().parent = Some(b);
+        tree.nodes.get_mut(&b).unwrap().parent = Some(a);
+        if let NodeKind::Container(container) = &mut tree.nodes.get_mut(&a).unwrap().kind {
+            container.children = vec![b];
+        }
+        if let NodeKind::Container(container) = &mut tree.nodes.get_mut(&b).unwrap().kind {
+            container.children = vec![a];
+        }
+
+        assert!(matches!(
+            tree.validate(),
+            Err(TreeError::InvalidStructure(_))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_a_next_id_that_would_collide_with_an_existing_node() {
+        let mut tree = Tree::new();
+        tree.add_group(ROOT_ID, "work").unwrap();
+        tree.next_id = 1;
+
+        assert!(matches!(
+            tree.validate(),
+            Err(TreeError::InvalidStructure(_))
+        ));
     }
 }

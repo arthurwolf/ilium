@@ -8,8 +8,10 @@
 //! table(s) it owns.
 //!
 //! `crate::run` calls [`load`] once at startup, before the terminal enters
-//! raw/alternate-screen mode and before any render call, and installs the
-//! result via `keymap::init_effective_bindings`/`theme::init`.
+//! raw/alternate-screen mode and before any render call. `[theme]` is
+//! installed process-wide via `theme::init`; `[keybindings]` becomes
+//! `App::keybindings` directly -- the single live table both input dispatch
+//! and the help screen read (see `keymap`'s module doc).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -799,9 +801,9 @@ pub enum ConfigLoadError {
     #[error("keyboard.shortcut_base = {0:?} must be exactly one letter from A to Z")]
     InvalidShortcutBase(String),
     /// Two actions ended up bound to the same key after applying every
-    /// override -- `action_for` can only ever dispatch one of them, so this
-    /// is rejected rather than silently picking whichever comes first in
-    /// table order.
+    /// override -- `action_for_table` can only ever dispatch one of them, so
+    /// this is rejected rather than silently picking whichever comes first
+    /// in table order.
     #[error("keybindings config binds more than one action to the key {0}")]
     DuplicateBinding(BindingKey),
     /// A `[theme]` value isn't a valid `#rrggbb`/`rrggbb` hex color.
@@ -1308,10 +1310,10 @@ fn tree_order_name(tree_order: TreeOrder) -> &'static str {
 }
 
 /// Applies `[keybindings]` overrides onto a copy of `LEADER_BINDINGS`,
-/// producing the effective table `keymap::init_effective_bindings`
-/// installs. Pure and side-effect-free -- unlike installing the result,
-/// which touches `keymap`'s process-lifetime `OnceLock`, this is safe to
-/// call from a unit test as many times as needed.
+/// producing the table [`load`] stores on `ClientConfig::keybindings` and
+/// `crate::run` then assigns straight onto `App::keybindings`. Pure and
+/// side-effect-free, so it is safe to call from a unit test as many times
+/// as needed.
 fn merge_keybindings(
     overrides: &HashMap<String, String>,
 ) -> Result<Vec<KeyBinding>, ConfigLoadError> {
@@ -1328,8 +1330,8 @@ fn merge_keybindings(
         })?;
 
         // `LEADER_BINDINGS` has exactly one entry per `Action` (enforced by
-        // `action_for`/`action_name` both being total functions over every
-        // binding), so this always finds a match.
+        // `action_for_table`/`action_name` both being total functions over
+        // every binding), so this always finds a match.
         if let Some(binding) = bindings.iter_mut().find(|binding| binding.action == action) {
             binding.key = key;
         }
@@ -1639,9 +1641,15 @@ fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), Client
         })?;
     }
     let temporary_path = path.with_extension(format!("toml.tmp-{}", std::process::id()));
-    std::fs::write(&temporary_path, serialized).map_err(|source| ClientError::ConfigSave {
-        path: path.to_path_buf(),
-        source: Box::new(ConfigSaveError::Write(source)),
+    std::fs::write(&temporary_path, serialized).map_err(|source| {
+        // A partial write must not leave a stray `*.toml.tmp-<pid>` file
+        // behind in the config directory -- best-effort cleanup mirrors the
+        // rename failure branch below.
+        let _ = std::fs::remove_file(&temporary_path);
+        ClientError::ConfigSave {
+            path: path.to_path_buf(),
+            source: Box::new(ConfigSaveError::Write(source)),
+        }
     })?;
     std::fs::rename(&temporary_path, path).map_err(|source| {
         let _ = std::fs::remove_file(&temporary_path);

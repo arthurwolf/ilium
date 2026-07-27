@@ -88,8 +88,9 @@ pub(crate) fn enqueue(state: &ServerState, request: PlaybackRequest) {
 
 /// Polls the user-global config file for changes so all already-running
 /// project servers converge on settings changed in any attached client.
-/// Invalid/intermediate writes retain the last known-good value and retry on
-/// the next tick.
+/// Invalid/intermediate writes -- including a transient window where the
+/// file is briefly unreadable during a write-then-rename -- retain the last
+/// known-good value and retry on the next tick.
 pub(crate) fn spawn_config_watcher(
     state: Arc<ServerState>,
     config_path: PathBuf,
@@ -113,13 +114,23 @@ fn spawn_config_watcher_with_interval(
             if fingerprint == observed_fingerprint {
                 continue;
             }
+            // A `None` fingerprint means the file could not be read this tick
+            // (e.g. an editor's write-then-rename briefly unlinks it). That is
+            // an intermediate write, not a deliberate reset to defaults --
+            // `config::load` would happily return `Ok(default())` for a
+            // missing file, which would violate this loop's own contract of
+            // retaining the last known-good settings. Skip and retry on the
+            // next tick instead of reacting to a file we could not observe.
+            let Some(current_fingerprint) = fingerprint else {
+                continue;
+            };
             let Some(config_dir) = config_path.parent().map(Path::to_path_buf) else {
                 continue;
             };
             match load_config_blocking(config_dir).await {
                 Ok(config) => {
                     *state.sound_settings.write().await = config.sound;
-                    observed_fingerprint = fingerprint;
+                    observed_fingerprint = Some(current_fingerprint);
                 }
                 Err(error) => tracing::warn!(
                     "failed to reload sound settings from {:?}, keeping last valid settings: {error}",

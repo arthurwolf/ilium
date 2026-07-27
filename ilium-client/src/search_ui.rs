@@ -183,7 +183,7 @@ impl SearchState {
         let visible_rows = visible_rows.max(1);
         if self.selected_index < self.scroll {
             self.scroll = self.selected_index;
-        } else if self.selected_index >= self.scroll + visible_rows {
+        } else if self.selected_index >= self.scroll.saturating_add(visible_rows) {
             self.scroll = self.selected_index + 1 - visible_rows;
         }
     }
@@ -481,9 +481,16 @@ pub fn result_at(area: Rect, state: &SearchState, position: Position) -> Option<
         return None;
     }
     let relative_row = usize::from(position.y.saturating_sub(results_area.y));
+    // `render_results` only paints this many full `RESULT_HEIGHT` rows;
+    // anything below that (when `results_area.height` is not an exact
+    // multiple of `RESULT_HEIGHT`) is unpainted leftover space that must not
+    // resolve to a result index that isn't actually shown there.
+    let visible_count = (usize::from(results_area.height) / RESULT_HEIGHT).max(1);
+    if relative_row >= visible_count * RESULT_HEIGHT {
+        return None;
+    }
     let result_index = state.scroll + relative_row / RESULT_HEIGHT;
-    (relative_row % RESULT_HEIGHT < RESULT_HEIGHT && result_index < state.results.len())
-        .then_some(result_index)
+    (result_index < state.results.len()).then_some(result_index)
 }
 
 pub fn visible_result_rows(area: Rect) -> usize {
@@ -729,16 +736,23 @@ fn result_metadata(result: &SearchResult) -> String {
     }
 }
 
+/// Characters of surrounding context kept on each side of a match.
+const CONTEXT_CHARS: usize = 72;
+
 fn context_parts(text: &str, match_start: usize, match_end: usize) -> (&str, &str, &str) {
     let before_start = text[..match_start]
         .char_indices()
         .rev()
-        .nth(72)
+        // Reversed iteration's `nth(k)` yields the `(k + 1)`-th-from-end
+        // character, so `CONTEXT_CHARS - 1` is the first character of a
+        // `CONTEXT_CHARS`-wide window (unlike the forward case below, where
+        // `nth(CONTEXT_CHARS)` already lands on the end-of-window boundary).
+        .nth(CONTEXT_CHARS - 1)
         .map(|(index, _)| index)
         .unwrap_or(0);
     let after_end = text[match_end..]
         .char_indices()
-        .nth(72)
+        .nth(CONTEXT_CHARS)
         .map(|(index, _)| match_end + index)
         .unwrap_or(text.len());
     (
@@ -786,10 +800,7 @@ fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
             index += 1;
             continue;
         }
-        let remaining = &bytes[index..];
-        let decoded = std::str::from_utf8(remaining)
-            .ok()
-            .and_then(|value| value.chars().next());
+        let decoded = decode_next_char(&bytes[index..]);
         if let Some(character) = decoded {
             let end = index + character.len_utf8();
             push_mapped_char(&mut text, &mut raw_ends, character, end);
@@ -799,6 +810,40 @@ fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
         }
     }
     SearchableTerminalText { text, raw_ends }
+}
+
+/// Decodes the single UTF-8 character starting at the front of `remaining`,
+/// tolerating garbage or a truncated sequence anywhere *after* it.
+///
+/// The previous implementation validated `std::str::from_utf8` over the
+/// entire remaining slice on every iteration. That made stripping a
+/// multi-megabyte PTY journal quadratic (each of the ~n characters
+/// re-validated up to the full remaining tail), and it was also a
+/// correctness bug in its own right: a single stray invalid byte anywhere
+/// later in the retained history made the whole-slice validation fail for
+/// every position before it too, silently dropping all of that preceding
+/// text from the search index one byte at a time. Bounding the probe to the
+/// maximum possible UTF-8 sequence length (4 bytes) makes each call O(1) and
+/// keeps a later invalid byte from blinding decoding of everything before
+/// it.
+fn decode_next_char(remaining: &[u8]) -> Option<char> {
+    let probe_len = remaining.len().min(4);
+    let probe = &remaining[..probe_len];
+    match std::str::from_utf8(probe) {
+        Ok(valid) => valid.chars().next(),
+        Err(error) if error.valid_up_to() > 0 => {
+            // The truncation or garbage lands after the first character;
+            // the already-validated prefix is enough to recover it.
+            std::str::from_utf8(&probe[..error.valid_up_to()])
+                .ok()
+                .and_then(|valid| valid.chars().next())
+        }
+        // `probe_len == 4` always fully contains a valid leading character
+        // if one starts here, so this is either a genuinely invalid leading
+        // byte or (when `probe_len < 4`) a sequence truncated by the true
+        // end of the buffer — nothing more to recover either way.
+        Err(_) => None,
+    }
 }
 
 fn skip_escape(bytes: &[u8], index: usize) -> usize {
@@ -875,6 +920,14 @@ mod tests {
             results[0].location,
             SearchLocation::Terminal { history_end_byte } if history_end_byte > 6
         ));
+    }
+
+    #[test]
+    fn stripping_keeps_text_that_precedes_an_invalid_utf8_byte() {
+        let stripped = strip_terminal_controls(b"needle \xff tail");
+        assert!(stripped.text.contains("needle"));
+        assert!(stripped.text.contains("tail"));
+        assert_eq!(stripped.raw_ends.len(), stripped.text.len());
     }
 
     #[test]

@@ -66,7 +66,10 @@ impl PromptQueueDialogState {
                 std::mem::discriminant(choice) == std::mem::discriminant(&self.delivery_choice)
             })
             .unwrap_or(0);
-        let next = (current as i8 + direction).rem_euclid(choices.len() as i8) as usize;
+        // Widen to i32 before adding: `direction` is caller-supplied and an
+        // i8 sum of `current` (0..=2) with a `direction` near i8::MIN/MAX
+        // would overflow and panic under debug overflow checks.
+        let next = (current as i32 + direction as i32).rem_euclid(choices.len() as i32) as usize;
         self.delivery_choice = choices[next].clone();
     }
 

@@ -32,7 +32,9 @@ pub enum IpcError {
     #[error("frame payload truncated: expected {expected} bytes, connection closed early")]
     TruncatedFrame { expected: u32 },
 
-    /// A frame we're about to write would not fit in the `u32` length
+    /// A frame we're about to write is too large to send: either it
+    /// exceeds [`MAX_FRAME_LEN`] (the same corruption-guard bound
+    /// `read_frame` enforces) or it doesn't even fit in the `u32` length
     /// prefix. Not expected to happen in practice for this protocol's
     /// message sizes, but guarded rather than left to panic on the cast.
     #[error(

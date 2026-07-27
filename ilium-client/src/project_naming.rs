@@ -53,12 +53,21 @@ pub struct ProjectNameBootstrap {
 /// before entering the TUI so it can decide whether a background inference
 /// task is necessary without blocking the first rendered frame.
 pub fn load_stored_project_name(cwd: &Path) -> anyhow::Result<Option<String>> {
-    Ok(project_config::load(cwd)?
-        .project_name
-        .as_deref()
-        .and_then(|value| {
-            naming::normalize_word_bounded(value, PROJECT_NAME_MIN_WORDS, PROJECT_NAME_MAX_WORDS)
-        }))
+    Ok(stored_project_name(&project_config::load(cwd)?))
+}
+
+/// Extracts and validates the project name already present in a loaded
+/// config, without re-reading from disk. Shared by `load_stored_project_name`
+/// (which has no config in hand yet and must load one) and
+/// `bootstrap_project_name` (which already holds one loaded snapshot) so the
+/// latter never issues a second `project_config::load` just to re-derive a
+/// value it could read off the config it already has -- a second read could
+/// race a concurrent writer and pair a stale name with an icon read from a
+/// different snapshot of the file.
+fn stored_project_name(config: &project_config::ProjectConfig) -> Option<String> {
+    config.project_name.as_deref().and_then(|value| {
+        naming::normalize_word_bounded(value, PROJECT_NAME_MIN_WORDS, PROJECT_NAME_MAX_WORDS)
+    })
 }
 
 /// Reads the optional icon stored alongside a valid project name. Older
@@ -76,7 +85,7 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
     generator: &G,
 ) -> anyhow::Result<ProjectNameBootstrap> {
     let mut config = project_config::load(cwd)?;
-    if let Some(project_name) = load_stored_project_name(cwd)? {
+    if let Some(project_name) = stored_project_name(&config) {
         return Ok(ProjectNameBootstrap {
             project_name,
             icon: config
