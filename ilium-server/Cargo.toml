@@ -8,6 +8,7 @@ name = "ilium-server"
 path = "src/main.rs"
 
 [dependencies]
+axum = { version = "0.8.8", features = ["json"] }
 crossterm = "0.29.0"
 directories = "6.0.0"
 ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }

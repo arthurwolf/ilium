@@ -185,7 +185,9 @@ fn settings_snapshot(app: &App) -> Value {
         .collect::<serde_json::Map<_, _>>();
     json!({
         "writable_path_patterns": [
-            "ui.auto_resize_tree", "ui.tree_width", "ui.tree_order",
+            "ui.left_panel_sizing_mode", "ui.left_panel_fixed_width",
+            "ui.left_panel_unfocused_width", "ui.left_panel_focused_width",
+            "ui.left_panel_minimum_terminal_width", "ui.tree_order",
             "ui.tree_row_management_controls", "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
             "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
@@ -209,8 +211,17 @@ fn settings_snapshot(app: &App) -> Value {
             "debug.file_logging_enabled"
         ],
         "ui": {
-            "auto_resize_tree": app.ui_settings.auto_resize_tree_on_focus,
-            "tree_width": app.ui_settings.tree_width,
+            "left_panel_sizing_mode": match app.ui_settings.left_panel_sizing.mode {
+                crate::config::LeftPanelSizingMode::Fixed => "fixed",
+                crate::config::LeftPanelSizingMode::FocusDependent => "focus_dependent",
+                crate::config::LeftPanelSizingMode::TerminalWidthDependent => {
+                    "terminal_width_dependent"
+                }
+            },
+            "left_panel_fixed_width": app.ui_settings.left_panel_sizing.fixed_width,
+            "left_panel_unfocused_width": app.ui_settings.left_panel_sizing.unfocused_width,
+            "left_panel_focused_width": app.ui_settings.left_panel_sizing.focused_width,
+            "left_panel_minimum_terminal_width": app.ui_settings.left_panel_sizing.minimum_terminal_width,
             "tree_order": format!("{:?}", app.ui_settings.tree_order).to_ascii_lowercase(),
             "tree_row_management_controls": app.ui_settings.show_tree_row_management_controls,
             "color_scheme": format!("{:?}", app.ui_settings.color_scheme).to_ascii_lowercase(),
@@ -334,6 +345,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::CommandPrompt(_) => "command_prompt",
         Mode::InferenceSettingPrompt(_, _) => "inference_setting_prompt",
         Mode::VoiceSettingPrompt(_, _) => "voice_setting_prompt",
+        Mode::ApiSettingPrompt(_) => "api_setting_prompt",
         Mode::VoicePromptEditor(_) => "voice_prompt_editor",
         Mode::SaveAs(..) => "save_as",
         Mode::Help => "help",

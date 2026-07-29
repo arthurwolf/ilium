@@ -15,9 +15,9 @@ use ilium_agent_debug::{
     AgentDebugSource, PaneResizeCause,
 };
 use ilium_core::{
-    NodeId, NodeKind, PaneContentKind, PaneStatus, PaneTitleSource, PromptQueueDelivery,
-    QueuedPrompt, RestructurePlan, ScheduledPaneInput, SessionIdentityTransitionRule, Tree,
-    TreeError,
+    AgentProvider, BuiltinAgentProvider, NodeId, NodeKind, PaneContentKind, PaneStatus,
+    PaneTitleSource, PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput,
+    SessionIdentityTransitionRule, Tree, TreeError,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
@@ -1416,7 +1416,79 @@ async fn handle_new_pane(
     .await;
 
     if let Some(initial_input) = plan.initial_input {
-        crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
+        let _completion =
+            crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
+    }
+}
+
+/// Creates one built-in coding agent inside the project represented by
+/// `project_cwd`, then waits until the existing composer-readiness boundary
+/// has submitted `prompt`. HTTP automation uses this instead of emulating an
+/// IPC client, so the server remains the sole owner of project placement,
+/// PTY lifecycle, and readiness-safe input delivery.
+pub(crate) async fn create_agent_with_prompt(
+    state: &Arc<ServerState>,
+    provider: BuiltinAgentProvider,
+    project_cwd: std::path::PathBuf,
+    prompt: String,
+) -> Result<NodeId, String> {
+    let command_line = provider.command_line().to_string();
+    let pane_id = {
+        let mut tree = state.tree.write().await;
+        let project_id = tree
+            .project_ids()
+            .into_iter()
+            .find(|project_id| {
+                tree.get(*project_id)
+                    .and_then(ilium_core::Node::project_path)
+                    .is_some_and(|path| path == project_cwd)
+            })
+            .map(Ok)
+            .unwrap_or_else(|| tree.add_project(project_cwd.clone()))
+            .map_err(|error| format!("failed to add project: {error}"))?;
+        let group_id = tree
+            .ensure_project_default_group(project_id, "default")
+            .map_err(|error| format!("failed to prepare project group: {error}"))?;
+        tree.add_pane(group_id, command_line.clone(), PaneContentKind::Terminal)
+            .map_err(|error| format!("failed to create agent pane: {error}"))?
+    };
+
+    let origin = TerminalOrigin::Command(command_line.clone());
+    if let Err(error) = spawn_and_register_pane_in_directory(
+        state,
+        pane_id,
+        PaneSnapshotKind::Terminal(origin),
+        &project_cwd,
+    )
+    .await
+    {
+        let mut tree = state.tree.write().await;
+        let _ = tree.remove_node(pane_id);
+        return Err(format!("failed to spawn {command_line}: {error}"));
+    }
+
+    broadcast_and_persist(state).await;
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PaneCreated,
+            "Agent created by HTTP API",
+        )
+        .with_fields(vec![
+            AgentDebugField::plain("provider", provider.label()),
+            AgentDebugField::plain("working directory", project_cwd.display().to_string()),
+        ]),
+    )
+    .await;
+
+    let completion = crate::initial_prompt::start(Arc::clone(state), pane_id, prompt).await;
+    match tokio::time::timeout(std::time::Duration::from_secs(120), completion).await {
+        Ok(Ok(Ok(()))) => Ok(pane_id),
+        Ok(Ok(Err(error))) => Err(format!("agent prompt was not delivered: {error}")),
+        Ok(Err(_)) => Err("agent prompt delivery was cancelled".to_string()),
+        Err(_) => Err("timed out waiting for the agent input prompt".to_string()),
     }
 }
 
@@ -2229,7 +2301,7 @@ pub(crate) async fn write_key_input(
     // the same byte batch. In practice they are mutually exclusive, but the
     // ordering makes the stale LLM title impossible to retain if input and
     // foreground detection race.
-    let title_changed = {
+    let tree_changed = {
         let mut tree = state.tree.write().await;
         if cleared_conversation_title_generation.is_some() {
             match tree
@@ -2259,7 +2331,7 @@ pub(crate) async fn write_key_input(
             false
         }
     };
-    if title_changed {
+    if tree_changed {
         broadcast_and_persist(state).await;
     }
     Ok(())
@@ -2364,7 +2436,7 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 mod tests {
     use super::*;
     use crate::initial_prompt::initial_input_bytes;
-    use ilium_core::NodeId;
+    use ilium_core::{NodeId, RestructureNode, SplitOrientation};
     use std::time::Duration;
 
     /// Waits for the command-backed test pane's reader thread to journal at
@@ -2509,6 +2581,146 @@ mod tests {
         for (pane_id, resource) in resources {
             teardown_pane_resource(pane_id, resource);
         }
+        sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn project_restructure_handler_preserves_splits_and_rejects_dissolution() {
+        let directory = tempfile::tempdir().expect("create restructure test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "protected-split-restructure".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("protected-split.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let (project_id, original_group, split_view, first, second) = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            let original_group = tree
+                .add_group(project_id, "original")
+                .expect("launch project accepts a group");
+            let first = tree
+                .add_pane(original_group, "first", PaneContentKind::Terminal)
+                .expect("group accepts first terminal");
+            let second = tree
+                .add_pane(original_group, "second", PaneContentKind::Terminal)
+                .expect("group accepts second terminal");
+            let split_view = tree
+                .create_split_view(
+                    original_group,
+                    "User Split",
+                    SplitOrientation::Horizontal,
+                    &[first, second],
+                )
+                .expect("group accepts a split");
+            (project_id, original_group, split_view, first, second)
+        };
+        let before_restructure = state.tree.read().await.clone();
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+
+        handle_apply_project_restructure_plan(
+            &state,
+            project_id,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "regrouped".to_string(),
+                    short_title: None,
+                    icon: None,
+                    children: vec![RestructureNode::ExistingSplitView {
+                        id: split_view,
+                        children: vec![
+                            RestructureNode::Pane {
+                                id: first,
+                                title: "renamed first".to_string(),
+                                short_title: None,
+                                icon: None,
+                            },
+                            RestructureNode::Pane {
+                                id: second,
+                                title: "renamed second".to_string(),
+                                short_title: None,
+                                icon: None,
+                            },
+                        ],
+                    }],
+                }],
+            },
+            &direct_tx,
+        )
+        .await;
+
+        assert!(direct_rx.try_recv().is_err());
+        let snapshot = tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .expect("successful restructure broadcasts")
+            .expect("broadcast channel remains open");
+        let ServerEvent::TreeSnapshot(snapshot) = snapshot else {
+            panic!("successful restructure should broadcast a tree snapshot");
+        };
+        assert!(snapshot.get(original_group).is_none());
+        assert!(snapshot
+            .get(split_view)
+            .is_some_and(ilium_core::Node::is_split_view));
+        assert_eq!(snapshot.children_of(split_view).unwrap(), &[first, second]);
+        assert_eq!(
+            snapshot.split_orientation(split_view),
+            Some(SplitOrientation::Horizontal)
+        );
+        assert_eq!(
+            state.restructure_undo.lock().await.get(&project_id),
+            Some(&before_restructure)
+        );
+
+        let valid_tree = state.tree.read().await.clone();
+        let prior_undo = state
+            .restructure_undo
+            .lock()
+            .await
+            .get(&project_id)
+            .cloned();
+        handle_apply_project_restructure_plan(
+            &state,
+            project_id,
+            RestructurePlan {
+                children: vec![
+                    RestructureNode::Pane {
+                        id: first,
+                        title: "dissolved first".to_string(),
+                        short_title: None,
+                        icon: None,
+                    },
+                    RestructureNode::Pane {
+                        id: second,
+                        title: "dissolved second".to_string(),
+                        short_title: None,
+                        icon: None,
+                    },
+                ],
+            },
+            &direct_tx,
+        )
+        .await;
+
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::Error { message })
+                if message.contains("changed the protected split-view set")
+        ));
+        assert_eq!(*state.tree.read().await, valid_tree);
+        assert_eq!(
+            state.restructure_undo.lock().await.get(&project_id),
+            prior_undo.as_ref()
+        );
+        assert!(events.try_recv().is_err());
+
         sound_task.abort();
     }
 

@@ -41,9 +41,28 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             sequence,
             bytes,
         } => {
-            if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                view.apply_live_output(first_sequence, sequence, &bytes);
-            }
+            let should_track_visible_text_change = app.tree.get(pane_id).is_some_and(|node| {
+                matches!(
+                    node.kind,
+                    NodeKind::Pane {
+                        content: PaneContentKind::Terminal,
+                        status: PaneStatus::PlainShell,
+                        ..
+                    }
+                )
+            });
+            let did_visible_text_change =
+                if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                    view.apply_live_output(
+                        first_sequence,
+                        sequence,
+                        &bytes,
+                        should_track_visible_text_change,
+                    )
+                } else {
+                    false
+                };
+            app.record_terminal_screen_change(pane_id, did_visible_text_change);
             None
         }
         ServerEvent::TerminalReplay {
@@ -85,6 +104,21 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             // change that never actually happened.
             match app.tree.set_pane_status(pane_id, status) {
                 Ok(()) => {
+                    let is_plain_terminal = app.tree.get(pane_id).is_some_and(|node| {
+                        matches!(
+                            node.kind,
+                            NodeKind::Pane {
+                                content: PaneContentKind::Terminal,
+                                status: PaneStatus::PlainShell,
+                                ..
+                            }
+                        )
+                    });
+                    if is_plain_terminal {
+                        if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                            view.synchronize_visible_text_fingerprint();
+                        }
+                    }
                     // Type ordering distinguishes agents from plain shells;
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
@@ -347,6 +381,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         app.tree.panes().map(|node| node.id).collect();
     app.panes
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.retain_requested_pane_sizes(&live_pane_ids);
     // `NodeId` is never reused (see `ilium_core::Tree`), so every one of
     // these pane-keyed caches would otherwise grow by one entry per pane
     // ever created for the life of the client process -- a slow but
@@ -586,14 +621,18 @@ fn load_restored_editor(app: &mut App, pane_id: NodeId) {
 
 #[cfg(test)]
 mod tests {
-    use ilium_core::{AgentActivity, AgentClass, PaneContentKind, ROOT_ID};
+    use ilium_core::{
+        AgentActivity, AgentClass, PaneContentKind, RestructureNode, RestructurePlan,
+        SplitOrientation, ROOT_ID,
+    };
     use ilium_ipc::{
         AgentDebugContext, AgentDebugEntry, AgentDebugEventKind, AgentDebugSeverity,
-        AgentDebugSource,
+        AgentDebugSource, ClientRequest,
     };
     use ratatui::layout::{Position, Rect};
 
     use super::*;
+    use crate::terminal_activity::TerminalActivityPhase;
 
     fn app() -> App {
         App::new("test".to_string(), std::env::temp_dir())
@@ -684,6 +723,199 @@ mod tests {
         assert_eq!(app.active_pane_id(), None);
         assert_eq!(app.right_panel_target, crate::app::RightPanelTarget::Empty);
         assert!(app.panes.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn removing_a_pane_forgets_its_server_resize_deduplication_state() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 140, 40));
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        app.focus_pane(pane_id);
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::ResizePane {
+                    pane_id: resized_pane_id,
+                    ..
+                } if resized_pane_id == pane_id
+            )
+        }));
+
+        apply(&mut app, ServerEvent::TreeSnapshot(ilium_core::Tree::new()));
+        app.take_outbound_requests();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        app.focus_pane(pane_id);
+
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::ResizePane {
+                    pane_id: resized_pane_id,
+                    ..
+                } if resized_pane_id == pane_id
+            )
+        }));
+    }
+
+    #[test]
+    fn focused_split_member_survives_a_restructure_snapshot() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let project = tree.add_project(std::env::temp_dir()).unwrap();
+        let original_group = tree.add_group(project, "original").unwrap();
+        let first = tree
+            .add_pane(original_group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(original_group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let outside = tree
+            .add_pane(original_group, "outside", PaneContentKind::Terminal)
+            .unwrap();
+        let split_view = tree
+            .create_split_view(
+                original_group,
+                "User Split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        app.focus_pane(second);
+
+        tree.apply_project_restructure(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "AI regrouped".to_string(),
+                    short_title: None,
+                    icon: None,
+                    children: vec![
+                        RestructureNode::ExistingSplitView {
+                            id: split_view,
+                            children: vec![
+                                RestructureNode::Pane {
+                                    id: first,
+                                    title: "renamed first".to_string(),
+                                    short_title: None,
+                                    icon: None,
+                                },
+                                RestructureNode::Pane {
+                                    id: second,
+                                    title: "renamed second".to_string(),
+                                    short_title: None,
+                                    icon: None,
+                                },
+                            ],
+                        },
+                        RestructureNode::Pane {
+                            id: outside,
+                            title: "renamed outside".to_string(),
+                            short_title: None,
+                            icon: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+        let regrouped = tree.children_of(project).unwrap()[0];
+
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(
+            app.right_panel_target,
+            crate::app::RightPanelTarget::SplitView {
+                split_id: split_view,
+                active_pane_id: Some(second),
+            }
+        );
+        assert_eq!(app.displayed_pane_ids(), vec![first, second]);
+        assert_eq!(app.selected_node_id(), Some(second));
+        assert_eq!(
+            app.tree_state.selected(),
+            &[project, regrouped, split_view, second]
+        );
+        assert_eq!(app.focus, crate::app::FocusTarget::Pane);
+    }
+
+    #[test]
+    fn tree_focused_split_row_survives_a_restructure_snapshot() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let project = tree.add_project(std::env::temp_dir()).unwrap();
+        let original_group = tree.add_group(project, "original").unwrap();
+        let first = tree
+            .add_pane(original_group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(original_group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split_view = tree
+            .create_split_view(
+                original_group,
+                "User Split",
+                SplitOrientation::Horizontal,
+                &[first, second],
+            )
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree.clone()));
+        app.select_node(split_view);
+        app.focus = crate::app::FocusTarget::Tree;
+        app.right_panel_target = crate::app::RightPanelTarget::SplitView {
+            split_id: split_view,
+            active_pane_id: None,
+        };
+
+        tree.apply_project_restructure(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "AI regrouped".to_string(),
+                    short_title: None,
+                    icon: None,
+                    children: vec![RestructureNode::ExistingSplitView {
+                        id: split_view,
+                        children: vec![
+                            RestructureNode::Pane {
+                                id: first,
+                                title: "renamed first".to_string(),
+                                short_title: None,
+                                icon: None,
+                            },
+                            RestructureNode::Pane {
+                                id: second,
+                                title: "renamed second".to_string(),
+                                short_title: None,
+                                icon: None,
+                            },
+                        ],
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+        let regrouped = tree.children_of(project).unwrap()[0];
+
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        assert_eq!(app.selected_node_id(), Some(split_view));
+        assert_eq!(app.tree_state.selected(), &[project, regrouped, split_view]);
+        assert_eq!(
+            app.right_panel_target,
+            crate::app::RightPanelTarget::SplitView {
+                split_id: split_view,
+                active_pane_id: None,
+            }
+        );
+        assert_eq!(app.displayed_pane_ids(), vec![first, second]);
+        assert_eq!(app.focus, crate::app::FocusTarget::Tree);
     }
 
     #[test]
@@ -1335,6 +1567,107 @@ mod tests {
         assert!(view
             .with_screen(|screen| screen.contents())
             .contains("hello"));
+        assert_eq!(
+            app.terminal_activity
+                .phase(pane_id, app.started_at.elapsed().as_millis()),
+            Some(TerminalActivityPhase::Fast)
+        );
+    }
+
+    #[test]
+    fn attach_replay_does_not_mark_a_plain_terminal_active() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        apply(
+            &mut app,
+            ServerEvent::TerminalReplay {
+                pane_id,
+                through_sequence: 1,
+                bytes: b"restored output".to_vec(),
+                is_complete: true,
+            },
+        );
+
+        assert!(!app
+            .terminal_activity
+            .has_visible_activity(app.started_at.elapsed().as_millis()));
+    }
+
+    #[test]
+    fn known_agent_output_skips_activity_and_plain_transition_resynchronizes() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "terminal", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::Agent(
+                    ilium_core::AgentClass::Codex,
+                    ilium_core::AgentActivity::Working,
+                ),
+            },
+        );
+        apply(
+            &mut app,
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 1,
+                sequence: 1,
+                bytes: b"agent output".to_vec(),
+            },
+        );
+
+        assert!(!app
+            .terminal_activity
+            .has_visible_activity(app.started_at.elapsed().as_millis()));
+
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::PlainShell,
+            },
+        );
+        apply(
+            &mut app,
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 2,
+                sequence: 2,
+                bytes: b"\x1b[33m".to_vec(),
+            },
+        );
+
+        assert!(!app
+            .terminal_activity
+            .has_visible_activity(app.started_at.elapsed().as_millis()));
+
+        apply(
+            &mut app,
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: 3,
+                sequence: 3,
+                bytes: b"\rplain output".to_vec(),
+            },
+        );
+
+        assert_eq!(
+            app.terminal_activity
+                .phase(pane_id, app.started_at.elapsed().as_millis()),
+            Some(TerminalActivityPhase::Fast)
+        );
     }
 
     #[test]

@@ -265,6 +265,7 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::CommandPrompt(_)
             | Mode::InferenceSettingPrompt(_, _)
             | Mode::VoiceSettingPrompt(_, _)
+            | Mode::ApiSettingPrompt(_)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
             | Mode::AgentDebugSavePath(..)
@@ -331,6 +332,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::CommandPrompt(state)
         | Mode::InferenceSettingPrompt(_, state)
         | Mode::VoiceSettingPrompt(_, state)
+        | Mode::ApiSettingPrompt(state)
         | Mode::SaveAs(_, state)
         | Mode::AgentDebugSavePath(_, state)
         | Mode::BoardCardPrompt(_, state)
@@ -386,7 +388,7 @@ fn handle_terminal_pane_context_menu_mouse(
         return;
     }
     let action_index = usize::from(position.y - menu.area.y.saturating_add(1));
-    let Some(action) = menu.actions.get(action_index).copied() else {
+    let Some(action) = menu.actions.get(action_index).cloned() else {
         app.mode = Mode::TerminalPaneContextMenu(menu);
         return;
     };
@@ -1335,19 +1337,41 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_toggle_file_logging();
                     }
                 }
-            } else if state.tab == crate::app::SettingsTab::Appearance {
-                if let Some((row, direction)) = crate::settings_ui::appearance_content_hit(
+            } else if state.tab == crate::app::SettingsTab::Api {
+                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
                     layout.content_area,
                     state.scroll,
                     position,
+                    crate::app::ApiRow::ALL.len(),
                 ) {
-                    if let Some(index) = crate::app::AppearanceRow::ALL
-                        .iter()
-                        .position(|candidate| *candidate == row)
-                    {
-                        state.selected_row = index;
+                    state.selected_row = index;
+                    app.mode = Mode::Settings(state);
+                    app.settings_open_api_port();
+                    return;
+                }
+            } else if state.tab == crate::app::SettingsTab::Appearance {
+                if let Some(hit) = crate::settings_ui::appearance_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    &app.ui_settings,
+                ) {
+                    match hit {
+                        crate::settings_ui::AppearanceContentHit::Mode(mode) => {
+                            state.selected_row = 0;
+                            app.settings_set_left_panel_sizing_mode(mode);
+                        }
+                        crate::settings_ui::AppearanceContentHit::Row { row, direction } => {
+                            let rows = crate::app::AppearanceRow::visible(
+                                app.ui_settings.left_panel_sizing.mode,
+                            );
+                            if let Some(index) = rows.iter().position(|candidate| *candidate == row)
+                            {
+                                state.selected_row = index;
+                            }
+                            app.settings_adjust_row(row, direction);
+                        }
                     }
-                    app.settings_adjust_row(row, direction);
                 }
             } else if state.tab == crate::app::SettingsTab::Terminal {
                 if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
@@ -2287,6 +2311,34 @@ mod row_action_click_tests {
         );
 
         assert!(matches!(app.mode, Mode::Settings(_)));
+    }
+
+    #[test]
+    fn appearance_sizing_cards_are_direct_mouse_targets() {
+        let mut app = test_app();
+        app.mode = Mode::Settings(crate::app::SettingsState::new());
+        let content = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+        let width_dependent_column = content.right().saturating_sub(2);
+        let card_row = content.y + 4;
+
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: width_dependent_column,
+                row: card_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert_eq!(
+            app.ui_settings.left_panel_sizing.mode,
+            crate::config::LeftPanelSizingMode::TerminalWidthDependent
+        );
+        assert!(matches!(
+            &app.mode,
+            Mode::Settings(state) if state.selected_row == 0
+        ));
     }
 
     #[test]

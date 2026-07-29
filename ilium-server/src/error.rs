@@ -158,6 +158,8 @@ pub enum ConfigLoadError {
     /// the client-side copy of this same string.
     #[error("session.recovery_policy = {0:?} is not supported")]
     InvalidSessionRecoveryPolicy(String),
+    #[error("api.port must be between 1 and 65535")]
+    InvalidHttpApiPort,
 }
 
 /// Why a crash-recovery snapshot read/write failed.

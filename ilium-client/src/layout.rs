@@ -6,18 +6,21 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-/// Default width of the left tree column, in terminal columns -- what a
-/// fresh install (no `config.toml` `[ui].tree_width` override) uses. The
-/// settings screen's "Tree panel width" control
-/// (`crate::app::Mode::Settings`) lets a user change the effective base
-/// width at runtime; see `TreeWidthAnimation::set_base_width`.
-pub const DEFAULT_TREE_WIDTH: u16 = 32;
-/// Smallest and largest base width the settings screen's width control
-/// accepts -- also enforced by `crate::config::merge_ui`, so a hand-edited
-/// `config.toml` can't request something the layout math can't render
-/// sensibly (too narrow to show a name, or wide enough to swallow the pane).
+/// Fresh-install width used while a focus-dependent left panel is inactive.
+pub const DEFAULT_UNFOCUSED_TREE_WIDTH: u16 = 32;
+/// Fresh-install width used while a focus-dependent left panel is active.
+pub const DEFAULT_FOCUSED_TREE_WIDTH: u16 = 64;
+/// Fresh-install width used by the fixed policy.
+pub const DEFAULT_FIXED_TREE_WIDTH: u16 = 32;
+/// Fresh-install terminal-width breakpoint for the responsive policy.
+pub const DEFAULT_MINIMUM_TERMINAL_WIDTH: u16 = 120;
+/// Smallest and largest left-panel widths accepted by Settings and config.
 pub const MIN_TREE_WIDTH: u16 = 16;
 pub const MAX_TREE_WIDTH: u16 = 80;
+/// Bounds keep the responsive breakpoint practical without coupling it to
+/// one monitor, terminal emulator, or current panel-width choice.
+pub const MINIMUM_TERMINAL_WIDTH: u16 = 40;
+pub const MAXIMUM_TERMINAL_WIDTH: u16 = 500;
 /// A short transition keeps the panel responsive while still making the
 /// change legible instead of snapping across thirty-two terminal cells.
 pub const TREE_WIDTH_ANIMATION_DURATION: Duration = Duration::from_millis(180);
@@ -36,9 +39,6 @@ pub const VOICE_CONTROL_WIDTH: u16 = 22;
 /// express the desired endpoint and never manipulate animation progress.
 #[derive(Debug, Clone)]
 pub struct TreeWidthAnimation {
-    /// The collapsed (not-focused/not-hovered) width -- settings-controlled,
-    /// see `set_base_width`. The expanded width is always `base_width * 2`.
-    base_width: u16,
     transition_start_width: u16,
     current_width: u16,
     target_width: u16,
@@ -50,12 +50,11 @@ pub struct TreeWidthAnimation {
 impl TreeWidthAnimation {
     /// Starts in the ordinary pane-focused state without an initial flourish,
     /// collapsed to `base_width`.
-    pub fn new(now: Instant, base_width: u16) -> Self {
+    pub fn new(now: Instant, initial_width: u16) -> Self {
         Self {
-            base_width,
-            transition_start_width: base_width,
-            current_width: base_width,
-            target_width: base_width,
+            transition_start_width: initial_width,
+            current_width: initial_width,
+            target_width: initial_width,
             transition_started_at: now,
             is_animating: false,
             motion_enabled: true,
@@ -73,24 +72,10 @@ impl TreeWidthAnimation {
         }
     }
 
-    const fn expanded_width(&self) -> u16 {
-        self.base_width.saturating_mul(2)
-    }
-
-    /// Applies a new base width from the settings screen immediately -- a
-    /// discrete configuration change, not a focus transition, so this snaps
-    /// rather than easing like `update` does. Preserves whichever endpoint
-    /// (collapsed/expanded) the animation currently targets, so changing the
-    /// width setting while the tree panel happens to be focused doesn't
-    /// visually collapse it first.
-    pub fn set_base_width(&mut self, base_width: u16, now: Instant) -> u16 {
-        let was_expanded = self.target_width != self.base_width;
-        self.base_width = base_width;
-        let width = if was_expanded {
-            self.expanded_width()
-        } else {
-            base_width
-        };
+    /// Applies a discrete settings change immediately. Focus and terminal
+    /// transitions use [`Self::update`]; editing the selected policy should
+    /// make its resolved result authoritative without replaying an old target.
+    pub fn snap_to(&mut self, width: u16, now: Instant) -> u16 {
         self.transition_start_width = width;
         self.current_width = width;
         self.target_width = width;
@@ -99,15 +84,10 @@ impl TreeWidthAnimation {
         width
     }
 
-    /// Advances toward the focus-derived endpoint and returns the width to
-    /// use for this frame. A direction change samples the old transition
-    /// first, then starts from that exact visible cell width without a jump.
-    pub fn update(&mut self, is_expanded: bool, now: Instant) -> u16 {
-        let requested_target = if is_expanded {
-            self.expanded_width()
-        } else {
-            self.base_width
-        };
+    /// Advances toward an explicit policy-derived endpoint and returns the
+    /// width to use for this frame. A direction change samples the previous
+    /// transition first, then starts from that visible width without a jump.
+    pub fn update(&mut self, requested_target: u16, now: Instant) -> u16 {
         let sampled_width = self.sample(now);
 
         if !self.motion_enabled {
@@ -192,7 +172,7 @@ pub struct UiLayout {
 impl UiLayout {
     /// Computes the ordinary pane-focused geometry from the full area.
     pub fn from_screen_area(screen_area: Rect) -> Self {
-        Self::from_screen_area_with_tree_width(screen_area, DEFAULT_TREE_WIDTH)
+        Self::from_screen_area_with_tree_width(screen_area, DEFAULT_UNFOCUSED_TREE_WIDTH)
     }
 
     /// Computes every stable region for one frame from the animated tree
@@ -303,16 +283,19 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 mod tests {
     use super::*;
 
-    const EXPANDED_TREE_WIDTH: u16 = DEFAULT_TREE_WIDTH * 2;
+    const EXPANDED_TREE_WIDTH: u16 = DEFAULT_FOCUSED_TREE_WIDTH;
 
     #[test]
     fn pane_content_excludes_status_tree_and_border() {
         let layout = UiLayout::from_screen_area(Rect::new(0, 0, 120, 40));
         assert_eq!(
             layout.tree_area,
-            Rect::new(0, 0, DEFAULT_TREE_WIDTH + 1, 39)
+            Rect::new(0, 0, DEFAULT_UNFOCUSED_TREE_WIDTH + 1, 39)
         );
-        assert_eq!(layout.pane_area, Rect::new(DEFAULT_TREE_WIDTH, 0, 88, 39));
+        assert_eq!(
+            layout.pane_area,
+            Rect::new(DEFAULT_UNFOCUSED_TREE_WIDTH, 0, 88, 39)
+        );
         assert_eq!(layout.pane_content_size(), (37, 86));
         assert_eq!(layout.status_area, Rect::new(0, 39, 98, 1));
         assert_eq!(layout.voice_control_area, Rect::new(98, 39, 22, 1));
@@ -367,28 +350,37 @@ mod tests {
     }
 
     #[test]
-    fn tree_width_animation_eases_to_double_width() {
+    fn tree_width_animation_eases_between_explicit_policy_widths() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_TREE_WIDTH);
+        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
 
-        assert_eq!(animation.update(true, started_at), DEFAULT_TREE_WIDTH);
+        assert_eq!(
+            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at),
+            DEFAULT_UNFOCUSED_TREE_WIDTH
+        );
         assert!(animation.is_animating());
 
         let quarter = started_at + TREE_WIDTH_ANIMATION_DURATION / 4;
         let midpoint = started_at + TREE_WIDTH_ANIMATION_DURATION / 2;
         let three_quarters = started_at + TREE_WIDTH_ANIMATION_DURATION * 3 / 4;
-        assert!(animation.update(true, quarter) < DEFAULT_TREE_WIDTH + DEFAULT_TREE_WIDTH / 4);
+        assert!(
+            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, quarter)
+                < DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH / 4
+        );
         assert_eq!(
-            animation.update(true, midpoint),
-            DEFAULT_TREE_WIDTH + DEFAULT_TREE_WIDTH / 2
+            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, midpoint),
+            DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH / 2
         );
         assert!(
-            animation.update(true, three_quarters)
-                > DEFAULT_TREE_WIDTH + DEFAULT_TREE_WIDTH * 3 / 4
+            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, three_quarters)
+                > DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH * 3 / 4
         );
 
         assert_eq!(
-            animation.update(true, started_at + TREE_WIDTH_ANIMATION_DURATION),
+            animation.update(
+                DEFAULT_FOCUSED_TREE_WIDTH,
+                started_at + TREE_WIDTH_ANIMATION_DURATION
+            ),
             EXPANDED_TREE_WIDTH
         );
         assert!(!animation.is_animating());
@@ -397,13 +389,13 @@ mod tests {
     #[test]
     fn repeated_expansion_requests_do_not_restart_or_reverse_progress() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_TREE_WIDTH);
-        animation.update(true, started_at);
+        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
+        animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at);
 
         let mut sampled_widths = Vec::new();
         for step in 1..=12 {
             let sampled_at = started_at + TREE_WIDTH_ANIMATION_DURATION * step / 12;
-            sampled_widths.push(animation.update(true, sampled_at));
+            sampled_widths.push(animation.update(DEFAULT_FOCUSED_TREE_WIDTH, sampled_at));
         }
 
         assert!(sampled_widths.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -414,43 +406,36 @@ mod tests {
     #[test]
     fn tree_width_animation_reverses_from_the_visible_width() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_TREE_WIDTH);
-        animation.update(true, started_at);
+        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
+        animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at);
 
         let midpoint = started_at + TREE_WIDTH_ANIMATION_DURATION / 2;
-        assert_eq!(animation.update(true, midpoint), 48);
-        assert_eq!(animation.update(false, midpoint), 48);
+        assert_eq!(animation.update(DEFAULT_FOCUSED_TREE_WIDTH, midpoint), 48);
+        assert_eq!(animation.update(DEFAULT_UNFOCUSED_TREE_WIDTH, midpoint), 48);
 
         let collapse_midpoint = midpoint + TREE_WIDTH_ANIMATION_DURATION / 2;
-        assert_eq!(animation.update(false, collapse_midpoint), 40);
         assert_eq!(
-            animation.update(false, midpoint + TREE_WIDTH_ANIMATION_DURATION),
-            DEFAULT_TREE_WIDTH
+            animation.update(DEFAULT_UNFOCUSED_TREE_WIDTH, collapse_midpoint),
+            40
+        );
+        assert_eq!(
+            animation.update(
+                DEFAULT_UNFOCUSED_TREE_WIDTH,
+                midpoint + TREE_WIDTH_ANIMATION_DURATION
+            ),
+            DEFAULT_UNFOCUSED_TREE_WIDTH
         );
         assert!(!animation.is_animating());
     }
 
     #[test]
-    fn set_base_width_snaps_immediately_without_animating() {
+    fn snap_to_applies_a_settings_width_without_animating() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_TREE_WIDTH);
+        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
 
-        let width = animation.set_base_width(20, started_at);
+        let width = animation.snap_to(20, started_at);
         assert_eq!(width, 20);
         assert_eq!(animation.current_width(), 20);
-        assert!(!animation.is_animating());
-    }
-
-    #[test]
-    fn set_base_width_preserves_the_expanded_endpoint() {
-        let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_TREE_WIDTH);
-        // Fully expand first.
-        animation.update(true, started_at + TREE_WIDTH_ANIMATION_DURATION);
-
-        let width = animation.set_base_width(20, started_at);
-        // Still expanded, just at the new base width's double.
-        assert_eq!(width, 40);
         assert!(!animation.is_animating());
     }
 }

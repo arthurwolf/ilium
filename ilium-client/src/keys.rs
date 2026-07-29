@@ -76,6 +76,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::VoiceSettingPrompt(field, state) => {
             handle_voice_setting_prompt(app, field, state, &event)
         }
+        Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
         Mode::VoicePromptEditor(state) => handle_voice_prompt_editor(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
@@ -165,7 +166,7 @@ fn handle_terminal_pane_context_menu_event(
             app.mode = Mode::TerminalPaneContextMenu(menu);
         }
         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-            let action = menu.actions[menu.selected_index];
+            let action = menu.actions[menu.selected_index].clone();
             app.execute_terminal_context_action(action, menu);
         }
         _ => app.mode = Mode::TerminalPaneContextMenu(menu),
@@ -989,6 +990,25 @@ fn handle_voice_setting_prompt(
     }
 }
 
+fn handle_api_setting_prompt(app: &mut App, mut state: TextPromptState, event: &Event) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::ApiSettingPrompt(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::ApiSettingPrompt(state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            app.settings_commit_api_port(state.buf);
+            app.pop_modal();
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
+        PromptOutcome::Continue => app.mode = Mode::ApiSettingPrompt(state),
+    }
+}
+
 fn handle_voice_prompt_editor(
     app: &mut App,
     mut state: Box<crate::voice_settings::VoicePromptEditorState>,
@@ -1739,6 +1759,25 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Debug => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Api => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Api => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::ApiRow::ALL.len().saturating_sub(1));
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Api =>
+        {
+            app.mode = Mode::Settings(state);
+            app.settings_open_api_port();
+            return;
+        }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Debug => {
             state.selected_row =
                 (state.selected_row + 1).min(crate::app::DebugRow::ALL.len().saturating_sub(1));
@@ -1762,19 +1801,31 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.selected_row = state.selected_row.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Appearance => {
-            state.selected_row =
-                (state.selected_row + 1).min(AppearanceRow::ALL.len().saturating_sub(1));
+            let rows = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode);
+            state.selected_row = (state.selected_row + 1).min(rows.len().saturating_sub(1));
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Appearance => {
-            if let Some(row) = AppearanceRow::ALL.get(state.selected_row).copied() {
+            let rows = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode);
+            if let Some(row) = rows.get(state.selected_row).copied() {
                 app.settings_adjust_row(row, -1);
+                state.selected_row = state.selected_row.min(
+                    AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                        .len()
+                        .saturating_sub(1),
+                );
             }
         }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Appearance =>
         {
-            if let Some(row) = AppearanceRow::ALL.get(state.selected_row).copied() {
+            let rows = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode);
+            if let Some(row) = rows.get(state.selected_row).copied() {
                 app.settings_adjust_row(row, 1);
+                state.selected_row = state.selected_row.min(
+                    AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                        .len()
+                        .saturating_sub(1),
+                );
             }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Terminal => {

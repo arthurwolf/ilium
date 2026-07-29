@@ -72,12 +72,14 @@ pub mod prompt_queue;
 pub mod render_cache;
 pub mod restructure;
 pub mod scheduled_input;
+pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
 pub mod session_naming;
 pub mod settings_ui;
 pub mod split_layout;
 pub mod syntax;
+pub mod terminal_activity;
 pub mod terminal_context_menu;
 pub mod terminal_guard;
 pub mod terminal_links;
@@ -381,6 +383,7 @@ async fn run_inner(
     app.apply_session_settings(config.session);
     app.apply_voice_settings(config.voice);
     app.apply_debug_settings(config.debug);
+    app.apply_api_settings(config.api);
     app.request_debug_logging_reconciliation();
     app.request_agent_debug_menu_reconciliation();
     app.sound_discovery = sound_discovery;
@@ -1249,6 +1252,7 @@ fn dispatch_pending_app_work(
                 request.project_id,
                 request.contexts,
                 request.current_structure,
+                request.protected_split_views,
                 home_dir.to_path_buf(),
                 request.project_cwd,
             ),

@@ -372,6 +372,7 @@ impl NamingWorkers {
         project_id: NodeId,
         mut contexts: Vec<crate::restructure::LeafContext>,
         current_structure: String,
+        protected_split_views: Vec<crate::restructure::ProtectedSplitViewContext>,
         home: PathBuf,
         cwd: PathBuf,
     ) {
@@ -384,10 +385,11 @@ impl NamingWorkers {
         std::thread::spawn(move || {
             crate::restructure::resolve_content_extracts(&mut contexts, &home, &cwd);
             let _permit = concurrency_limiter.acquire();
-            let result = crate::restructure::infer_restructure_plan_with_structure(
+            let result = crate::restructure::infer_restructure_plan_with_protected_splits(
                 &inference_settings,
                 &contexts,
                 &current_structure,
+                &protected_split_views,
             );
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.

@@ -232,11 +232,8 @@ mod tests {
                                 short_title: None,
                                 icon: Some("🔧".to_string()),
                             },
-                            ilium_core::RestructureNode::SplitView {
-                                orientation: SplitOrientation::Vertical,
-                                title: "Split".to_string(),
-                                short_title: None,
-                                icon: Some("🪟".to_string()),
+                            ilium_core::RestructureNode::ExistingSplitView {
+                                id: NodeId(5),
                                 children: vec![ilium_core::RestructureNode::Pane {
                                     id: NodeId(3),
                                     title: "Frontend shell".to_string(),

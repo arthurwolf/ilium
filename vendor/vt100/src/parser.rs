@@ -94,3 +94,27 @@ impl std::io::Write for Parser {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Parser;
+
+    #[test]
+    fn erase_display_mode_three_purges_scrollback_but_keeps_visible_rows() {
+        let mut parser = Parser::new(3, 20, 100);
+        for line in 0..8 {
+            parser.process(format!("line {line}\r\n").as_bytes());
+        }
+
+        parser.screen_mut().set_scrollback(usize::MAX);
+        assert!(parser.screen().scrollback() > 0);
+        parser.screen_mut().set_scrollback(0);
+        let visible_before_purge = parser.screen().contents();
+
+        parser.process(b"\x1b[3J");
+
+        parser.screen_mut().set_scrollback(usize::MAX);
+        assert_eq!(parser.screen().scrollback(), 0);
+        assert_eq!(parser.screen().contents(), visible_before_purge);
+    }
+}

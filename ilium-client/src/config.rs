@@ -27,7 +27,11 @@ use crate::icon_settings::{IconSettings, IconTarget};
 use crate::keymap::{
     self, BindingKey, KeyBinding, ShortcutBase, DEFAULT_NAVIGATION_SHORTCUT_BASE, LEADER_BINDINGS,
 };
-use crate::layout::{DEFAULT_TREE_WIDTH, MAX_TREE_WIDTH, MIN_TREE_WIDTH};
+use crate::layout::{
+    DEFAULT_FIXED_TREE_WIDTH, DEFAULT_FOCUSED_TREE_WIDTH, DEFAULT_MINIMUM_TERMINAL_WIDTH,
+    DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
+    MIN_TREE_WIDTH,
+};
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
 
@@ -69,6 +73,8 @@ pub struct ClientConfig {
     pub voice: VoiceSettings,
     /// Opt-in process diagnostics shown in the Debug tab.
     pub debug: DebugSettings,
+    /// Loopback HTTP API listener configuration read by the detached server.
+    pub api: ApiSettings,
 }
 
 impl Default for ClientConfig {
@@ -87,6 +93,7 @@ impl Default for ClientConfig {
             session: SessionSettings::default(),
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
+            api: ApiSettings::default(),
         }
     }
 }
@@ -98,6 +105,20 @@ impl Default for ClientConfig {
 #[serde(default)]
 pub struct DebugSettings {
     pub file_logging_enabled: bool,
+}
+
+/// Durable `[api]` settings. A changed port takes effect when the detached
+/// server next starts, avoiding an implicit server restart from the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ApiSettings {
+    pub port: u16,
+}
+
+impl Default for ApiSettings {
+    fn default() -> Self {
+        Self { port: 8872 }
+    }
 }
 
 /// Durable `[voice]` settings. Runtime ownership lives in `crate::run`; this
@@ -608,22 +629,87 @@ fn stepped_value<T: Copy + PartialEq>(values: &[T], current: T, direction: i32) 
     values[(index + offset) % values.len()]
 }
 
+/// The three user-facing left-panel sizing policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeftPanelSizingMode {
+    Fixed,
+    FocusDependent,
+    TerminalWidthDependent,
+}
+
+impl LeftPanelSizingMode {
+    pub const ALL: [Self; 3] = [
+        Self::Fixed,
+        Self::FocusDependent,
+        Self::TerminalWidthDependent,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fixed => "Fixed",
+            Self::FocusDependent => "Focus-dependent",
+            Self::TerminalWidthDependent => "Width-dependent",
+        }
+    }
+
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Complete validated left-panel sizing policy. Keeping all three modes'
+/// values preserves a user's tuning while they compare cards in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeftPanelSizingSettings {
+    pub mode: LeftPanelSizingMode,
+    pub fixed_width: u16,
+    pub unfocused_width: u16,
+    pub focused_width: u16,
+    pub minimum_terminal_width: u16,
+}
+
+impl LeftPanelSizingSettings {
+    /// Resolves the panel width without performing animation or I/O.
+    pub const fn resolved_width(self, terminal_width: u16, is_focused: bool) -> u16 {
+        match self.mode {
+            LeftPanelSizingMode::Fixed => self.fixed_width,
+            LeftPanelSizingMode::FocusDependent => {
+                if is_focused {
+                    self.focused_width
+                } else {
+                    self.unfocused_width
+                }
+            }
+            LeftPanelSizingMode::TerminalWidthDependent => {
+                if terminal_width >= self.minimum_terminal_width || is_focused {
+                    self.focused_width
+                } else {
+                    self.unfocused_width
+                }
+            }
+        }
+    }
+}
+
+impl Default for LeftPanelSizingSettings {
+    fn default() -> Self {
+        Self {
+            mode: LeftPanelSizingMode::FocusDependent,
+            fixed_width: DEFAULT_FIXED_TREE_WIDTH,
+            unfocused_width: DEFAULT_UNFOCUSED_TREE_WIDTH,
+            focused_width: DEFAULT_FOCUSED_TREE_WIDTH,
+            minimum_terminal_width: DEFAULT_MINIMUM_TERMINAL_WIDTH,
+        }
+    }
+}
+
 /// `[ui]`'s settings, already validated -- what the settings screen reads
-/// from and writes to (via `App`'s live copy, persisted with
-/// [`save_ui_settings`]). Read this crate's `CLAUDE.md`-style reminder in
-/// `crate::app`'s `SettingsState` doc comment before adding a fourth entry
-/// here: every new setting needs a `Raw` field, a validated field here, a
-/// default, a settings-screen row, and a `[ui]` table key -- in that order.
+/// from and writes to through `App`'s live copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiSettings {
-    /// Whether the tree panel widens while it has mouse/keyboard focus (see
-    /// `crate::layout::TreeWidthAnimation`). Some users find the motion
-    /// distracting or simply prefer a fixed-width sidebar; this is a pure
-    /// on/off switch for that whole affordance.
-    pub auto_resize_tree_on_focus: bool,
-    /// The tree panel's collapsed (or, with auto-resize disabled, only)
-    /// width -- `crate::layout::TreeWidthAnimation`'s base width.
-    pub tree_width: u16,
+    /// Policy resolves an explicit target width; `TreeWidthAnimation` only
+    /// handles the visual transition between resolved targets.
+    pub left_panel_sizing: LeftPanelSizingSettings,
     pub color_scheme: ColorScheme,
     /// Agent-type representation in the left tree. Activity remains a
     /// separate, always-visible status column regardless of this choice.
@@ -655,8 +741,7 @@ pub struct UiSettings {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
-            auto_resize_tree_on_focus: true,
-            tree_width: DEFAULT_TREE_WIDTH,
+            left_panel_sizing: LeftPanelSizingSettings::default(),
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
@@ -709,6 +794,8 @@ struct RawClientConfig {
     voice: VoiceSettings,
     #[serde(default)]
     debug: DebugSettings,
+    #[serde(default)]
+    api: ApiSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -729,8 +816,11 @@ struct RawKanbanBoardConfig {
 /// the validated equivalent [`merge_ui`] produces.
 #[derive(Debug, Default, Deserialize)]
 struct RawUiConfig {
-    auto_resize_tree_on_focus: Option<bool>,
-    tree_width: Option<u16>,
+    left_panel_sizing_mode: Option<String>,
+    left_panel_fixed_width: Option<u16>,
+    left_panel_unfocused_width: Option<u16>,
+    left_panel_focused_width: Option<u16>,
+    left_panel_minimum_terminal_width: Option<u16>,
     /// `"dark"` or `"light"` (case-insensitive) -- see
     /// [`parse_color_scheme`].
     color_scheme: Option<String>,
@@ -809,9 +899,23 @@ pub enum ConfigLoadError {
     /// A `[theme]` value isn't a valid `#rrggbb`/`rrggbb` hex color.
     #[error("theme.{field:?} = {value:?} is not a valid #rrggbb hex color")]
     InvalidColor { field: &'static str, value: String },
-    /// `ui.tree_width` is outside `[MIN_TREE_WIDTH, MAX_TREE_WIDTH]`.
-    #[error("ui.tree_width = {0} must be between {MIN_TREE_WIDTH} and {MAX_TREE_WIDTH}")]
-    InvalidTreeWidth(u16),
+    #[error(
+        "ui.left_panel_sizing_mode = {0:?} must be \"fixed\", \"focus_dependent\", or \"terminal_width_dependent\""
+    )]
+    InvalidLeftPanelSizingMode(String),
+    #[error("ui.{field} = {value} must be between {MIN_TREE_WIDTH} and {MAX_TREE_WIDTH}")]
+    InvalidLeftPanelWidth { field: &'static str, value: u16 },
+    #[error(
+        "ui.left_panel_unfocused_width = {unfocused_width} cannot exceed ui.left_panel_focused_width = {focused_width}"
+    )]
+    InvalidLeftPanelWidthOrder {
+        unfocused_width: u16,
+        focused_width: u16,
+    },
+    #[error(
+        "ui.left_panel_minimum_terminal_width = {0} must be between {MINIMUM_TERMINAL_WIDTH} and {MAXIMUM_TERMINAL_WIDTH}"
+    )]
+    InvalidMinimumTerminalWidth(u16),
     /// `ui.color_scheme` isn't `"dark"` or `"light"`.
     #[error("ui.color_scheme = {0:?} must be \"dark\" or \"light\"")]
     InvalidColorScheme(String),
@@ -952,6 +1056,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         session,
         voice: raw.voice,
         debug: raw.debug,
+        api: raw.api,
     })
 }
 
@@ -998,10 +1103,38 @@ fn merge_kanban_board(raw: RawKanbanBoardConfig) -> Result<KanbanBoardSettings, 
 /// side-effect-free.
 fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
     let defaults = UiSettings::default();
-    let tree_width = match raw.tree_width {
-        Some(width) if (MIN_TREE_WIDTH..=MAX_TREE_WIDTH).contains(&width) => width,
-        Some(width) => return Err(ConfigLoadError::InvalidTreeWidth(width)),
-        None => defaults.tree_width,
+    let default_sizing = defaults.left_panel_sizing;
+    let sizing_mode = raw
+        .left_panel_sizing_mode
+        .as_deref()
+        .map(parse_left_panel_sizing_mode)
+        .transpose()?
+        .unwrap_or(default_sizing.mode);
+    let fixed_width = validated_left_panel_width(
+        "left_panel_fixed_width",
+        raw.left_panel_fixed_width,
+        default_sizing.fixed_width,
+    )?;
+    let unfocused_width = validated_left_panel_width(
+        "left_panel_unfocused_width",
+        raw.left_panel_unfocused_width,
+        default_sizing.unfocused_width,
+    )?;
+    let focused_width = validated_left_panel_width(
+        "left_panel_focused_width",
+        raw.left_panel_focused_width,
+        default_sizing.focused_width,
+    )?;
+    if unfocused_width > focused_width {
+        return Err(ConfigLoadError::InvalidLeftPanelWidthOrder {
+            unfocused_width,
+            focused_width,
+        });
+    }
+    let minimum_terminal_width = match raw.left_panel_minimum_terminal_width {
+        Some(width) if (MINIMUM_TERMINAL_WIDTH..=MAXIMUM_TERMINAL_WIDTH).contains(&width) => width,
+        Some(width) => return Err(ConfigLoadError::InvalidMinimumTerminalWidth(width)),
+        None => default_sizing.minimum_terminal_width,
     };
     let color_scheme = match raw.color_scheme {
         Some(value) => parse_color_scheme(&value)?,
@@ -1047,10 +1180,13 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             .unwrap_or_else(|| target.default_glyph().to_string())
     });
     Ok(UiSettings {
-        auto_resize_tree_on_focus: raw
-            .auto_resize_tree_on_focus
-            .unwrap_or(defaults.auto_resize_tree_on_focus),
-        tree_width,
+        left_panel_sizing: LeftPanelSizingSettings {
+            mode: sizing_mode,
+            fixed_width,
+            unfocused_width,
+            focused_width,
+            minimum_terminal_width,
+        },
         color_scheme,
         agent_identifiers: AgentIdentifierSettings {
             mode,
@@ -1128,6 +1264,40 @@ fn merge_session(raw: RawSessionConfig) -> Result<SessionSettings, ConfigLoadErr
             .transpose()?
             .unwrap_or_default(),
     })
+}
+
+fn validated_left_panel_width(
+    field: &'static str,
+    value: Option<u16>,
+    default: u16,
+) -> Result<u16, ConfigLoadError> {
+    match value {
+        Some(width) if (MIN_TREE_WIDTH..=MAX_TREE_WIDTH).contains(&width) => Ok(width),
+        Some(width) => Err(ConfigLoadError::InvalidLeftPanelWidth {
+            field,
+            value: width,
+        }),
+        None => Ok(default),
+    }
+}
+
+fn parse_left_panel_sizing_mode(value: &str) -> Result<LeftPanelSizingMode, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fixed" => Ok(LeftPanelSizingMode::Fixed),
+        "focus_dependent" => Ok(LeftPanelSizingMode::FocusDependent),
+        "terminal_width_dependent" => Ok(LeftPanelSizingMode::TerminalWidthDependent),
+        _ => Err(ConfigLoadError::InvalidLeftPanelSizingMode(
+            value.to_string(),
+        )),
+    }
+}
+
+fn left_panel_sizing_mode_name(mode: LeftPanelSizingMode) -> &'static str {
+    match mode {
+        LeftPanelSizingMode::Fixed => "fixed",
+        LeftPanelSizingMode::FocusDependent => "focus_dependent",
+        LeftPanelSizingMode::TerminalWidthDependent => "terminal_width_dependent",
+    }
 }
 
 fn parse_motion_level(value: &str) -> Result<MotionLevel, ConfigLoadError> {
@@ -1610,6 +1780,15 @@ pub fn save_debug_settings(config_dir: &Path, debug: &DebugSettings) -> Result<(
     save_table(config_dir, "debug", value)
 }
 
+/// Persists only `[api]`, preserving all unrelated client and server settings.
+pub fn save_api_settings(config_dir: &Path, api: &ApiSettings) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(api).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "api", value)
+}
+
 /// Reads and parses `path` as a generic TOML document for [`save_ui_settings`]
 /// to merge into -- an absent file starts from an empty table rather than an
 /// error, matching [`load`]'s own "no config file yet" handling.
@@ -1667,12 +1846,24 @@ fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), Client
 fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     let mut table = toml::value::Table::new();
     table.insert(
-        "auto_resize_tree_on_focus".to_string(),
-        toml::Value::Boolean(ui.auto_resize_tree_on_focus),
+        "left_panel_sizing_mode".to_string(),
+        toml::Value::String(left_panel_sizing_mode_name(ui.left_panel_sizing.mode).to_string()),
     );
     table.insert(
-        "tree_width".to_string(),
-        toml::Value::Integer(i64::from(ui.tree_width)),
+        "left_panel_fixed_width".to_string(),
+        toml::Value::Integer(i64::from(ui.left_panel_sizing.fixed_width)),
+    );
+    table.insert(
+        "left_panel_unfocused_width".to_string(),
+        toml::Value::Integer(i64::from(ui.left_panel_sizing.unfocused_width)),
+    );
+    table.insert(
+        "left_panel_focused_width".to_string(),
+        toml::Value::Integer(i64::from(ui.left_panel_sizing.focused_width)),
+    );
+    table.insert(
+        "left_panel_minimum_terminal_width".to_string(),
+        toml::Value::Integer(i64::from(ui.left_panel_sizing.minimum_terminal_width)),
     );
     table.insert(
         "color_scheme".to_string(),
@@ -2214,15 +2405,44 @@ mod tests {
     }
 
     #[test]
+    fn all_left_panel_policies_resolve_their_explicit_width_contract() {
+        let mut sizing = LeftPanelSizingSettings {
+            fixed_width: 28,
+            unfocused_width: 24,
+            focused_width: 60,
+            minimum_terminal_width: 120,
+            ..LeftPanelSizingSettings::default()
+        };
+
+        sizing.mode = LeftPanelSizingMode::Fixed;
+        assert_eq!(sizing.resolved_width(80, false), 28);
+        assert_eq!(sizing.resolved_width(200, true), 28);
+
+        sizing.mode = LeftPanelSizingMode::FocusDependent;
+        assert_eq!(sizing.resolved_width(200, false), 24);
+        assert_eq!(sizing.resolved_width(80, true), 60);
+
+        sizing.mode = LeftPanelSizingMode::TerminalWidthDependent;
+        assert_eq!(sizing.resolved_width(119, false), 24);
+        assert_eq!(sizing.resolved_width(119, true), 60);
+        assert_eq!(sizing.resolved_width(120, false), 60);
+        assert_eq!(sizing.resolved_width(200, false), 60);
+    }
+
+    #[test]
     fn a_ui_override_replaces_only_the_specified_field() {
         let dir = scratch_dir();
-        std::fs::write(dir.join("config.toml"), "[ui]\ntree_width = 40\n").unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nleft_panel_fixed_width = 40\n",
+        )
+        .unwrap();
 
         let config = load(&dir).expect("valid config should load");
-        assert_eq!(config.ui.tree_width, 40);
+        assert_eq!(config.ui.left_panel_sizing.fixed_width, 40);
         assert_eq!(
-            config.ui.auto_resize_tree_on_focus,
-            UiSettings::default().auto_resize_tree_on_focus
+            config.ui.left_panel_sizing.mode,
+            UiSettings::default().left_panel_sizing.mode
         );
         assert_eq!(config.ui.color_scheme, ColorScheme::Dark);
         assert_eq!(
@@ -2384,15 +2604,43 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_width_below_the_minimum_is_a_clear_config_error() {
+    fn a_left_panel_width_below_the_minimum_is_a_clear_config_error() {
         let dir = scratch_dir();
-        std::fs::write(dir.join("config.toml"), "[ui]\ntree_width = 1\n").unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nleft_panel_fixed_width = 1\n",
+        )
+        .unwrap();
 
         let result = load(&dir);
         assert!(matches!(
             result,
             Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::InvalidTreeWidth(1),
+                source: ConfigLoadError::InvalidLeftPanelWidth {
+                    field: "left_panel_fixed_width",
+                    value: 1
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn left_panel_sizing_rejects_an_inverted_focus_range() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nleft_panel_unfocused_width = 60\nleft_panel_focused_width = 40\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidLeftPanelWidthOrder {
+                    unfocused_width: 60,
+                    focused_width: 40
+                },
                 ..
             })
         ));
@@ -2423,8 +2671,13 @@ mod tests {
     fn save_ui_settings_round_trips_through_load() {
         let dir = scratch_dir();
         let ui = UiSettings {
-            auto_resize_tree_on_focus: false,
-            tree_width: 24,
+            left_panel_sizing: LeftPanelSizingSettings {
+                mode: LeftPanelSizingMode::TerminalWidthDependent,
+                fixed_width: 24,
+                unfocused_width: 22,
+                focused_width: 55,
+                minimum_terminal_width: 145,
+            },
             color_scheme: ColorScheme::Light,
             agent_identifiers: AgentIdentifierSettings {
                 mode: AgentIdentifierMode::Icon,
@@ -2560,7 +2813,7 @@ mod tests {
         let dir = scratch_dir();
         std::fs::write(
             dir.join("config.toml"),
-            "[ui]\ntree_width = 40\n[keybindings]\nquit = \"z\"\n",
+            "[ui]\nleft_panel_fixed_width = 40\n[keybindings]\nquit = \"z\"\n",
         )
         .unwrap();
         let keyboard = KeyboardSettings {
@@ -2571,7 +2824,7 @@ mod tests {
 
         let config = load(&dir).expect("saved keyboard config should load back");
         assert_eq!(config.keyboard, keyboard);
-        assert_eq!(config.ui.tree_width, 40);
+        assert_eq!(config.ui.left_panel_sizing.fixed_width, 40);
         assert_eq!(
             keymap::action_for_table(&config.keybindings, BindingKey::Character('z')),
             Some(keymap::Action::Quit)

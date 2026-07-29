@@ -9,11 +9,11 @@
 //! plus mouse-wheel scrolling, and every control is a live, self-applying
 //! toggle/stepper -- never a buffered form with a Save button.
 //!
-//! Adding a fourth Appearance setting? Add a variant to
-//! `crate::app::AppearanceRow` and its `ALL` array, then extend
+//! Adding another Appearance setting? Add a variant to
+//! `crate::app::AppearanceRow`, include it in `AppearanceRow::visible`, then extend
 //! [`appearance_row_label`]/[`appearance_row_description`]/
 //! [`appearance_row_value`] and `App::settings_adjust_row` -- row count,
-//! scroll bounds, and mouse hit-testing all fall out of `AppearanceRow::ALL`
+//! scroll bounds, and mouse hit-testing all fall out of the visible-row registry
 //! automatically, nothing else here needs to change. Adding another *tab*
 //! is a bigger change: extend `crate::app::SettingsTab::ALL` and add a
 //! render/hit-test branch here for it.
@@ -40,8 +40,8 @@ use crate::app::{
     SettingsTab, SoundRow,
 };
 use crate::config::{
-    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
-    TerminalSettings, UiSettings,
+    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode,
+    SessionSettings, TerminalSettings, UiSettings,
 };
 use crate::icon_settings::{
     catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
@@ -67,11 +67,12 @@ const GAP_WIDTH: u16 = 3;
 const TAB_LIST_TOP_PADDING: u16 = 1;
 const TAB_ROW_HEIGHT: u16 = 2;
 
-/// One blank line above the first row, then one label/value line + one dim
-/// description line + one blank spacer per row -- see
-/// [`appearance_content_hit`], which must reproduce this exact arithmetic.
+/// Shared one-line top inset used by the compact row-based settings tabs.
 const APPEARANCE_TOP_PADDING: u16 = 1;
 const APPEARANCE_ROW_HEIGHT: u16 = 3;
+const APPEARANCE_CARD_HEIGHT: u16 = 5;
+const APPEARANCE_CARD_GAP: u16 = 2;
+const APPEARANCE_WIDE_CARD_MINIMUM_WIDTH: u16 = 22;
 
 /// Column where a row's value control (`‹ value ›`) begins -- two leading
 /// spaces plus the padded label column. Shared by rendering and
@@ -272,7 +273,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.scroll,
         ),
         SettingsTab::Appearance => {
-            let lines = appearance_lines(&app.ui_settings, state.selected_row);
+            let lines = appearance_view(
+                &app.ui_settings,
+                state.selected_row,
+                layout.content_area.width,
+            )
+            .lines;
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
         SettingsTab::Terminal => render_scrollable(
@@ -319,6 +325,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             frame,
             layout.content_area,
             debug_lines(&app.debug_settings, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::Api => render_scrollable(
+            frame,
+            layout.content_area,
+            api_lines(&app.api_settings, state.selected_row),
             state.scroll,
         ),
         SettingsTab::About => {
@@ -472,7 +484,11 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
                 0,
             );
         }
-        SettingsTab::Appearance => appearance_lines(&app.ui_settings, selected_row).len() as u16,
+        SettingsTab::Appearance => {
+            appearance_view(&app.ui_settings, selected_row, content_area.width)
+                .lines
+                .len() as u16
+        }
         SettingsTab::Icons => {
             // The icon table's `scroll` is an entry offset into `IconTarget::ALL`
             // (see `render_icons_tab`), not a line count like every other tab --
@@ -498,6 +514,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
+        SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
@@ -585,12 +602,14 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             crate::tree_ui::TreeRenderOptions {
                 focused: false,
                 elapsed_ms: app.started_at.elapsed().as_millis(),
+                terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
                 current_unix_millis: crate::scheduled_input::unix_millis_now(),
                 project_name: app.project_name.as_deref(),
                 project_icon: app.project_icon.as_deref(),
                 is_project_name_loading: app.is_project_name_loading,
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
+                terminal_activity: &app.terminal_activity,
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,
                 icons: &app.ui_settings.icons,
@@ -2384,8 +2403,11 @@ pub fn keyboard_preset_at(
 
 fn appearance_row_label(row: AppearanceRow) -> &'static str {
     match row {
-        AppearanceRow::AutoResizeTree => "Auto-resize tree panel on focus",
-        AppearanceRow::TreeWidth => "Tree panel width",
+        AppearanceRow::LeftPanelSizingMode => "Left panel sizing",
+        AppearanceRow::FixedPanelWidth => "Panel width",
+        AppearanceRow::UnfocusedPanelWidth => "Unfocused width",
+        AppearanceRow::FocusedPanelWidth => "Focused width",
+        AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
@@ -2400,10 +2422,21 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
 
 fn appearance_row_description(row: AppearanceRow) -> &'static str {
     match row {
-        AppearanceRow::AutoResizeTree => {
-            "Widen the tree panel while it has mouse or keyboard focus, then ease back."
+        AppearanceRow::LeftPanelSizingMode => {
+            "Choose a card: fixed, focus-dependent, or responsive to terminal width."
         }
-        AppearanceRow::TreeWidth => "Collapsed width of the tree panel, in terminal columns.",
+        AppearanceRow::FixedPanelWidth => {
+            "The left panel always uses this width, independent of focus."
+        }
+        AppearanceRow::UnfocusedPanelWidth => {
+            "Compact width while the pointer and keyboard focus are elsewhere."
+        }
+        AppearanceRow::FocusedPanelWidth => {
+            "Maximum width while active, and on roomy terminals in width-dependent mode."
+        }
+        AppearanceRow::MinimumTerminalWidth => {
+            "At or above this terminal width, the panel stays at its focused width."
+        }
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
         }
@@ -2432,14 +2465,19 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
 
 fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
     match row {
-        AppearanceRow::AutoResizeTree => {
-            if ui.auto_resize_tree_on_focus {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            }
+        AppearanceRow::LeftPanelSizingMode => ui.left_panel_sizing.mode.label().to_string(),
+        AppearanceRow::FixedPanelWidth => {
+            format!("{} columns", ui.left_panel_sizing.fixed_width)
         }
-        AppearanceRow::TreeWidth => ui.tree_width.to_string(),
+        AppearanceRow::UnfocusedPanelWidth => {
+            format!("{} columns", ui.left_panel_sizing.unfocused_width)
+        }
+        AppearanceRow::FocusedPanelWidth => {
+            format!("{} columns", ui.left_panel_sizing.focused_width)
+        }
+        AppearanceRow::MinimumTerminalWidth => {
+            format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
+        }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
         AppearanceRow::TreeRowManagementControls => {
             if ui.show_tree_row_management_controls {
@@ -2587,6 +2625,17 @@ fn debug_lines(settings: &DebugSettings, selected: usize) -> Vec<Line<'static>> 
     )
 }
 
+fn api_lines(settings: &crate::config::ApiSettings, selected: usize) -> Vec<Line<'static>> {
+    setting_lines(
+        &[(
+            "HTTP API port",
+            settings.port.to_string(),
+            "Loopback-only /create_agent API. Changes apply when the detached server next starts.",
+        )],
+        selected,
+    )
+}
+
 fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     let settings = &app.voice_settings;
     let state = match &app.voice_connection_state {
@@ -2703,34 +2752,36 @@ fn on_off(value: bool) -> String {
     }
 }
 
-/// One label/value line per `AppearanceRow`, each followed by a dim
-/// description line and a blank spacer -- see [`appearance_content_hit`]
-/// for the matching hit-test arithmetic, and the module doc comment for why
-/// both read `AppearanceRow::ALL` instead of hardcoding a row count.
-fn appearance_lines(ui: &UiSettings, selected_row: usize) -> Vec<Line<'static>> {
-    let mut lines = Vec::with_capacity(
-        usize::from(APPEARANCE_TOP_PADDING)
-            + AppearanceRow::ALL.len() * usize::from(APPEARANCE_ROW_HEIGHT),
-    );
-    lines.push(Line::from(""));
-    for (index, row) in AppearanceRow::ALL.into_iter().enumerate() {
-        let selected = index == selected_row;
-        lines.push(appearance_row_line(row, ui, selected));
-        lines.push(Line::from(Span::styled(
-            format!("    {}", appearance_row_description(row)),
-            Style::new().add_modifier(Modifier::DIM),
-        )));
-        lines.push(Line::from(""));
-    }
-    lines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AppearanceCardHit {
+    mode: LeftPanelSizingMode,
+    start_x: u16,
+    end_x: u16,
+    start_line: u16,
+    end_line: u16,
 }
 
-fn appearance_row_line(row: AppearanceRow, ui: &UiSettings, selected: bool) -> Line<'static> {
+struct AppearanceView {
+    lines: Vec<Line<'static>>,
+    card_hits: Vec<AppearanceCardHit>,
+    row_lines: Vec<(AppearanceRow, u16)>,
+}
+
+fn appearance_control_label_width(content_width: u16) -> u16 {
+    LABEL_COLUMN_WIDTH.min(content_width.saturating_sub(16).max(20))
+}
+
+fn appearance_row_line(
+    row: AppearanceRow,
+    ui: &UiSettings,
+    selected: bool,
+    label_width: u16,
+) -> Line<'static> {
     let label = appearance_row_label(row);
     let value = appearance_row_value(row, ui);
     let control = format!("\u{2039} {value} \u{203a}");
 
-    let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
+    let padding = usize::from(label_width).saturating_sub(UnicodeWidthStr::width(label));
     let label_style = if selected {
         Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
@@ -2750,30 +2801,255 @@ fn appearance_row_line(row: AppearanceRow, ui: &UiSettings, selected: bool) -> L
     ])
 }
 
-/// The `(row, direction)` a click at `position` should adjust, if any.
-/// `direction` is `-1` for the `‹` hot zone, `+1` for anywhere else in the
-/// control -- see `App::settings_adjust_row`. Reproduces
-/// [`appearance_lines`]'s exact line arithmetic (top padding, three lines
-/// per row) and [`appearance_row_line`]'s exact column arithmetic (left
-/// inset, padded label column) rather than re-deriving either.
+fn left_panel_mode_card_text(
+    mode: LeftPanelSizingMode,
+    ui: &UiSettings,
+) -> (&'static str, &'static str, String) {
+    match mode {
+        LeftPanelSizingMode::Fixed => (
+            "▣  Fixed",
+            "Always one width",
+            format!("{} columns", ui.left_panel_sizing.fixed_width),
+        ),
+        LeftPanelSizingMode::FocusDependent => (
+            "◉  Focus-dependent",
+            "Responds to focus",
+            format!(
+                "{} ↔ {} columns",
+                ui.left_panel_sizing.unfocused_width, ui.left_panel_sizing.focused_width
+            ),
+        ),
+        LeftPanelSizingMode::TerminalWidthDependent => (
+            "↔  Width-dependent",
+            "Adapts to terminal",
+            format!(
+                "≥{}: {} columns",
+                ui.left_panel_sizing.minimum_terminal_width, ui.left_panel_sizing.focused_width
+            ),
+        ),
+    }
+}
+
+fn bordered_card_line(content: &str, width: u16, border: bool) -> String {
+    let width = usize::from(width.max(2));
+    if border {
+        return format!("╭{}╮", "─".repeat(width.saturating_sub(2)));
+    }
+    let inner_width = width.saturating_sub(2);
+    let content = truncate_icon_text(content, inner_width);
+    let padding = inner_width.saturating_sub(UnicodeWidthStr::width(content.as_str()));
+    format!("│{content}{}│", " ".repeat(padding))
+}
+
+fn bottom_card_line(width: u16) -> String {
+    format!(
+        "╰{}╯",
+        "─".repeat(usize::from(width.max(2)).saturating_sub(2))
+    )
+}
+
+fn left_panel_mode_card_lines(
+    mode: LeftPanelSizingMode,
+    ui: &UiSettings,
+    width: u16,
+) -> [String; 5] {
+    let (title, description, value) = left_panel_mode_card_text(mode, ui);
+    [
+        bordered_card_line("", width, true),
+        bordered_card_line(&format!(" {title}"), width, false),
+        bordered_card_line(&format!(" {description}"), width, false),
+        bordered_card_line(&format!(" {value}"), width, false),
+        bottom_card_line(width),
+    ]
+}
+
+fn mode_card_style(mode: LeftPanelSizingMode, ui: &UiSettings, selected_row: usize) -> Style {
+    if mode == ui.left_panel_sizing.mode {
+        let style = theme::selected_style();
+        if selected_row == 0 {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
+        }
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    }
+}
+
+fn left_panel_policy_summary(ui: &UiSettings) -> String {
+    match ui.left_panel_sizing.mode {
+        LeftPanelSizingMode::Fixed => format!(
+            "The panel stays at {} columns at every terminal width and focus state.",
+            ui.left_panel_sizing.fixed_width
+        ),
+        LeftPanelSizingMode::FocusDependent => format!(
+            "The panel eases from {} columns to {} when focused or hovered.",
+            ui.left_panel_sizing.unfocused_width, ui.left_panel_sizing.focused_width
+        ),
+        LeftPanelSizingMode::TerminalWidthDependent => format!(
+            "At ≥ {} terminal columns it stays at {}. Below that it moves from {} to {} on focus.",
+            ui.left_panel_sizing.minimum_terminal_width,
+            ui.left_panel_sizing.focused_width,
+            ui.left_panel_sizing.unfocused_width,
+            ui.left_panel_sizing.focused_width
+        ),
+    }
+}
+
+fn push_left_panel_mode_cards(
+    view: &mut AppearanceView,
+    ui: &UiSettings,
+    selected_row: usize,
+    content_width: u16,
+) {
+    let wide_card_width = content_width.saturating_sub(APPEARANCE_CARD_GAP * 2)
+        / LeftPanelSizingMode::ALL.len() as u16;
+    let is_wide = wide_card_width >= APPEARANCE_WIDE_CARD_MINIMUM_WIDTH;
+
+    if is_wide {
+        let start_line = view.lines.len() as u16;
+        let cards = LeftPanelSizingMode::ALL
+            .map(|mode| left_panel_mode_card_lines(mode, ui, wide_card_width));
+        for (line_index, _) in cards[0].iter().enumerate() {
+            let mut spans = Vec::new();
+            for (card_index, mode) in LeftPanelSizingMode::ALL.into_iter().enumerate() {
+                if card_index > 0 {
+                    spans.push(Span::raw(" ".repeat(usize::from(APPEARANCE_CARD_GAP))));
+                }
+                spans.push(Span::styled(
+                    cards[card_index][line_index].clone(),
+                    mode_card_style(mode, ui, selected_row),
+                ));
+            }
+            view.lines.push(Line::from(spans));
+        }
+        for (card_index, mode) in LeftPanelSizingMode::ALL.into_iter().enumerate() {
+            let start_x = card_index as u16 * (wide_card_width + APPEARANCE_CARD_GAP);
+            view.card_hits.push(AppearanceCardHit {
+                mode,
+                start_x,
+                end_x: start_x + wide_card_width,
+                start_line,
+                end_line: start_line + APPEARANCE_CARD_HEIGHT,
+            });
+        }
+    } else {
+        for mode in LeftPanelSizingMode::ALL {
+            let start_line = view.lines.len() as u16;
+            for line in left_panel_mode_card_lines(mode, ui, content_width) {
+                view.lines.push(Line::from(Span::styled(
+                    line,
+                    mode_card_style(mode, ui, selected_row),
+                )));
+            }
+            view.card_hits.push(AppearanceCardHit {
+                mode,
+                start_x: 0,
+                end_x: content_width,
+                start_line,
+                end_line: start_line + APPEARANCE_CARD_HEIGHT,
+            });
+            view.lines.push(Line::from(""));
+        }
+    }
+}
+
+fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> AppearanceView {
+    let mut view = AppearanceView {
+        lines: vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Left panel sizing",
+                Style::new().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "Choose the behavior first; only settings used by that policy stay visible.",
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+            Line::from(""),
+        ],
+        card_hits: Vec::new(),
+        row_lines: Vec::new(),
+    };
+    push_left_panel_mode_cards(&mut view, ui, selected_row, content_width);
+    view.lines.push(Line::from(""));
+    view.lines.push(Line::from(Span::styled(
+        format!("{} settings", ui.left_panel_sizing.mode.label()),
+        Style::new().add_modifier(Modifier::BOLD),
+    )));
+    view.lines.push(Line::from(Span::styled(
+        left_panel_policy_summary(ui),
+        Style::new().add_modifier(Modifier::DIM),
+    )));
+    view.lines.push(Line::from(""));
+
+    let rows = AppearanceRow::visible(ui.left_panel_sizing.mode);
+    let label_width = appearance_control_label_width(content_width);
+    for (index, row) in rows.into_iter().enumerate().skip(1) {
+        if row == AppearanceRow::TreeOrder {
+            view.lines.push(Line::from(""));
+            view.lines.push(Line::from(Span::styled(
+                "More interface options",
+                Style::new().add_modifier(Modifier::BOLD),
+            )));
+            view.lines.push(Line::from(""));
+        }
+        let row_line = view.lines.len() as u16;
+        view.row_lines.push((row, row_line));
+        view.lines.push(appearance_row_line(
+            row,
+            ui,
+            index == selected_row,
+            label_width,
+        ));
+        view.lines.push(Line::from(Span::styled(
+            format!("    {}", appearance_row_description(row)),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        view.lines.push(Line::from(""));
+    }
+    view
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppearanceContentHit {
+    Mode(LeftPanelSizingMode),
+    Row { row: AppearanceRow, direction: i32 },
+}
+
+/// Returns the selected card or stepper hit using the same virtual geometry
+/// that built the responsive lines above.
 pub fn appearance_content_hit(
     content_area: Rect,
     scroll: u16,
     position: Position,
-) -> Option<(AppearanceRow, i32)> {
+    ui: &UiSettings,
+) -> Option<AppearanceContentHit> {
     if !content_area.contains(position) {
         return None;
     }
 
-    let line_index = i32::from(position.y) - i32::from(content_area.y) + i32::from(scroll);
-    let line_index = line_index - i32::from(APPEARANCE_TOP_PADDING);
-    if line_index < 0 || line_index % i32::from(APPEARANCE_ROW_HEIGHT) != 0 {
-        return None;
+    let view = appearance_view(ui, 0, content_area.width);
+    let virtual_line = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    let virtual_x = position.x.saturating_sub(content_area.x);
+    if let Some(hit) = view.card_hits.into_iter().find(|hit| {
+        virtual_line >= hit.start_line
+            && virtual_line < hit.end_line
+            && virtual_x >= hit.start_x
+            && virtual_x < hit.end_x
+    }) {
+        return Some(AppearanceContentHit::Mode(hit.mode));
     }
-    let row_index = usize::try_from(line_index / i32::from(APPEARANCE_ROW_HEIGHT)).ok()?;
-    let row = AppearanceRow::ALL.get(row_index).copied()?;
 
-    let control_start_x = content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+    let row = view
+        .row_lines
+        .into_iter()
+        .find_map(|(row, line)| (line == virtual_line).then_some(row))?;
+    let control_start_x =
+        content_area.x + ROW_LEFT_INSET + appearance_control_label_width(content_area.width);
     if position.x < control_start_x {
         return None;
     }
@@ -2782,7 +3058,7 @@ pub fn appearance_content_hit(
     } else {
         1
     };
-    Some((row, direction))
+    Some(AppearanceContentHit::Row { row, direction })
 }
 
 /// Shared hit geometry for the small fixed-row settings tabs.
@@ -2889,7 +3165,8 @@ mod tests {
             Some(SettingsTab::Triggers)
         );
         assert_eq!(tab_at(area, Position::new(2, 12)), Some(SettingsTab::Debug));
-        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::Api));
+        assert_eq!(tab_at(area, Position::new(2, 14)), Some(SettingsTab::About));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
@@ -2902,6 +3179,10 @@ mod tests {
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 25)),
+            Some(SettingsTab::Api)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 27)),
             Some(SettingsTab::About)
         );
     }
@@ -3402,54 +3683,86 @@ mod tests {
     }
 
     #[test]
-    fn appearance_content_hit_finds_each_row_and_the_correct_zone() {
-        let area = Rect::new(0, 0, 60, 20);
-        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
+    fn appearance_content_hit_selects_cards_and_mode_specific_controls() {
+        let area = Rect::new(0, 0, 90, 30);
+        let ui = UiSettings::default();
+        let view = appearance_view(&ui, 0, area.width);
+        let control_start_x = area.x + ROW_LEFT_INSET + appearance_control_label_width(area.width);
+        let unfocused_line = view
+            .row_lines
+            .iter()
+            .find_map(|(row, line)| (*row == AppearanceRow::UnfocusedPanelWidth).then_some(*line))
+            .unwrap();
 
         assert_eq!(
-            appearance_content_hit(area, 0, Position::new(control_start_x, 1)),
-            Some((AppearanceRow::AutoResizeTree, -1))
+            appearance_content_hit(area, 0, Position::new(1, 4), &ui),
+            Some(AppearanceContentHit::Mode(LeftPanelSizingMode::Fixed))
+        );
+        assert_eq!(
+            appearance_content_hit(area, 0, Position::new(control_start_x, unfocused_line), &ui,),
+            Some(AppearanceContentHit::Row {
+                row: AppearanceRow::UnfocusedPanelWidth,
+                direction: -1,
+            })
         );
         assert_eq!(
             appearance_content_hit(
                 area,
                 0,
-                Position::new(control_start_x + DECREMENT_ZONE_WIDTH, 1)
+                Position::new(control_start_x + DECREMENT_ZONE_WIDTH, unfocused_line),
+                &ui,
             ),
-            Some((AppearanceRow::AutoResizeTree, 1))
-        );
-        assert_eq!(
-            appearance_content_hit(area, 0, Position::new(control_start_x, 4)),
-            Some((AppearanceRow::TreeWidth, -1))
-        );
-        assert_eq!(
-            appearance_content_hit(area, 0, Position::new(control_start_x, 10)),
-            Some((AppearanceRow::TreeRowManagementControls, -1))
+            Some(AppearanceContentHit::Row {
+                row: AppearanceRow::UnfocusedPanelWidth,
+                direction: 1,
+            })
         );
         // A click on the label (left of the control) is a no-op.
-        assert_eq!(appearance_content_hit(area, 0, Position::new(2, 1)), None);
+        assert_eq!(
+            appearance_content_hit(area, 0, Position::new(2, unfocused_line), &ui),
+            None
+        );
         // A click on the description line between rows is a no-op.
         assert_eq!(
-            appearance_content_hit(area, 0, Position::new(control_start_x, 2)),
+            appearance_content_hit(
+                area,
+                0,
+                Position::new(control_start_x, unfocused_line + 1),
+                &ui,
+            ),
             None
         );
     }
 
     #[test]
     fn appearance_content_hit_accounts_for_scroll_offset() {
-        let area = Rect::new(0, 0, 60, 20);
-        let control_start_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
-        // Scrolled down by 3 lines, row 1 on screen is TreeWidth's line
-        // (originally at line 4).
+        let area = Rect::new(0, 0, 90, 20);
+        let ui = UiSettings::default();
+        let view = appearance_view(&ui, 0, area.width);
+        let focused_line = view
+            .row_lines
+            .iter()
+            .find_map(|(row, line)| (*row == AppearanceRow::FocusedPanelWidth).then_some(*line))
+            .unwrap();
+        let scroll = focused_line.saturating_sub(1);
+        let control_start_x = area.x + ROW_LEFT_INSET + appearance_control_label_width(area.width);
         assert_eq!(
-            appearance_content_hit(area, 3, Position::new(control_start_x, 1)),
-            Some((AppearanceRow::TreeWidth, -1))
+            appearance_content_hit(area, scroll, Position::new(control_start_x, 1), &ui,),
+            Some(AppearanceContentHit::Row {
+                row: AppearanceRow::FocusedPanelWidth,
+                direction: -1,
+            })
         );
     }
 
     #[test]
-    fn appearance_lines_expose_tree_controls_agent_mode_glyphs_and_private_debug_history() {
+    fn appearance_view_exposes_three_cards_dynamic_controls_and_general_options() {
         let ui = UiSettings {
+            left_panel_sizing: crate::config::LeftPanelSizingSettings {
+                mode: LeftPanelSizingMode::TerminalWidthDependent,
+                minimum_terminal_width: 150,
+                ..crate::config::LeftPanelSizingSettings::default()
+            },
             tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
                 mode: crate::config::AgentIdentifierMode::Icon,
@@ -3460,11 +3773,30 @@ mod tests {
             ..UiSettings::default()
         };
 
-        let rendered = appearance_lines(&ui, 3)
+        let view = appearance_view(&ui, 3, 100);
+        let rendered = view
+            .lines
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
+        assert!(rendered.contains("Fixed"));
+        assert!(rendered.contains("Focus-dependent"));
+        assert!(rendered.contains("Width-dependent"));
+        assert!(rendered.contains("Minimum terminal width"));
+        assert!(rendered.contains("150 columns"));
+        assert!(rendered.contains("Unfocused width"));
+        assert!(rendered.contains("Focused width"));
+        assert!(rendered.contains("At ≥ 150 terminal columns"));
+        assert_eq!(
+            AppearanceRow::visible(LeftPanelSizingMode::Fixed)[0..2],
+            [
+                AppearanceRow::LeftPanelSizingMode,
+                AppearanceRow::FixedPanelWidth
+            ]
+        );
+        assert!(!AppearanceRow::visible(LeftPanelSizingMode::Fixed)
+            .contains(&AppearanceRow::FocusedPanelWidth));
         assert!(rendered.contains("Tree order"));
         assert!(rendered.contains("Age up (newest first)"));
         assert!(rendered.contains("Tree row management buttons"));
@@ -3482,6 +3814,19 @@ mod tests {
         assert!(rendered.contains("Off (normal icons)"));
         assert!(rendered.contains("Agent debug menu"));
         assert!(rendered.contains("persist prompts, detection evidence, session phases"));
+    }
+
+    #[test]
+    fn narrow_appearance_view_stacks_complete_sizing_cards() {
+        let ui = UiSettings::default();
+        let view = appearance_view(&ui, 0, 50);
+
+        assert_eq!(view.card_hits.len(), 3);
+        assert!(view
+            .card_hits
+            .windows(2)
+            .all(|hits| hits[0].end_line < hits[1].start_line));
+        assert!(view.card_hits.iter().all(|hit| hit.start_x == 0));
     }
 
     #[test]
@@ -3809,7 +4154,7 @@ mod tests {
             "settings-test".to_string(),
             std::path::PathBuf::from("/tmp"),
         );
-        let area = Rect::new(0, 0, 60, 40);
+        let area = Rect::new(0, 0, 60, 100);
         assert_eq!(max_scroll(SettingsTab::Appearance, &app, 0, area), 0);
     }
 

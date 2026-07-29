@@ -195,6 +195,7 @@ impl TestServer {
             custom_signatures: Vec::new(),
             session_recovery: ilium_server::config::SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled,
+            http_api: ilium_server::config::HttpApiConfig { port: 0 },
         };
 
         let server_task = tokio::spawn(run(options));

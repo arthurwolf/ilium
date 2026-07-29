@@ -7,25 +7,42 @@
 use ilium_core::NodeId;
 use ratatui::layout::Rect;
 
+use crate::split_layout::PaneDirection;
+
 /// Actions available from a terminal pane's right-click menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalContextAction {
     CopyLineToClipboard,
     CopyVisibleTerminalToClipboard,
     CopyFullTerminalHistoryToClipboard,
     PasteClipboard,
+    PasteScreenInto {
+        destination_pane_id: NodeId,
+        direction: PaneDirection,
+        destination_label: String,
+    },
     ShowAgentDebugLog,
 }
 
 impl TerminalContextAction {
     /// Returns the user-facing menu label for this terminal action.
-    pub const fn label(self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Self::CopyLineToClipboard => "Copy line to clipboard",
-            Self::CopyVisibleTerminalToClipboard => "Copy visible terminal to clipboard",
-            Self::CopyFullTerminalHistoryToClipboard => "Copy full terminal history",
-            Self::PasteClipboard => "Paste clipboard",
-            Self::ShowAgentDebugLog => "Show debug log",
+            Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
+            Self::CopyVisibleTerminalToClipboard => {
+                "Copy visible terminal to clipboard".to_string()
+            }
+            Self::CopyFullTerminalHistoryToClipboard => "Copy full terminal history".to_string(),
+            Self::PasteClipboard => "Paste clipboard".to_string(),
+            Self::PasteScreenInto {
+                direction,
+                destination_label,
+                ..
+            } => format!(
+                "Paste screen into {destination_label} {}",
+                direction.label()
+            ),
+            Self::ShowAgentDebugLog => "Show debug log".to_string(),
         }
     }
 }

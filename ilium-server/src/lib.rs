@@ -18,6 +18,7 @@ mod agent_debug;
 pub mod config;
 mod detection;
 pub mod error;
+mod http_api;
 mod initial_prompt;
 mod ipc;
 mod mouse;
@@ -43,7 +44,7 @@ use tokio::net::UnixListener;
 
 use ilium_detect::AgentSignature;
 
-use crate::config::{DetectionConfig, NotificationsConfig, SessionRecoveryConfig};
+use crate::config::{DetectionConfig, HttpApiConfig, NotificationsConfig, SessionRecoveryConfig};
 use crate::error::ServerError;
 use crate::state::{ServerState, ServerStateOptions};
 use crate::task_guard::AbortOnDropHandle;
@@ -92,6 +93,8 @@ pub struct ServerOptions {
     /// Initial recorder policy loaded from `[ui]`. Live clients can update it
     /// without restarting the detached server.
     pub agent_debug_menu_enabled: bool,
+    /// Loopback HTTP API listener configuration loaded from `[api]`.
+    pub http_api: HttpApiConfig,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -167,6 +170,8 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
+    let http_api_task =
+        AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
     let snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
@@ -183,6 +188,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     detection_task.abort();
+    http_api_task.abort();
     scheduled_input_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
@@ -577,6 +583,7 @@ mod restore_tests {
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled: true,
+            http_api: HttpApiConfig { port: 0 },
         };
         let server_task = tokio::spawn(run(options));
 
@@ -944,6 +951,7 @@ mod restore_tests {
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled: false,
+            http_api: HttpApiConfig { port: 0 },
         };
         let server_task = tokio::spawn(run(options));
 
@@ -1001,6 +1009,7 @@ mod socket_tests {
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::StartFresh,
             agent_debug_menu_enabled: false,
+            http_api: HttpApiConfig { port: 0 },
         }
     }
 

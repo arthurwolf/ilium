@@ -69,6 +69,19 @@ pub struct DebugConfig {
     pub file_logging_enabled: bool,
 }
 
+/// Loopback-only HTTP automation settings. The listener deliberately never
+/// accepts remote connections: prompt submission controls local coding agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpApiConfig {
+    pub port: u16,
+}
+
+impl Default for HttpApiConfig {
+    fn default() -> Self {
+        Self { port: 8872 }
+    }
+}
+
 impl Default for NotificationsConfig {
     fn default() -> Self {
         Self { enabled: true }
@@ -98,6 +111,7 @@ pub struct ServerConfig {
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
     pub debug: DebugConfig,
+    pub http_api: HttpApiConfig,
     pub agent_debug_menu_enabled: bool,
 }
 
@@ -127,6 +141,8 @@ struct RawConfig {
     session: RawSessionConfig,
     #[serde(default)]
     debug: RawDebugConfig,
+    #[serde(default, rename = "api")]
+    http_api: RawHttpApiConfig,
     #[serde(default)]
     ui: RawUiConfig,
 }
@@ -134,6 +150,11 @@ struct RawConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawDebugConfig {
     file_logging_enabled: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawHttpApiConfig {
+    port: Option<u16>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -306,6 +327,14 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         })?
         .unwrap_or_default();
 
+    let http_api_port = raw.http_api.port.unwrap_or(HttpApiConfig::default().port);
+    if http_api_port == 0 {
+        return Err(ServerError::ConfigLoad {
+            path,
+            source: ConfigLoadError::InvalidHttpApiPort,
+        });
+    }
+
     Ok(ServerConfig {
         detection,
         notifications: NotificationsConfig::from_raw(raw.notifications),
@@ -314,6 +343,9 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         session_recovery,
         debug: DebugConfig {
             file_logging_enabled: raw.debug.file_logging_enabled.unwrap_or(false),
+        },
+        http_api: HttpApiConfig {
+            port: http_api_port,
         },
         agent_debug_menu_enabled: raw.ui.agent_debug_menu_enabled.unwrap_or(false),
     })
@@ -344,6 +376,7 @@ mod tests {
         assert_eq!(config.sound, SoundSettings::default());
         assert!(config.custom_signatures.is_empty());
         assert!(!config.debug.file_logging_enabled);
+        assert_eq!(config.http_api, HttpApiConfig::default());
         assert!(!config.agent_debug_menu_enabled);
     }
 
@@ -371,6 +404,16 @@ mod tests {
 
         let config = load(&dir).expect("valid debug config should load");
         assert!(config.debug.file_logging_enabled);
+    }
+
+    #[test]
+    fn http_api_port_can_be_configured() {
+        let dir = scratch_dir();
+        std::fs::write(dir.join("config.toml"), "[api]\nport = 19072\n").unwrap();
+
+        let config = load(&dir).expect("valid API config should load");
+
+        assert_eq!(config.http_api.port, 19072);
     }
 
     #[test]

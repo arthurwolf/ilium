@@ -137,6 +137,7 @@ async fn async_main(
         custom_signatures: server_config.custom_signatures,
         session_recovery: server_config.session_recovery,
         agent_debug_menu_enabled: server_config.agent_debug_menu_enabled,
+        http_api: server_config.http_api,
     };
     match ilium_server::run(options).await {
         Ok(()) => ExitCode::SUCCESS,

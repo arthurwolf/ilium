@@ -24,6 +24,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
 use crate::icon_settings::{IconSettings, IconTarget};
+use crate::terminal_activity::{
+    TerminalActivityPhase, TerminalActivityTracker, TERMINAL_ACTIVITY_FAST_FRAME_MS,
+    TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+};
 use crate::theme;
 use crate::tree_ordering;
 use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
@@ -33,6 +37,10 @@ use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
 /// regardless of the (much slower) detection poll interval.
 pub(crate) const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 pub(crate) const SPINNER_FRAME_MS: u128 = 90;
+
+/// The selected one-cell Angular loop for ordinary terminals with activity
+/// inside the current sixty-second presentation window.
+const TERMINAL_ACTIVITY_FRAMES: &[char] = &['⠋', '⠙', '⠚', '⠞', '⠖', '⠦', '⠴', '⠲', '⠳', '⠓'];
 
 /// Every half-hour clock face in chronological order for a
 /// `WaitingBackground` agent pane. The slower cadence keeps the full clock
@@ -84,7 +92,7 @@ const GOAL_ICON_COLUMN_WIDTH: usize = 3;
 /// columns included) at or above which a pane shows its long-form title
 /// instead of its short-form one -- see `crate::naming::DualTitle` and
 /// `display_title` below. Sits between the tree panel's default collapsed
-/// width (33 columns: `layout::DEFAULT_TREE_WIDTH` plus the shared-border
+/// width (33 columns: `layout::DEFAULT_UNFOCUSED_TREE_WIDTH` plus the shared-border
 /// column) and its default expanded (focused/hovered) width of 65 columns,
 /// so the default collapsed<->expanded transition is exactly the
 /// thin<->wide switch this constant draws -- see `crate::layout::TreeWidthAnimation`.
@@ -397,6 +405,9 @@ pub struct TreeHoverState {
 pub struct TreeRenderOptions<'a> {
     pub focused: bool,
     pub elapsed_ms: u128,
+    /// Real animation-clock offset even when decorative motion is disabled.
+    /// Activity-window expiry must not freeze merely because its glyph does.
+    pub terminal_activity_elapsed_ms: u128,
     /// Current wall-clock time used only for durable absolute countdowns.
     pub current_unix_millis: u64,
     pub project_name: Option<&'a str>,
@@ -409,6 +420,7 @@ pub struct TreeRenderOptions<'a> {
     /// Node id -> `elapsed_ms`-relative offset (ms) at which this client
     /// finished sliding into place -- see `App::recently_created`.
     pub recently_created: &'a HashMap<NodeId, u128>,
+    pub terminal_activity: &'a TerminalActivityTracker,
     /// Client-only structural transition state. It may temporarily supply the
     /// previous snapshot for exit rendering while `tree` remains authoritative.
     pub transitions: &'a TreeTransitions,
@@ -442,9 +454,11 @@ pub struct TreeRenderOptions<'a> {
 /// recursive helper's signature independently.
 struct TreeItemBuildContext<'a> {
     elapsed_ms: u128,
+    terminal_activity_elapsed_ms: u128,
     current_unix_millis: u64,
     titles_loading: &'a HashSet<NodeId>,
     recently_created: &'a HashMap<NodeId, u128>,
+    terminal_activity: &'a TerminalActivityTracker,
     agent_identifiers: &'a AgentIdentifierSettings,
     icons: &'a IconSettings,
     tree_order: TreeOrder,
@@ -485,9 +499,11 @@ pub(crate) fn visible_tree_node_ids(
         tree,
         TreeItemBuildContext {
             elapsed_ms: 0,
+            terminal_activity_elapsed_ms: 0,
             current_unix_millis: 0,
             titles_loading: &HashSet::new(),
             recently_created: &HashMap::new(),
+            terminal_activity: &TerminalActivityTracker::default(),
             agent_identifiers: &AgentIdentifierSettings::default(),
             icons: &IconSettings::default(),
             tree_order,
@@ -619,11 +635,16 @@ fn build_item(
                     pane_label_with_icons(
                         status,
                         &display_name,
-                        context.elapsed_ms,
-                        context.titles_loading.contains(&node.id),
-                        context.agent_identifiers,
-                        context.icons,
-                        editor_filename.as_deref(),
+                        PaneLabelContext {
+                            elapsed_ms: context.elapsed_ms,
+                            is_title_loading: context.titles_loading.contains(&node.id),
+                            terminal_activity_phase: context
+                                .terminal_activity
+                                .phase(node.id, context.terminal_activity_elapsed_ms),
+                            agent_identifiers: context.agent_identifiers,
+                            icons: context.icons,
+                            editor_filename: editor_filename.as_deref(),
+                        },
                     )
                 },
                 |scheduled_input| {
@@ -934,19 +955,33 @@ fn apply_recent_pulse(line: Line<'static>, flash_on: bool) -> Line<'static> {
     )
 }
 
+/// Presentation-only inputs shared by every pane-label variant.
+struct PaneLabelContext<'a> {
+    elapsed_ms: u128,
+    is_title_loading: bool,
+    terminal_activity_phase: Option<TerminalActivityPhase>,
+    agent_identifiers: &'a AgentIdentifierSettings,
+    icons: &'a IconSettings,
+    editor_filename: Option<&'a str>,
+}
+
 /// Builds the icon+color-prefixed label for a single pane, based on its
-/// current `PaneStatus`. `elapsed_ms` selects the current animation frame
-/// for `Working` (spinning braille dots), `WaitingBackground` (a slower
-/// half-hour clock sweep), and `Done` (pulsing bell).
+/// current `PaneStatus`. The context's elapsed time selects the current
+/// activity frame without moving presentation state into the domain tree.
 fn pane_label_with_icons(
     status: &PaneStatus,
     name: &str,
-    elapsed_ms: u128,
-    is_title_loading: bool,
-    agent_identifiers: &AgentIdentifierSettings,
-    icons: &IconSettings,
-    editor_filename: Option<&str>,
+    context: PaneLabelContext<'_>,
 ) -> Line<'static> {
+    let PaneLabelContext {
+        elapsed_ms,
+        is_title_loading,
+        terminal_activity_phase,
+        agent_identifiers,
+        icons,
+        editor_filename,
+    } = context;
+
     // While `session_naming::infer_pane_title` is still awaiting a result
     // for this pane, its name renders as the same braille spinner
     // `sidebar_title` uses for the project name -- the activity glyph
@@ -979,7 +1014,16 @@ fn pane_label_with_icons(
                 icons.glyph(IconTarget::Terminal).to_string(),
                 Style::new().fg(Color::Gray),
             ),
-            None,
+            terminal_activity_phase.map(|phase| {
+                let frame_duration_ms = match phase {
+                    TerminalActivityPhase::Fast => TERMINAL_ACTIVITY_FAST_FRAME_MS,
+                    TerminalActivityPhase::Slow => TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+                };
+                let frame_index = (elapsed_ms / u128::from(frame_duration_ms)) as usize
+                    % TERMINAL_ACTIVITY_FRAMES.len();
+
+                Span::raw(TERMINAL_ACTIVITY_FRAMES[frame_index].to_string())
+            }),
             Span::raw(title()),
         ),
         PaneStatus::Agent(class, activity) => agent_pane_label(
@@ -1055,11 +1099,14 @@ fn pane_label(
     pane_label_with_icons(
         status,
         name,
-        elapsed_ms,
-        is_title_loading,
-        agent_identifiers,
-        &icons,
-        editor_filename,
+        PaneLabelContext {
+            elapsed_ms,
+            is_title_loading,
+            terminal_activity_phase: None,
+            agent_identifiers,
+            icons: &icons,
+            editor_filename,
+        },
     )
 }
 
@@ -1226,11 +1273,14 @@ fn scheduled_pane_label(
         PaneStatus::Editor { .. } | PaneStatus::Board => pane_label_with_icons(
             status,
             name,
-            elapsed_ms,
-            is_title_loading,
-            agent_identifiers,
-            &icons,
-            editor_filename,
+            PaneLabelContext {
+                elapsed_ms,
+                is_title_loading,
+                terminal_activity_phase: None,
+                agent_identifiers,
+                icons: &icons,
+                editor_filename,
+            },
         ),
     }
 }
@@ -1586,9 +1636,11 @@ impl TreeItemCache {
                 tree,
                 TreeItemBuildContext {
                     elapsed_ms: 0,
+                    terminal_activity_elapsed_ms: 0,
                     current_unix_millis: 0,
                     titles_loading: &HashSet::new(),
                     recently_created: &HashMap::new(),
+                    terminal_activity: &TerminalActivityTracker::default(),
                     agent_identifiers: &AgentIdentifierSettings::default(),
                     icons: &IconSettings::default(),
                     tree_order,
@@ -1635,9 +1687,11 @@ pub fn render(
         tree,
         TreeItemBuildContext {
             elapsed_ms: options.elapsed_ms,
+            terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
             current_unix_millis: options.current_unix_millis,
             titles_loading: options.titles_loading,
             recently_created: options.recently_created,
+            terminal_activity: options.terminal_activity,
             agent_identifiers: options.agent_identifiers,
             icons: options.icons,
             tree_order: options.tree_order,
@@ -1672,9 +1726,11 @@ pub fn render(
             presentation_tree,
             TreeItemBuildContext {
                 elapsed_ms: options.elapsed_ms,
+                terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
                 current_unix_millis: options.current_unix_millis,
                 titles_loading: options.titles_loading,
                 recently_created: options.recently_created,
+                terminal_activity: options.terminal_activity,
                 agent_identifiers: options.agent_identifiers,
                 icons: options.icons,
                 tree_order: options.tree_order,
@@ -2129,12 +2185,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms,
+                        terminal_activity_elapsed_ms: elapsed_ms,
                         current_unix_millis: 0,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created,
+                        terminal_activity: &TerminalActivityTracker::default(),
                         transitions,
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2455,6 +2513,48 @@ mod tests {
     }
 
     #[test]
+    fn plain_terminal_uses_exact_angular_frames_at_both_activity_cadences() {
+        let settings = AgentIdentifierSettings::default();
+        let icons = IconSettings::default();
+
+        for (phase, frame_duration_ms) in [
+            (TerminalActivityPhase::Fast, TERMINAL_ACTIVITY_FAST_FRAME_MS),
+            (TerminalActivityPhase::Slow, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
+        ] {
+            for (frame_index, expected_frame) in TERMINAL_ACTIVITY_FRAMES.iter().enumerate() {
+                let line = pane_label_with_icons(
+                    &PaneStatus::PlainShell,
+                    "build",
+                    PaneLabelContext {
+                        elapsed_ms: frame_index as u128 * u128::from(frame_duration_ms),
+                        is_title_loading: false,
+                        terminal_activity_phase: Some(phase),
+                        agent_identifiers: &settings,
+                        icons: &icons,
+                        editor_filename: None,
+                    },
+                );
+
+                assert_eq!(line.spans[1].content.trim(), expected_frame.to_string());
+            }
+        }
+
+        let inactive = pane_label_with_icons(
+            &PaneStatus::PlainShell,
+            "build",
+            PaneLabelContext {
+                elapsed_ms: 0,
+                is_title_loading: false,
+                terminal_activity_phase: None,
+                agent_identifiers: &settings,
+                icons: &icons,
+                editor_filename: None,
+            },
+        );
+        assert!(inactive.spans[1].content.trim().is_empty());
+    }
+
+    #[test]
     fn row_actions_default_to_normal_icons_and_offer_opt_in_stable_glyphs() {
         let icons = IconSettings::default();
         assert_eq!(
@@ -2675,12 +2775,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms: 0,
+                        terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
+                        terminal_activity: &TerminalActivityTracker::default(),
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2714,12 +2816,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms: 0,
+                        terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
+                        terminal_activity: &TerminalActivityTracker::default(),
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2772,12 +2876,14 @@ mod tests {
                     TreeRenderOptions {
                         focused: false,
                         elapsed_ms: 0,
+                        terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
+                        terminal_activity: &TerminalActivityTracker::default(),
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -3001,9 +3107,11 @@ mod tests {
             &tree,
             TreeItemBuildContext {
                 elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3021,9 +3129,11 @@ mod tests {
             &tree,
             TreeItemBuildContext {
                 elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3044,9 +3154,11 @@ mod tests {
             &tree,
             TreeItemBuildContext {
                 elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3317,9 +3429,11 @@ mod tests {
             &tree,
             TreeItemBuildContext {
                 elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
                 titles_loading: &HashSet::new(),
                 recently_created: &recently_created,
+                terminal_activity: &TerminalActivityTracker::default(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3553,9 +3667,11 @@ mod tests {
             &tree,
             TreeItemBuildContext {
                 elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,

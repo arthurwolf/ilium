@@ -30,8 +30,8 @@ use crate::agent_from_line::{
 use crate::board::BoardPane;
 use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
-    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, SessionSettings,
-    TerminalSettings, TreeOrder, UiSettings, VoiceSettings,
+    ApiSettings, DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings,
+    LeftPanelSizingMode, SessionSettings, TerminalSettings, TreeOrder, UiSettings, VoiceSettings,
 };
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
@@ -42,12 +42,14 @@ use crate::naming_workers::TitleTrigger;
 use crate::prompt_queue::PromptQueueDialogState;
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
+use crate::screen_transfer::ScreenTransfer;
 use crate::search_ui::{
     self, SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
     WorkspaceSearchRequest, WorkspaceSearchSource, WorkspaceSearchText,
 };
 use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
+use crate::terminal_activity::{TerminalActivityTracker, TERMINAL_ACTIVITY_SLOW_FRAME_MS};
 use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
 use crate::terminal_title_inference;
 use crate::terminal_view::{self, TerminalView};
@@ -227,6 +229,8 @@ pub enum Mode {
     InferenceSettingPrompt(InferenceSettingField, TextPromptState),
     /// Masked single-line OpenAI credential editor.
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
+    /// Edits the loopback HTTP API port from Settings.
+    ApiSettingPrompt(TextPromptState),
     /// Multiline additive prompt editor for the voice controller.
     VoicePromptEditor(Box<VoicePromptEditorState>),
     /// In-progress "Save As" filename prompt for the editor pane `NodeId`.
@@ -335,6 +339,7 @@ pub enum SettingsTab {
     Sound,
     VoiceControl,
     Debug,
+    Api,
     About,
 }
 
@@ -440,7 +445,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 13] = [
+    pub const ALL: [SettingsTab; 14] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -453,6 +458,7 @@ impl SettingsTab {
         Self::Inference,
         Self::Triggers,
         Self::Debug,
+        Self::Api,
         Self::About,
     ];
 
@@ -470,6 +476,7 @@ impl SettingsTab {
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
             Self::Debug => "Debug",
+            Self::Api => "API",
             Self::About => "About",
         }
     }
@@ -499,8 +506,11 @@ impl SettingsTab {
 /// `ALL` rather than hardcoding a row count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceRow {
-    AutoResizeTree,
-    TreeWidth,
+    LeftPanelSizingMode,
+    FixedPanelWidth,
+    UnfocusedPanelWidth,
+    FocusedPanelWidth,
+    MinimumTerminalWidth,
     TreeOrder,
     TreeRowManagementControls,
     AgentIdentifierMode,
@@ -513,9 +523,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    pub const ALL: [AppearanceRow; 11] = [
-        Self::AutoResizeTree,
-        Self::TreeWidth,
+    const GENERAL: [AppearanceRow; 9] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -526,6 +534,26 @@ impl AppearanceRow {
         Self::ShowInferredTitleIcons,
         Self::AgentDebugMenu,
     ];
+
+    /// Rows visible for the active card. Hidden values remain persisted so
+    /// switching cards never discards a policy the user already tuned.
+    pub fn visible(mode: LeftPanelSizingMode) -> Vec<Self> {
+        let mut rows = vec![Self::LeftPanelSizingMode];
+        match mode {
+            LeftPanelSizingMode::Fixed => rows.push(Self::FixedPanelWidth),
+            LeftPanelSizingMode::FocusDependent => {
+                rows.push(Self::UnfocusedPanelWidth);
+                rows.push(Self::FocusedPanelWidth);
+            }
+            LeftPanelSizingMode::TerminalWidthDependent => {
+                rows.push(Self::MinimumTerminalWidth);
+                rows.push(Self::UnfocusedPanelWidth);
+                rows.push(Self::FocusedPanelWidth);
+            }
+        }
+        rows.extend(Self::GENERAL);
+        rows
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -568,6 +596,15 @@ impl SessionRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugRow {
     FileLogging,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiRow {
+    Port,
+}
+
+impl ApiRow {
+    pub const ALL: [Self; 1] = [Self::Port];
 }
 
 impl DebugRow {
@@ -1121,6 +1158,9 @@ pub struct PendingRestructureRequest {
     pub project_name: String,
     pub project_cwd: PathBuf,
     pub contexts: Vec<LeafContext>,
+    /// Complete typed split-view constraints captured from the same tree
+    /// snapshot as `current_structure`; these are never prompt-clipped.
+    pub protected_split_views: Vec<crate::restructure::ProtectedSplitViewContext>,
     /// Exact project-local hierarchy captured on the main loop alongside
     /// item extracts, before the asynchronous LLM worker begins.
     pub current_structure: String,
@@ -1233,6 +1273,11 @@ pub struct App {
     /// loop. Freshly created panes are asked for at this size, so a pane
     /// created after startup doesn't wait for the next resize event.
     pub last_known_pane_size: (u16, u16),
+    /// Last geometry this client actually requested from each server-owned
+    /// PTY. A `TerminalView` may already have the desired local parser size
+    /// before its new server PTY has ever received `ResizePane`, so parser
+    /// geometry cannot safely serve as IPC deduplication state.
+    requested_pane_sizes: HashMap<NodeId, (u16, u16)>,
     /// Geometry from the last terminal-size calculation.
     pub layout: UiLayout,
     tree_width_animation: TreeWidthAnimation,
@@ -1267,6 +1312,7 @@ pub struct App {
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
     pub debug_settings: DebugSettings,
+    pub api_settings: ApiSettings,
     pub voice_connection_state: ilium_voice::VoiceConnectionState,
     pub voice_input_devices: Vec<String>,
     pub voice_output_devices: Vec<String>,
@@ -1350,6 +1396,10 @@ pub struct App {
     /// boot-time restore of a whole persisted session must not flash every
     /// node at once).
     pub recently_created: HashMap<NodeId, u128>,
+    /// Short-lived, client-local activity edges for ordinary terminals.
+    /// Live rendered-text changes and accepted key input feed this tracker;
+    /// no server poll or durable pane status is involved.
+    pub(crate) terminal_activity: TerminalActivityTracker,
     /// Whether `track_tree_snapshot_change` has processed at least one
     /// snapshot yet -- see that method's doc comment.
     has_applied_first_snapshot: bool,
@@ -1453,6 +1503,18 @@ fn scheduled_input_frame_delay(remaining_millis: u64, frame_millis: u64) -> Dura
     Duration::from_millis(delay_millis.min(frame_millis))
 }
 
+/// Returns the next boundary for a frame index derived from elapsed time.
+fn elapsed_frame_delay(elapsed_millis: u128, frame_millis: u64) -> Duration {
+    let remainder = elapsed_millis % u128::from(frame_millis);
+    let delay_millis = if remainder == 0 {
+        frame_millis
+    } else {
+        frame_millis - remainder as u64
+    };
+
+    Duration::from_millis(delay_millis)
+}
+
 impl App {
     /// Starts a client session with an empty render-cache tree -- the real
     /// tree arrives moments later as the first `ServerEvent::TreeSnapshot`
@@ -1479,10 +1541,11 @@ impl App {
             started_at,
             tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
+            requested_pane_sizes: HashMap::new(),
             layout: UiLayout::default(),
             tree_width_animation: TreeWidthAnimation::new(
                 started_at,
-                UiSettings::default().tree_width,
+                UiSettings::default().left_panel_sizing.unfocused_width,
             ),
             ui_settings: UiSettings::default(),
             keyboard_settings: KeyboardSettings::default(),
@@ -1497,6 +1560,7 @@ impl App {
             session_settings: SessionSettings::default(),
             voice_settings: VoiceSettings::default(),
             debug_settings: DebugSettings::default(),
+            api_settings: ApiSettings::default(),
             voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
             voice_input_devices: Vec::new(),
             voice_output_devices: Vec::new(),
@@ -1537,6 +1601,7 @@ impl App {
                 .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks()),
             markdown_rasterizer: crate::markdown::raster::HeaderRasterizer::new(),
             recently_created: HashMap::new(),
+            terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
             agent_process_ids: HashMap::new(),
@@ -1701,7 +1766,47 @@ impl App {
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
+        if let ClientRequest::KeyInput { pane_id, bytes, .. } = &request {
+            if !bytes.is_empty() {
+                self.record_plain_terminal_activity(*pane_id, Instant::now());
+            }
+        }
+
         self.outbox.push(request);
+    }
+
+    /// Records a live-output edge only when parsed visible text actually
+    /// changed. `TerminalView` owns that allocation-free comparison.
+    pub(crate) fn record_terminal_screen_change(
+        &mut self,
+        pane_id: NodeId,
+        did_visible_text_change: bool,
+    ) {
+        if did_visible_text_change {
+            self.record_plain_terminal_activity(pane_id, Instant::now());
+        }
+    }
+
+    /// Starts or refreshes activity only for an ordinary PTY-backed terminal.
+    /// Detected agents retain their existing provider/activity indicators.
+    fn record_plain_terminal_activity(&mut self, pane_id: NodeId, now: Instant) {
+        let is_plain_terminal = self.tree.get(pane_id).is_some_and(|node| {
+            matches!(
+                node.kind,
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    status: PaneStatus::PlainShell,
+                    ..
+                }
+            )
+        });
+
+        if !is_plain_terminal {
+            return;
+        }
+
+        let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
+        self.terminal_activity.record(pane_id, elapsed_ms);
     }
 
     pub fn active_pane_id(&self) -> Option<NodeId> {
@@ -1904,6 +2009,39 @@ impl App {
 
     pub fn pane_viewport_at(&self, position: Position) -> Option<PaneViewport> {
         split_layout::viewport_at(&self.pane_viewports(), position)
+    }
+
+    /// Returns every currently actionable transfer across a visible split
+    /// separator. A transfer is available only when both panes have live
+    /// terminal runtimes, which includes ordinary shells and detected agents
+    /// but excludes editors, boards, and still-loading pane placeholders.
+    pub(crate) fn screen_transfers(&self) -> Vec<ScreenTransfer> {
+        split_layout::adjacent_pane_directions(&self.pane_viewports())
+            .into_iter()
+            .filter(|transfer| {
+                self.is_live_terminal_pane(transfer.source_pane_id)
+                    && self.is_live_terminal_pane(transfer.destination_pane_id)
+            })
+            .map(|transfer| ScreenTransfer {
+                source_pane_id: transfer.source_pane_id,
+                destination_pane_id: transfer.destination_pane_id,
+                direction: transfer.direction,
+                control_area: transfer.control_area,
+            })
+            .collect()
+    }
+
+    /// Resolves a pointer position against the exact separator cells rendered
+    /// as screen-transfer controls. The runtime eligibility above keeps a
+    /// border next to an editor from behaving like a terminal paste target.
+    pub(crate) fn screen_transfer_at(&self, position: Position) -> Option<ScreenTransfer> {
+        self.screen_transfers()
+            .into_iter()
+            .find(|transfer| transfer.control_area.contains(position))
+    }
+
+    fn is_live_terminal_pane(&self, pane_id: NodeId) -> bool {
+        matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(_)))
     }
 
     /// Returns the bottom-row close action for a pane whose detected agent
@@ -2429,6 +2567,7 @@ impl App {
             self.tree_width_animation.current_width(),
         );
         self.set_layout(layout, PaneResizeCause::HostTerminal);
+        self.tick_layout_animation(Instant::now());
     }
 
     /// Applies `ui` as this session's live settings: threads the change
@@ -2460,7 +2599,11 @@ impl App {
         if !matches!(ui.motion_level, crate::config::MotionLevel::Full) {
             self.tree_transitions = TreeTransitions::default();
         }
-        self.tree_width_animation.set_base_width(ui.tree_width, now);
+        let is_tree_active = self.is_tree_active();
+        let resolved_width = ui
+            .left_panel_sizing
+            .resolved_width(self.layout.screen_area.width, is_tree_active);
+        self.tree_width_animation.snap_to(resolved_width, now);
         theme::set(Theme::for_scheme(ui.color_scheme));
         let layout = UiLayout::from_screen_area_with_tree_width(
             self.layout.screen_area,
@@ -2499,6 +2642,38 @@ impl App {
     /// async event loop; `App` keeps only the settings value rendered by UI.
     pub fn apply_debug_settings(&mut self, settings: DebugSettings) {
         self.debug_settings = settings;
+    }
+
+    pub fn apply_api_settings(&mut self, settings: ApiSettings) {
+        self.api_settings = settings;
+    }
+
+    pub fn settings_open_api_port(&mut self) {
+        self.push_modal(Mode::ApiSettingPrompt(TextPromptState::new(
+            self.api_settings.port.to_string(),
+        )));
+    }
+
+    pub fn settings_commit_api_port(&mut self, value: String) {
+        let Ok(port) = value.trim().parse::<u16>() else {
+            self.status_message =
+                Some("HTTP API port must be a number from 1 to 65535".to_string());
+            return;
+        };
+        if port == 0 {
+            self.status_message =
+                Some("HTTP API port must be a number from 1 to 65535".to_string());
+            return;
+        }
+        self.api_settings.port = port;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) = crate::config::save_api_settings(&config_dir, &self.api_settings) {
+                self.status_message = Some(format!("Could not save API settings: {error}"));
+            } else {
+                self.status_message =
+                    Some("HTTP API port saved; restart the server to apply it".to_string());
+            }
+        }
     }
 
     /// Asks the async owner to synchronize this value with both the local
@@ -3543,23 +3718,86 @@ impl App {
         self.status_message = Some(format!("Opened search result in {}", result.object_name));
     }
 
-    /// Flips the "auto-resize tree panel on focus" toggle -- the Appearance
-    /// tab's first row.
-    pub fn settings_toggle_auto_resize_tree(&mut self) {
+    /// Selects one of the three cards without discarding values owned by the
+    /// other policies, allowing quick comparison and later restoration.
+    pub fn settings_set_left_panel_sizing_mode(&mut self, mode: LeftPanelSizingMode) {
         let mut ui = self.ui_settings.clone();
-        ui.auto_resize_tree_on_focus = !ui.auto_resize_tree_on_focus;
+        ui.left_panel_sizing.mode = mode;
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Adjusts the tree panel's base width by `delta` columns, clamped to
-    /// `[MIN_TREE_WIDTH, MAX_TREE_WIDTH]` -- the Appearance tab's second row.
-    pub fn settings_adjust_tree_width(&mut self, delta: i32) {
-        let mut ui = self.ui_settings.clone();
-        let clamped = (i32::from(ui.tree_width) + delta).clamp(
+    pub fn settings_adjust_left_panel_sizing_mode(&mut self, direction: i32) {
+        self.settings_set_left_panel_sizing_mode(
+            self.ui_settings.left_panel_sizing.mode.stepped(direction),
+        );
+    }
+
+    pub fn settings_adjust_fixed_panel_width(&mut self, delta: i32) {
+        let current = self.ui_settings.left_panel_sizing.fixed_width;
+        let width = (i32::from(current) + delta).clamp(
             i32::from(crate::layout::MIN_TREE_WIDTH),
             i32::from(crate::layout::MAX_TREE_WIDTH),
+        ) as u16;
+        self.settings_set_fixed_panel_width(width);
+    }
+
+    pub fn settings_set_fixed_panel_width(&mut self, width: u16) {
+        let mut ui = self.ui_settings.clone();
+        ui.left_panel_sizing.fixed_width =
+            width.clamp(crate::layout::MIN_TREE_WIDTH, crate::layout::MAX_TREE_WIDTH);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_adjust_unfocused_panel_width(&mut self, delta: i32) {
+        let sizing = self.ui_settings.left_panel_sizing;
+        let width = (i32::from(sizing.unfocused_width) + delta).clamp(
+            i32::from(crate::layout::MIN_TREE_WIDTH),
+            i32::from(sizing.focused_width),
+        ) as u16;
+        self.settings_set_unfocused_panel_width(width);
+    }
+
+    pub fn settings_set_unfocused_panel_width(&mut self, width: u16) {
+        let mut ui = self.ui_settings.clone();
+        let sizing = &mut ui.left_panel_sizing;
+        sizing.unfocused_width = width.clamp(crate::layout::MIN_TREE_WIDTH, sizing.focused_width);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_adjust_focused_panel_width(&mut self, delta: i32) {
+        let sizing = self.ui_settings.left_panel_sizing;
+        let width = (i32::from(sizing.focused_width) + delta).clamp(
+            i32::from(sizing.unfocused_width),
+            i32::from(crate::layout::MAX_TREE_WIDTH),
+        ) as u16;
+        self.settings_set_focused_panel_width(width);
+    }
+
+    pub fn settings_set_focused_panel_width(&mut self, width: u16) {
+        let mut ui = self.ui_settings.clone();
+        let sizing = &mut ui.left_panel_sizing;
+        sizing.focused_width = width.clamp(sizing.unfocused_width, crate::layout::MAX_TREE_WIDTH);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_adjust_minimum_terminal_width(&mut self, direction: i32) {
+        let current = self.ui_settings.left_panel_sizing.minimum_terminal_width;
+        let mut ui = self.ui_settings.clone();
+        let delta = if direction < 0 { -5 } else { 5 };
+        let width = (i32::from(current) + delta).clamp(
+            i32::from(crate::layout::MINIMUM_TERMINAL_WIDTH),
+            i32::from(crate::layout::MAXIMUM_TERMINAL_WIDTH),
+        ) as u16;
+        ui.left_panel_sizing.minimum_terminal_width = width;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_set_minimum_terminal_width(&mut self, width: u16) {
+        let mut ui = self.ui_settings.clone();
+        ui.left_panel_sizing.minimum_terminal_width = width.clamp(
+            crate::layout::MINIMUM_TERMINAL_WIDTH,
+            crate::layout::MAXIMUM_TERMINAL_WIDTH,
         );
-        ui.tree_width = clamped as u16;
         self.apply_and_persist_ui_settings(ui);
     }
 
@@ -3652,15 +3890,20 @@ impl App {
     }
 
     /// Dispatches a keyboard/mouse "adjust this row" gesture to the right
-    /// per-row action, per `AppearanceRow`'s doc comment. `direction` is
-    /// `-1`/`+1` (decrement/increment); for the two-state rows
-    /// (`AutoResizeTree`, `ColorScheme`) either direction just flips the
-    /// value -- there's nothing to distinguish between "previous" and
-    /// "next" with only two states.
+    /// per-row action, per `AppearanceRow`'s doc comment.
     pub fn settings_adjust_row(&mut self, row: AppearanceRow, direction: i32) {
         match row {
-            AppearanceRow::AutoResizeTree => self.settings_toggle_auto_resize_tree(),
-            AppearanceRow::TreeWidth => self.settings_adjust_tree_width(direction),
+            AppearanceRow::LeftPanelSizingMode => {
+                self.settings_adjust_left_panel_sizing_mode(direction)
+            }
+            AppearanceRow::FixedPanelWidth => self.settings_adjust_fixed_panel_width(direction),
+            AppearanceRow::UnfocusedPanelWidth => {
+                self.settings_adjust_unfocused_panel_width(direction)
+            }
+            AppearanceRow::FocusedPanelWidth => self.settings_adjust_focused_panel_width(direction),
+            AppearanceRow::MinimumTerminalWidth => {
+                self.settings_adjust_minimum_terminal_width(direction)
+            }
             AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
             AppearanceRow::TreeRowManagementControls => {
                 self.settings_toggle_tree_row_management_controls()
@@ -3771,20 +4014,23 @@ impl App {
         self.tick_layout_animation(Instant::now());
     }
 
-    /// Advances the tree width from the two independent activation signals:
-    /// pointer-over-panel and keyboard focus.
-    pub fn tick_layout_animation(&mut self, now: Instant) {
+    /// Whether mouse or keyboard focus currently activates the left panel.
+    fn is_tree_active(&self) -> bool {
         let is_pointer_over_tree = self
             .pointer_position
             .is_some_and(|position| self.layout.tree_area.contains(position));
-        // Gated on `ui_settings.auto_resize_tree_on_focus`: with the setting
-        // off, `is_tree_active` is always false, so `update` only ever
-        // targets the base width -- the panel simply never expands, and any
-        // expansion already in progress eases back down to it.
-        let is_tree_active = self.ui_settings.auto_resize_tree_on_focus
-            && self.is_terminal_focused
-            && (is_pointer_over_tree || matches!(self.focus, FocusTarget::Tree));
-        let tree_width = self.tree_width_animation.update(is_tree_active, now);
+        self.is_terminal_focused
+            && (is_pointer_over_tree || matches!(self.focus, FocusTarget::Tree))
+    }
+
+    /// Advances toward the selected policy's target. The policy owns sizing;
+    /// this method owns only activation sampling, animation, and geometry.
+    pub fn tick_layout_animation(&mut self, now: Instant) {
+        let requested_width = self
+            .ui_settings
+            .left_panel_sizing
+            .resolved_width(self.layout.screen_area.width, self.is_tree_active());
+        let tree_width = self.tree_width_animation.update(requested_width, now);
         let layout =
             UiLayout::from_screen_area_with_tree_width(self.layout.screen_area, tree_width);
         self.set_layout(layout, PaneResizeCause::TreePanelAnimation);
@@ -3810,6 +4056,14 @@ impl App {
         self.tree_transitions.prune(now_offset_ms, &self.tree)
     }
 
+    /// Expires ordinary-terminal activity windows. The tick performs no
+    /// screen inspection; it only removes timestamps recorded by output and
+    /// input events.
+    pub fn tick_terminal_activity(&mut self, now: Instant) -> bool {
+        let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
+        self.terminal_activity.prune_expired(elapsed_ms)
+    }
+
     /// Whether any wall-clock-driven visual (the tree-width hover
     /// animation, a "Working" spinner, a waiting-background clock, a "Done"
     /// bell pulse, a recently-created flash, or the project-name/pane-title
@@ -3820,7 +4074,10 @@ impl App {
     /// `ServerEvent`, a finished naming worker) already marks the frame dirty
     /// on its own.
     pub fn has_active_animation(&self) -> bool {
+        let elapsed_ms = self.started_at.elapsed().as_millis();
+
         self.has_fast_animation()
+            || self.terminal_activity.has_slow_activity(elapsed_ms)
             || self.tree.panes().any(|node| {
                 matches!(
                     node.kind,
@@ -3852,6 +4109,9 @@ impl App {
             return true;
         }
         if tree_ui::any_recently_created_within_window(&self.recently_created, elapsed_ms) {
+            return true;
+        }
+        if self.terminal_activity.has_fast_activity(elapsed_ms) {
             return true;
         }
         self.tree.panes().any(|node| {
@@ -3915,23 +4175,35 @@ impl App {
             let pane_id = viewport.pane_id;
             let rows = viewport.content_area.height.max(1);
             let cols = viewport.content_area.width.max(1);
-            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
-                // Skip panes already at this size: without this guard every
-                // tree-width animation tick re-sends a `ResizePane` (and the
-                // server relays a real PTY resize/SIGWINCH) for every
-                // terminal pane, not just ones whose size actually changed.
-                if view.with_screen(|screen| screen.size()) == (rows, cols) {
-                    continue;
-                }
+            let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+                continue;
+            };
+            if view.with_screen(|screen| screen.size()) != (rows, cols) {
                 view.resize(rows, cols);
-                self.queue_request(ClientRequest::ResizePane {
-                    pane_id,
-                    rows,
-                    cols,
-                    cause,
-                });
             }
+            // The local parser is presentation state, not evidence that the
+            // detached server's PTY received this geometry. New views are
+            // deliberately created at `last_known_pane_size`, while new PTYs
+            // start at 24x80; only a previously queued request is safe to
+            // deduplicate against.
+            if self.requested_pane_sizes.get(&pane_id) == Some(&(rows, cols)) {
+                continue;
+            }
+            self.queue_request(ClientRequest::ResizePane {
+                pane_id,
+                rows,
+                cols,
+                cause,
+            });
+            self.requested_pane_sizes.insert(pane_id, (rows, cols));
         }
+    }
+
+    /// Drops resize-deduplication state for panes removed by an authoritative
+    /// tree snapshot, keeping this pane-keyed cache bounded with `panes`.
+    pub(crate) fn retain_requested_pane_sizes(&mut self, live_pane_ids: &HashSet<NodeId>) {
+        self.requested_pane_sizes
+            .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     }
 
     /// Rebuilds a focused editor pane's Rendered-mode document at the
@@ -5067,7 +5339,8 @@ impl App {
                 .unwrap_or_default();
             (source_line_text, visible_contents)
         });
-        let mut actions = Vec::with_capacity(5);
+        let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
+        let mut actions = Vec::with_capacity(5 + screen_transfer_actions.len());
         // Preserve the existing agent-debug entry point and its first-row
         // activation contract when the user has explicitly enabled it. The
         // activation itself still verifies that this exact pane is an agent.
@@ -5080,7 +5353,17 @@ impl App {
             TerminalContextAction::CopyFullTerminalHistoryToClipboard,
             TerminalContextAction::PasteClipboard,
         ]);
-        let width = 38.min(self.layout.screen_area.width.max(1));
+        actions.extend(screen_transfer_actions);
+        let label_width = actions
+            .iter()
+            .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(3);
+        let width = u16::try_from(label_width)
+            .unwrap_or(u16::MAX)
+            .max(38)
+            .min(self.layout.screen_area.width.max(1));
         let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
@@ -5115,7 +5398,73 @@ impl App {
                     "Full terminal history copied to clipboard",
                 ),
             TerminalContextAction::PasteClipboard => self.paste_clipboard_to_terminal(menu.pane_id),
+            TerminalContextAction::PasteScreenInto {
+                destination_pane_id,
+                direction,
+                destination_label,
+            } => self.paste_visible_terminal_screen(
+                menu.pane_id,
+                destination_pane_id,
+                direction,
+                &destination_label,
+            ),
             TerminalContextAction::ShowAgentDebugLog => self.open_agent_debug_log(menu.pane_id),
+        }
+    }
+
+    /// Builds the context-menu entries from the same separator model used by
+    /// rendering and mouse hit testing, so a menu never advertises a transfer
+    /// that lacks a corresponding visible split relationship.
+    fn screen_transfer_actions_from(&self, source_pane_id: NodeId) -> Vec<TerminalContextAction> {
+        self.screen_transfers()
+            .into_iter()
+            .filter(|transfer| transfer.source_pane_id == source_pane_id)
+            .map(|transfer| TerminalContextAction::PasteScreenInto {
+                destination_pane_id: transfer.destination_pane_id,
+                direction: transfer.direction,
+                destination_label: self
+                    .screen_transfer_destination_label(transfer.destination_pane_id),
+            })
+            .collect()
+    }
+
+    fn screen_transfer_destination_label(&self, pane_id: NodeId) -> String {
+        let Some(node) = self.tree.get(pane_id) else {
+            return "terminal".to_string();
+        };
+        match &node.kind {
+            NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+                ..
+            } => format!("{} agent", class.label()),
+            _ => "terminal".to_string(),
+        }
+    }
+
+    /// Takes the source pane's current visible terminal screen at activation
+    /// time, then writes it to the adjacent destination with the already
+    /// negotiated atomic paste path. Capturing late avoids stale content when
+    /// a terminal updates while its context menu remains open.
+    pub(crate) fn paste_visible_terminal_screen(
+        &mut self,
+        source_pane_id: NodeId,
+        destination_pane_id: NodeId,
+        direction: split_layout::PaneDirection,
+        destination_label: &str,
+    ) {
+        let Some(PaneRuntime::Terminal(source_view)) = self.panes.get(&source_pane_id) else {
+            self.status_message = Some("The source pane is no longer a terminal".to_string());
+            return;
+        };
+        let visible_contents = source_view.with_screen(|screen| screen.contents());
+        if self.forward_terminal_paste(destination_pane_id, &visible_contents) {
+            self.status_message = Some(format!(
+                "Screen pasted into {destination_label} {}",
+                direction.label()
+            ));
+        } else {
+            self.status_message = Some("The destination pane is no longer a terminal".to_string());
         }
     }
 
@@ -5995,6 +6344,26 @@ impl App {
         let ordinary_delay = next_deadline
             .map(|deadline| deadline.saturating_duration_since(now))
             .unwrap_or(IDLE_MAINTENANCE_INTERVAL);
+        let terminal_activity_elapsed_ms =
+            now.saturating_duration_since(self.started_at).as_millis();
+        let ordinary_delay = if self
+            .terminal_activity
+            .has_slow_activity(terminal_activity_elapsed_ms)
+        {
+            let next_frame_delay = elapsed_frame_delay(
+                terminal_activity_elapsed_ms,
+                TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+            );
+            let next_expiry_delay = self
+                .terminal_activity
+                .next_slow_expiry_delay(terminal_activity_elapsed_ms)
+                .unwrap_or(next_frame_delay);
+
+            ordinary_delay.min(next_frame_delay.min(next_expiry_delay))
+        } else {
+            ordinary_delay
+        };
+
         self.next_scheduled_input_frame_delay()
             .map(|scheduled_delay| ordinary_delay.min(scheduled_delay))
             .unwrap_or(ordinary_delay)
@@ -6184,14 +6553,14 @@ impl App {
     /// applies).
     ///
     /// A terminal pane intercepts Shift+PageUp/Shift+PageDown as local
-    /// scrollback navigation rather than forwarding them -- plain
-    /// PageUp/PageDown aren't in `encode_key_for_terminal`'s table at all
-    /// (dropped silently), so this claims only the Shift-held variants,
-    /// leaving room for plain PageUp/PageDown to reach the foreground app
-    /// if that table ever grows to cover them. Any other key that *does*
-    /// forward resets the view back to the live tail first, matching how
-    /// an ordinary terminal emulator returns you to the prompt the moment
-    /// you type.
+    /// scrollback navigation and Shift+End as an immediate return to live
+    /// output rather than forwarding them. Plain PageUp/PageDown/End aren't
+    /// in `encode_key_for_terminal`'s table at all (dropped silently), so this
+    /// claims only the Shift-held variants, leaving room for the plain keys to
+    /// reach the foreground app if that table ever grows to cover them. Any
+    /// other key that *does* forward also resets the view back to the live tail,
+    /// matching how an ordinary terminal emulator returns you to the prompt
+    /// the moment you type.
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
         if matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. }) {
@@ -6211,14 +6580,15 @@ impl App {
         match self.panes.get_mut(&id) {
             Some(PaneRuntime::Terminal(view)) => {
                 let page_lines = self.last_known_pane_size.0;
-                let is_scroll_key = is_press(&key)
+                let is_scrollback_key = is_press(&key)
                     && key.modifiers.contains(KeyModifiers::SHIFT)
-                    && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown);
-                if is_scroll_key {
+                    && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown | KeyCode::End);
+                if is_scrollback_key {
                     match key.code {
                         KeyCode::PageUp => view.scroll_up(page_lines),
                         KeyCode::PageDown => view.scroll_down(page_lines),
-                        _ => unreachable!("is_scroll_key only matches PageUp/PageDown"),
+                        KeyCode::End => view.scroll_to_bottom(),
+                        _ => unreachable!("is_scrollback_key only matches PageUp/PageDown/End"),
                     }
                 } else if let Some(bytes) = encode_key_for_terminal(&key) {
                     view.scroll_to_bottom();
@@ -6761,6 +7131,17 @@ impl App {
                     return;
                 }
             };
+        let protected_split_views =
+            match crate::restructure::gather_project_split_view_contexts(&self.tree, project_id) {
+                Ok(protected_split_views) => protected_split_views,
+                Err(error) => {
+                    if !request_origin.is_automatic() {
+                        self.status_message =
+                            Some(format!("Could not read project split views: {error}"));
+                    }
+                    return;
+                }
+            };
         let input_fingerprint = crate::restructure::project_restructure_input_fingerprint(
             &contexts,
             &current_structure,
@@ -6802,6 +7183,7 @@ impl App {
                 project_name,
                 project_cwd,
                 contexts,
+                protected_split_views,
                 current_structure,
             });
         self.refresh_structure_loading();
@@ -7011,6 +7393,22 @@ impl App {
     /// sub-regions, a terminal pane's coordinates (already pane-content-
     /// relative) become a `MouseInput` request.
     pub fn handle_pane_mouse(&mut self, mouse: crossterm::event::MouseEvent, position: Position) {
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        ) {
+            if let Some(transfer) = self.screen_transfer_at(position) {
+                let destination_label =
+                    self.screen_transfer_destination_label(transfer.destination_pane_id);
+                self.paste_visible_terminal_screen(
+                    transfer.source_pane_id,
+                    transfer.destination_pane_id,
+                    transfer.direction,
+                    &destination_label,
+                );
+                return;
+            }
+        }
         let Some(viewport) = self.pane_viewport_at(position) else {
             return;
         };
@@ -7670,7 +8068,8 @@ fn is_press(key: &crossterm::event::KeyEvent) -> bool {
 
 /// Hand-rolled crossterm-key -> terminal-input-bytes encoding. Not
 /// exhaustive (v1 scope): covers printable characters, the common
-/// control/navigation keys, and Ctrl+<letter>.
+/// control/navigation keys, Ctrl+<letter>, and xterm's modified End sequence
+/// used by full-screen agent TUIs to jump back to their live tail.
 fn encode_key_for_terminal(key: &crossterm::event::KeyEvent) -> Option<Vec<u8>> {
     use crossterm::event::{KeyCode, KeyModifiers};
     if !is_press(key) {
@@ -7699,6 +8098,9 @@ fn encode_key_for_terminal(key: &crossterm::event::KeyEvent) -> Option<Vec<u8>> 
         KeyCode::Down => Some(b"\x1b[B".to_vec()),
         KeyCode::Right => Some(b"\x1b[C".to_vec()),
         KeyCode::Left => Some(b"\x1b[D".to_vec()),
+        KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(b"\x1b[1;5F".to_vec())
+        }
         _ => None,
     }
 }
@@ -7988,6 +8390,194 @@ mod tests {
                 } if resized_pane_id == pane_id
             )
         }));
+    }
+
+    #[test]
+    fn fixed_left_panel_policy_ignores_focus_edges() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut ui = app.ui_settings.clone();
+        ui.motion_level = crate::config::MotionLevel::Off;
+        ui.left_panel_sizing.mode = LeftPanelSizingMode::Fixed;
+        ui.left_panel_sizing.fixed_width = 27;
+        app.apply_ui_settings(ui);
+
+        app.focus = FocusTarget::Tree;
+        app.tick_layout_animation(Instant::now());
+        assert_eq!(app.layout.tree_area.width, 28);
+
+        app.focus = FocusTarget::Pane;
+        app.tick_layout_animation(Instant::now());
+        assert_eq!(app.layout.tree_area.width, 28);
+    }
+
+    #[test]
+    fn width_dependent_policy_is_wide_above_threshold_and_focus_aware_below_it() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 140, 40));
+        let mut ui = app.ui_settings.clone();
+        ui.motion_level = crate::config::MotionLevel::Off;
+        ui.left_panel_sizing = crate::config::LeftPanelSizingSettings {
+            mode: LeftPanelSizingMode::TerminalWidthDependent,
+            fixed_width: 30,
+            unfocused_width: 24,
+            focused_width: 58,
+            minimum_terminal_width: 120,
+        };
+        app.apply_ui_settings(ui);
+
+        assert_eq!(app.layout.tree_area.width, 59);
+        app.set_screen_area(Rect::new(0, 0, 100, 40));
+        assert_eq!(app.layout.tree_area.width, 25);
+
+        app.focus = FocusTarget::Tree;
+        app.tick_layout_animation(Instant::now());
+        assert_eq!(app.layout.tree_area.width, 59);
+    }
+
+    #[test]
+    fn left_panel_policy_controls_persist_together() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        app.settings_set_left_panel_sizing_mode(LeftPanelSizingMode::TerminalWidthDependent);
+        app.settings_set_minimum_terminal_width(150);
+        app.settings_set_unfocused_panel_width(26);
+        app.settings_set_focused_panel_width(70);
+
+        let loaded = crate::config::load(config_dir.path())
+            .expect("left panel sizing settings should persist");
+        assert_eq!(
+            loaded.ui.left_panel_sizing,
+            app.ui_settings.left_panel_sizing
+        );
+    }
+
+    #[test]
+    fn key_input_marks_only_plain_terminals_active() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let shell_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let agent_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                agent_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+
+        app.queue_request(ClientRequest::KeyInput {
+            pane_id: shell_id,
+            bytes: b"x".to_vec(),
+            submission: None,
+        });
+        app.queue_request(ClientRequest::KeyInput {
+            pane_id: agent_id,
+            bytes: b"x".to_vec(),
+            submission: None,
+        });
+
+        let elapsed_ms = app.started_at.elapsed().as_millis();
+        assert_eq!(
+            app.terminal_activity.phase(shell_id, elapsed_ms),
+            Some(crate::terminal_activity::TerminalActivityPhase::Fast)
+        );
+        assert_eq!(app.terminal_activity.phase(agent_id, elapsed_ms), None);
+        assert!(app.has_active_animation());
+    }
+
+    #[test]
+    fn terminal_activity_tick_preserves_slow_phase_then_expires_at_sixty_seconds() {
+        let mut app = app();
+        let pane_id = NodeId(41);
+        app.started_at = Instant::now() - Duration::from_secs(5);
+        app.terminal_activity.record(pane_id, 0);
+
+        assert_eq!(
+            app.terminal_activity.phase(pane_id, 5_000),
+            Some(crate::terminal_activity::TerminalActivityPhase::Slow)
+        );
+        assert!(!app.tick_terminal_activity(app.started_at + Duration::from_secs(5)));
+        assert!(app.has_active_animation());
+        assert!(app.tick_terminal_activity(app.started_at + Duration::from_secs(60)));
+        assert!(!app
+            .terminal_activity
+            .has_visible_activity(crate::terminal_activity::TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS));
+    }
+
+    #[test]
+    fn shift_end_returns_terminal_history_to_live_without_forwarding_input() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(4, 20);
+        for line in 0..12 {
+            view.feed(format!("line {line}\r\n").as_bytes());
+        }
+        view.scroll_up(4);
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.take_outbound_requests();
+
+        app.handle_pane_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::SHIFT,
+        ));
+
+        let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {
+            panic!("terminal pane should remain available");
+        };
+        assert!(!view.is_scrolled_back());
+        assert_eq!(view.scrollback_position(), 0);
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn control_end_returns_local_history_to_live_and_forwards_xterm_end() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "full-screen agent", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(4, 20);
+        for line in 0..12 {
+            view.feed(format!("line {line}\r\n").as_bytes());
+        }
+        view.scroll_up(4);
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.take_outbound_requests();
+
+        app.handle_pane_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+
+        let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {
+            panic!("terminal pane should remain available");
+        };
+        assert!(!view.is_scrolled_back());
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"\x1b[1;5F".to_vec(),
+                submission: None,
+            }]
+        );
     }
 
     #[test]
@@ -8404,6 +8994,18 @@ mod tests {
         assert_eq!(
             scheduled_input_frame_delay(0, 220),
             Duration::from_millis(1)
+        );
+    }
+
+    #[test]
+    fn elapsed_frame_redraw_uses_the_exact_forward_clock_boundary() {
+        assert_eq!(
+            elapsed_frame_delay(6_250, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            elapsed_frame_delay(6_500, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
+            Duration::from_millis(500)
         );
     }
 
@@ -8960,6 +9562,28 @@ mod tests {
     }
 
     #[test]
+    fn terminal_activity_uses_fast_then_half_second_then_idle_maintenance() {
+        let mut app = app();
+        let pane_id = NodeId(73);
+        let now = Instant::now();
+        app.started_at = now;
+        app.terminal_activity.record(pane_id, 0);
+
+        assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(50));
+
+        app.started_at = now - Duration::from_millis(6_250);
+        assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(250));
+        assert!(app.has_active_animation());
+
+        app.started_at = now - Duration::from_millis(59_900);
+        assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(100));
+
+        app.started_at = now - Duration::from_secs(60);
+        assert_eq!(app.next_maintenance_delay(now), Duration::from_secs(1));
+        assert!(!app.has_active_animation());
+    }
+
+    #[test]
     fn workspace_search_debounce_wakes_at_its_exact_deadline() {
         let mut app = app();
         let edited_at = Instant::now();
@@ -9003,6 +9627,40 @@ mod tests {
                 cause: PaneResizeCause::HostTerminal,
             }]
         );
+    }
+
+    #[test]
+    fn first_server_resize_is_not_suppressed_by_matching_local_parser_geometry() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 140, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let rows = viewport.content_area.height;
+        let cols = viewport.content_area.width;
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(rows, cols))),
+        );
+
+        app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ResizePane {
+                pane_id,
+                rows,
+                cols,
+                cause: PaneResizeCause::RightPanelPresentation,
+            }]
+        );
+
+        app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[test]
@@ -9699,6 +10357,183 @@ mod tests {
     }
 
     #[test]
+    fn split_terminal_menu_pastes_the_live_source_screen_into_an_adjacent_terminal() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let source_pane_id = app
+            .tree
+            .add_pane(group, "source", PaneContentKind::Terminal)
+            .unwrap();
+        let destination_pane_id = app
+            .tree
+            .add_pane(group, "destination", PaneContentKind::Terminal)
+            .unwrap();
+        let split_id = app
+            .tree
+            .create_split_view(
+                group,
+                "split",
+                SplitOrientation::Vertical,
+                &[source_pane_id, destination_pane_id],
+            )
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                destination_pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+        let mut source_view = TerminalView::new(12, 40);
+        source_view.feed(b"screen contents to transfer");
+        let mut destination_view = TerminalView::new(12, 40);
+        destination_view.feed(b"\x1b[?2004h");
+        app.panes
+            .insert(source_pane_id, PaneRuntime::Terminal(Box::new(source_view)));
+        app.panes.insert(
+            destination_pane_id,
+            PaneRuntime::Terminal(Box::new(destination_view)),
+        );
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id,
+            active_pane_id: Some(source_pane_id),
+        };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let source_viewport = app.pane_viewport(source_pane_id).unwrap();
+        let position = Position::new(
+            source_viewport.content_area.x + 3,
+            source_viewport.content_area.y + 1,
+        );
+        let expected_screen = match app.panes.get(&source_pane_id) {
+            Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
+            _ => panic!("source terminal should remain available"),
+        };
+        app.take_outbound_requests();
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("right click should open the terminal menu");
+        };
+        let action = menu
+            .actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action,
+                    TerminalContextAction::PasteScreenInto {
+                        destination_pane_id: target,
+                        direction: split_layout::PaneDirection::Right,
+                        ..
+                    } if *target == destination_pane_id
+                )
+            })
+            .cloned()
+            .expect("adjacent destination should have a screen-transfer action");
+        assert_eq!(
+            action.label(),
+            "Paste screen into Codex agent on the right".to_string()
+        );
+
+        app.execute_terminal_context_action(action, menu);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id: destination_pane_id,
+                bytes: encode_bracketed_paste(&expected_screen),
+                submission: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn split_separator_transfer_control_pastes_only_from_its_adjacent_source() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let source_pane_id = app
+            .tree
+            .add_pane(group, "source", PaneContentKind::Terminal)
+            .unwrap();
+        let destination_pane_id = app
+            .tree
+            .add_pane(group, "destination", PaneContentKind::Terminal)
+            .unwrap();
+        let split_id = app
+            .tree
+            .create_split_view(
+                group,
+                "split",
+                SplitOrientation::Horizontal,
+                &[source_pane_id, destination_pane_id],
+            )
+            .unwrap();
+        let mut source_view = TerminalView::new(12, 40);
+        source_view.feed(b"send downward");
+        app.panes
+            .insert(source_pane_id, PaneRuntime::Terminal(Box::new(source_view)));
+        app.panes.insert(
+            destination_pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(12, 40))),
+        );
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id,
+            active_pane_id: Some(source_pane_id),
+        };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let transfer = app
+            .screen_transfers()
+            .into_iter()
+            .find(|transfer| {
+                transfer.source_pane_id == source_pane_id
+                    && transfer.destination_pane_id == destination_pane_id
+                    && transfer.direction == split_layout::PaneDirection::Down
+            })
+            .expect("top-to-bottom terminal separator should be actionable");
+        let expected_screen = match app.panes.get(&source_pane_id) {
+            Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
+            _ => panic!("source terminal should remain available"),
+        };
+        app.take_outbound_requests();
+        let position = Position::new(transfer.control_area.x, transfer.control_area.y);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id: destination_pane_id,
+                bytes: expected_screen.into_bytes(),
+                submission: None,
+            }]
+        );
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Screen pasted into terminal below")
+        );
+    }
+
+    #[test]
     fn opening_debug_log_fetches_retained_history_before_using_incremental_replay() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -10114,7 +10949,8 @@ mod tests {
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::Debug);
-        assert_eq!(SettingsTab::Debug.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
+        assert_eq!(SettingsTab::Api.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
     }

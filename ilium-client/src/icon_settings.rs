@@ -40,10 +40,14 @@ pub enum IconTarget {
     RowClose,
     RowRetitle,
     RowProjectRestructure,
+    ScreenTransferLeft,
+    ScreenTransferRight,
+    ScreenTransferUp,
+    ScreenTransferDown,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 32] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -72,6 +76,10 @@ impl IconTarget {
         Self::RowClose,
         Self::RowRetitle,
         Self::RowProjectRestructure,
+        Self::ScreenTransferLeft,
+        Self::ScreenTransferRight,
+        Self::ScreenTransferUp,
+        Self::ScreenTransferDown,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -104,6 +112,10 @@ impl IconTarget {
             Self::RowClose => "Row action: close",
             Self::RowRetitle => "Row action: retitle",
             Self::RowProjectRestructure => "Row action: restructure project",
+            Self::ScreenTransferLeft => "Screen transfer: paste left",
+            Self::ScreenTransferRight => "Screen transfer: paste right",
+            Self::ScreenTransferUp => "Screen transfer: paste up",
+            Self::ScreenTransferDown => "Screen transfer: paste down",
         }
     }
 
@@ -137,6 +149,10 @@ impl IconTarget {
             Self::RowClose => "row_close",
             Self::RowRetitle => "row_retitle",
             Self::RowProjectRestructure => "row_project_restructure",
+            Self::ScreenTransferLeft => "screen_transfer_left",
+            Self::ScreenTransferRight => "screen_transfer_right",
+            Self::ScreenTransferUp => "screen_transfer_up",
+            Self::ScreenTransferDown => "screen_transfer_down",
         }
     }
 
@@ -174,6 +190,10 @@ impl IconTarget {
             Self::RowClose => "🚫",
             Self::RowRetitle => "♻️",
             Self::RowProjectRestructure => "♻️",
+            Self::ScreenTransferLeft => "←",
+            Self::ScreenTransferRight => "→",
+            Self::ScreenTransferUp => "↑",
+            Self::ScreenTransferDown => "↓",
         }
     }
 
@@ -204,6 +224,10 @@ impl IconTarget {
             Self::RowMoveUp => &["🔼", "↑", "⬆️", "⤴️"],
             Self::RowMoveDown => &["🔽", "↓", "⬇️", "⤵️"],
             Self::RowClose => &["🚫", "×", "✕", "⛔"],
+            Self::ScreenTransferLeft => &["←", "⇐", "⬅️", "◀"],
+            Self::ScreenTransferRight => &["→", "⇒", "➡️", "▶"],
+            Self::ScreenTransferUp => &["↑", "⇑", "⬆️", "▲"],
+            Self::ScreenTransferDown => &["↓", "⇓", "⬇️", "▼"],
         }
     }
 }
@@ -240,6 +264,10 @@ pub struct IconSettings {
     pub row_close: String,
     pub row_retitle: String,
     pub row_project_restructure: String,
+    pub screen_transfer_left: String,
+    pub screen_transfer_right: String,
+    pub screen_transfer_up: String,
+    pub screen_transfer_down: String,
 }
 
 impl Default for IconSettings {
@@ -279,6 +307,10 @@ impl IconSettings {
             row_close: value(IconTarget::RowClose),
             row_retitle: value(IconTarget::RowRetitle),
             row_project_restructure: value(IconTarget::RowProjectRestructure),
+            screen_transfer_left: value(IconTarget::ScreenTransferLeft),
+            screen_transfer_right: value(IconTarget::ScreenTransferRight),
+            screen_transfer_up: value(IconTarget::ScreenTransferUp),
+            screen_transfer_down: value(IconTarget::ScreenTransferDown),
         }
     }
 
@@ -312,6 +344,10 @@ impl IconSettings {
             IconTarget::RowClose => &self.row_close,
             IconTarget::RowRetitle => &self.row_retitle,
             IconTarget::RowProjectRestructure => &self.row_project_restructure,
+            IconTarget::ScreenTransferLeft => &self.screen_transfer_left,
+            IconTarget::ScreenTransferRight => &self.screen_transfer_right,
+            IconTarget::ScreenTransferUp => &self.screen_transfer_up,
+            IconTarget::ScreenTransferDown => &self.screen_transfer_down,
         }
     }
 
@@ -345,6 +381,10 @@ impl IconSettings {
             IconTarget::RowClose => &mut self.row_close,
             IconTarget::RowRetitle => &mut self.row_retitle,
             IconTarget::RowProjectRestructure => &mut self.row_project_restructure,
+            IconTarget::ScreenTransferLeft => &mut self.screen_transfer_left,
+            IconTarget::ScreenTransferRight => &mut self.screen_transfer_right,
+            IconTarget::ScreenTransferUp => &mut self.screen_transfer_up,
+            IconTarget::ScreenTransferDown => &mut self.screen_transfer_down,
         };
         *slot = glyph;
     }

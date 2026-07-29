@@ -24,11 +24,13 @@ pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) 
     let was_animating = app.has_active_animation();
     app.tick_layout_animation(now);
     let tree_transition_changed = app.tick_tree_transitions(now);
+    let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.reconcile_chatroom_projects();
     was_animating
         || tree_transition_changed
+        || terminal_activity_changed
         || autosave_wrote
         || workspace_search_started
         || chatroom_changed

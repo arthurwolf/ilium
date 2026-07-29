@@ -199,6 +199,14 @@ impl Grid {
         self.scrollback_offset = rows.min(self.scrollback.len());
     }
 
+    /// Purges every retained row and returns the visible viewport to the live
+    /// offset. Xterm assigns this behavior to erase-display mode 3 (`CSI 3 J`);
+    /// unlike mode 2, it deliberately leaves the visible screen untouched.
+    pub fn clear_scrollback(&mut self) {
+        self.scrollback.clear();
+        self.scrollback_offset = 0;
+    }
+
     pub fn write_contents(&self, contents: &mut String) {
         let mut wrapping = false;
         for row in self.visible_rows() {

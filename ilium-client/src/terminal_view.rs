@@ -8,20 +8,21 @@
 //! `ilium_ipc::ServerEvent::ScreenUpdate`'s own doc comment for why the
 //! wire carries raw bytes rather than a pre-diffed cell format).
 //!
-//! Scrollback lives entirely here, client-side, on the same `vt100::Parser`
-//! -- not on `ilium-server`'s copy (see `ilium-pty::PtySession::spawn`,
-//! which deliberately keeps its own parser's scrollback at zero: the server
-//! only ever needs the *current* screen, for agent-activity detection and
-//! mouse-protocol negotiation, never a scrolled-back one). `vt100::Screen`
-//! already implements a scrollback ring buffer and transparently reflows
-//! `cell`/`rows`/`contents` through it via `set_scrollback`, so this crate
-//! doesn't need a second, hand-rolled history buffer -- it only needs to
-//! turn scrollback on and expose navigation over it. `tui_term::widget::
-//! PseudoTerminal` already renders a scrolled-back `Screen` correctly
-//! (cursor hidden/adjusted as appropriate), so scrolling here is exactly
-//! `Screen::set_scrollback` plus a cached total (see `scrollback_total`).
+//! Scrollback lives entirely here, client-side -- not on `ilium-server`'s
+//! copy (see `ilium-pty::PtySession::spawn`, which deliberately keeps its
+//! own parser's scrollback at zero: the server only needs the *current*
+//! screen for agent detection and mouse-protocol negotiation). The live
+//! `vt100::Parser` therefore always follows PTY output at offset zero. When
+//! the user scrolls away from the tail, this module clones its `Screen` into
+//! a read-only historical viewport and navigates that snapshot instead.
+//! Keeping the two roles explicit is essential for inline agent TUIs: Codex
+//! clears and replays its transcript after a resize, and mutating one
+//! scrolled parser with that live redraw splices old rows into the replay
+//! while continuously increasing the distance back to the tail.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /// Starting geometry for a freshly created pane, before the first real
@@ -34,6 +35,28 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle)
+}
+
+/// Hashes only the visible character contents of each terminal cell.
+///
+/// Cursor movement, color/style changes, terminal modes, and scrollback do
+/// not affect this value. Iterating cells avoids allocating `Screen::contents`
+/// for every already-coalesced live output batch.
+fn visible_text_fingerprint(screen: &vt100::Screen) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    let (rows, columns) = screen.size();
+
+    for row in 0..rows {
+        for column in 0..columns {
+            screen
+                .cell(row, column)
+                .map(vt100::Cell::contents)
+                .unwrap_or_default()
+                .hash(&mut hasher);
+        }
+    }
+
+    hasher.finish()
 }
 
 /// Returns the offset before, and width of, a BEL or ST OSC terminator.
@@ -67,6 +90,13 @@ fn osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
 /// budget.
 const RENDER_SCROLLBACK_ROWS: usize = 10_000;
 
+/// An immutable-in-time terminal screen the user is inspecting while the
+/// live parser continues to absorb output and resize redraws behind it.
+struct HistoricalViewport {
+    screen: vt100::Screen,
+    scrollback_total: usize,
+}
+
 /// Computes the raw-history retention cap in bytes for a given MiB budget.
 /// Unlike the render parser's row cap above, this figure is exact -- the
 /// journal it governs (`TerminalView::history_bytes`) stores raw output
@@ -82,6 +112,8 @@ fn history_budget_bytes(budget_mib: u16) -> usize {
 }
 
 pub struct TerminalView {
+    /// Authoritative live terminal state. Its scrollback offset stays at zero;
+    /// historical navigation happens only through `historical_viewport`.
     parser: vt100::Parser,
     // `vt100::Screen` exposes the current scroll *offset*
     // (`Screen::scrollback`) but no direct "how many rows have
@@ -91,6 +123,10 @@ pub struct TerminalView {
     // result here so rendering (`scrollback_total`) stays a cheap `&self`
     // read instead of needing a `&mut Screen` on every frame.
     scrollback_total: usize,
+    /// Present only while the user is reading retained history or a workspace
+    /// search result. A `Screen` clone is sufficient because this view never
+    /// parses output; it only changes its independent scrollback offset.
+    historical_viewport: Option<HistoricalViewport>,
     /// Newest server output chunk represented by `parser`. This turns an
     /// attach-time replay plus the connection's already-queued live updates
     /// into one exactly-once stream.
@@ -108,17 +144,17 @@ pub struct TerminalView {
     /// `set_scrollback_budget_mib` can re-trim `history_bytes` in place
     /// without touching the (budget-independent) render parser.
     history_budget_bytes: usize,
-    /// A search result can temporarily rebuild the visual parser at an old
-    /// point in history. Fresh output is retained but does not silently move
-    /// that evidence out from under the user; `scroll_to_bottom` restores the
-    /// live parser from `history_bytes`.
-    is_history_anchor: bool,
     /// Recent OSC-8 label/target pairs observed in the byte stream. vt100
     /// renders the label but deliberately discards the metadata, so the
     /// client retains this narrow side-channel for click activation.
     osc8_links: VecDeque<(String, String)>,
     /// Unconsumed raw output while an OSC-8 sequence spans IPC chunks.
     osc8_stream: Vec<u8>,
+    /// Fingerprint of `parser`'s visible character cells after the most recent
+    /// replay, resize, feed, or accepted live output. This baseline turns a
+    /// live PTY event into an O(screen cells), allocation-free text-change
+    /// decision without any timer-driven screen scan.
+    visible_text_fingerprint: u64,
 }
 
 impl TerminalView {
@@ -131,15 +167,19 @@ impl TerminalView {
     }
 
     pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
+        let parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        let visible_text_fingerprint = visible_text_fingerprint(parser.screen());
+
         Self {
-            parser: vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS),
+            parser,
             scrollback_total: 0,
+            historical_viewport: None,
             last_output_sequence: 0,
             history_bytes: Arc::new(Vec::new()),
             history_budget_bytes: history_budget_bytes(budget_mib),
-            is_history_anchor: false,
             osc8_links: VecDeque::new(),
             osc8_stream: Vec::new(),
+            visible_text_fingerprint,
         }
     }
 
@@ -153,30 +193,27 @@ impl TerminalView {
         self.trim_history_to_budget();
     }
 
-    /// Feeds one chunk of raw PTY output bytes (from `ServerEvent::ScreenUpdate`)
-    /// into the local parser. If the view is currently scrolled back,
-    /// `vt100` itself keeps the scrolled-to content stable (it advances the
-    /// scroll offset in step as rows are pushed into scrollback) -- this
-    /// only needs to refresh the cached total, not the position.
+    /// Feeds one raw PTY output chunk into the live parser. An active
+    /// historical viewport is intentionally untouched, so streaming output
+    /// cannot move the rows the user is reading or lengthen their route back
+    /// to the live tail.
     pub fn feed(&mut self, bytes: &[u8]) {
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
         self.parser.process(bytes);
         self.refresh_scrollback_total();
+        self.refresh_visible_text_fingerprint();
     }
 
-    /// Replaces this view with the server-owned retained output history.
-    /// Attach starts from a blank view; live lag repair preserves the user's
-    /// historical/search viewport and ignores stale replays so recovery
-    /// cannot move a pane or roll its screen backward.
+    /// Replaces the live parser with the server-owned retained output.
+    /// Attach starts from a blank view; lag repair leaves a detached
+    /// historical snapshot untouched and ignores stale replays so recovery
+    /// cannot move the visible viewport or roll the live screen backward.
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
         if through_sequence <= self.last_output_sequence {
             return;
         }
 
-        let previous_scrollback_position = self.scrollback_position();
-        let previous_scrollback_total = self.scrollback_total;
-        let was_history_anchor = self.is_history_anchor;
         let (rows, cols) = self.parser.screen().size();
         Arc::make_mut(&mut self.history_bytes).clear();
         self.osc8_links.clear();
@@ -185,37 +222,28 @@ impl TerminalView {
         self.append_history(bytes);
         self.last_output_sequence = through_sequence;
 
-        // A workspace-search anchor intentionally renders an older prefix.
-        // Repair the authoritative raw history and sequence without replacing
-        // the evidence the user explicitly opened.
-        if was_history_anchor {
-            return;
-        }
-
         self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         self.scrollback_total = 0;
         self.parser.process(bytes);
         self.refresh_scrollback_total();
-
-        // vt100 normally advances a historical offset as new rows arrive.
-        // Rebuilding from replay must reproduce that behavior explicitly so
-        // the same old top row remains visible rather than jumping to tail.
-        if previous_scrollback_position > 0 {
-            let appended_rows = self
-                .scrollback_total
-                .saturating_sub(previous_scrollback_total);
-            self.parser
-                .screen_mut()
-                .set_scrollback(previous_scrollback_position.saturating_add(appended_rows));
-        }
+        self.refresh_visible_text_fingerprint();
     }
 
     /// Applies a live output chunk only when it was not already included in
     /// the attach replay. Output sequence numbers are pane-local and
-    /// monotonic for one server lifetime.
-    pub fn apply_live_output(&mut self, first_sequence: u64, sequence: u64, bytes: &[u8]) {
+    /// monotonic for one server lifetime. Returns `true` only when the
+    /// accepted bytes changed at least one visible character cell and the
+    /// caller requested ordinary-terminal activity tracking. Known agent
+    /// panes skip the O(visible cells) fingerprint entirely.
+    pub fn apply_live_output(
+        &mut self,
+        first_sequence: u64,
+        sequence: u64,
+        bytes: &[u8],
+        should_track_visible_text_change: bool,
+    ) -> bool {
         if sequence <= self.last_output_sequence {
-            return;
+            return false;
         }
         let expected_first_sequence = self.last_output_sequence.saturating_add(1);
         if first_sequence != expected_first_sequence {
@@ -225,15 +253,28 @@ impl TerminalView {
                 last_output_sequence = self.last_output_sequence,
                 "ignoring non-contiguous terminal output"
             );
-            return;
+            return false;
         }
         self.append_history(bytes);
         self.observe_osc8_links(bytes);
-        if !self.is_history_anchor {
-            self.parser.process(bytes);
-            self.refresh_scrollback_total();
-        }
+        self.parser.process(bytes);
+        self.refresh_scrollback_total();
         self.last_output_sequence = sequence;
+
+        should_track_visible_text_change && self.refresh_visible_text_fingerprint()
+    }
+
+    /// Re-establishes the visible-text baseline when a detected agent becomes
+    /// an ordinary terminal again after its live output skipped fingerprinting.
+    pub fn synchronize_visible_text_fingerprint(&mut self) {
+        self.refresh_visible_text_fingerprint();
+    }
+
+    /// Updates the saved visible-text baseline and reports whether it changed.
+    fn refresh_visible_text_fingerprint(&mut self) -> bool {
+        let previous_fingerprint = self.visible_text_fingerprint;
+        self.visible_text_fingerprint = visible_text_fingerprint(self.parser.screen());
+        self.visible_text_fingerprint != previous_fingerprint
     }
 
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
@@ -324,65 +365,105 @@ impl TerminalView {
         }
     }
 
-    /// Resizes the local screen to match a `ResizePane` request just sent
-    /// to the server, so the client's own rendering never waits on a round
-    /// trip before reflowing. A resize can change how many rows the
-    /// scrollback reflows into, so the cached total (and the current
-    /// position, which `refresh_scrollback_total` re-clamps) are refreshed
-    /// here too.
+    /// Resizes the authoritative live screen to match a `ResizePane` request
+    /// just sent to the server, so the client's own rendering never waits on
+    /// a round trip before reflowing. An active historical viewport retains
+    /// the geometry and rows the user was inspecting; the foreground
+    /// application may redraw the live parser at the new geometry without
+    /// corrupting that frozen view.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.parser.screen_mut().set_size(rows, cols);
         self.refresh_scrollback_total();
+        self.refresh_visible_text_fingerprint();
     }
 
-    /// Runs `f` with the current `vt100::Screen`, for rendering via
-    /// `tui_term::widget::PseudoTerminal::new(screen)`.
+    /// Runs `f` with the screen currently visible to the user, for rendering
+    /// via `tui_term::widget::PseudoTerminal::new(screen)`.
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
-        f(self.parser.screen())
+        match self.historical_viewport.as_ref() {
+            Some(viewport) => f(&viewport.screen),
+            None => f(self.parser.screen()),
+        }
     }
 
-    /// Scrolls further back into history by `lines` rows (clamped to the
-    /// oldest row available).
+    /// Freezes the current live screen on first use, then scrolls that
+    /// immutable-in-time snapshot further into history. Live PTY output and
+    /// resize redraws can continue behind it without moving the visible rows.
     pub fn scroll_up(&mut self, lines: u16) {
-        let screen = self.parser.screen_mut();
-        let current = screen.scrollback();
-        screen.set_scrollback(current.saturating_add(usize::from(lines)));
+        if lines == 0 {
+            return;
+        }
+
+        if self.historical_viewport.is_none() {
+            if self.scrollback_total == 0 {
+                return;
+            }
+            self.historical_viewport = Some(HistoricalViewport {
+                screen: self.parser.screen().clone(),
+                scrollback_total: self.scrollback_total,
+            });
+        }
+
+        let Some(viewport) = self.historical_viewport.as_mut() else {
+            return;
+        };
+        let current = viewport.screen.scrollback();
+        viewport
+            .screen
+            .set_scrollback(current.saturating_add(usize::from(lines)));
     }
 
-    /// Scrolls back toward the live tail by `lines` rows (clamped at the
-    /// live view, i.e. offset `0`).
+    /// Scrolls the frozen historical viewport toward its captured tail.
+    /// Reaching offset zero discards the snapshot and atomically reveals the
+    /// current live parser rather than making the user traverse output that
+    /// arrived while they were reading.
     pub fn scroll_down(&mut self, lines: u16) {
-        let screen = self.parser.screen_mut();
-        let current = screen.scrollback();
-        screen.set_scrollback(current.saturating_sub(usize::from(lines)));
+        let Some(viewport) = self.historical_viewport.as_mut() else {
+            return;
+        };
+        let current = viewport.screen.scrollback();
+        viewport
+            .screen
+            .set_scrollback(current.saturating_sub(usize::from(lines)));
+        if viewport.screen.scrollback() == 0 {
+            self.historical_viewport = None;
+        }
     }
 
     /// Jumps back to the live tail -- called whenever the pane sends fresh
     /// input, matching how an ordinary terminal emulator drops you back to
     /// the prompt the moment you start typing again.
     pub fn scroll_to_bottom(&mut self) {
-        if self.is_history_anchor {
-            self.rebuild_live_parser();
-            self.is_history_anchor = false;
-        }
+        self.historical_viewport = None;
         self.parser.screen_mut().set_scrollback(0);
     }
 
     /// `true` once the view has scrolled away from the live tail.
     pub fn is_scrolled_back(&self) -> bool {
-        self.parser.screen().scrollback() > 0
+        self.historical_viewport.is_some()
     }
 
     /// Current offset into scrollback: `0` at the live tail, increasing
     /// toward the oldest retained row.
     pub fn scrollback_position(&self) -> usize {
-        self.parser.screen().scrollback()
+        self.historical_viewport
+            .as_ref()
+            .map_or(0, |viewport| viewport.screen.scrollback())
     }
 
-    /// Total rows currently retained in scrollback (bounded by
-    /// `SCROLLBACK_LINES`), for sizing the scrollbar.
+    /// Total rows retained by the currently visible screen. A historical
+    /// viewport reports its captured total so live output cannot change its
+    /// scrollbar or the distance back to its captured tail.
     pub fn scrollback_total(&self) -> usize {
-        self.scrollback_total
+        self.historical_viewport
+            .as_ref()
+            .map_or(self.scrollback_total, |viewport| viewport.scrollback_total)
+    }
+
+    /// Number of rows in the currently visible terminal screen, used as the
+    /// scrollbar's viewport length rather than its default one-row thumb.
+    pub fn viewport_rows(&self) -> u16 {
+        self.with_screen(|screen| screen.size().0)
     }
 
     /// Returns all output retained for workspace search, including bytes the
@@ -407,18 +488,22 @@ impl TerminalView {
         Arc::clone(&self.history_bytes)
     }
 
-    /// Rebuilds the visible terminal around one raw-output offset found by
+    /// Builds a historical terminal around one raw-output offset found by
     /// workspace search. The matching bytes become the newest visible output,
     /// so the result opens at its actual place rather than merely focusing the
-    /// correct pane. The ordinary live view returns on the next input/wheel
-    /// journey to the bottom.
+    /// correct pane. The authoritative live parser keeps processing output;
+    /// the ordinary live view returns on the next input or wheel journey to
+    /// the bottom.
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let end_byte = end_byte.min(self.history_bytes.len());
-        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
-        self.parser.process(&self.history_bytes[..end_byte]);
-        self.refresh_scrollback_total();
-        self.is_history_anchor = true;
+        let mut historical_parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        historical_parser.process(&self.history_bytes[..end_byte]);
+        let scrollback_total = Self::measure_scrollback_total(historical_parser.screen_mut());
+        self.historical_viewport = Some(HistoricalViewport {
+            screen: historical_parser.screen().clone(),
+            scrollback_total,
+        });
     }
 
     #[cfg(test)]
@@ -432,7 +517,7 @@ impl TerminalView {
     /// navigation. Most agent CLIs (and a plain shell prompt) never
     /// negotiate one, which is exactly the case this feature targets.
     pub fn wants_mouse_protocol(&self) -> bool {
-        self.with_screen(|screen| screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None)
+        self.parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None
     }
 
     /// Returns whether the foreground application asked its terminal for
@@ -440,7 +525,7 @@ impl TerminalView {
     /// one host paste needs inner `CSI 200~` / `CSI 201~` delimiters or should
     /// remain one unadorned bulk write for a plain shell/readline consumer.
     pub fn wants_bracketed_paste(&self) -> bool {
-        self.with_screen(vt100::Screen::bracketed_paste)
+        self.parser.screen().bracketed_paste()
     }
 
     /// Re-derives `scrollback_total` (see the field doc comment) and
@@ -448,11 +533,19 @@ impl TerminalView {
     /// since `set_scrollback` is the only operation that performs that
     /// clamp.
     fn refresh_scrollback_total(&mut self) {
-        let screen = self.parser.screen_mut();
-        let current = screen.scrollback();
+        self.scrollback_total = Self::measure_scrollback_total(self.parser.screen_mut());
+    }
+
+    /// Asks `vt100` to clamp an impossible offset, which is its only public
+    /// mechanism for exposing the number of accumulated scrollback rows.
+    /// Restoring the original offset keeps this helper safe for temporary
+    /// search parsers as well as the live parser.
+    fn measure_scrollback_total(screen: &mut vt100::Screen) -> usize {
+        let original = screen.scrollback();
         screen.set_scrollback(usize::MAX);
-        self.scrollback_total = screen.scrollback();
-        screen.set_scrollback(current);
+        let total = screen.scrollback();
+        screen.set_scrollback(original);
+        total
     }
 
     fn append_history(&mut self, bytes: &[u8]) {
@@ -470,13 +563,6 @@ impl TerminalView {
         if excess > 0 {
             Arc::make_mut(&mut self.history_bytes).drain(..excess);
         }
-    }
-
-    fn rebuild_live_parser(&mut self) {
-        let (rows, cols) = self.parser.screen().size();
-        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
-        self.parser.process(&self.history_bytes);
-        self.refresh_scrollback_total();
     }
 }
 
@@ -646,6 +732,77 @@ mod tests {
     }
 
     #[test]
+    fn live_output_cannot_move_history_or_lengthen_the_return_to_live_tail() {
+        let mut view = TerminalView::new(4, 24);
+        feed_lines(&mut view, 16);
+        view.scroll_up(5);
+        let frozen_screen = view.with_screen(|screen| screen.contents());
+        let frozen_position = view.scrollback_position();
+        let frozen_total = view.scrollback_total();
+
+        for line in 0..80 {
+            view.feed(format!("live {line:02}\r\n").as_bytes());
+        }
+
+        assert_eq!(view.with_screen(|screen| screen.contents()), frozen_screen);
+        assert_eq!(view.scrollback_position(), frozen_position);
+        assert_eq!(view.scrollback_total(), frozen_total);
+
+        view.scroll_down(frozen_position as u16);
+
+        assert!(!view.is_scrolled_back());
+        assert_eq!(view.scrollback_position(), 0);
+        assert!(view
+            .with_screen(|screen| screen.contents())
+            .contains("live 79"));
+    }
+
+    #[test]
+    fn live_resize_and_reflow_cannot_mutate_a_frozen_historical_viewport() {
+        let mut view = TerminalView::new(4, 24);
+        feed_lines(&mut view, 16);
+        view.scroll_up(5);
+        let frozen_screen = view.with_screen(|screen| screen.contents());
+        let frozen_size = view.with_screen(vt100::Screen::size);
+
+        view.resize(7, 48);
+        view.feed(b"\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H");
+        for line in 0..12 {
+            view.feed(format!("canonical {line:02}\r\n").as_bytes());
+        }
+
+        assert_eq!(view.with_screen(vt100::Screen::size), frozen_size);
+        assert_eq!(view.with_screen(|screen| screen.contents()), frozen_screen);
+
+        view.scroll_to_bottom();
+
+        assert_eq!(view.with_screen(vt100::Screen::size), (7, 48));
+        assert!(view
+            .with_screen(|screen| screen.contents())
+            .contains("canonical 11"));
+    }
+
+    #[test]
+    fn ansi_scrollback_purge_replaces_old_rows_during_agent_reflow() {
+        let mut view = TerminalView::new(4, 24);
+        for line in 0..16 {
+            view.feed(format!("obsolete {line:02}\r\n").as_bytes());
+        }
+        assert!(view.scrollback_total() > 0);
+
+        view.feed(b"\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H");
+        assert_eq!(view.scrollback_total(), 0);
+        for line in 0..12 {
+            view.feed(format!("canonical {line:02}\r\n").as_bytes());
+        }
+
+        view.scroll_up(u16::MAX);
+        let complete_reflow = view.with_screen(|screen| screen.contents());
+        assert!(complete_reflow.contains("canonical 00"));
+        assert!(!complete_reflow.contains("obsolete"));
+    }
+
+    #[test]
     fn a_fresh_view_reports_no_negotiated_mouse_protocol() {
         let view = TerminalView::new(4, 20);
         assert!(!view.wants_mouse_protocol());
@@ -664,6 +821,54 @@ mod tests {
     }
 
     #[test]
+    fn input_modes_follow_the_live_application_while_history_is_frozen() {
+        let mut view = TerminalView::new(4, 20);
+        view.feed(b"\x1b[?1000h\x1b[?2004h");
+        feed_lines(&mut view, 10);
+        view.scroll_up(3);
+        assert!(view.wants_mouse_protocol());
+        assert!(view.wants_bracketed_paste());
+
+        view.feed(b"\x1b[?1000l\x1b[?2004l");
+
+        assert!(!view.wants_mouse_protocol());
+        assert!(!view.wants_bracketed_paste());
+        assert!(view.is_scrolled_back());
+    }
+
+    #[test]
+    fn live_output_reports_only_visible_character_changes() {
+        let mut view = TerminalView::new(3, 20);
+
+        assert!(view.apply_live_output(1, 1, b"A", true));
+        assert!(!view.apply_live_output(2, 2, b"\x1b[31m", true));
+        assert!(!view.apply_live_output(3, 3, b"\x1b[2;2H", true));
+        assert!(!view.apply_live_output(4, 4, b"\x1b[1;1HA", true));
+        assert!(view.apply_live_output(5, 5, b"\x1b[1;1HB", true));
+    }
+
+    #[test]
+    fn replay_and_resize_refresh_the_activity_fingerprint_baseline() {
+        let mut view = TerminalView::new(3, 20);
+
+        view.apply_replay(b"one long terminal line", 4, true);
+        view.resize(4, 8);
+
+        assert!(!view.apply_live_output(5, 5, b"\x1b[32m", true));
+    }
+
+    #[test]
+    fn agent_output_skips_fingerprinting_and_plain_shell_transition_resynchronizes() {
+        let mut view = TerminalView::new(3, 20);
+
+        assert!(!view.apply_live_output(1, 1, b"agent output", false));
+        view.synchronize_visible_text_fingerprint();
+
+        assert!(!view.apply_live_output(2, 2, b"\x1b[33m", true));
+        assert!(view.apply_live_output(3, 3, b"\rplain output", true));
+    }
+
+    #[test]
     fn replay_restores_scrollback_and_deduplicates_queued_live_output() {
         let mut original = TerminalView::new(4, 20);
         feed_lines(&mut original, 12);
@@ -676,11 +881,11 @@ mod tests {
         let total_after_replay = reattached.scrollback_total();
         assert!(total_after_replay > 0);
 
-        reattached.apply_live_output(12, 12, b"duplicate\r\n");
+        reattached.apply_live_output(12, 12, b"duplicate\r\n", true);
         assert_eq!(reattached.scrollback_total(), total_after_replay);
         assert_eq!(reattached.last_output_sequence(), 12);
 
-        reattached.apply_live_output(13, 13, b"new live output\r\n");
+        reattached.apply_live_output(13, 13, b"new live output\r\n", true);
         assert_eq!(reattached.last_output_sequence(), 13);
         assert!(reattached
             .with_screen(|screen| screen.contents())
@@ -691,7 +896,7 @@ mod tests {
     fn stale_replay_cannot_roll_a_live_terminal_backward() {
         let mut view = TerminalView::new(4, 30);
         view.apply_replay(b"authoritative replay\r\n", 10, true);
-        view.apply_live_output(11, 11, b"newer live output\r\n");
+        view.apply_live_output(11, 11, b"newer live output\r\n", true);
         let screen_before_stale_replay = view.with_screen(|screen| screen.contents());
 
         view.apply_replay(b"obsolete screen\r\n", 10, true);
@@ -712,7 +917,7 @@ mod tests {
         view.apply_replay(b"authoritative replay\r\n", 10, true);
         let history_before_gap = view.history_bytes.as_ref().clone();
 
-        view.apply_live_output(12, 12, b"output after a gap\r\n");
+        view.apply_live_output(12, 12, b"output after a gap\r\n", true);
 
         assert_eq!(view.last_output_sequence(), 10);
         assert_eq!(view.history_bytes.as_ref(), &history_before_gap);

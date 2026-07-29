@@ -1,8 +1,54 @@
+# Two-tier plain-terminal activity decay
+
+- [x] Extend the event-driven activity tracker from one short window to explicit fast (under 5 seconds), slow (5–60 seconds), and idle (60 seconds or older) phases.
+- [x] Keep the selected Angular loop at its current cadence during the fast phase and render the same frames at one frame per 500 ms during the slow phase.
+- [x] Give slow-only activity a 500 ms maintenance cadence without reintroducing PTY screen polling or keeping the generic 50 ms animation loop active.
+- [x] Add exact boundary, refresh, rendering, scheduler, agent-exclusion, replay, resize, cursor-only, and style-only regressions.
+- [x] Run formatting, strict workspace Clippy, all workspace tests, rebuild/install, and verify fast-to-slow-to-idle behavior in a controlled installed TUI. (All 764 client tests, strict all-target workspace Clippy, formatting, and the complete all-target workspace suite pass; one transient server reattach timeout passed both its exact rerun and the full-suite rerun. Release/install hashes match. In the isolated installed TUI, typed input and `DECAY-PROOF` output drove the current fast loop, the same activity cell changed every 500 ms after five seconds, and a capture at 69 seconds showed no activity glyph while the producing command was still running without further output.)
+
+# New terminal PTY width synchronization
+
+- [x] Reproduce a newly discovered terminal staying at the server's 24x80 fallback under the width-dependent left-panel policy and trace the client/server resize contract.
+- [x] Deduplicate against sizes actually requested from the server instead of the locally pre-sized terminal render cache.
+- [x] Add focused regressions for the first resize request, repeat suppression, and pane-close bookkeeping.
+- [x] Run formatting, strict workspace Clippy, relevant workspace tests, rebuild/install, and verify a newly discovered terminal fills the controlled installed TUI. (Formatting, strict all-target workspace Clippy, all workspace tests, release/install hash parity, and the installed-runtime regression pass. A pane created after the TUI geometry settled received the server's `PaneResized` event and reported `41 114` instead of the fallback `24 80`.)
+
+# Plain-terminal output activity indicator
+
+- [x] Detect visible character-cell changes from the already-coalesced live PTY stream without polling idle terminals, and exclude replay, resize, cursor-only, and style-only updates.
+- [x] Track accepted local terminal key input as immediate activity and expire plain-terminal activity without a periodic screen scan.
+- [x] Render the chosen Angular loop in the sidebar activity column for active plain terminals while preserving agent and scheduled-input indicators.
+- [x] Add focused tracker, terminal-view, render-cache, input, scheduler, and tree-rendering regressions.
+- [x] Run formatting, strict workspace Clippy, all workspace tests, rebuild/install, and verify changing output plus idle expiry in a controlled installed TUI. (All 758 client tests, all-target workspace tests including 10 PTY/TUI smoke scenarios, strict all-target Clippy, and formatting pass. Release/install hashes match. In the isolated installed TUI, changing `ACT-1` through `ACT-8` output drove the exact Angular loop and then cleared it; with echo disabled, one typed `Z` independently drove the same loop without a visible PTY character change.)
+
+# Three-mode automatic left-panel sizing
+
+- [x] Trace the current boolean/base-width configuration, focus animation, host-terminal resize path, settings rendering, input routing, persistence, and runtime verification seams.
+- [x] Replace the hard-coded two-state sizing rule with explicit fixed, focus-dependent, and terminal-width-dependent policies plus validated per-mode values.
+- [x] Build a responsive three-card User Interface settings experience whose visible controls and live explanation follow the selected policy.
+- [x] Add configuration, policy, animation, rendering, keyboard, mouse, persistence, and PTY regressions.
+- [ ] Run formatting, strict workspace Clippy, all workspace tests, rebuild/install, and verify all three policies in a controlled installed TUI. (The sizing tests, release/install hash proof, installed-binary PTY scenario, and controlled 140/100/80-column TUI checks pass. The concurrent plain-terminal activity work currently leaves one unrelated Clippy warning and one unrelated pane-exit PTY failure in the full workspace gates.)
+
+# AI restructure split-view preservation
+
+- [x] Make existing split views explicit protected references in the restructure plan and reject any AI plan that creates, removes, dissolves, reorients, or changes the membership/order of a split.
+- [x] Preserve split IDs and user-owned split metadata while allowing AI-authored title updates for panes inside the split.
+- [x] Keep a focused split and its active pane selected across the authoritative post-restructure tree snapshot.
+- [x] Add prompt/parser, domain, IPC, server-handler, and client snapshot regressions for all protected-split invariants.
+- [x] Run focused and workspace gates, rebuild/install, and verify the focused split behavior through a controlled installed TUI. (Focused prompt/parser, domain, IPC, server-handler, snapshot-reconciliation, and PTY regressions pass; the strict all-target Clippy and workspace suite pass; release/install hashes match; and the installed TUI retained the same split ID, orientation, ordered members, both terminal streams, and active-child input routing while an IPC restructure replaced its surrounding hierarchy and retitled both panes.)
+
+# Agent terminal history and resize hardening
+
+- [x] Reproduce Codex history corruption in the installed controlled TUI and trace terminal output, viewport scrolling, sidebar-driven resize, transcript reflow, and vt100 purge handling.
+- [x] Separate the user-visible historical viewport from the live parser and honor ANSI scrollback purge so resize reflow cannot splice old, transient, and replayed rows together.
+- [x] Add immediate keyboard paths back to live output, correct scrollbar geometry, and focused regressions for resize, replay, live output, search anchors, and bounded history.
+- [x] Run focused and workspace gates, rebuild/install, and verify stable Codex and Claude history behavior through the installed controlled TUI before asking the user to test. (The vendored ANSI purge regression, all 735 client tests, all-target workspace suite, strict all-target Clippy, formatting, release/install hash parity, and controlled installed-runtime checks pass. Codex 0.145.0 retained the exact `CODEX-114` historical anchor through sidebar reflow, exposed one canonical startup-to-`CODEX-160` history with no splice, and returned live in one Shift+End; Claude Code 2.1.220 retained its native release-note history through the same resize and accepted its advertised Ctrl+End jump to the live tail.)
+
 # Fresh `/clear` project-level placement
 
 - [x] Define one atomic domain transition that resets a cleared agent's title and moves its pane directly under its owning project.
 - [x] Route the authoritative Claude/Codex `/clear` input path through that transition and cover nested-container plus live provider behavior.
-- [ ] Run focused and workspace gates, rebuild/install, and verify the relocation through the installed controlled TUI.
+- [x] Run focused and workspace gates, rebuild/install, and verify the relocation through the installed controlled TUI. (Focused atomic-transition tests, live Claude/Codex IPC tests, all-target workspace tests, strict all-target Clippy, formatting, release/install hash parity, and a real installed Codex 0.145.0 pane moving from group parent `2` to project parent `1` all pass.)
 
 # Right-panel pane-switch integrity
 

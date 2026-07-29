@@ -51,6 +51,9 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ilium_client::connection::Connection;
+use ilium_core::{RestructureNode, RestructurePlan, Tree};
+use ilium_ipc::{ClientRequest, ServerEvent};
 use ilium_pty::{PtyCommand, PtySession};
 
 /// How long phases of this test wait for the server/TUI/help overlay to
@@ -278,6 +281,23 @@ async fn isolated_server_identity(xdg: &IsolatedXdgDirs) -> (PathBuf, u32) {
         .expect("isolated server socket should report a peer PID");
     let process_id = u32::try_from(process_id).expect("server PID should fit u32");
     (socket_path, process_id)
+}
+
+/// Waits for the next authoritative tree snapshot on an attached control
+/// connection. The PTY client remains the UI under test; this second client
+/// exists only to submit a deterministic restructure request and inspect the
+/// same broadcast snapshot every real attached client receives.
+async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tree {
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            if let ServerEvent::TreeSnapshot(tree) = event {
+                return tree;
+            }
+        }
+        panic!("{context}: server closed the control connection before a tree snapshot");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context}: no tree snapshot within {WAIT_TIMEOUT:?}"))
 }
 
 /// Writes `.ilium/config.yaml` with a pre-set project name into `cwd`,
@@ -658,7 +678,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the final PTY-rendered action strip, not only its in-memory TestBackend
     // buffer: every action must remain visible, ordered, and separated after
     // crossterm writes it to a vt100 terminal surface.
-    let terminal_rows = tui.with_screen(|screen| rows_containing(screen, "📟   cat"));
+    let terminal_rows = tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "cat"]));
     assert_eq!(
         terminal_rows.len(),
         1,
@@ -800,7 +820,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let agent_controls_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("Tree order")
+            screen.contains("Fixed")
+                && screen.contains("Focus-dependent")
+                && screen.contains("Width-dependent")
+                && screen.contains("Unfocused width")
+                && screen.contains("Focused width")
+                && screen.contains("Tree order")
                 && screen.contains("Age down (oldest first)")
                 && screen.contains("Agent identifier")
                 && screen.contains("Full name")
@@ -813,10 +838,31 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected agent identifier controls in User Appearance, got: {:?}",
         tui.screen_text()
     );
+    tui.write(b"l")
+        .expect("selecting the width-dependent sizing card");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                let config =
+                    std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                        .unwrap_or_default();
+                screen.contains("Minimum terminal width")
+                    && screen.contains("At ≥")
+                    && config.contains("left_panel_sizing_mode = \"terminal_width_dependent\"")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected width-dependent controls and persistence, screen={:?}",
+        tui.screen_text()
+    );
+    tui.write(b"h")
+        .expect("returning to the focus-dependent sizing card");
     // Use the settings view's `j`/`l` aliases rather than escape-prefixed
     // arrows: a real PTY can deliver an isolated escape before the rest of
     // a CSI sequence, which would legitimately close this full-screen view.
-    tui.write(b"jjjjll")
+    tui.write(b"jjjjjll")
         .expect("selecting icon mode for agent identifiers");
     let agent_controls_persisted = wait_until(
         || {
@@ -1498,7 +1544,8 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         "split child rows did not render: {:?}",
         tui.screen_text()
     );
-    let split_child_rows = tui.with_screen(|screen| rows_containing(screen, "📟   cat"));
+    let split_child_rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "cat"]));
     assert_eq!(split_child_rows.len(), 2, "expected two split child rows");
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[0]))
         .expect("focus first split child");
@@ -1529,6 +1576,156 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     assert!(
         both_routed,
         "split input was not independently routed: {:?}",
+        tui.screen_text()
+    );
+
+    // Attach a second real client to obtain stable ids from the authoritative
+    // tree. This leaves the focused PTY client untouched while avoiding an
+    // LLM/network dependency in a deterministic smoke test.
+    let (socket_path, _) = isolated_server_identity(&xdg).await;
+    let mut control_connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
+        .await
+        .expect("attach restructure control connection");
+    let tree_before_restructure =
+        receive_tree_snapshot(&mut control_connection, "initial control attach").await;
+    let project_ids = tree_before_restructure.project_ids();
+    assert_eq!(project_ids.len(), 1, "expected one isolated project");
+    let project_id = project_ids[0];
+    let pane_ids = tree_before_restructure.pane_ids_in_tree_order();
+    assert_eq!(pane_ids.len(), 2, "expected two split panes");
+    let split_view_id = tree_before_restructure
+        .parent_of(pane_ids[0])
+        .expect("first pane should have a split parent");
+    assert!(
+        tree_before_restructure
+            .get(split_view_id)
+            .is_some_and(ilium_core::Node::is_split_view),
+        "fixture panes should be inside a split view"
+    );
+    assert_eq!(
+        tree_before_restructure.parent_of(pane_ids[1]),
+        Some(split_view_id),
+        "both fixture panes should share the split view"
+    );
+    let original_split_parent_id = tree_before_restructure
+        .parent_of(split_view_id)
+        .expect("split view should have a project-local parent");
+    let original_orientation = tree_before_restructure
+        .split_orientation(split_view_id)
+        .expect("split view should expose its orientation");
+    let original_split_children = tree_before_restructure
+        .children_of(split_view_id)
+        .expect("split view should expose its children")
+        .to_vec();
+
+    // Model output may rebuild ordinary groups and retitle panes, but it can
+    // represent the user-owned split only by its existing id and exact child
+    // order. Submitting this over IPC exercises the production server path.
+    let retitled_split_children = original_split_children
+        .iter()
+        .enumerate()
+        .map(|(index, pane_id)| RestructureNode::Pane {
+            id: *pane_id,
+            title: format!("AI pane {}", index + 1),
+            short_title: None,
+            icon: None,
+        })
+        .collect();
+    let restructure_plan = RestructurePlan {
+        children: vec![RestructureNode::Group {
+            title: "AI regrouped work".to_string(),
+            short_title: None,
+            icon: None,
+            children: vec![RestructureNode::ExistingSplitView {
+                id: split_view_id,
+                children: retitled_split_children,
+            }],
+        }],
+    };
+    control_connection
+        .requests
+        .send(ClientRequest::ApplyProjectRestructurePlan {
+            project_id,
+            plan: restructure_plan,
+        })
+        .await
+        .expect("submit deterministic project restructure");
+    let tree_after_restructure =
+        receive_tree_snapshot(&mut control_connection, "project restructure").await;
+
+    // A newly authored ordinary group now wraps the split, while every
+    // split-owned property and pane identity remains stable across the
+    // server mutation.
+    let restructured_group_id = tree_after_restructure
+        .parent_of(split_view_id)
+        .expect("preserved split should have its restructured group parent");
+    assert_ne!(
+        restructured_group_id, original_split_parent_id,
+        "AI-authored hierarchy should replace the split's old placement"
+    );
+    assert_eq!(
+        tree_after_restructure
+            .get(restructured_group_id)
+            .expect("restructured group should exist")
+            .name,
+        "AI regrouped work"
+    );
+    assert_eq!(
+        tree_after_restructure.split_orientation(split_view_id),
+        Some(original_orientation),
+        "split orientation should survive"
+    );
+    assert_eq!(
+        tree_after_restructure
+            .children_of(split_view_id)
+            .expect("preserved split should expose its children"),
+        original_split_children,
+        "split membership and order should survive"
+    );
+    assert_eq!(
+        tree_after_restructure
+            .get(pane_ids[0])
+            .expect("first pane should survive")
+            .name,
+        "AI pane 1"
+    );
+    assert_eq!(
+        tree_after_restructure
+            .get(pane_ids[1])
+            .expect("second pane should survive")
+            .name,
+        "AI pane 2"
+    );
+
+    // Seeing both old terminal streams under the new titles proves the PTY
+    // client consumed the snapshot without losing the displayed split. A new
+    // marker then proves pane focus/input routing also survived rather than
+    // being kicked to an empty right panel.
+    let preserved_split_rendered = wait_until(
+        || {
+            let screen = tui.screen_text();
+            screen.contains("AI pane 1")
+                && screen.contains("AI pane 2")
+                && screen.contains("left-route")
+                && screen.contains("right-route")
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(
+        preserved_split_rendered,
+        "focused split disappeared after restructure: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"focus-survived\r")
+        .expect("type into the still-focused split child");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("focus-survived"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "focused split child stopped receiving input after restructure: {:?}",
         tui.screen_text()
     );
 
@@ -1764,7 +1961,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // moving right. The creation pulse starts only after this condition can
     // become true, which pins the requested slide-then-blink sequence.
     let both_panes_listed = wait_until(
-        || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 2),
+        || tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]).len() == 2),
         WAIT_TIMEOUT,
     )
     .await;
@@ -1774,11 +1971,10 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
 
-    // A `PlainShell` pane row is `📟` (node icon, padded to
-    // `tree_ui::NODE_ICON_COLUMN_WIDTH`) + an empty activity-icon column
-    // (padded to `tree_ui::ACTIVITY_ICON_COLUMN_WIDTH`) + the name. Match
-    // that fixed-width label rather than the toolbar's separate 📟 button.
-    let rows = tui.with_screen(|screen| rows_containing(screen, "📟   shell"));
+    // A `PlainShell` pane row is `📟` plus either an empty activity slot or
+    // its event-driven Angular frame, followed by the title. Match those
+    // stable ordered fields rather than assuming the activity slot is idle.
+    let rows = tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]));
     assert_eq!(
         rows.len(),
         2,
@@ -1886,7 +2082,11 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("release the preserved default group click");
     assert!(
         wait_until(
-            || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 2),
+            || {
+                tui.with_screen(|screen| {
+                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 2
+                })
+            },
             WAIT_TIMEOUT,
         )
         .await,
@@ -1906,7 +2106,9 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     let removal_motion_observed = wait_until(
         || {
             tui.screen_text().matches("shell").count() >= 3
-                && tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 1)
+                && tui.with_screen(|screen| {
+                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 1
+                })
         },
         Duration::from_millis(500),
     )
@@ -1920,7 +2122,8 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         u64::try_from(ilium_client::tree_transitions::TREE_ENTRY_TRANSITION_MS)
             .expect("tree-entry transition duration should fit u64");
     tokio::time::sleep(Duration::from_millis(transition_duration_ms + 100)).await;
-    let remaining_pane_rows = tui.with_screen(|screen| rows_containing(screen, "📟   shell").len());
+    let remaining_pane_rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]).len());
     assert_eq!(
         remaining_pane_rows,
         1,
@@ -1970,7 +2173,9 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         wait_until(
             || {
                 !tui.screen_text().contains("Keep open")
-                    && tui.with_screen(|screen| rows_containing(screen, "📟   shell").is_empty())
+                    && tui.with_screen(|screen| {
+                        rows_containing_in_order(screen, &["📟", "shell"]).is_empty()
+                    })
             },
             WAIT_TIMEOUT,
         )
@@ -2937,7 +3142,11 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .expect("expand nested group and create its pane");
     assert!(
         wait_until(
-            || tui.with_screen(|screen| rows_containing(screen, "📟   shell").len() == 1),
+            || {
+                tui.with_screen(|screen| {
+                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 1
+                })
+            },
             WAIT_TIMEOUT,
         )
         .await,
@@ -2946,7 +3155,8 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     );
 
     let nested_row_before = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
-    let shell_row_before = tui.with_screen(|screen| rows_containing(screen, "📟   shell"))[0];
+    let shell_row_before =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]))[0];
     assert!(
         nested_row_before < shell_row_before,
         "fixture pane must begin below its nested parent: {:?}",
@@ -2994,7 +3204,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
             || {
                 tui.with_screen(|screen| {
                     let nested_rows = rows_containing(screen, "nested");
-                    let shell_rows = rows_containing(screen, "📟   shell");
+                    let shell_rows = rows_containing_in_order(screen, &["📟", "shell"]);
                     nested_rows.len() == 1
                         && shell_rows.len() == 1
                         && shell_rows[0] < nested_rows[0]

@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use ilium_core::NodeId;
 use ilium_ipc::PromptSubmissionSource;
+use tokio::sync::oneshot;
 
 use crate::ipc::handlers::write_key_input;
 use crate::pane::PaneResource;
@@ -33,26 +34,40 @@ const READINESS_RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 /// task were spawned first and installed after, a manual keystroke landing in
 /// that window would find no handle yet installed, cancel nothing, and this
 /// task would later paste over text the user is already typing.
-pub(crate) async fn start(state: Arc<ServerState>, pane_id: NodeId, initial_input: String) {
+pub(crate) async fn start(
+    state: Arc<ServerState>,
+    pane_id: NodeId,
+    initial_input: String,
+) -> oneshot::Receiver<Result<(), String>> {
+    let (completion_sender, completion_receiver) = oneshot::channel();
     let mut panes = state.panes.write().await;
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
-        return;
+        let _ = completion_sender.send(Err("pane is no longer a terminal".to_string()));
+        return completion_receiver;
     };
     let task = tokio::spawn(deliver_when_ready(
         Arc::clone(&state),
         pane_id,
         initial_input,
+        completion_sender,
     ));
     runtime.set_initial_prompt_task(task);
+    completion_receiver
 }
 
 /// Waits on the PTY's screen-change signal until either the detector or one of
 /// the known provider composer signatures confirms readiness, then writes text
 /// plus the final Enter in one PTY transaction so user input cannot interleave.
-async fn deliver_when_ready(state: Arc<ServerState>, pane_id: NodeId, initial_input: String) {
+async fn deliver_when_ready(
+    state: Arc<ServerState>,
+    pane_id: NodeId,
+    initial_input: String,
+    completion_sender: oneshot::Sender<Result<(), String>>,
+) {
     let mut screen_changed = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            let _ = completion_sender.send(Err("pane closed before prompt delivery".to_string()));
             return;
         };
         runtime.session.subscribe_screen_changed()
@@ -74,10 +89,14 @@ async fn deliver_when_ready(state: Arc<ServerState>, pane_id: NodeId, initial_in
             )
             .await
             {
+                let message = error.to_string();
                 tracing::warn!(
                     pane_id = pane_id.0,
-                    "initial agent prompt was not delivered after readiness: {error}"
+                    "initial agent prompt was not delivered after readiness: {message}"
                 );
+                let _ = completion_sender.send(Err(message));
+            } else {
+                let _ = completion_sender.send(Ok(()));
             }
             return;
         }
@@ -85,6 +104,7 @@ async fn deliver_when_ready(state: Arc<ServerState>, pane_id: NodeId, initial_in
         tokio::select! {
             changed = screen_changed.changed() => {
                 if changed.is_err() {
+                    let _ = completion_sender.send(Err("pane closed before prompt delivery".to_string()));
                     return;
                 }
             }

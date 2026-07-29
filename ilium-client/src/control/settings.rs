@@ -7,9 +7,9 @@ use serde_json::Value;
 
 use crate::app::{AppearanceRow, EditorRow, SessionRow, SoundRow, TerminalRow};
 use crate::config::{
-    AgentIdentifierMode, MotionLevel, NewPaneDirectory, SessionRecoveryPolicy, SidebarDensity,
-    TreeOrder, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES, MIN_BOARD_COLUMN_WIDTH,
-    MIN_CARD_PREVIEW_LINES,
+    AgentIdentifierMode, LeftPanelSizingMode, MotionLevel, NewPaneDirectory, SessionRecoveryPolicy,
+    SidebarDensity, TreeOrder, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES,
+    MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
@@ -63,32 +63,36 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
 
 fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
     match path {
-        "ui.auto_resize_tree" => {
-            if app.ui_settings.auto_resize_tree_on_focus != boolean(&value)? {
-                app.settings_toggle_auto_resize_tree();
-            }
+        "ui.left_panel_sizing_mode" => {
+            app.settings_set_left_panel_sizing_mode(parse_left_panel_sizing_mode(string(&value)?)?);
         }
-        "ui.tree_width" => {
-            // Bounds-check into `u16` (the field's real width) before ever mixing it into
-            // signed arithmetic below -- `unsigned(&value)? as i32` used to truncate huge
-            // JSON numbers into an arbitrary (possibly very negative) `i32`, which could
-            // overflow the subsequent subtraction and panic on a debug build.
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "tree width is outside ilium's allowed range".to_owned())?;
-            // Validate against the real allowed range *before* mutating anything: every
-            // other numeric arm in this file (scrollback budget, card preview lines,
-            // board column width) rejects an out-of-range target up front. Without this,
-            // `settings_adjust_tree_width` below clamps and persists a width the caller
-            // never asked for, then this arm reports failure anyway -- a rejected
-            // request must not have a visible side effect.
-            if !(crate::layout::MIN_TREE_WIDTH..=crate::layout::MAX_TREE_WIDTH).contains(&target) {
-                return Err("tree width is outside ilium's allowed range".to_owned());
+        "ui.left_panel_fixed_width" => {
+            let target = left_panel_width(&value)?;
+            app.settings_set_fixed_panel_width(target);
+        }
+        "ui.left_panel_unfocused_width" => {
+            let target = left_panel_width(&value)?;
+            if target > app.ui_settings.left_panel_sizing.focused_width {
+                return Err("unfocused width cannot exceed focused width".to_owned());
             }
-            let target = i32::from(target);
-            app.settings_adjust_tree_width(target - i32::from(app.ui_settings.tree_width));
-            // Cannot fail: `target` was just proven to be inside
-            // `settings_adjust_tree_width`'s own clamp range, so the exact delta lands on it.
-            debug_assert_eq!(i32::from(app.ui_settings.tree_width), target);
+            app.settings_set_unfocused_panel_width(target);
+        }
+        "ui.left_panel_focused_width" => {
+            let target = left_panel_width(&value)?;
+            if target < app.ui_settings.left_panel_sizing.unfocused_width {
+                return Err("focused width cannot be smaller than unfocused width".to_owned());
+            }
+            app.settings_set_focused_panel_width(target);
+        }
+        "ui.left_panel_minimum_terminal_width" => {
+            let target = u16::try_from(unsigned(&value)?)
+                .map_err(|_| "minimum terminal width is outside ilium's allowed range")?;
+            if !(crate::layout::MINIMUM_TERMINAL_WIDTH..=crate::layout::MAXIMUM_TERMINAL_WIDTH)
+                .contains(&target)
+            {
+                return Err("minimum terminal width is outside ilium's allowed range".to_owned());
+            }
+            app.settings_set_minimum_terminal_width(target);
         }
         "ui.tree_order" => {
             app.settings_set_tree_order(parse_tree_order(string(&value)?)?);
@@ -505,7 +509,13 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
 
 fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), String> {
     match path {
-        "ui.tree_width" => app.settings_adjust_tree_width(direction),
+        "ui.left_panel_sizing_mode" => app.settings_adjust_left_panel_sizing_mode(direction),
+        "ui.left_panel_fixed_width" => app.settings_adjust_fixed_panel_width(direction),
+        "ui.left_panel_unfocused_width" => app.settings_adjust_unfocused_panel_width(direction),
+        "ui.left_panel_focused_width" => app.settings_adjust_focused_panel_width(direction),
+        "ui.left_panel_minimum_terminal_width" => {
+            app.settings_adjust_minimum_terminal_width(direction)
+        }
         "ui.tree_order" => app.settings_adjust_tree_order(direction),
         "ui.tree_row_management_controls" => app.settings_toggle_tree_row_management_controls(),
         "ui.agent_identifier_mode" => app.settings_adjust_agent_identifier_mode(direction),
@@ -630,6 +640,28 @@ fn optional_string(value: &Value) -> Result<Option<String>, String> {
 
 fn normalized(value: &str) -> String {
     value.trim().to_ascii_lowercase().replace([' ', '-'], "_")
+}
+
+fn left_panel_width(value: &Value) -> Result<u16, String> {
+    let width = u16::try_from(unsigned(value)?)
+        .map_err(|_| "left panel width is outside ilium's allowed range".to_owned())?;
+    if !(crate::layout::MIN_TREE_WIDTH..=crate::layout::MAX_TREE_WIDTH).contains(&width) {
+        return Err("left panel width is outside ilium's allowed range".to_owned());
+    }
+    Ok(width)
+}
+
+fn parse_left_panel_sizing_mode(value: &str) -> Result<LeftPanelSizingMode, String> {
+    match normalized(value).as_str() {
+        "fixed" => Ok(LeftPanelSizingMode::Fixed),
+        "focus_dependent" => Ok(LeftPanelSizingMode::FocusDependent),
+        "width_dependent" | "terminal_width_dependent" => {
+            Ok(LeftPanelSizingMode::TerminalWidthDependent)
+        }
+        _ => Err(
+            "left panel sizing mode must be fixed, focus-dependent, or width-dependent".to_owned(),
+        ),
+    }
 }
 
 fn parse_tree_order(value: &str) -> Result<TreeOrder, String> {
@@ -804,26 +836,39 @@ mod tests {
     }
 
     #[test]
-    fn tree_width_rejects_out_of_range_values_without_mutating_state() {
+    fn left_panel_widths_reject_invalid_values_without_mutating_state() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
-        let original = app.ui_settings.tree_width;
+        let original = app.ui_settings.left_panel_sizing;
 
-        // A value far outside `[MIN_TREE_WIDTH, MAX_TREE_WIDTH]` must be rejected up
-        // front, not silently clamped and persisted before the arm reports failure.
-        assert!(set_setting(&mut app, "ui.tree_width", json!(5)).is_err());
+        assert!(set_setting(&mut app, "ui.left_panel_fixed_width", json!(5)).is_err());
         assert_eq!(
-            app.ui_settings.tree_width, original,
-            "a rejected ui.tree_width request must not have a visible side effect"
+            app.ui_settings.left_panel_sizing, original,
+            "a rejected left-panel width must not have a visible side effect"
         );
 
-        // A JSON number too large to even fit `u16` (let alone the real width range)
-        // used to be truncated with `as i32`, which could overflow the subsequent
-        // subtraction; it must now be rejected cleanly instead of panicking.
-        assert!(set_setting(&mut app, "ui.tree_width", json!(2_147_483_648_u64)).is_err());
-        assert_eq!(app.ui_settings.tree_width, original);
+        assert!(set_setting(
+            &mut app,
+            "ui.left_panel_focused_width",
+            json!(2_147_483_648_u64)
+        )
+        .is_err());
+        assert_eq!(app.ui_settings.left_panel_sizing, original);
 
-        set_setting(&mut app, "ui.tree_width", json!(40)).unwrap();
-        assert_eq!(app.ui_settings.tree_width, 40);
+        assert!(set_setting(&mut app, "ui.left_panel_focused_width", json!(20)).is_err());
+        assert_eq!(app.ui_settings.left_panel_sizing, original);
+
+        set_setting(&mut app, "ui.left_panel_fixed_width", json!(40)).unwrap();
+        assert_eq!(app.ui_settings.left_panel_sizing.fixed_width, 40);
+        set_setting(
+            &mut app,
+            "ui.left_panel_sizing_mode",
+            json!("width-dependent"),
+        )
+        .unwrap();
+        assert_eq!(
+            app.ui_settings.left_panel_sizing.mode,
+            LeftPanelSizingMode::TerminalWidthDependent
+        );
     }
 
     #[test]

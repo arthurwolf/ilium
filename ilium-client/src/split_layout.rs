@@ -7,6 +7,40 @@
 use ilium_core::{NodeId, SplitOrientation, MAXIMUM_SPLIT_VIEW_PANES};
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 
+/// A visual cardinal relationship between two adjacent pane viewports.
+///
+/// This is deliberately presentation-only: it describes the current split
+/// geometry without knowing whether either pane is a terminal or an agent.
+/// `screen_transfer` applies the terminal eligibility rule above this layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl PaneDirection {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Left => "on the left",
+            Self::Right => "on the right",
+            Self::Up => "above",
+            Self::Down => "below",
+        }
+    }
+}
+
+/// One directed relationship across a physical split separator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdjacentPaneDirection {
+    pub source_pane_id: NodeId,
+    pub destination_pane_id: NodeId,
+    pub direction: PaneDirection,
+    /// One terminal cell on the source side of the shared separator.
+    pub control_area: Rect,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaneViewport {
     pub pane_id: NodeId,
@@ -59,6 +93,83 @@ pub fn viewport_at(viewports: &[PaneViewport], position: Position) -> Option<Pan
         .iter()
         .copied()
         .find(|viewport| viewport.outer_area.contains(position))
+}
+
+/// Finds every ordered, edge-sharing relationship in the visible split.
+///
+/// A four-pane grid produces eight directed actions: left/right for each row
+/// and up/down for each column. Diagonal panes are intentionally excluded;
+/// users see controls only on the separator they can actually point at.
+pub fn adjacent_pane_directions(viewports: &[PaneViewport]) -> Vec<AdjacentPaneDirection> {
+    let mut directions = Vec::new();
+    for (left_index, first) in viewports.iter().enumerate() {
+        for second in viewports.iter().skip(left_index + 1) {
+            if first.outer_area.right() == second.outer_area.x {
+                add_horizontal_directions(&mut directions, *first, *second);
+            } else if second.outer_area.right() == first.outer_area.x {
+                add_horizontal_directions(&mut directions, *second, *first);
+            } else if first.outer_area.bottom() == second.outer_area.y {
+                add_vertical_directions(&mut directions, *first, *second);
+            } else if second.outer_area.bottom() == first.outer_area.y {
+                add_vertical_directions(&mut directions, *second, *first);
+            }
+        }
+    }
+    directions
+}
+
+fn add_horizontal_directions(
+    directions: &mut Vec<AdjacentPaneDirection>,
+    left: PaneViewport,
+    right: PaneViewport,
+) {
+    let overlap_top = left.outer_area.y.max(right.outer_area.y);
+    let overlap_bottom = left.outer_area.bottom().min(right.outer_area.bottom());
+    if overlap_top >= overlap_bottom {
+        return;
+    }
+    let center_y = overlap_top + (overlap_bottom - overlap_top) / 2;
+    directions.extend([
+        AdjacentPaneDirection {
+            source_pane_id: left.pane_id,
+            destination_pane_id: right.pane_id,
+            direction: PaneDirection::Right,
+            control_area: Rect::new(left.outer_area.right().saturating_sub(1), center_y, 1, 1),
+        },
+        AdjacentPaneDirection {
+            source_pane_id: right.pane_id,
+            destination_pane_id: left.pane_id,
+            direction: PaneDirection::Left,
+            control_area: Rect::new(right.outer_area.x, center_y, 1, 1),
+        },
+    ]);
+}
+
+fn add_vertical_directions(
+    directions: &mut Vec<AdjacentPaneDirection>,
+    top: PaneViewport,
+    bottom: PaneViewport,
+) {
+    let overlap_left = top.outer_area.x.max(bottom.outer_area.x);
+    let overlap_right = top.outer_area.right().min(bottom.outer_area.right());
+    if overlap_left >= overlap_right {
+        return;
+    }
+    let center_x = overlap_left + (overlap_right - overlap_left) / 2;
+    directions.extend([
+        AdjacentPaneDirection {
+            source_pane_id: top.pane_id,
+            destination_pane_id: bottom.pane_id,
+            direction: PaneDirection::Down,
+            control_area: Rect::new(center_x, top.outer_area.bottom().saturating_sub(1), 1, 1),
+        },
+        AdjacentPaneDirection {
+            source_pane_id: bottom.pane_id,
+            destination_pane_id: top.pane_id,
+            direction: PaneDirection::Up,
+            control_area: Rect::new(center_x, bottom.outer_area.y, 1, 1),
+        },
+    ]);
 }
 
 fn equal_areas(area: Rect, orientation: SplitOrientation, count: usize) -> Vec<Rect> {
@@ -153,5 +264,32 @@ mod tests {
         assert!(viewports
             .iter()
             .all(|viewport| viewport.content_area.width == 0 && viewport.content_area.height == 0));
+    }
+
+    #[test]
+    fn adjacent_panes_expose_bidirectional_separator_controls_without_diagonals() {
+        let viewports = allocate_viewports(
+            Rect::new(0, 0, 100, 40),
+            SplitOrientation::Vertical,
+            &ids(4),
+        );
+        let directions = adjacent_pane_directions(&viewports);
+
+        assert_eq!(directions.len(), 8);
+        assert!(directions.contains(&AdjacentPaneDirection {
+            source_pane_id: NodeId(1),
+            destination_pane_id: NodeId(2),
+            direction: PaneDirection::Right,
+            control_area: Rect::new(49, 10, 1, 1),
+        }));
+        assert!(directions.contains(&AdjacentPaneDirection {
+            source_pane_id: NodeId(4),
+            destination_pane_id: NodeId(2),
+            direction: PaneDirection::Up,
+            control_area: Rect::new(75, 20, 1, 1),
+        }));
+        assert!(!directions.iter().any(|direction| {
+            direction.source_pane_id == NodeId(1) && direction.destination_pane_id == NodeId(4)
+        }));
     }
 }

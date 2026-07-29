@@ -78,12 +78,14 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 app.started_at.elapsed().as_millis()
             },
+            terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
             titles_loading: &app.titles_loading,
             recently_created: &app.recently_created,
+            terminal_activity: &app.terminal_activity,
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
             icons: &app.ui_settings.icons,
@@ -201,6 +203,9 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         }
         Mode::VoiceSettingPrompt(field, state) => {
             modal::render_masked_text_prompt(frame, area, field.label(), state, "Replace");
+        }
+        Mode::ApiSettingPrompt(state) => {
+            modal::render_text_prompt(frame, area, "HTTP API port", state, "Apply");
         }
         Mode::VoicePromptEditor(state) => modal::render_multiline_prompt(
             frame,
@@ -999,6 +1004,28 @@ fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
     for viewport in viewports {
         draw_pane_runtime(frame, app, viewport);
     }
+    draw_screen_transfer_controls(frame, app);
+}
+
+/// Draws the two directional actions in the middle of every eligible split
+/// separator. They are rendered after pane borders so the configured glyphs
+/// remain directly clickable instead of being overwritten by chrome.
+fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
+    for transfer in app.screen_transfers() {
+        let icon_target = match transfer.direction {
+            crate::split_layout::PaneDirection::Left => IconTarget::ScreenTransferLeft,
+            crate::split_layout::PaneDirection::Right => IconTarget::ScreenTransferRight,
+            crate::split_layout::PaneDirection::Up => IconTarget::ScreenTransferUp,
+            crate::split_layout::PaneDirection::Down => IconTarget::ScreenTransferDown,
+        };
+        let glyph = app.ui_settings.icons.glyph(icon_target);
+        let control = Paragraph::new(Span::styled(
+            glyph,
+            theme::selected_style().add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center);
+        frame.render_widget(control, transfer.control_area);
+    }
 }
 
 fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
@@ -1087,14 +1114,15 @@ fn draw_completed_agent_close_action(frame: &mut Frame, area: Rect) {
 /// border, mirroring `tree_ui::draw_scrollbar` -- shown only once the pane
 /// actually has scrollback history to navigate (`Ctrl+A` isn't involved:
 /// see `App::handle_pane_key`/`handle_pane_mouse` for Shift+PageUp/
-/// PageDown and wheel navigation).
+/// PageDown, Shift+End, and wheel navigation).
 fn draw_terminal_scrollbar(frame: &mut Frame, area: Rect, term: &terminal_view::TerminalView) {
     let total = term.scrollback_total();
     if total == 0 {
         return;
     }
-    let mut scrollbar_state =
-        ScrollbarState::new(total).position(total.saturating_sub(term.scrollback_position()));
+    let mut scrollbar_state = ScrollbarState::new(total.saturating_add(1))
+        .position(total.saturating_sub(term.scrollback_position()))
+        .viewport_content_length(usize::from(term.viewport_rows()));
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
@@ -1274,6 +1302,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::CommandPrompt(_) => "RUN COMMAND",
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
+        Mode::ApiSettingPrompt(_) => "HTTP API PORT",
         Mode::VoicePromptEditor(_) => "VOICE PROMPT",
         Mode::SaveAs(..) => "SAVE AS",
         Mode::Help => "HELP",
@@ -1429,6 +1458,43 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn terminal_scrollbar_thumb_tracks_the_full_viewport_from_top_to_tail() {
+        let mut view = TerminalView::new(4, 20);
+        for line in 0..10 {
+            view.feed(format!("line {line}\r\n").as_bytes());
+        }
+        let mut terminal = Terminal::new(TestBackend::new(3, 10)).unwrap();
+
+        terminal
+            .draw(|frame| draw_terminal_scrollbar(frame, frame.area(), &view))
+            .unwrap();
+        let tail_thumb_rows = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(3)
+            .enumerate()
+            .filter_map(|(row, cells)| (cells[2].symbol() == "█").then_some(row))
+            .collect::<Vec<_>>();
+        assert!(tail_thumb_rows.len() > 1);
+        assert_eq!(tail_thumb_rows.last().copied(), Some(9));
+
+        view.scroll_up(u16::MAX);
+        terminal
+            .draw(|frame| draw_terminal_scrollbar(frame, frame.area(), &view))
+            .unwrap();
+        let top_thumb_rows = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(3)
+            .enumerate()
+            .filter_map(|(row, cells)| (cells[2].symbol() == "█").then_some(row))
+            .collect::<Vec<_>>();
+        assert_eq!(top_thumb_rows.first().copied(), Some(0));
+    }
 
     #[test]
     fn right_panel_title_prefixes_done_without_mutating_the_pane_name() {
@@ -1856,5 +1922,80 @@ mod tests {
         assert!(rendered.contains("RIGHT-PANE"));
         assert!(rendered.contains("first"));
         assert!(rendered.contains("second"));
+    }
+
+    #[test]
+    fn split_view_renders_configured_directional_screen_transfer_controls() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let left = app
+            .tree
+            .add_pane(group, "left", PaneContentKind::Terminal)
+            .unwrap();
+        let right = app
+            .tree
+            .add_pane(group, "right", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[left, right],
+            )
+            .unwrap();
+        app.panes.insert(
+            left,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(20, 30))),
+        );
+        app.panes.insert(
+            right,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(20, 30))),
+        );
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(left),
+        };
+        app.ui_settings
+            .icons
+            .set(IconTarget::ScreenTransferRight, "⇢".to_string());
+        app.ui_settings
+            .icons
+            .set(IconTarget::ScreenTransferLeft, "⇠".to_string());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let rightward = app
+            .screen_transfers()
+            .into_iter()
+            .find(|transfer| {
+                transfer.source_pane_id == left
+                    && transfer.destination_pane_id == right
+                    && transfer.direction == crate::split_layout::PaneDirection::Right
+            })
+            .unwrap();
+        let leftward = app
+            .screen_transfers()
+            .into_iter()
+            .find(|transfer| {
+                transfer.source_pane_id == right
+                    && transfer.destination_pane_id == left
+                    && transfer.direction == crate::split_layout::PaneDirection::Left
+            })
+            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(rightward.control_area.x, rightward.control_area.y)].symbol(),
+            "⇢"
+        );
+        assert_eq!(
+            buffer[(leftward.control_area.x, leftward.control_area.y)].symbol(),
+            "⇠"
+        );
     }
 }

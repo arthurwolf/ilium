@@ -1,0 +1,13 @@
+╭─────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.145.0)              │
+│                                         │
+│ model:       gpt-5.6-terra medium        │
+│ directory:   ~/dev/api                   │
+│ permissions: YOLO mode                   │
+╰─────────────────────────────────────────╯
+
+• You have 2 usage limit resets available. Run /usage to use one.
+
+› Explain this codebase
+
+gpt-5.6-terra medium · ~/dev/api · api · main · Ready · Context 100% left

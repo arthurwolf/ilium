@@ -25,12 +25,13 @@ mod common;
 use common::{expect_event, TestServer};
 
 /// Creates an absolute-path fake Codex process which has no readable composer
-/// for one second, then shows Codex's real `send a message` prompt before it
-/// reads stdin. This proves initial input waits for visible readiness instead
-/// of merely racing the PTY spawn.
+/// for one second, then shows the current Codex composer cursor with one of its
+/// rotating contextual placeholders before it reads stdin. This proves initial
+/// input waits for visible readiness without depending on obsolete placeholder
+/// copy or merely racing the PTY spawn.
 fn write_delayed_ready_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = bin_dir.join("codex");
-    let script = "#!/bin/sh\nprintf 'starting codex...\\n'\nsleep 1\nprintf '\\033[2J\\033[H  send a message\\n'\nIFS= read -r line\nprintf 'received-after-ready:<%s>\\n' \"$line\"\nsleep 60\n";
+    let script = "#!/bin/sh\nprintf 'starting codex...\\n'\nsleep 1\nprintf '\\033[2J\\033[H› Explain this codebase\\n'\nIFS= read -r line\nprintf 'received-after-ready:<%s>\\n' \"$line\"\nsleep 60\n";
     let mut file = std::fs::File::create(&script_path).expect("create delayed fake Codex");
     file.write_all(script.as_bytes())
         .expect("write delayed fake Codex");

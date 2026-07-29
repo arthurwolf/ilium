@@ -29,7 +29,7 @@ pub fn render(
     // underneath it this frame.
     frame.render_widget(Clear, popup_area);
 
-    let mut lines = Vec::with_capacity(bindings.len().div_ceil(2) + 6);
+    let mut lines = Vec::with_capacity(bindings.len().div_ceil(2) + 7);
     lines.push(Line::from(Span::styled(
         "ilium — keyboard reference",
         Style::new().add_modifier(Modifier::BOLD),
@@ -66,6 +66,9 @@ pub fn render(
         "Mouse: pane focus · tree expand/reorder · context menus · tree footer Settings · {} rename",
         theme::PEN_ICON,
     )));
+    lines.push(Line::from(
+        "Terminal history: wheel / Shift+PgUp/PgDn · Shift+End live · Ctrl+End app",
+    ));
     lines.push(Line::from(Span::styled(
         format!(
             "press {} {} again, or Esc, to close",
@@ -114,6 +117,7 @@ mod tests {
         assert!(rendered.contains("Ctrl+B ?"));
         assert!(rendered.contains("press Ctrl+B ? again"));
         assert!(rendered.contains(theme::PEN_ICON));
+        assert!(rendered.contains("Shift+End live · Ctrl+End app"));
         assert!(!rendered.contains("Ctrl+A then ?"));
     }
 

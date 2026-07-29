@@ -341,7 +341,9 @@ pub fn is_fresh_agent_screen(class: &AgentClass, screen_text: &str) -> bool {
 pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
     let normalized = screen_text.to_ascii_lowercase();
     let composer_visible = match class {
-        AgentClass::Codex => normalized.contains("send a message"),
+        AgentClass::Codex => {
+            normalized.contains("send a message") || screen_has_codex_composer_cursor(screen_text)
+        }
         AgentClass::Claude => screen_has_claude_composer_cursor(screen_text),
         AgentClass::Antigravity => normalized.contains("type a message"),
         AgentClass::Other(_) => return false,
@@ -353,6 +355,19 @@ pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
                 | AgentActivity::WaitingBackground
                 | AgentActivity::WaitingApproval
         )
+}
+
+/// Current Codex releases rotate contextual placeholder text instead of
+/// retaining the older literal `Send a message` label. The stable composer
+/// contract is its leading `›` cursor; numbered modal choices are excluded so
+/// an approval surface cannot masquerade as the free-form composer.
+fn screen_has_codex_composer_cursor(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        let Some(composer_content) = line.trim_start().strip_prefix('›') else {
+            return false;
+        };
+        !is_numbered_option_line(composer_content)
+    })
 }
 
 /// Claude's empty composer is a bordered terminal field whose content row is
@@ -1086,6 +1101,10 @@ mod tests {
             &fixture("codex_idle.txt")
         ));
         assert!(is_agent_prompt_ready(
+            &AgentClass::Codex,
+            &fixture("codex_dynamic_placeholder_idle.txt")
+        ));
+        assert!(is_agent_prompt_ready(
             &AgentClass::Claude,
             &fixture("claude_code_idle.txt")
         ));
@@ -1114,6 +1133,12 @@ mod tests {
         // shared activity classification too, not just the composer marker,
         // or a one-shot initial prompt gets injected into the modal instead.
         let screen = "Allow this command?\n❯ 1. Yes\n  2. No\n\nSend a message";
+        assert!(!is_agent_prompt_ready(&AgentClass::Codex, screen));
+    }
+
+    #[test]
+    fn codex_numbered_choice_cursor_is_not_a_free_form_composer() {
+        let screen = "Select a mode\n› 1. Read only\n  2. Full access";
         assert!(!is_agent_prompt_ready(&AgentClass::Codex, screen));
     }
 
