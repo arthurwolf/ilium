@@ -2568,7 +2568,7 @@ mod tests {
     /// a snapshot naming it simply fails to respawn and the restored tree no longer
     /// matches what was saved.
     fn long_running_pane_command() -> String {
-        if cfg!(windows) { "findstr ^" } else { "cat" }.to_string()
+        if cfg!(windows) { "findstr x" } else { "cat" }.to_string()
     }
     use super::*;
     use crate::initial_prompt::initial_input_bytes;

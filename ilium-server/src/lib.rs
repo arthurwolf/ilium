@@ -477,7 +477,7 @@ mod restore_tests {
     /// exits immediately with nothing to page, and a bare `pause` prints
     /// "Press any key to continue", so the prompt is discarded.
     fn long_running_pane_command() -> String {
-        if cfg!(windows) { "findstr ^" } else { "cat" }.to_string()
+        if cfg!(windows) { "findstr x" } else { "cat" }.to_string()
     }
 
     use std::path::PathBuf;
