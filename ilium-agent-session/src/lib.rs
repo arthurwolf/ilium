@@ -312,7 +312,11 @@ fn same_canonical_project(recorded_cwd: &Path, expected_cwd: &Path) -> bool {
 }
 
 fn canonical_or_original(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    // Through `ilium_platform`, not `std`: the provider derives its transcript
+    // directory name from the project path, and Windows' own canonical form
+    // carries a `\\?\` prefix that the provider never sees, so slugifying it
+    // would look for a directory that does not exist.
+    ilium_platform::paths::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn slugify_claude_project_path(cwd: &Path) -> String {

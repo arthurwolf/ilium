@@ -2165,6 +2165,7 @@ name = "ilium-agent-session"
 version = "0.1.0"
 dependencies = [
  "ilium-core",
+ "ilium-platform",
  "serde_json",
  "tempfile",
 ]

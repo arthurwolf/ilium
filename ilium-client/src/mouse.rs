@@ -1997,6 +1997,10 @@ mod markdown_board_context_mouse_tests {
             crate::scheduled_input::unix_millis_now()
         ));
         std::fs::write(&path, "# Work\n\n* [ ] Mouse task\n").unwrap();
+        // Canonicalized through the same helper the app uses: `%TEMP%` hands
+        // out an 8.3 short path (`RUNNER~1`) while resolving it yields the long
+        // name, so an unresolved expectation cannot match what the app stores.
+        let path = ilium_platform::paths::canonicalize(&path).unwrap_or(path);
 
         let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
         app.set_screen_area(Rect::new(0, 0, 120, 40));

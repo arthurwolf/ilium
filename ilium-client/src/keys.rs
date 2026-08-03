@@ -2326,11 +2326,17 @@ mod indent_outdent_tests {
 
     #[test]
     fn board_dialog_types_plain_p_and_reserves_control_p_for_browse() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        // A real directory: Ctrl+P opens a browser rooted at this path's
+        // parent, and a literal `/tmp` does not exist on Windows, so the
+        // browser would fail to open before the assertion under test ran.
+        let temporary_dir = std::env::temp_dir();
+        let mut app = App::new("test".to_string(), temporary_dir.clone());
         app.mode = Mode::CreateBoard(CreateBoardState {
             parent_group: ilium_core::ROOT_ID,
             name: crate::text_prompt::TextPromptState::new(""),
-            path: crate::text_prompt::TextPromptState::new("/tmp/board.md"),
+            path: crate::text_prompt::TextPromptState::new(
+                temporary_dir.join("board.md").to_string_lossy().as_ref(),
+            ),
             storage_kind: BoardStorageKind::MarkdownFile,
             editing_path: false,
         });
@@ -2471,12 +2477,15 @@ mod indent_outdent_tests {
                     && state.scroll == 3
         ));
 
-        let overlay = crate::explorer_overlay::ExplorerOverlay::open_at(&PathBuf::from("/tmp"))
+        // `std::env::temp_dir()`, not a literal `/tmp`: Windows has no such
+        // directory, so opening it fails before the assertion under test runs.
+        let temporary_dir = std::env::temp_dir();
+        let overlay = crate::explorer_overlay::ExplorerOverlay::open_at(&temporary_dir)
             .expect("open temporary explorer");
         app.open_explorer_file_menu(
             Box::new(overlay),
             ilium_core::ROOT_ID,
-            PathBuf::from("/tmp/example.md"),
+            temporary_dir.join("example.md"),
             ratatui::layout::Position::new(2, 2),
         );
         assert!(matches!(app.mode, Mode::ExplorerFileMenu(_)));

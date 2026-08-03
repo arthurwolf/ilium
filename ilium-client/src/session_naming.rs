@@ -468,8 +468,23 @@ mod tests {
         let home = directory.path().join("home");
         std::fs::create_dir_all(&project_path).unwrap();
         let session_id = "77777777-7777-4777-8777-777777777777";
-        let project_slug = project_path.to_string_lossy().replace(['/', '.'], "-");
-        let transcript_dir = home.join(".claude/projects").join(project_slug);
+        // Must match `ilium_agent_session`'s own rule exactly -- every
+        // non-alphanumeric byte becomes `-`. Replacing only `/` and `.` happens
+        // to agree on a Unix temp path and disagrees on `C:\Users\...`, where
+        // the backslashes and colon would survive.
+        let project_slug: String = ilium_platform::paths::canonicalize(&project_path)
+            .unwrap_or_else(|_| project_path.clone())
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let transcript_dir = home.join(".claude").join("projects").join(project_slug);
         std::fs::create_dir_all(&transcript_dir).unwrap();
         std::fs::write(
             transcript_dir.join(format!("{session_id}.jsonl")),
@@ -498,8 +513,23 @@ mod tests {
         let home = directory.path().join("home");
         std::fs::create_dir_all(&project_path).unwrap();
         let session_id = "77777777-7777-4777-8777-777777777777";
-        let project_slug = project_path.to_string_lossy().replace(['/', '.'], "-");
-        let transcript_dir = home.join(".claude/projects").join(project_slug);
+        // Must match `ilium_agent_session`'s own rule exactly -- every
+        // non-alphanumeric byte becomes `-`. Replacing only `/` and `.` happens
+        // to agree on a Unix temp path and disagrees on `C:\Users\...`, where
+        // the backslashes and colon would survive.
+        let project_slug: String = ilium_platform::paths::canonicalize(&project_path)
+            .unwrap_or_else(|_| project_path.clone())
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let transcript_dir = home.join(".claude").join("projects").join(project_slug);
         std::fs::create_dir_all(&transcript_dir).unwrap();
         let transcript_path = transcript_dir.join(format!("{session_id}.jsonl"));
         let transcript = [

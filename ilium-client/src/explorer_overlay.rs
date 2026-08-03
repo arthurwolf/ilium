@@ -860,7 +860,13 @@ mod tests {
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("manual path should navigate to its directory");
         assert_eq!(selected, None);
-        assert_eq!(overlay.current_dir, selected_directory);
+        // The overlay resolves what was typed, so the expectation is resolved
+        // the same way: `%TEMP%` hands out an 8.3 short path while resolving it
+        // yields the long name, and the two are the same directory.
+        assert_eq!(
+            overlay.current_dir,
+            ilium_platform::paths::canonicalize(&selected_directory).unwrap_or(selected_directory)
+        );
     }
 
     #[test]

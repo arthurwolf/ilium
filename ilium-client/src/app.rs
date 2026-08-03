@@ -9147,6 +9147,10 @@ mod tests {
             crate::scheduled_input::unix_millis_now()
         ));
         std::fs::write(&path, "# Work\n\n* [ ] Keep this task\n").unwrap();
+        // Canonicalized through the same helper the app uses: `%TEMP%` hands
+        // out an 8.3 short path (`RUNNER~1`) while resolving it yields the long
+        // name, so an unresolved expectation cannot match what the app stores.
+        let path = ilium_platform::paths::canonicalize(&path).unwrap_or(path);
 
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -11076,10 +11080,12 @@ mod tests {
         );
 
         assert!(!app.save_agent_debug_log(pane_id, "exports/codex.log"));
-        assert!(app
-            .status_message
-            .as_deref()
-            .is_some_and(|message| message.contains("No such file or directory")));
+        // Asserts the failure names its target rather than quoting an errno
+        // string: "No such file or directory" is the Unix wording, and Windows
+        // says "The system cannot find the path specified" for the same cause.
+        assert!(app.status_message.as_deref().is_some_and(|message| message
+            .starts_with("Save agent debug log failed for")
+            && message.contains("codex.log")));
 
         std::fs::create_dir(directory.path().join("exports")).unwrap();
         assert!(app.save_agent_debug_log(pane_id, "exports/codex.log"));
