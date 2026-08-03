@@ -16,8 +16,8 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, DisableLineWrap,
+    EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen,
 };
 
 use crate::error::ClientError;
@@ -36,9 +36,20 @@ impl TerminalGuard {
         // never run to restore it. Unwind whatever already succeeded
         // before propagating the error -- this constructor is the only
         // chance to do so.
+        // Line wrapping off for the whole session. This TUI positions every
+        // cell absolutely and never relies on the cursor wrapping, but leaving
+        // wrapping enabled is not merely unused: writing the terminal's
+        // bottom-right cell -- which the footer's own last cell is -- wraps the
+        // cursor, and on the last row a wrap scrolls the whole screen up by
+        // one. Hosts differ on whether they defer that wrap until the next
+        // character, so on Windows the frame ended up one row high with the
+        // footer sitting where the next full-screen overlay painted over it,
+        // and ratatui (which writes only cell diffs, and sees no change in
+        // those cells) never put it back.
         if let Err(source) = execute!(
             io::stdout(),
             EnterAlternateScreen,
+            DisableLineWrap,
             EnableBracketedPaste,
             EnableMouseCapture,
             EnableFocusChange
@@ -55,6 +66,7 @@ impl TerminalGuard {
                 DisableFocusChange,
                 DisableMouseCapture,
                 DisableBracketedPaste,
+                EnableLineWrap,
                 LeaveAlternateScreen
             );
             let _ = disable_raw_mode();
@@ -101,6 +113,7 @@ impl Drop for TerminalGuard {
             DisableFocusChange,
             DisableMouseCapture,
             DisableBracketedPaste,
+            EnableLineWrap,
             LeaveAlternateScreen
         );
         let _ = disable_raw_mode();
