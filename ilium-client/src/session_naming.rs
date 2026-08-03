@@ -570,26 +570,23 @@ mod tests {
         assert!(prompt.contains("repair auth"));
         assert!(prompt.contains("I found the race."));
         assert!(prompt.contains("test passed"));
-        // Either form is correct. The prompt embeds the transcript path as the
-        // locator discovered it, and whether that is the given path or its
-        // resolved twin is a platform detail: macOS reaches a temporary
-        // directory through a `/var` -> `/private/var` symlink and Windows
-        // hands out 8.3 short names, so the two differ there and nowhere else.
-        // Pinning one form asserts the platform, not the behaviour.
+        // Compared through `clipped`, the same encoder the prompt is built
+        // with. Untrusted context is JSON-encoded on purpose, so a Windows path
+        // legitimately appears as "C:\\Users\\..." -- quoted, with escaped
+        // separators. Asserting the raw path only ever held on platforms whose
+        // separators need no escaping.
+        //
+        // Either path form is accepted because which one the locator reports is
+        // a platform detail: macOS reaches a temporary directory through a
+        // `/var` -> `/private/var` symlink and Windows hands out 8.3 short
+        // names.
         let resolved_transcript = ilium_platform::paths::canonicalize(&transcript_path)
             .unwrap_or_else(|_| transcript_path.clone());
+        let given_encoded = clipped(&transcript_path.display().to_string());
+        let resolved_encoded = clipped(&resolved_transcript.display().to_string());
         assert!(
-            prompt.contains(&transcript_path.display().to_string())
-                || prompt.contains(&resolved_transcript.display().to_string()),
-            "prompt should name the transcript it read.\n  given:    {}\n  resolved: {}\n  rendered: {}",
-            transcript_path.display(),
-            resolved_transcript.display(),
-            // The rendered element, so a mismatch shows the form actually
-            // embedded rather than only that neither guess matched.
-            prompt
-                .split_once("<transcript-path>")
-                .and_then(|(_, rest)| rest.split_once("</transcript-path>"))
-                .map_or("(no transcript-path element)", |(value, _)| value),
+            prompt.contains(&given_encoded) || prompt.contains(&resolved_encoded),
+            "prompt should name the transcript it read.\n  expected one of:\n    {given_encoded}\n    {resolved_encoded}",
         );
     }
 
