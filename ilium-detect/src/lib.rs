@@ -21,6 +21,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
 
 use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -844,18 +845,23 @@ pub fn identify_agent_with_extra(
             }
         }
         if let Some(process) = system.process(pid) {
-            // Cache lowercase name once per process (avoids repeated allocation per classification attempt)
-            let lowercased = process.name().to_string_lossy().to_lowercase();
-            if let Some(process_match) =
-                match_process_name_with_extra(&lowercased, extra_signatures)
-            {
+            // Lowercased once per process, avoiding repeated allocation per
+            // classification attempt. See `identifying_process_names` for why
+            // more than the kernel name has to be considered.
+            let matched = identifying_process_names(process)
+                .into_iter()
+                .find_map(|candidate| {
+                    match_process_name_with_extra(&candidate, extra_signatures)
+                        .map(|process_match| (candidate, process_match))
+                });
+            if let Some((matched_name, process_match)) = matched {
                 let key = (depth, pid.as_u32());
                 let is_better = match &best {
                     None => true,
                     Some((existing_key, _, _, _)) => key < *existing_key,
                 };
                 if is_better {
-                    best = Some((key, pid, lowercased, process_match));
+                    best = Some((key, pid, matched_name, process_match));
                 }
             }
         }
@@ -878,6 +884,33 @@ pub fn identify_agent_with_extra(
             process_tree_depth: depth,
         },
     )
+}
+
+/// Every lowercase name a process may legitimately be recognised by, most
+/// authoritative first.
+///
+/// The kernel's process name is normally right, but it is not portable for the
+/// shape agent CLIs most often take. A CLI installed as a script with a shebang
+/// -- `#!/usr/bin/env node`, or a shell wrapper -- is reported by Linux under
+/// the script's own name, while macOS reports the *interpreter*: `node`, or
+/// `sh`. Matching the kernel name alone therefore recognises the same installed
+/// `claude` or `codex` on Linux and silently misses it on macOS.
+///
+/// The first command-line argument closes that gap, because it is the path the
+/// process was actually invoked as. Only its file name is considered, and it is
+/// only consulted when the kernel name matched nothing, so `sh -c "codex …"`
+/// cannot masquerade as the agent: its first argument is the shell itself.
+fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
+    let mut candidates = vec![process.name().to_string_lossy().to_lowercase()];
+    if let Some(invoked) = process.cmd().first() {
+        if let Some(file_name) = Path::new(invoked).file_name() {
+            let file_name = file_name.to_string_lossy().to_lowercase();
+            if !candidates.contains(&file_name) {
+                candidates.push(file_name);
+            }
+        }
+    }
+    candidates
 }
 
 /// Classifies a single (already-lowercased) process name against the shared
