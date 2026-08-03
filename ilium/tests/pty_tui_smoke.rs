@@ -482,6 +482,83 @@ fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathB
     None
 }
 
+/// Every `submitted input` value the log recorded for an accepted prompt.
+///
+/// Parsed rather than substring-matched: the record is a serialized
+/// `AgentDebugField`, and whether its keys come out in declaration order or
+/// alphabetically depends on whether some crate in the build enables
+/// `serde_json/preserve_order` -- which differs between a whole-workspace
+/// build and a single-package one. Matching `"label":...,"value":...` as
+/// adjacent text therefore asserts a feature-unification detail rather than
+/// what the log actually says.
+fn logged_prompt_submissions(contents: &str) -> Vec<String> {
+    contents
+        .lines()
+        .filter(|line| line.contains("event_kind=PromptSubmitted"))
+        .filter_map(|line| line.split_once("agent_event="))
+        .filter_map(|(_, json)| serde_json::from_str::<serde_json::Value>(json).ok())
+        .flat_map(|event| {
+            event["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|field| field["label"] == "submitted input")
+                .filter_map(|field| field["value"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Explains what a failed process-log expectation actually saw. Every step the
+/// match depends on is reported -- the canonical project path, each session
+/// directory's active-log metadata, whether the file it names is readable, and
+/// the prompt records it holds -- because the interesting answers ("the path
+/// resolved to a different prefix", "the log exists but recorded a shorter
+/// prompt because the keystrokes went to the tree") are all invisible in a bare
+/// "expected X, found nothing".
+fn process_log_diagnostics(log_root: &Path, project_dir: &Path) -> String {
+    let mut report = format!(
+        "log root: {log_root:?}\nproject dir as given: {project_dir:?}\ncanonical project path: {:?}\n",
+        project_dir.canonicalize()
+    );
+    let Ok(entries) = std::fs::read_dir(log_root) else {
+        report.push_str("log root is not readable\n");
+        return report;
+    };
+    for session_entry in entries.filter_map(Result::ok) {
+        let session_path = session_entry.path();
+        report.push_str(&format!("session dir {session_path:?}\n"));
+        let metadata = std::fs::read_to_string(session_path.join(".active-log-path"));
+        report.push_str(&format!("  active-log metadata: {metadata:?}\n"));
+        let Some(log_path) = metadata
+            .ok()
+            .as_deref()
+            .and_then(active_log_path_from_metadata)
+        else {
+            continue;
+        };
+        let Ok(contents) = std::fs::read_to_string(&log_path) else {
+            report.push_str(&format!("  log {log_path:?} is not readable\n"));
+            continue;
+        };
+        report.push_str(&format!(
+            "  log {log_path:?} holds {} bytes\n",
+            contents.len()
+        ));
+        report.push_str(&format!(
+            "  parsed submitted inputs: {:?}\n",
+            logged_prompt_submissions(&contents)
+        ));
+        for line in contents
+            .lines()
+            .filter(|line| line.contains("PromptSubmitted") || line.contains("submitted input"))
+        {
+            report.push_str(&format!("  prompt record: {line}\n"));
+        }
+    }
+    report
+}
+
 /// Produces a deterministic process literally named `codex` whose visible
 /// status changes only in volatile counters. The detector must keep polling
 /// it while the journal retains one semantic conclusion.
@@ -2793,16 +2870,23 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     );
     tui.write(b"\x1b[B\x1b[B\r")
         .expect("select dialog.md below parent and context.md");
+    // The form must come back carrying a storage path, but the *filename* is
+    // deliberately not required on screen: the field clips its value to the
+    // widget's width, so whether `dialog.md` survives that clip depends on how
+    // long the platform's temporary root happens to be -- macOS's
+    // `/private/var/folders/<...>/T` fills the field before reaching the file
+    // name where Linux's `/tmp` does not. What was actually selected is proven
+    // below, by the board this form goes on to create.
     assert!(
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("New board") && screen.contains("dialog.md")
+                screen.contains("New board") && screen.contains("Storage path")
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "expected selected dialog.md in create form, got: {:?}",
+        "expected the create form to return with a storage path, got: {:?}",
         tui.screen_text()
     );
     let board_dialog = ilium_client::modal::create_board_dialog_layout_for_size(120, 40);
@@ -3589,17 +3673,18 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
             || {
                 process_log_for_project(&xdg.debug_log_dir, &project_dir).is_some_and(
                     |(_, contents)| {
-                        contents.contains("event_kind=PromptSubmitted")
-                            && contents.contains(
-                                "\"label\":\"submitted input\",\"value\":\"diagnostic-prompt\"",
-                            )
+                        logged_prompt_submissions(&contents)
+                            .iter()
+                            .any(|submission| submission == "diagnostic-prompt")
                     },
                 )
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "expected exact submitted input in the private process log"
+        "expected exact submitted input in the private process log.\n{}\nscreen: {:?}",
+        process_log_diagnostics(&xdg.debug_log_dir, &project_dir),
+        tui.screen_text()
     );
 
     // Exercise focus-owned expansion and contraction explicitly instead of
@@ -3629,6 +3714,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         .expect("open agent debug log");
     tui.write(b"\x1b[H")
         .expect("jump to the oldest retained debug events");
+    // The chrome and the filter summary are one screen's worth by
+    // construction, so they are asserted together on the opened view.
     assert!(
         wait_until(
             || {
@@ -3638,16 +3725,50 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
                     && screen.contains("Panel resizes hidden")
                     && screen.contains("panel resize events hid")
                     && screen.contains("DETECTION")
-                    && screen.contains("Agent identity decision")
-                    && screen.contains("Activity decision")
-                    && screen.contains("Goal decision")
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "expected readable retained detection history, got: {:?}",
+        "expected the retained history's chrome and filter summary, got: {:?}",
         tui.screen_text()
     );
+
+    // The three decisions are not: every one of them quotes absolute paths,
+    // which wrap to a height that depends on how long the platform's
+    // temporary directory happens to be -- macOS's
+    // `/private/var/folders/<...>/T` pushes the last decision below the fold
+    // where Linux's `/tmp` does not. Requiring them on one screen would be
+    // asserting the width of a path, so they are collected while walking the
+    // log the way an operator reads it.
+    let mut unseen = vec![
+        "Agent identity decision",
+        "Activity decision",
+        "Goal decision",
+    ];
+    for scroll in 0..40 {
+        let screen = tui.screen_text();
+        unseen.retain(|decision| !screen.contains(decision));
+        if unseen.is_empty() {
+            break;
+        }
+        // The first pass only reads what opening the view already showed;
+        // afterwards, one line of travel per pass so nothing is stepped over.
+        if scroll > 0 {
+            tui.write(b"\x1b[B").expect("scroll the retained history");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        unseen.is_empty(),
+        "retained detection history never showed {unseen:?}, last screen: {:?}",
+        tui.screen_text()
+    );
+
+    // Back to the oldest events, so the Save button this test clicks next is
+    // found at the position the view opens in rather than wherever the scan
+    // above stopped.
+    tui.write(b"\x1b[H")
+        .expect("return to the oldest retained debug events");
 
     tokio::time::sleep(Duration::from_millis(2200)).await;
     let (save_column, save_row) = tui

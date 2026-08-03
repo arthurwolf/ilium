@@ -30,6 +30,7 @@ mod prompt_queue;
 mod scheduled_input;
 mod session_id;
 mod shell_title;
+mod snapshot_state;
 mod sounds;
 mod state;
 mod task_guard;

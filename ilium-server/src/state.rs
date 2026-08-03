@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use ilium_core::{NodeId, Tree};
 use ilium_detect::AgentSignature;
@@ -23,6 +22,7 @@ use crate::agent_debug::AgentDebugRecorder;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
 use crate::persistence::SessionSnapshot;
+use crate::snapshot_state::SnapshotState;
 use crate::sounds::PlaybackRequest;
 
 /// Capacity of the per-session broadcast channel. Sized generously for
@@ -89,27 +89,19 @@ pub struct ServerState {
     /// Serializes enqueue/clear mutations with completion-driven delivery so
     /// a successful PTY write advances exactly the FIFO head it observed.
     pub prompt_queue_transaction: Mutex<()>,
-    /// `true` when the on-disk crash-recovery snapshot no longer matches
-    /// `tree`/`panes` and needs rewriting. Request handlers
-    /// (`crate::ipc::handlers`) set this via `request_snapshot_save`
-    /// instead of writing to disk inline on the request path (see
-    /// `crate::persistence::spawn_snapshot_writer`); the background writer
-    /// consumes it with an atomic swap so a request that arrives mid-write
-    /// is never lost, only coalesced into the next pass.
-    pub snapshot_dirty: AtomicBool,
-    /// Set once by `ipc::handlers::handle_kill_session` and never cleared.
-    /// `crate::run`'s shutdown grace period (see `SHUTDOWN_GRACE_PERIOD`)
-    /// deliberately keeps other attached connections alive for a short
-    /// window after one connection's `KillSession` request has already
-    /// reset `tree`/`panes` to empty and deleted the on-disk snapshot --
-    /// so, without this flag, a second connection's ordinary mutation
-    /// (e.g. `NewPane`) landing in that same window would call
-    /// `request_snapshot_save` again and resurrect a snapshot file for a
-    /// session `handle_kill_session` already decided has nothing worth
-    /// recovering. Checked by `request_snapshot_save` itself -- the one
-    /// chokepoint every snapshot-dirtying call site already goes through
-    /// -- rather than by every individual mutation handler.
-    pub session_killed: AtomicBool,
+    /// Whether the on-disk crash-recovery snapshot still matches
+    /// `tree`/`panes`, and whether this session wants one at all. Request
+    /// handlers (`crate::ipc::handlers`) mark it through
+    /// [`ServerState::request_snapshot_save`] instead of writing to disk
+    /// inline on the request path (see
+    /// `crate::persistence::spawn_snapshot_writer`).
+    ///
+    /// Private, and reached only through the methods below: its two
+    /// interesting transitions -- "a mutation needs persisting" and "this
+    /// session was killed and must never be persisted again" -- are a single
+    /// atomic state machine precisely so no call site can sequence them by
+    /// hand. See [`crate::snapshot_state`] for why that is not optional.
+    snapshot_state: SnapshotState,
     /// Wakes `crate::persistence::spawn_snapshot_writer`'s background
     /// task. `Notify` only ever stores a single outstanding permit, which
     /// is exactly the coalescing behavior wanted here: any number of
@@ -168,8 +160,7 @@ impl ServerState {
             snapshot_write_lock: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
-            snapshot_dirty: AtomicBool::new(false),
-            session_killed: AtomicBool::new(false),
+            snapshot_state: SnapshotState::new(),
             snapshot_requested: Notify::new(),
             scheduled_input_changed: Notify::new(),
             detection_schedule_changed: Notify::new(),
@@ -231,35 +222,51 @@ impl ServerState {
     /// never `.await` a full disk write inline on the request path (see
     /// `crate::persistence` module docs).
     ///
-    /// A no-op once `session_killed` is set: a killed session must never
+    /// A no-op once the session has been killed: a killed session must never
     /// get a snapshot written for it again, no matter which still-attached
-    /// connection or background task calls this afterward (see that
-    /// field's doc comment).
-    ///
-    /// Re-checks `session_killed` after marking dirty, and undoes the mark
-    /// if it lands true: `session_killed` and `snapshot_dirty` are two
-    /// separate atomics with no lock spanning both, so `handle_kill_session`
-    /// (mark killed, then clear dirty) can interleave with this function's
-    /// own two steps. Without the re-check, a `session_killed` load here
-    /// that lands just before `handle_kill_session`'s store, followed by
-    /// this function's `snapshot_dirty` store landing just *after*
-    /// `handle_kill_session`'s own `snapshot_dirty = false`, would leave the
-    /// flag stuck dirty for the killed session -- exactly the resurrected
-    /// snapshot this no-op exists to prevent. The re-check closes that
-    /// window: whichever of the two threads' `session_killed` store or load
-    /// actually happens last, the losing side's view of `snapshot_dirty` is
-    /// reconciled back to `false` by the check below the same call it
-    /// happened in.
+    /// connection or background task calls this afterward. The refusal is
+    /// part of the same atomic step that would otherwise mark the snapshot
+    /// dirty, so no interleaving can leave a killed session owing a write
+    /// (see [`crate::snapshot_state`]).
     pub fn request_snapshot_save(&self) {
-        if self.session_killed.load(Ordering::Acquire) {
-            return;
+        if self.snapshot_state.mark_dirty() {
+            self.snapshot_requested.notify_one();
         }
-        self.snapshot_dirty.store(true, Ordering::Release);
-        if self.session_killed.load(Ordering::Acquire) {
-            self.snapshot_dirty.store(false, Ordering::Release);
-            return;
-        }
-        self.snapshot_requested.notify_one();
+    }
+
+    /// Claims a pending snapshot write for the caller, returning whether
+    /// there was one to claim. Used only by `crate::persistence`'s writer.
+    pub fn take_pending_snapshot(&self) -> bool {
+        self.snapshot_state.take_dirty()
+    }
+
+    /// Marks this session unrecoverable, discarding any pending write.
+    /// Terminal: nothing can mark the snapshot dirty afterward.
+    ///
+    /// `crate::run`'s shutdown grace period (see `SHUTDOWN_GRACE_PERIOD`)
+    /// deliberately keeps other attached connections alive for a short
+    /// window after one connection's `KillSession` request has already reset
+    /// `tree`/`panes` to empty and deleted the on-disk snapshot. Without
+    /// this, a second connection's ordinary mutation (e.g. `NewPane`)
+    /// landing in that window would resurrect a snapshot file for a session
+    /// `handle_kill_session` already decided has nothing worth recovering.
+    pub fn mark_session_killed(&self) {
+        self.snapshot_state.mark_session_killed();
+    }
+
+    /// Whether a snapshot write is currently owed. Tests only -- a writer
+    /// must claim the work with `take_pending_snapshot` rather than acting
+    /// on this observation.
+    #[cfg(test)]
+    pub fn is_snapshot_dirty(&self) -> bool {
+        self.snapshot_state.is_dirty()
+    }
+
+    /// Whether this session has been killed. Tests only, for the same
+    /// reason as above.
+    #[cfg(test)]
+    pub fn is_session_killed(&self) -> bool {
+        self.snapshot_state.is_session_killed()
     }
 
     /// Drops every `restructure_undo` entry whose project no longer exists
@@ -355,14 +362,11 @@ mod tests {
 
         state.request_snapshot_save();
         assert!(
-            state.snapshot_dirty.load(Ordering::Acquire),
+            state.is_snapshot_dirty(),
             "an ordinary request must still be able to dirty the snapshot before any kill"
         );
 
-        // Mirrors `handle_kill_session`'s own ordering: mark killed, then
-        // clear the flag it may have just set.
-        state.session_killed.store(true, Ordering::Release);
-        state.snapshot_dirty.store(false, Ordering::Release);
+        state.mark_session_killed();
 
         // Stands in for a second, still-attached connection's ordinary
         // mutation (e.g. `NewPane`) landing during the shutdown grace
@@ -370,49 +374,21 @@ mod tests {
         state.request_snapshot_save();
 
         assert!(
-            !state.snapshot_dirty.load(Ordering::Acquire),
+            !state.is_snapshot_dirty(),
             "request_snapshot_save must not re-dirty the snapshot for an already-killed session"
+        );
+        assert!(
+            state.is_session_killed(),
+            "a refused request must leave the session killed, not merely clean"
+        );
+        assert!(
+            !state.take_pending_snapshot(),
+            "and the background writer must find no work for a killed session"
         );
     }
 
-    /// Stress-reproduces the same race with a genuinely concurrent
-    /// `request_snapshot_save` and kill sequence on real OS threads, rather
-    /// than the hand-sequenced interleaving above: `session_killed` and
-    /// `snapshot_dirty` are two independent atomics with no lock spanning
-    /// both, so `handle_kill_session`'s own two-step sequence (mark killed,
-    /// then clear dirty) can land at any point relative to
-    /// `request_snapshot_save`'s two steps (check killed, then mark dirty).
-    /// Whichever interleaving occurs, the killer thread's own
-    /// `snapshot_dirty = false` is always the last write to actually
-    /// persist unless `request_snapshot_save` observes the kill and undoes
-    /// its own mark -- run enough iterations under `loom`-style repetition
-    /// to make a regression in that re-check reliably observable rather
-    /// than relying on a single lucky (or unlucky) scheduling.
-    #[tokio::test]
-    async fn request_snapshot_save_never_leaves_dirty_set_after_a_concurrent_kill() {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let state = Arc::new(test_state(&directory));
-
-        for _ in 0..1_000 {
-            state.snapshot_dirty.store(false, Ordering::Release);
-            state.session_killed.store(false, Ordering::Release);
-
-            let saver = Arc::clone(&state);
-            let saver_thread = std::thread::spawn(move || saver.request_snapshot_save());
-
-            let killer = Arc::clone(&state);
-            let killer_thread = std::thread::spawn(move || {
-                killer.session_killed.store(true, Ordering::Release);
-                killer.snapshot_dirty.store(false, Ordering::Release);
-            });
-
-            saver_thread.join().expect("saver thread must not panic");
-            killer_thread.join().expect("killer thread must not panic");
-
-            assert!(
-                !state.snapshot_dirty.load(Ordering::Acquire),
-                "a concurrent kill must never leave the dirty flag stuck true"
-            );
-        }
-    }
+    // The concurrent request-versus-kill stress lives with the state machine
+    // itself, in `crate::snapshot_state`: it is a property of that one
+    // atomic, and testing it there needs neither a tempdir nor a whole
+    // `ServerState` per iteration.
 }

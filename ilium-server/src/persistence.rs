@@ -34,7 +34,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -472,7 +471,7 @@ pub fn spawn_snapshot_writer(state: Arc<ServerState>) -> JoinHandle<()> {
 /// picked up by the debounce window yet is still persisted before the
 /// server exits.
 pub async fn flush_pending_snapshot(state: &ServerState) {
-    if !state.snapshot_dirty.swap(false, Ordering::AcqRel) {
+    if !state.take_pending_snapshot() {
         return;
     }
     if let Err(error) = save_snapshot(state).await {

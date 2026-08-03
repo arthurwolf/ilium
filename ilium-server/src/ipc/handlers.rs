@@ -2515,27 +2515,21 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
 
-    // A cleanly-killed session has nothing left worth recovering. Set
-    // `session_killed` first: `crate::run`'s shutdown grace period keeps
-    // other attached connections alive for a short window after this
-    // returns, and without this flag one of them could still call
-    // `request_snapshot_save` (e.g. via `NewPane`) and resurrect a
-    // snapshot for a session already decided to be unrecoverable -- see
-    // `ServerState::session_killed`'s doc comment. Then clear the dirty
-    // flag so the background debounced writer
-    // (`crate::persistence::spawn_snapshot_writer`) never recreates the
-    // file after we remove it below just because an earlier mutation's
-    // dirty flag was still set; then take the same write lock
+    // A cleanly-killed session has nothing left worth recovering. Marking it
+    // killed both refuses every later `request_snapshot_save` -- `crate::run`'s
+    // shutdown grace period keeps other attached connections alive for a short
+    // window after this returns, and one of them could otherwise resurrect a
+    // snapshot via `NewPane` -- and discards any pending write, so the
+    // background debounced writer
+    // (`crate::persistence::spawn_snapshot_writer`) cannot recreate the file
+    // after we remove it below just because an earlier mutation had left one
+    // owed. Both are the same atomic step; see `crate::snapshot_state` for
+    // why they must be. Then take the same write lock
     // `persistence::save_snapshot` holds for a save's entire
-    // build+serialize+write+rename, so a write already in flight when
-    // this handler runs is guaranteed to finish (writing the *old*
-    // snapshot) before we remove the file, rather than racing it.
-    state
-        .session_killed
-        .store(true, std::sync::atomic::Ordering::Release);
-    state
-        .snapshot_dirty
-        .store(false, std::sync::atomic::Ordering::Release);
+    // build+serialize+write+rename, so a write already in flight when this
+    // handler runs is guaranteed to finish (writing the *old* snapshot)
+    // before we remove the file, rather than racing it.
+    state.mark_session_killed();
     {
         let _write_guard = state.snapshot_write_lock.lock().await;
         match tokio::fs::remove_file(&state.snapshot_path).await {
@@ -2718,9 +2712,7 @@ mod tests {
         };
         assert!(snapshot.get(group_id).unwrap().is_bookmarked);
         assert!(state.tree.read().await.get(group_id).unwrap().is_bookmarked);
-        assert!(state
-            .snapshot_dirty
-            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(state.is_snapshot_dirty());
         assert!(direct_rx.try_recv().is_err());
         sound_task.abort();
     }
@@ -2854,19 +2846,22 @@ mod tests {
         })
         .await
         .expect("PTY echo should produce output activity");
+        // At least, not exactly: the event is published after the tree is
+        // updated, so the tree can only be at or ahead of an announced
+        // revision. A PTY is free to deliver its output in more chunks than
+        // one -- ConPTY routinely does -- and each chunk advances activity
+        // again, so demanding equality would be asserting a property of the
+        // platform's buffering rather than of ilium.
+        let tree_revision = state
+            .tree
+            .read()
+            .await
+            .get(pane_id)
+            .unwrap()
+            .activity_revision;
         assert!(
-            output_revision >= 2,
-            "one accepted input and its PTY output must create distinct revisions"
-        );
-        assert_eq!(
-            state
-                .tree
-                .read()
-                .await
-                .get(pane_id)
-                .unwrap()
-                .activity_revision,
-            output_revision
+            tree_revision >= output_revision,
+            "tree revision {tree_revision} is behind the announced revision {output_revision}"
         );
 
         let resources: Vec<_> = state.panes.write().await.drain().collect();
@@ -2956,18 +2951,30 @@ mod tests {
             .iter()
             .find(|event| matches!(event, ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == missing_pane_id))
             .unwrap_or_else(|| panic!("the pane behind by one frame should be sent its tail: {terminal_events:#?}"));
-        assert!(matches!(
-            missing_tail,
-            ServerEvent::ScreenUpdate {
-                pane_id,
-                first_sequence,
-                sequence,
-                bytes,
-            } if *pane_id == missing_pane_id
-                && *first_sequence == missing_sequence
-                && *sequence == missing_sequence
-                && !bytes.is_empty()
-        ));
+        let ServerEvent::ScreenUpdate {
+            first_sequence,
+            sequence,
+            bytes,
+            ..
+        } = *missing_tail
+        else {
+            panic!("the tail found for the behind pane was not a screen update: {missing_tail:#?}");
+        };
+        assert_eq!(
+            *first_sequence, missing_sequence,
+            "the tail must begin at exactly the frame the client is missing, not earlier"
+        );
+        // At least, for the same reason the count is not asserted above: the
+        // pane's process may legitimately have produced further frames since
+        // it settled, and a tail that carries them too is still correct.
+        assert!(
+            *sequence >= missing_sequence,
+            "the tail must reach at least the frame the client is missing, got {sequence}"
+        );
+        assert!(
+            !bytes.is_empty(),
+            "a tail with no bytes replays nothing: {missing_tail:#?}"
+        );
         for event in &terminal_events {
             if let ServerEvent::ScreenUpdate {
                 pane_id,

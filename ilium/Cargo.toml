@@ -24,6 +24,7 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 ilium-pty = { version = "0.1.0", path = "../ilium-pty" }
+serde_json = "1.0.151"
 tempfile = "3.27.0"
 tokio = { version = "1", features = ["process"] }
 vt100 = "0.16.2"
