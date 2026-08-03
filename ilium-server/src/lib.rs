@@ -443,6 +443,31 @@ pub(crate) async fn restore_snapshot(
 #[cfg(test)]
 mod restore_tests {
 
+    /// Every node's identity, parentage, name, and kind, in a stable order.
+    ///
+    /// Deliberately excludes activity revisions: they are runtime counters that
+    /// advance whenever a restored pane's process writes anything, which is not
+    /// something a snapshot can or should promise.
+    fn tree_structure(tree: &ilium_core::Tree) -> Vec<String> {
+        fn walk(tree: &ilium_core::Tree, id: ilium_core::NodeId, into: &mut Vec<String>) {
+            if let Some(node) = tree.get(id) {
+                into.push(format!(
+                    "{:?} parent={:?} name={:?} kind={:?}",
+                    node.id,
+                    node.parent,
+                    node.name,
+                    std::mem::discriminant(&node.kind)
+                ));
+            }
+            for child in tree.children_of(id).unwrap_or(&[]) {
+                walk(tree, *child, into);
+            }
+        }
+        let mut structure = Vec::new();
+        walk(tree, ilium_core::ROOT_ID, &mut structure);
+        structure
+    }
+
     /// A command that stays alive and prints nothing, spelled per platform.
     ///
     /// These fixtures need a pane whose process keeps running until the test
@@ -614,9 +639,17 @@ mod restore_tests {
         let ServerEvent::TreeSnapshot(restored_tree) = event else {
             panic!("expected TreeSnapshot on attach, got {event:?}");
         };
+        // Structure, not runtime counters. Restoring a pane starts a real
+        // process, and any byte it emits advances that node's activity
+        // revision -- on Windows a console app cannot avoid it, because ConPTY
+        // writes setup sequences the moment it starts. `cat` happens to stay
+        // silent on Unix, so an exact comparison passed there by luck rather
+        // than by contract. What the snapshot promises is the shape of the
+        // tree.
         assert_eq!(
-            restored_tree, tree,
-            "the tree the server attaches with should exactly match the saved snapshot's tree"
+            tree_structure(&restored_tree),
+            tree_structure(&tree),
+            "the tree the server attaches with should match the saved snapshot's structure"
         );
 
         write_frame(
