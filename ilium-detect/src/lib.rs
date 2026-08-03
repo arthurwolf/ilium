@@ -901,16 +901,48 @@ pub fn identify_agent_with_extra(
 /// only consulted when the kernel name matched nothing, so `sh -c "codex …"`
 /// cannot masquerade as the agent: its first argument is the shell itself.
 fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
+    let arguments = process.cmd();
+    let invoked = argument_file_name(arguments, 0);
+    // When the first argument is an interpreter, the *script* it was handed is
+    // the name worth matching. That is exactly how the kernel launches a
+    // shebang script: executing `#!/bin/sh /path/codex` builds an argument
+    // vector of `["/bin/sh", "/path/codex"]`, so the agent's own name is the
+    // second entry, never the first.
+    let script = invoked
+        .as_deref()
+        .is_some_and(is_interpreter_name)
+        .then(|| argument_file_name(arguments, 1))
+        .flatten();
+
     let mut candidates = vec![process.name().to_string_lossy().to_lowercase()];
-    if let Some(invoked) = process.cmd().first() {
-        if let Some(file_name) = Path::new(invoked).file_name() {
-            let file_name = file_name.to_string_lossy().to_lowercase();
-            if !candidates.contains(&file_name) {
-                candidates.push(file_name);
-            }
+    for candidate in [script, invoked].into_iter().flatten() {
+        if !candidate.is_empty() && !candidates.contains(&candidate) {
+            candidates.push(candidate);
         }
     }
     candidates
+}
+
+/// File name of the argument at `index`, lowercased.
+fn argument_file_name(arguments: &[std::ffi::OsString], index: usize) -> Option<String> {
+    let argument = arguments.get(index)?;
+    Path::new(argument)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+}
+
+/// Whether a program merely *runs* another program named after it.
+///
+/// Deliberately a closed list. Consulting the second argument for any process
+/// would misread `vim codex.md` as the agent itself; consulting it only behind
+/// a known interpreter keeps the rule to the case it exists for, and leaves
+/// `sh -c "codex …"` alone because that command's second argument is `-c`.
+fn is_interpreter_name(name: &str) -> bool {
+    const INTERPRETERS: &[&str] = &[
+        "sh", "bash", "dash", "zsh", "ksh", "fish", "env", "node", "nodejs", "deno", "bun",
+        "python", "python3", "ruby", "perl",
+    ];
+    INTERPRETERS.contains(&name) || INTERPRETERS.contains(&name.trim_end_matches(".exe"))
 }
 
 /// Classifies a single (already-lowercased) process name against the shared
@@ -960,6 +992,42 @@ fn match_process_name_with_extra(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shebang case this exists for: the kernel puts the interpreter in
+    /// the first argument and the agent's own script in the second, so the
+    /// script is the name that must be reachable.
+    #[test]
+    fn an_interpreter_hands_its_script_name_on() {
+        assert!(is_interpreter_name("sh"));
+        assert!(is_interpreter_name("node"));
+        assert!(is_interpreter_name("python3"));
+        // Windows spells the same interpreters with an extension.
+        assert!(is_interpreter_name("node.exe"));
+    }
+
+    /// The list is closed on purpose: consulting a second argument for any
+    /// process at all would read `vim codex.md` as the agent itself.
+    #[test]
+    fn an_ordinary_program_is_not_treated_as_an_interpreter() {
+        assert!(!is_interpreter_name("vim"));
+        assert!(!is_interpreter_name("codex"));
+        assert!(!is_interpreter_name("claude"));
+        assert!(!is_interpreter_name(""));
+    }
+
+    #[test]
+    fn an_argument_is_reduced_to_its_lowercase_file_name() {
+        let arguments = [
+            std::ffi::OsString::from("/bin/sh"),
+            std::ffi::OsString::from("/Tmp/Fixtures/Codex"),
+        ];
+
+        assert_eq!(argument_file_name(&arguments, 0).as_deref(), Some("sh"));
+        assert_eq!(argument_file_name(&arguments, 1).as_deref(), Some("codex"));
+        // Past the end is "unknown", not a panic: a process can be inspected
+        // while its argument vector is still being read.
+        assert_eq!(argument_file_name(&arguments, 2), None);
+    }
 
     /// Loads a captured screen-text fixture from `tests/fixtures/`.
     fn fixture(name: &str) -> String {
