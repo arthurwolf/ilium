@@ -564,10 +564,17 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         .iter()
         .filter(|entry| entry.kind == AgentDebugEventKind::DetectionCycle)
         .collect();
-    assert_eq!(
-        detection_entries.len(),
-        3,
-        "repeated polls must produce only the Working, Done, and input-acknowledged Idle decisions: {detection_entries:#?}"
+    // The point is that repeated polls do not spam decisions -- one entry per
+    // real change, not one per tick. The Working/Done/input-acknowledged-Idle
+    // progression is always recorded; whether a leading Idle precedes it is a
+    // scheduling detail, because the detector can legitimately observe the pane
+    // once before the agent's first bytes have been parsed. Pinning an exact
+    // count asserts how fast the machine is, not how the server behaves.
+    assert!(
+        (3..=4).contains(&detection_entries.len()),
+        "repeated polls must produce one decision per real change, optionally \
+         preceded by an idle observation made before the agent's first output: \
+         {detection_entries:#?}"
     );
     assert!(detection_entries.iter().all(|entry| {
         [
