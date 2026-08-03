@@ -109,12 +109,24 @@ impl TranscriptLocator {
     /// Ensures a PID-held path is within the expected agent store before its
     /// metadata is opened. Claude must be a direct project transcript, not a
     /// nested subagent transcript; Codex may be nested only below sessions/.
+    /// Compared after resolving both sides, never lexically.
+    ///
+    /// A path reaching this from a process's open descriptors is whatever the
+    /// kernel reports, and macOS reports it fully resolved: a store rooted at
+    /// `/var/folders/...` is handed back as `/private/var/folders/...`, so a
+    /// textual comparison rejects an agent's own transcript.
     fn path_is_in_expected_store(&self, class: &AgentClass, path: &Path) -> bool {
+        let path = canonical_or_original(path);
         match class {
-            AgentClass::Claude => path.parent() == Some(self.claude_project_dir().as_path()),
-            AgentClass::Codex => path.starts_with(self.codex_sessions_dir()),
+            AgentClass::Claude => {
+                path.parent() == Some(canonical_or_original(&self.claude_project_dir()).as_path())
+            }
+            AgentClass::Codex => {
+                path.starts_with(canonical_or_original(&self.codex_sessions_dir()))
+            }
             AgentClass::Antigravity => {
-                path.parent() == Some(self.antigravity_conversations_dir().as_path())
+                path.parent()
+                    == Some(canonical_or_original(&self.antigravity_conversations_dir()).as_path())
             }
             AgentClass::Other(_) => false,
         }

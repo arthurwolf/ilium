@@ -726,8 +726,14 @@ fn write_clear_transitioning_fake_codex_binary(bin_dir: &std::path::Path) -> std
 }
 
 fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> std::path::PathBuf {
-    let slug: String = server
-        .project_cwd
+    // Slugged from the resolved path, because `TranscriptLocator` resolves
+    // before it slugifies. macOS reaches a temporary directory through a
+    // `/var` -> `/private/var` symlink, so an unresolved slug names a
+    // directory the locator never looks in -- a different directory, not just
+    // a different spelling of one.
+    let resolved_cwd = ilium_platform::paths::canonicalize(&server.project_cwd)
+        .unwrap_or_else(|_| server.project_cwd.clone());
+    let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
         .map(|character| {
@@ -738,7 +744,7 @@ fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> st
             }
         })
         .collect();
-    let directory = server.home_dir.join(".claude/projects").join(slug);
+    let directory = server.home_dir.join(".claude").join("projects").join(slug);
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join(format!("{session_id}.jsonl"));
     std::fs::write(
