@@ -2023,7 +2023,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
-        let cwd = Path::new("/home/developer/dev/ai/ilium");
+        let cwd = Path::new("/home/developer/projects/ilium");
 
         let mut contexts = vec![LeafContext {
             id: NodeId(1),

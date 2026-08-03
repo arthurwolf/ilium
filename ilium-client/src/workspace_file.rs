@@ -232,7 +232,9 @@ mod tests {
                 },
                 SavedNode::Editor {
                     name: "main.rs".to_string(),
-                    path: Some(PathBuf::from("/home/developer/dev/ai/ilium/ilium/src/main.rs")),
+                    path: Some(PathBuf::from(
+                        "/home/developer/projects/ilium/ilium/src/main.rs",
+                    )),
                 },
                 SavedNode::Group {
                     name: "nested".to_string(),

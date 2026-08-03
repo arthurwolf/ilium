@@ -188,7 +188,7 @@ mod tests {
         TerminalTitleInput {
             pane_id: NodeId(7),
             project_name: "ilium".to_string(),
-            project_path: PathBuf::from("/home/developer/dev/ai/ilium"),
+            project_path: PathBuf::from("/home/developer/projects/ilium"),
             current_title: "shell".to_string(),
             screen_text: screen_text.to_string(),
         }
@@ -231,7 +231,7 @@ mod tests {
         assert!(prompt.contains("command_hint"));
         assert!(prompt.contains("<pane-id>\"7\"</pane-id>"));
         assert!(prompt.contains("<project-name>\"ilium\"</project-name>"));
-        assert!(prompt.contains("<project-path>\"/home/developer/dev/ai/ilium\"</project-path>"));
+        assert!(prompt.contains("<project-path>\"/home/developer/projects/ilium\"</project-path>"));
         assert!(prompt.contains(
             "<output-example>{\"icon\":\"🦀\",\"command_hint\":\"cargo build\",\"terminal_title_short\":\"Rust Build\",\"terminal_title_long\":\"Build Rust Project With Cargo\"}</output-example>"
         ));

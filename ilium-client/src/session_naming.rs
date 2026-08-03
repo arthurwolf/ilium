@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn prompt_contains_all_live_metadata_and_typed_transcript_entries() {
         let generator = FakeGenerator::success();
-        let input = input(PathBuf::from("/home/developer/dev/ai/ilium"));
+        let input = input(PathBuf::from("/home/developer/projects/ilium"));
         infer_session_title(
             &generator,
             &input,
@@ -377,7 +377,7 @@ mod tests {
             ("session-id", "77777777-7777-4777-8777-777777777777"),
             ("process-id", "12345"),
             ("project-name", "ilium"),
-            ("project-path", "/home/developer/dev/ai/ilium"),
+            ("project-path", "/home/developer/projects/ilium"),
             (
                 "transcript-path",
                 "/home/developer/.codex/sessions/session.jsonl",

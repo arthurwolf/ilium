@@ -1,1 +1,1 @@
-developer@workstation:~/dev/ai/ilium$
+developer@workstation:~/projects/ilium$
