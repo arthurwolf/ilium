@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ilium_core::ROOT_ID;
 use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
-use ilium_transport::{SessionEndpoint, SessionStream};
+use ilium_transport::{Liveness, SessionEndpoint, SessionStream};
 
 struct ChildGuard(Child);
 
@@ -18,12 +18,17 @@ impl Drop for ChildGuard {
     }
 }
 
+/// Waits until a server is actually listening on `path`.
+///
+/// Liveness, not a filesystem check: a Windows session endpoint is a named
+/// pipe with no file to appear, so waiting for one would never return there.
 async fn wait_for_socket(path: &std::path::Path) {
+    let endpoint = SessionEndpoint::from_path(path);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while !path.exists() {
+    while endpoint.probe_liveness() != Liveness::Live {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "server did not create {}",
+            "server never began listening on {}",
             path.display()
         );
         tokio::time::sleep(Duration::from_millis(20)).await;

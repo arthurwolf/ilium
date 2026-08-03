@@ -31,7 +31,7 @@ use std::time::Duration;
 use ilium_ipc::{read_frame, ServerEvent};
 use ilium_server::config::{DetectionConfig, NotificationsConfig};
 use ilium_server::{run, NoopSoundPlayer, ServerOptions, SoundPlayer};
-use ilium_transport::{SessionEndpoint, SessionStream};
+use ilium_transport::{Liveness, SessionEndpoint, SessionStream};
 
 /// Polls `condition` until it's true or `timeout` elapses, without a fixed
 /// sleep -- the server binding its socket (or, for
@@ -200,7 +200,14 @@ impl TestServer {
 
         let server_task = tokio::spawn(run(options));
 
-        let bound = wait_until(|| socket_path.exists(), Duration::from_secs(5)).await;
+        // Liveness, not a filesystem check: a Windows session endpoint is a
+        // named pipe with no file to appear, so `Path::exists` would wait
+        // forever there.
+        let bound = wait_until(
+            || SessionEndpoint::from_path(&socket_path).probe_liveness() == Liveness::Live,
+            Duration::from_secs(5),
+        )
+        .await;
         if !bound {
             // Bail out before the task's `JoinHandle` is ever stored
             // anywhere reachable -- without this, a bind timeout would

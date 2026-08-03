@@ -573,7 +573,13 @@ mod restore_tests {
         };
         let server_task = tokio::spawn(run(options));
 
-        let bound = wait_until(|| socket_path.exists(), Duration::from_secs(5)).await;
+        // Liveness, not a filesystem check: a Windows session endpoint is a named
+        // pipe with no file to appear, so `Path::exists` would wait forever there.
+        let bound = wait_until(
+            || SessionEndpoint::from_path(&socket_path).probe_liveness() == Liveness::Live,
+            Duration::from_secs(5),
+        )
+        .await;
         assert!(bound, "server did not bind its socket in time");
 
         let mut client = SessionEndpoint::from_path(&socket_path)
@@ -943,7 +949,11 @@ mod restore_tests {
         let server_task = tokio::spawn(run(options));
 
         assert!(
-            wait_until(|| socket_path.exists(), Duration::from_secs(5)).await,
+            wait_until(
+                || SessionEndpoint::from_path(&socket_path).probe_liveness() == Liveness::Live,
+                Duration::from_secs(5)
+            )
+            .await,
             "server did not bind its socket"
         );
 
@@ -1042,7 +1052,9 @@ mod socket_tests {
 
         let published = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if socket_path.exists() && active_log_path_file.exists() {
+                if SessionEndpoint::from_path(&socket_path).probe_liveness() == Liveness::Live
+                    && active_log_path_file.exists()
+                {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;

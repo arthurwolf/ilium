@@ -375,16 +375,45 @@ fn terminal_launch_plan(origin: &TerminalOrigin) -> TerminalLaunchPlan {
     }
 }
 
+/// The interactive shell a pane runs, and the flag that makes it execute one
+/// command line and exit.
+///
+/// `$SHELL` is the user's own choice wherever it is set, which on Unix is
+/// essentially always. It is normally unset on Windows, and the Unix fallback
+/// is not merely unhelpful there but fatal: `/bin/sh` does not exist, so every
+/// pane spawn fails outright. Windows falls back to `%COMSPEC%`, and its
+/// command flag is `/C` rather than `-c`.
+fn shell_command() -> (String, &'static str) {
+    if cfg!(windows) {
+        let shell = std::env::var("SHELL")
+            .or_else(|_| std::env::var("COMSPEC"))
+            .unwrap_or_else(|_| "cmd.exe".to_string());
+        // A `SHELL` pointing at a POSIX shell (Git Bash, MSYS) still takes
+        // `-c`; only the `cmd.exe` family uses `/C`.
+        let flag = if shell.to_lowercase().contains("cmd") {
+            "/C"
+        } else {
+            "-c"
+        };
+        (shell, flag)
+    } else {
+        (
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
+            "-c",
+        )
+    }
+}
+
 pub fn spawn_terminal_session(
     origin: &TerminalOrigin,
     cwd: &Path,
 ) -> Result<SpawnedTerminalSession, PtyError> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin);
     let command = match launch_plan.command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
         Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
-            .arg("-c")
+            .arg(command_flag)
             .arg(command_line),
     };
     Ok(SpawnedTerminalSession {

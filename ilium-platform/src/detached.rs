@@ -129,12 +129,16 @@ mod tests {
         command
     }
 
+    /// Writes through `cmd`'s own redirection. The whole command, redirection
+    /// included, has to be one argument: `Command` quotes each argument
+    /// separately, so passing `>` and the path as further arguments would send
+    /// them to `echo` as literal text instead of redirecting.
     #[cfg(windows)]
     fn shell_command_writing(marker: &std::path::Path) -> Command {
-        let mut command = Command::new("cmd");
-        command
-            .arg("/C")
-            .arg(format!("echo started> \"{}\"", marker.to_string_lossy()));
+        use std::os::windows::process::CommandExt;
+
+        let mut command = Command::new("cmd.exe");
+        command.raw_arg(format!("/C echo started>\"{}\"", marker.to_string_lossy()));
         command
     }
 }
