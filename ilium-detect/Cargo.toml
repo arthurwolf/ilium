@@ -9,3 +9,6 @@ repository.workspace = true
 [dependencies]
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 sysinfo = "0.39.6"
+
+[dev-dependencies]
+tempfile = "3.27.0"

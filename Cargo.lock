@@ -2231,6 +2231,7 @@ version = "0.1.0"
 dependencies = [
  "ilium-core",
  "sysinfo",
+ "tempfile",
 ]
 
 [[package]]
