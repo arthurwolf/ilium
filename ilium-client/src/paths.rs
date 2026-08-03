@@ -4,8 +4,6 @@
 
 use std::path::PathBuf;
 
-use directories::ProjectDirs;
-
 use crate::error::ClientError;
 
 /// This client's config directory, `~/.config/ilium/` on Linux -- the
@@ -15,6 +13,5 @@ use crate::error::ClientError;
 /// client-side tables (`[keybindings]`, `[theme]`) -- see
 /// `crate::config::load`.
 pub fn config_dir() -> Result<PathBuf, ClientError> {
-    let project_dirs = ProjectDirs::from("", "", "ilium").ok_or(ClientError::NoProjectDirs)?;
-    Ok(project_dirs.config_dir().to_path_buf())
+    ilium_platform::paths::config_dir().ok_or(ClientError::NoProjectDirs)
 }

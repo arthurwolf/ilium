@@ -6,9 +6,12 @@
 //! machine is loaded. Only the *worker* thread is lowered, never the process,
 //! so input and drawing keep their normal priority.
 //!
-//! Both supported families can express this, by unrelated mechanisms: POSIX
-//! niceness through `setpriority`, and Windows thread priority classes through
-//! `SetThreadPriority`. Callers pick an intent and this module maps it.
+//! Every platform expresses this differently, and only one of them through
+//! niceness: Linux narrows `setpriority` to the calling thread, Darwin has
+//! quality-of-service classes because its `setpriority` is process-wide, and
+//! Windows has thread priority classes. Callers pick an intent and this module
+//! maps it -- picking the mechanism at a call site would eventually reach for
+//! `setpriority` on Darwin and slow the whole interface down.
 
 /// How aggressively a worker thread should yield to interactive work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,13 +28,17 @@ pub enum WorkerPriority {
 /// Lowers the *calling thread's* priority. Never fails the caller: a worker
 /// that could not be niced must still run, just at default priority.
 ///
-/// On Unix this is `setpriority(PRIO_PROCESS, 0, _)`, which despite its name
-/// targets the calling thread alone when given a pid of `0`, and is always
-/// permitted -- only *raising* priority needs `CAP_SYS_NICE`. The value set is
-/// absolute rather than relative on purpose: worker threads come from pools
-/// that get reused across many calls, so a relative adjustment would compound
-/// on every reuse instead of settling at a fixed, correct value.
-#[cfg(unix)]
+/// `setpriority(PRIO_PROCESS, 0, _)` targets the calling *thread* on Linux,
+/// which is the exception rather than the rule: POSIX defines `PRIO_PROCESS`
+/// as process-wide, and Darwin implements it that way. Using it there would
+/// deprioritise the interactive UI along with the worker -- the precise
+/// opposite of this module's purpose -- so Linux is the only platform that
+/// takes this path.
+///
+/// The value set is absolute rather than relative on purpose: worker threads
+/// come from pools that get reused across many calls, so a relative adjustment
+/// would compound on every reuse instead of settling at a fixed, correct value.
+#[cfg(target_os = "linux")]
 pub fn lower_current_thread(priority: WorkerPriority) {
     let niceness = match priority {
         WorkerPriority::BelowNormal => 10,
@@ -49,6 +56,48 @@ pub fn lower_current_thread(priority: WorkerPriority) {
              continuing at default scheduling priority"
         );
     }
+}
+
+/// Darwin's per-thread mechanism is a quality-of-service class, not niceness.
+///
+/// `setpriority` would apply to the whole process here (see the Linux arm), so
+/// it cannot be used: the scheduler is told what kind of work the thread is
+/// doing instead, and derives priority, timer coalescing, and I/O throttling
+/// from that.
+#[cfg(target_os = "macos")]
+pub fn lower_current_thread(priority: WorkerPriority) {
+    // From `<pthread/qos.h>`. Declared here because `libc` does not expose the
+    // QoS family; both the function and these values are stable public ABI.
+    const QOS_CLASS_UTILITY: u32 = 0x11;
+    const QOS_CLASS_BACKGROUND: u32 = 0x09;
+    unsafe extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+
+    let qos_class = match priority {
+        // Long-running, not user-initiated, but its progress still matters.
+        WorkerPriority::BelowNormal => QOS_CLASS_UTILITY,
+        // Explicitly throttled, including for I/O; nothing waits on it.
+        WorkerPriority::Lowest => QOS_CLASS_BACKGROUND,
+    };
+    // SAFETY: takes two integers, affects only the calling thread's scheduling
+    // class, and touches no caller memory.
+    let result = unsafe { pthread_set_qos_class_self_np(qos_class, 0) };
+    if result != 0 {
+        tracing::warn!(
+            "failed to lower worker thread quality-of-service class: {}; continuing at \
+             default scheduling priority",
+            std::io::Error::from_raw_os_error(result)
+        );
+    }
+}
+
+/// Every other Unix defines `PRIO_PROCESS` as process-wide and offers no
+/// portable per-thread equivalent, so a worker simply runs at normal priority
+/// rather than dragging the interface down with it.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub fn lower_current_thread(priority: WorkerPriority) {
+    let _ = priority;
 }
 
 /// Windows has no niceness; the equivalent is a per-thread priority class.
@@ -97,6 +146,10 @@ mod tests {
 
     /// Lowering must not disturb the interactive thread that spawned the
     /// worker, which is the entire reason this is per-thread.
+    ///
+    /// Reads process-wide priority, which is exactly the trap being guarded
+    /// against: Darwin's `setpriority(PRIO_PROCESS, 0, _)` would move this
+    /// number and take the whole interface down with the worker.
     #[cfg(unix)]
     #[test]
     fn lowering_a_worker_leaves_the_spawning_thread_alone() {

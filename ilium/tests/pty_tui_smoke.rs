@@ -134,6 +134,14 @@ async fn wait_until_polling(
 struct IsolatedXdgDirs {
     data_home: PathBuf,
     config_home: PathBuf,
+    /// Where ilium itself reads `config.toml`, named explicitly because the
+    /// platform default is only redirectable by `XDG_CONFIG_HOME` on Linux.
+    ilium_config_dir: PathBuf,
+    /// This test's own debug log root. The default is shared by every project
+    /// on the machine, and these tests scan it for the session they just
+    /// started -- against a root holding previous runs' directories, that scan
+    /// finds somebody else's log.
+    debug_log_dir: PathBuf,
     runtime_dir: PathBuf,
     /// Keeps the short runtime directory alive; dropping it removes the
     /// directory. Declared last so it outlives nothing that still needs it.
@@ -144,7 +152,11 @@ impl IsolatedXdgDirs {
     fn under(root: &Path) -> std::io::Result<Self> {
         let data_home = root.join("data");
         let config_home = root.join("config");
-        for dir in [&data_home, &config_home] {
+        // Matches what `XDG_CONFIG_HOME` implies on Linux, so both levers name
+        // the same directory and a seeded `config.toml` is found either way.
+        let ilium_config_dir = config_home.join("ilium");
+        let debug_log_dir = root.join("debug-logs");
+        for dir in [&data_home, &config_home, &ilium_config_dir, &debug_log_dir] {
             std::fs::create_dir_all(dir)?;
         }
         // The runtime directory deliberately does *not* live under `root`. A
@@ -160,6 +172,8 @@ impl IsolatedXdgDirs {
         Ok(Self {
             data_home,
             config_home,
+            ilium_config_dir,
+            debug_log_dir,
             runtime_dir,
             _runtime_root: runtime_root,
         })
@@ -172,11 +186,24 @@ impl IsolatedXdgDirs {
     /// own `.env("SHELL", ...)`, and these pairs are applied afterwards, so
     /// pinning here would silently overwrite that fixture. Tests that need a
     /// deterministic shell set it themselves.
-    fn as_pairs(&self) -> [(&'static str, &Path); 3] {
+    fn as_pairs(&self) -> [(&'static str, &Path); 5] {
         [
             ("XDG_DATA_HOME", &self.data_home),
             ("XDG_CONFIG_HOME", &self.config_home),
             ("XDG_RUNTIME_DIR", &self.runtime_dir),
+            // `XDG_CONFIG_HOME` only redirects `directories` on Linux. macOS
+            // resolves `~/Library/Application Support` and Windows `%APPDATA%`,
+            // so without an explicit override these tests would read (and the
+            // settings tests write) the real user's configuration there while
+            // silently ignoring the one they seeded.
+            (
+                ilium_platform::paths::CONFIG_DIR_ENV,
+                &self.ilium_config_dir,
+            ),
+            (
+                ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
+                &self.debug_log_dir,
+            ),
         ]
     }
 }
@@ -420,15 +447,17 @@ fn active_log_path_from_metadata(metadata: &str) -> Option<PathBuf> {
     (!metadata.is_empty()).then(|| PathBuf::from(metadata))
 }
 
-fn process_log_for_project(project_dir: &Path) -> Option<(PathBuf, String)> {
+fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathBuf, String)> {
     let project_path = project_dir
         .canonicalize()
         .ok()?
         .to_string_lossy()
         .into_owned();
-    // Ask the same authority the CLI uses rather than duplicating its path
-    // choice, which differs per platform.
-    let log_root = std::fs::read_dir(ilium_platform::runtime_dir::debug_log_root().ok()?).ok()?;
+    // The caller's own root, passed in rather than resolved here: the spawned
+    // processes are given `DEBUG_LOG_DIR_ENV`, but this scan runs in the test
+    // process, which never sees it and would otherwise read the machine-wide
+    // root shared with every other project.
+    let log_root = std::fs::read_dir(log_root).ok()?;
     for session_entry in log_root.filter_map(Result::ok) {
         let Ok(file_type) = session_entry.file_type() else {
             continue;
@@ -1199,8 +1228,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .map(|entry| entry.file_name())
         .find(|name| name.to_string_lossy().ends_with(".sock"))
         .expect("isolated session socket");
-    let session_log_directory = ilium_platform::runtime_dir::debug_log_root()
-        .expect("debug log root")
+    // This test's own root, not the machine-wide default: the spawned
+    // processes were given `DEBUG_LOG_DIR_ENV`, but this lookup runs in the
+    // test process, which never sees it.
+    let session_log_directory = xdg
+        .debug_log_dir
         .join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
     let active_log_path = active_log_path_from_metadata(
         &std::fs::read_to_string(session_log_directory.join(".active-log-path"))
@@ -3529,12 +3561,14 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     assert!(
         wait_until(
             || {
-                process_log_for_project(&project_dir).is_some_and(|(_, contents)| {
-                    contents.contains("event_kind=PromptSubmitted")
-                        && contents.contains(
-                            "\"label\":\"submitted input\",\"value\":\"diagnostic-prompt\"",
-                        )
-                })
+                process_log_for_project(&xdg.debug_log_dir, &project_dir).is_some_and(
+                    |(_, contents)| {
+                        contents.contains("event_kind=PromptSubmitted")
+                            && contents.contains(
+                                "\"label\":\"submitted input\",\"value\":\"diagnostic-prompt\"",
+                            )
+                    },
+                )
             },
             WAIT_TIMEOUT,
         )
@@ -3731,8 +3765,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         );
     }
 
-    let (process_log_path, process_log) =
-        process_log_for_project(&project_dir).expect("find this session's process log");
+    let (process_log_path, process_log) = process_log_for_project(&xdg.debug_log_dir, &project_dir)
+        .expect("find this session's process log");
     assert_eq!(
         std::fs::metadata(&process_log_path)
             .expect("process log metadata")

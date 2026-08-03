@@ -83,6 +83,10 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
             log_path.to_str().expect("log path"),
         ])
         .env("XDG_CONFIG_HOME", &config_home)
+        // `XDG_CONFIG_HOME` only redirects `directories` on Linux; macOS and
+        // Windows resolve their own locations and would read the developer's
+        // real configuration instead of this test's.
+        .env(ilium_server::paths::CONFIG_DIR_ENV, &config_directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

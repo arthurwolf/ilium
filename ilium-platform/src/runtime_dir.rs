@@ -91,14 +91,27 @@ fn short_shared_directory() -> PathBuf {
     PathBuf::from(format!("/tmp/.ilium-{user_id}"))
 }
 
+/// Environment override for the debug log root.
+///
+/// The default root is shared by every project on the machine, which is right
+/// for a real user -- one place to look, one place to clear -- and wrong for
+/// anything that needs to observe only its own logs. Tests are the obvious
+/// case: they scan this root for the session they just started, and a root
+/// holding hundreds of directories from previous runs makes that scan find
+/// somebody else's.
+pub const DEBUG_LOG_DIR_ENV: &str = "ILIUM_DEBUG_LOG_DIR";
+
 /// Root directory for timestamped debug logs, created private.
 ///
 /// Logs contain terminal contents, so this is owner-only for the same reason
 /// the socket directory is. On Unix it deliberately shares the short per-user
 /// path: a long log path costs nothing, but keeping one root keeps cleanup
-/// (and a user's own `rm -rf`) to a single place.
+/// (and a user's own `rm -rf`) to a single place -- unless
+/// [`DEBUG_LOG_DIR_ENV`] names one explicitly.
 pub fn debug_log_root() -> io::Result<PathBuf> {
-    let directory = debug_log_root_path();
+    let directory = std::env::var_os(DEBUG_LOG_DIR_ENV)
+        .filter(|directory| !directory.is_empty())
+        .map_or_else(debug_log_root_path, PathBuf::from);
     secure_fs::create_private_directory(&directory)?;
     Ok(directory)
 }

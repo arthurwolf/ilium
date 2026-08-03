@@ -432,9 +432,9 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
 /// boolean first preserves diagnostics even if an unrelated config table is
 /// malformed and the client later falls back to defaults.
 fn initialize_cli_logging(log_path: &Path) -> Result<(), CliError> {
-    let enabled = directories::ProjectDirs::from("", "", "ilium")
-        .and_then(|directories| {
-            ilium_logging::file_logging_enabled_hint(&directories.config_dir().join("config.toml"))
+    let enabled = ilium_platform::paths::config_dir()
+        .and_then(|config_dir| {
+            ilium_logging::file_logging_enabled_hint(&config_dir.join("config.toml"))
                 .ok()
                 .flatten()
         })

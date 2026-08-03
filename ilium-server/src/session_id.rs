@@ -382,7 +382,13 @@ mod tests {
     }
 
     fn write_claude_transcript(home: &Path, cwd: &Path, session_id: &str) {
-        let slug: String = cwd
+        // Resolved first, because `TranscriptLocator` resolves before it
+        // slugifies. macOS reaches a temp directory through a `/var` ->
+        // `/private/var` symlink and Windows hands out 8.3 short names, so an
+        // unresolved slug names a directory the locator never looks in.
+        let resolved =
+            ilium_platform::paths::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+        let slug: String = resolved
             .to_string_lossy()
             .chars()
             .map(|character| {
@@ -393,7 +399,7 @@ mod tests {
                 }
             })
             .collect();
-        let directory = home.join(".claude/projects").join(slug);
+        let directory = home.join(".claude").join("projects").join(slug);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
             directory.join(format!("{session_id}.jsonl")),

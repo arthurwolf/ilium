@@ -6,14 +6,16 @@
 
 use std::path::PathBuf;
 
-use directories::ProjectDirs;
-
 use crate::error::ServerError;
+
+pub use ilium_platform::paths::CONFIG_DIR_ENV;
 
 /// Resolves the user-wide configuration directory. Theme, keybinding, and
 /// detection preferences are intentionally global; project session state is
 /// not.
+///
+/// [`CONFIG_DIR_ENV`] wins when set, so a caller can be explicit rather than
+/// depending on which environment variable a given platform happens to read.
 pub fn config_dir() -> Result<PathBuf, ServerError> {
-    let project_dirs = ProjectDirs::from("", "", "ilium").ok_or(ServerError::NoProjectDirs)?;
-    Ok(project_dirs.config_dir().to_path_buf())
+    ilium_platform::paths::config_dir().ok_or(ServerError::NoProjectDirs)
 }
