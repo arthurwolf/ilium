@@ -2078,6 +2078,12 @@ pub(crate) async fn write_key_input(
             {
                 runtime.cancel_initial_prompt_delivery();
             }
+            // Always false on Windows: ConPTY has no foreground process group,
+            // so `foreground_process_group_id` reports nothing and shell
+            // command titles stay inactive there. That is a missing capability
+            // rather than a bug -- inferring a title without knowing whether a
+            // command owns the terminal would retitle panes from keystrokes
+            // typed into a running program.
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
                 && matches!(
                     (
@@ -2554,6 +2560,16 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 
 #[cfg(test)]
 mod tests {
+
+    /// A command that reads standard input and stays alive, spelled per platform.
+    ///
+    /// These fixtures need a pane whose process keeps running until the test kills
+    /// it. `cat` is the obvious choice on Unix and does not exist on Windows, where
+    /// a snapshot naming it simply fails to respawn and the restored tree no longer
+    /// matches what was saved.
+    fn long_running_pane_command() -> String {
+        if cfg!(windows) { "more" } else { "cat" }.to_string()
+    }
     use super::*;
     use crate::initial_prompt::initial_input_bytes;
     use ilium_core::{NodeId, RestructureNode, SplitOrientation};
@@ -2813,7 +2829,7 @@ mod tests {
         spawn_and_register_pane(
             &state,
             pane_id,
-            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
         )
         .await
         .expect("spawn terminal activity fixture");

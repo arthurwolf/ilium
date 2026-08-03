@@ -442,6 +442,18 @@ pub(crate) async fn restore_snapshot(
 /// why the client/server boundary only ever goes through `ilium-ipc`).
 #[cfg(test)]
 mod restore_tests {
+
+    /// A command that reads standard input and stays alive, spelled per
+    /// platform.
+    ///
+    /// These fixtures need a pane whose process keeps running until the test
+    /// kills it. `cat` is the obvious choice on Unix and does not exist on
+    /// Windows, where a snapshot naming it simply fails to respawn and the
+    /// restored tree no longer matches what was saved.
+    fn long_running_pane_command() -> String {
+        if cfg!(windows) { "more" } else { "cat" }.to_string()
+    }
+
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -535,7 +547,9 @@ mod restore_tests {
             panes: vec![
                 PaneSnapshot {
                     node_id: terminal_pane_id,
-                    kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+                    kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(
+                        long_running_pane_command(),
+                    )),
                 },
                 PaneSnapshot {
                     node_id: editor_pane_id,
@@ -715,7 +729,7 @@ mod restore_tests {
         crate::ipc::handlers::spawn_and_register_pane(
             &state,
             orphan_pane_id,
-            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
         )
         .await
         .expect("spawn the soon-to-be-orphaned pane's live pty");
@@ -796,7 +810,7 @@ mod restore_tests {
         crate::ipc::handlers::spawn_and_register_pane(
             &state,
             orphan_pane_id,
-            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
         )
         .await
         .expect("spawn the soon-to-be-orphaned pane's live pty");
@@ -905,7 +919,7 @@ mod restore_tests {
         let result = crate::ipc::handlers::spawn_and_register_pane_in_directory(
             &state,
             pane_id,
-            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
             &cwd,
         )
         .await;
