@@ -71,9 +71,16 @@ pub async fn expect_event(
         loop {
             let event: ServerEvent = read_frame(stream).await.expect("read a server event");
             if let Ok(mut seen) = observed_in_loop.lock() {
-                // Truncated: a `TreeSnapshot` or `ScreenUpdate` carries far
-                // more detail than a failure report needs.
-                seen.push(format!("{event:?}").chars().take(240).collect());
+                // Debug entries carry the server's own reasoning -- which agent
+                // it identified and why -- so they are kept at length while
+                // bulk traffic like `ScreenUpdate` is clipped to a label.
+                let rendered = format!("{event:?}");
+                let budget = if matches!(event, ServerEvent::PaneDebugEntryAppended { .. }) {
+                    1200
+                } else {
+                    160
+                };
+                seen.push(rendered.chars().take(budget).collect());
             }
             if predicate(&event) {
                 return event;
