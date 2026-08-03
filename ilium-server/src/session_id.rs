@@ -124,7 +124,16 @@ pub fn discover_with_trace(
         detail: format!("found exact agent PID {}", pid.as_u32()),
     });
 
-    let Some(process_cwd) = process.cwd() else {
+    // `sysinfo` does not report a working directory on every platform, and
+    // where it does not, session discovery would stop here even though the
+    // agent has already been identified -- which is exactly what happened on
+    // macOS: the pane showed `Agent(Claude, Idle)` while its session id never
+    // resolved. `ilium_platform` asks the OS directly as a fallback.
+    let process_cwd = process
+        .cwd()
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| ilium_platform::process_info::working_directory(pid.as_u32()));
+    let Some(process_cwd) = process_cwd else {
         phases.push(SessionDiscoveryPhase {
             phase: "project ownership",
             outcome: "missing",
@@ -135,6 +144,7 @@ pub fn discover_with_trace(
             phases,
         };
     };
+    let process_cwd = process_cwd.as_path();
     if !same_canonical_path(process_cwd, project_cwd) {
         phases.push(SessionDiscoveryPhase {
             phase: "project ownership",
