@@ -477,7 +477,7 @@ mod restore_tests {
     /// exits immediately with nothing to page, and a bare `pause` prints
     /// "Press any key to continue", so the prompt is discarded.
     fn long_running_pane_command() -> String {
-        if cfg!(windows) { "pause > nul" } else { "cat" }.to_string()
+        if cfg!(windows) { "findstr ^" } else { "cat" }.to_string()
     }
 
     use std::path::PathBuf;
@@ -516,16 +516,36 @@ mod restore_tests {
         timeout: Duration,
         predicate: impl Fn(&ServerEvent) -> bool,
     ) -> ServerEvent {
-        tokio::time::timeout(timeout, async {
+        // Kept outside the future so a timeout can still report what arrived.
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let observed_in_loop = std::sync::Arc::clone(&observed);
+        tokio::time::timeout(timeout, async move {
             loop {
                 let event: ServerEvent = read_frame(stream).await.expect("read a server event");
+                if let Ok(mut seen) = observed_in_loop.lock() {
+                    seen.push(format!("{event:?}").chars().take(200).collect());
+                }
                 if predicate(&event) {
                     return event;
                 }
             }
         })
         .await
-        .expect("timed out waiting for the expected server event")
+        .unwrap_or_else(|_| {
+            // "No matching event" describes the symptom; what the server did
+            // send usually names the cause.
+            let seen = observed
+                .lock()
+                .map(|seen| {
+                    if seen.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        seen.join("\n  ")
+                    }
+                })
+                .unwrap_or_else(|_| "(unavailable)".to_string());
+            panic!("timed out waiting for the expected server event\nevents received:\n  {seen}")
+        })
     }
 
     #[tokio::test]
@@ -611,7 +631,13 @@ mod restore_tests {
             agent_debug_menu_enabled: true,
             http_api: HttpApiConfig { port: 0 },
         };
-        let server_task = tokio::spawn(run(options));
+        let server_task = tokio::spawn(async move {
+            let result = run(options).await;
+            if let Err(error) = &result {
+                eprintln!("ilium-server run() exited with an error: {error}");
+            }
+            result
+        });
 
         // Liveness, not a filesystem check: a Windows session endpoint is a named
         // pipe with no file to appear, so `Path::exists` would wait forever there.
@@ -994,7 +1020,13 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             http_api: HttpApiConfig { port: 0 },
         };
-        let server_task = tokio::spawn(run(options));
+        let server_task = tokio::spawn(async move {
+            let result = run(options).await;
+            if let Err(error) = &result {
+                eprintln!("ilium-server run() exited with an error: {error}");
+            }
+            result
+        });
 
         assert!(
             wait_until(
@@ -1096,7 +1128,13 @@ mod socket_tests {
                 log_path: log_path.clone(),
             }),
         );
-        let server_task = tokio::spawn(run(options));
+        let server_task = tokio::spawn(async move {
+            let result = run(options).await;
+            if let Err(error) = &result {
+                eprintln!("ilium-server run() exited with an error: {error}");
+            }
+            result
+        });
 
         let published = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
