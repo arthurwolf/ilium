@@ -258,7 +258,9 @@ impl ExplorerOverlay {
                     } else {
                         self.current_dir.join(entered)
                     };
-                    let canonical = candidate.canonicalize()?;
+                    // The explorer shows this path back to the user, so it
+                    // must not gain a Windows extended-length prefix.
+                    let canonical = ilium_platform::paths::canonicalize(&candidate)?;
                     if !canonical.is_dir() {
                         anyhow::bail!("entered path is not a directory");
                     }

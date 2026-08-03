@@ -125,8 +125,10 @@ fn selected_inference_model(settings: &InferenceSettings) -> String {
 /// Gives an existing board path one stable lexical identity without using a
 /// currently selected project as an implicit base directory.
 fn normalize_board_path(path: PathBuf) -> PathBuf {
-    path.canonicalize()
-        .unwrap_or_else(|_| normalize_path_lexically(&path))
+    // Through `ilium_platform`, not `std`: a board path is written into the
+    // board definition and shown to the user, and Windows' own canonical form
+    // carries an extended-length `\\?\` prefix that should never reach either.
+    ilium_platform::paths::canonicalize(&path).unwrap_or_else(|_| normalize_path_lexically(&path))
 }
 
 /// Cycles through system default plus every discovered CPAL device. A saved
@@ -5029,8 +5031,7 @@ impl App {
         } else {
             self.project_cwd_for_node(project_node).join(path)
         };
-        absolute_path
-            .canonicalize()
+        ilium_platform::paths::canonicalize(&absolute_path)
             .unwrap_or_else(|_| normalize_path_lexically(&absolute_path))
     }
 

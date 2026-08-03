@@ -13,6 +13,8 @@
 //!   need for the same reason.
 //! - [`file_lock`] -- one cross-process exclusive lock, used to serialize
 //!   competing first-attach processes and chatroom appends.
+//! - [`paths`] -- resolving a path to its real location without leaving a
+//!   Windows extended-length prefix in front of it.
 //! - [`process_control`] -- stopping a server process and asking whether one
 //!   is still alive, the CLI's fallback when a graceful IPC shutdown cannot be
 //!   delivered.
@@ -31,6 +33,7 @@
 
 pub mod detached;
 pub mod file_lock;
+pub mod paths;
 pub mod process_control;
 pub mod process_info;
 pub mod runtime_dir;

@@ -6,10 +6,11 @@
 # requests and runs only on `master` pushes or an explicit manual dispatch.
 # Linux is the fast inner loop and gates everything.
 #
-# Windows and macOS are expected to fail until the platform port lands
-# (`ilium-ipc` is Unix-domain-socket only, `ilium-client` depends on `zbus`
-# unconditionally, and agent detection reads `/proc`). They are blocking on
-# purpose: the red job is the porting checklist.
+# Windows and macOS both build and run the suite. They still have failing
+# tests while the port finishes, and they block on purpose: a red job here is
+# the porting checklist, and every platform bug found so far -- a startup hang,
+# panes that could not spawn, socket paths over the length limit -- was
+# invisible to compilation and only surfaced by running on a real machine.
 
 name: CI
 
@@ -84,8 +85,11 @@ jobs:
 
             # The live OpenAI tests carry `#[ignore]`; the default test run
             # skips them, so no API key ever needs to exist as a repo secret.
+            #
+            # `--no-fail-fast` for the same reason the Windows job uses it: one
+            # run should report every crate, not stop at the first failure.
             - name: cargo test
-              run: cargo test --workspace
+              run: cargo test --workspace --no-fail-fast
 
     test-windows:
         name: Test (Windows)
@@ -104,14 +108,8 @@ jobs:
             # `--no-fail-fast` so one run reports every crate instead of
             # stopping at the first failure, which is what makes this a porting
             # checklist rather than a one-bug-per-run drip.
-            #
-            # `--test-threads=1` is diagnostic and temporary: a test in
-            # `ilium-client` hangs here until the job times out, and libtest
-            # prints each test's name *before* running it only when
-            # single-threaded, so the hang names itself in the log. Remove once
-            # that test is identified and fixed.
             - name: cargo test
-              run: cargo test --workspace --no-fail-fast -- --test-threads=1
+              run: cargo test --workspace --no-fail-fast
 
     test-macos:
         name: Test (macOS)
@@ -128,5 +126,7 @@ jobs:
             - name: cargo build
               run: cargo build --workspace --all-targets
 
+            # See the Linux job: report every crate rather than stopping at the
+            # first failure.
             - name: cargo test
-              run: cargo test --workspace
+              run: cargo test --workspace --no-fail-fast
