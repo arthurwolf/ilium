@@ -2561,6 +2561,46 @@ mod tests {
 
     /// Waits for the command-backed test pane's reader thread to journal at
     /// least one chunk without relying on scheduler timing.
+    /// Waits until a pane's output sequence stops advancing.
+    ///
+    /// [`wait_for_output_sequence`] returns at the *first* byte, which is
+    /// enough when a test only needs some output to exist. It is not enough
+    /// when a test snapshots what each pane has delivered and then asserts
+    /// which panes are behind: a shell that emits its prompt in more than one
+    /// chunk keeps advancing after the snapshot, so a pane that was current
+    /// becomes legitimately stale and the assertion sees an extra event.
+    async fn wait_for_settled_output_sequence(state: &ServerState, pane_id: NodeId) -> u64 {
+        /// Consecutive quiet polls before output counts as settled.
+        const REQUIRED_STABLE_POLLS: usize = 5;
+        const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+        let mut last_sequence = wait_for_output_sequence(state, pane_id).await;
+        let mut stable_polls = 0;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                tokio::time::sleep(POLL_INTERVAL).await;
+                let sequence = {
+                    let panes = state.panes.read().await;
+                    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                        panic!("test terminal pane must remain registered");
+                    };
+                    runtime.session.output_replay().through_sequence
+                };
+                if sequence == last_sequence {
+                    stable_polls += 1;
+                    if stable_polls >= REQUIRED_STABLE_POLLS {
+                        return sequence;
+                    }
+                } else {
+                    stable_polls = 0;
+                    last_sequence = sequence;
+                }
+            }
+        })
+        .await
+        .expect("test terminal output should stop advancing")
+    }
+
     async fn wait_for_output_sequence(state: &ServerState, pane_id: NodeId) -> u64 {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -2869,8 +2909,11 @@ mod tests {
             .expect("register command-backed test terminal");
         }
 
-        let missing_sequence = wait_for_output_sequence(&state, missing_pane_id).await;
-        let current_sequence = wait_for_output_sequence(&state, current_pane_id).await;
+        // Both panes must be quiet before their sequences are snapshotted, or
+        // the "current" pane can advance afterwards and legitimately need a
+        // tail of its own, which this test would read as a second event.
+        let missing_sequence = wait_for_settled_output_sequence(&state, missing_pane_id).await;
+        let current_sequence = wait_for_settled_output_sequence(&state, current_pane_id).await;
         let delivered_sequences = HashMap::from([
             (missing_pane_id, missing_sequence.saturating_sub(1)),
             (current_pane_id, current_sequence),

@@ -42,23 +42,31 @@ pub fn session_socket_directory() -> io::Result<PathBuf> {
     Ok(directory)
 }
 
-#[cfg(target_os = "linux")]
+/// `XDG_RUNTIME_DIR` wins wherever it is set, on every Unix.
+///
+/// On Linux that is the session manager's own short, per-user, logout-cleared
+/// directory. macOS has no such convention, but honouring the variable there
+/// too is what lets a caller point one ilium session at an isolated directory
+/// -- which the integration tests rely on, and which silently failed while
+/// this arm ignored the variable.
+///
+/// The fallback is deliberately neither `BaseDirs::runtime_dir` nor
+/// `std::env::temp_dir()`: on macOS both resolve to the long per-session
+/// `/var/folders/...` path that overflows `sun_path`. See the module comment.
+#[cfg(unix)]
 fn socket_directory_path() -> PathBuf {
-    use directories::BaseDirs;
-
-    BaseDirs::new()
-        .as_ref()
-        .and_then(BaseDirs::runtime_dir)
-        .map(|runtime_dir| runtime_dir.join("ilium"))
-        .unwrap_or_else(short_shared_directory)
+    socket_directory_for_runtime_dir(std::env::var_os("XDG_RUNTIME_DIR"))
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
-fn socket_directory_path() -> PathBuf {
-    // Deliberately not `BaseDirs::runtime_dir` or `std::env::temp_dir()`: on
-    // macOS both resolve to the long per-session `/var/folders/...` path that
-    // overflows `sun_path`. See the module comment.
-    short_shared_directory()
+/// Split from the caller so the choice can be tested without mutating the
+/// environment, which is process-global and cannot be done safely while other
+/// tests run in parallel.
+#[cfg(unix)]
+fn socket_directory_for_runtime_dir(runtime_dir: Option<std::ffi::OsString>) -> PathBuf {
+    runtime_dir
+        .filter(|runtime_dir| !runtime_dir.is_empty())
+        .map(|runtime_dir| PathBuf::from(runtime_dir).join("ilium"))
+        .unwrap_or_else(short_shared_directory)
 }
 
 #[cfg(windows)]
@@ -124,6 +132,33 @@ mod tests {
         assert!(
             remaining >= 40,
             "socket directory {directory:?} leaves only {remaining} bytes for a file name"
+        );
+    }
+
+    /// Honouring `XDG_RUNTIME_DIR` is what lets a caller isolate one session,
+    /// which the integration tests depend on. It silently did not happen on
+    /// macOS while that arm resolved a fixed path instead.
+    #[cfg(unix)]
+    #[test]
+    fn an_explicit_runtime_directory_is_honoured() {
+        let requested = std::ffi::OsString::from("/tmp/ilium-runtime-test");
+
+        let resolved = socket_directory_for_runtime_dir(Some(requested));
+
+        assert_eq!(resolved, PathBuf::from("/tmp/ilium-runtime-test/ilium"));
+    }
+
+    /// An unset or empty value must fall back rather than resolving something
+    /// relative to the current directory.
+    #[cfg(unix)]
+    #[test]
+    fn an_absent_or_empty_runtime_directory_falls_back_to_the_short_shared_path() {
+        let fallback = short_shared_directory();
+
+        assert_eq!(socket_directory_for_runtime_dir(None), fallback);
+        assert_eq!(
+            socket_directory_for_runtime_dir(Some(std::ffi::OsString::new())),
+            fallback
         );
     }
 
