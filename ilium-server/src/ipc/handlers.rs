@@ -2946,9 +2946,18 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(terminal_events.len(), 1);
+        // The claim is that an up-to-date pane gets no *redundant* tail, not
+        // that no pane can produce output ever again. A pane's process can emit
+        // more between settling and this call -- on Windows especially, where
+        // ConPTY writes its own setup sequences -- and resending those is
+        // correct, so the test asserts what each event says rather than how
+        // many arrived.
+        let missing_tail = terminal_events
+            .iter()
+            .find(|event| matches!(event, ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == missing_pane_id))
+            .unwrap_or_else(|| panic!("the pane behind by one frame should be sent its tail: {terminal_events:#?}"));
         assert!(matches!(
-            terminal_events[0],
+            missing_tail,
             ServerEvent::ScreenUpdate {
                 pane_id,
                 first_sequence,
@@ -2959,6 +2968,22 @@ mod tests {
                 && *sequence == missing_sequence
                 && !bytes.is_empty()
         ));
+        for event in &terminal_events {
+            if let ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence,
+                ..
+            } = event
+            {
+                if *pane_id == current_pane_id {
+                    assert!(
+                        *first_sequence > current_sequence,
+                        "an up-to-date pane must only be sent output it has not already seen: \
+                         {terminal_events:#?}"
+                    );
+                }
+            }
+        }
         assert!(!events.contains(&ServerEvent::InitialStateSyncComplete));
 
         let resources: Vec<_> = state.panes.write().await.drain().collect();
