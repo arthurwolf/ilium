@@ -23,6 +23,9 @@ exclude = ["vendor/vt100"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/arthurwolf/ilium"
 
 # vt100 0.16.2 can retain an orphaned wide cell after a shrinking resize,
 # then panic when a later erase sequence clears that row. Upstream issue #28

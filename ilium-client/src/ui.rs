@@ -63,6 +63,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
     // area; the tree then restores the connected shared-border joints.
     draw_pane(frame, layout.pane_area, app);
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
+    let focused_pane_id = app.focused_pane_id();
     tree_ui::render(
         frame,
         layout.tree_area,
@@ -86,6 +87,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             titles_loading: &app.titles_loading,
             recently_created: &app.recently_created,
             terminal_activity: &app.terminal_activity,
+            focused_pane_id,
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
             icons: &app.ui_settings.icons,
@@ -128,7 +130,10 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
                         "Markdown file",
                         Style::new().add_modifier(Modifier::DIM),
                     )),
-                    Line::from(format!("▦ Create board from {label}")),
+            Line::from(format!(
+                "{} Create board from {label}",
+                context_menu_icon(&app.ui_settings, IconTarget::Board)
+            )),
                 ])
                 .block(theme::block(true).title(theme::chrome_title("File actions"))),
                 menu.area,
@@ -142,16 +147,16 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             &app.keybindings,
         ),
         Mode::ContextMenu(menu) => {
-            draw_context_menu(frame, menu, app.ui_settings.tree_order);
+            draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings);
         }
-        Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu),
+        Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu, &app.ui_settings),
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
             modal::render_text_prompt(frame, area, "Save agent debug log", state, "Save");
         }
         Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
-        Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu),
+        Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu, &app.ui_settings),
         Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
         Mode::CreateGroup(state) => draw_create_group(frame, app, state),
         Mode::CreateSplitOrientation(state) => {
@@ -428,6 +433,7 @@ fn draw_context_menu(
     frame: &mut Frame,
     menu: &ContextMenu,
     current_tree_order: crate::config::TreeOrder,
+    ui: &crate::config::UiSettings,
 ) {
     let lines: Vec<Line> = menu
         .actions
@@ -439,7 +445,14 @@ fn draw_context_menu(
             } else {
                 Style::new()
             };
-            Line::from(Span::styled(format!(" {}", action.label()), style))
+            Line::from(Span::styled(
+                format!(
+                    "{} {}",
+                    context_menu_icon(ui, action.icon_target()),
+                    action.label()
+                ),
+                style,
+            ))
         })
         .collect();
     let title = app_menu_title(menu);
@@ -465,7 +478,11 @@ fn draw_context_menu(
                 " "
             };
             Line::from(Span::styled(
-                format!(" {check} {}", tree_order.label()),
+                format!(
+                    " {check}{} {}",
+                    context_menu_icon(ui, IconTarget::TopLevel),
+                    tree_order.label()
+                ),
                 style,
             ))
         })
@@ -727,7 +744,11 @@ fn draw_scheduled_input_field(
 
 /// Draws the line-specific right-click action without implying that its file
 /// target is the currently selected tree node.
-fn draw_editor_line_context_menu(frame: &mut Frame, menu: &EditorLineContextMenu) {
+fn draw_editor_line_context_menu(
+    frame: &mut Frame,
+    menu: &EditorLineContextMenu,
+    ui: &crate::config::UiSettings,
+) {
     let lines: Vec<Line> = menu
         .actions
         .iter()
@@ -738,7 +759,14 @@ fn draw_editor_line_context_menu(frame: &mut Frame, menu: &EditorLineContextMenu
             } else {
                 Style::new()
             };
-            Line::from(Span::styled(format!(" {}", action.label()), style))
+            Line::from(Span::styled(
+                format!(
+                    "{} {}",
+                    context_menu_icon(ui, action.icon_target()),
+                    action.label()
+                ),
+                style,
+            ))
         })
         .collect();
     let widget =
@@ -751,6 +779,7 @@ fn draw_editor_line_context_menu(frame: &mut Frame, menu: &EditorLineContextMenu
 fn draw_terminal_pane_context_menu(
     frame: &mut Frame,
     menu: &crate::terminal_context_menu::TerminalPaneContextMenu,
+    ui: &crate::config::UiSettings,
 ) {
     let lines: Vec<Line> = menu
         .actions
@@ -762,13 +791,30 @@ fn draw_terminal_pane_context_menu(
             } else {
                 Style::new()
             };
-            Line::from(Span::styled(format!(" {}", action.label()), style))
+            Line::from(Span::styled(
+                format!(
+                    "{} {}",
+                    context_menu_icon(ui, action.icon_target()),
+                    action.label()
+                ),
+                style,
+            ))
         })
         .collect();
     let widget = Paragraph::new(lines)
         .block(theme::block(true).title(theme::chrome_title("Terminal actions")));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
+}
+
+/// Keeps menu renderers text-only when the accessibility preference is off,
+/// while every enabled menu entry receives its current configurable glyph.
+fn context_menu_icon(ui: &crate::config::UiSettings, target: IconTarget) -> String {
+    if ui.show_context_menu_icons {
+        format!(" {}", ui.icons.glyph(target))
+    } else {
+        String::new()
+    }
 }
 
 /// Draws the agent selector, editable multi-line prompt, and explicit submit
@@ -1824,7 +1870,14 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
 
         terminal
-            .draw(|frame| draw_context_menu(frame, &menu, crate::config::TreeOrder::AgeDescending))
+            .draw(|frame| {
+                draw_context_menu(
+                    frame,
+                    &menu,
+                    crate::config::TreeOrder::AgeDescending,
+                    &app.ui_settings,
+                )
+            })
             .unwrap();
         let rendered = terminal
             .backend()
@@ -1834,8 +1887,47 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(rendered.contains("✓ Age down (oldest first)"));
+        // A configurable icon renders between the check mark and the label, so
+        // the expected row is composed through the same helper the renderer
+        // uses; pinning the literal pair would break whenever that icon
+        // changes or the user turns context-menu icons off entirely.
+        let active_row = format!(
+            "✓{} Age down (oldest first)",
+            context_menu_icon(&app.ui_settings, IconTarget::TopLevel)
+        );
+        assert!(rendered.contains(&active_row));
         assert_eq!(rendered.matches('✓').count(), 1);
+    }
+
+    #[test]
+    fn context_menu_icons_follow_the_live_ui_preference() {
+        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("context menu should open");
+        };
+        let render = |ui: &crate::config::UiSettings| {
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal
+                .draw(|frame| draw_context_menu(frame, &menu, crate::config::TreeOrder::Manual, ui))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+
+        let with_icons = render(&app.ui_settings);
+        assert!(with_icons.contains(app.ui_settings.icons.glyph(IconTarget::ToolbarSearch)));
+
+        app.ui_settings.show_context_menu_icons = false;
+        let text_only = render(&app.ui_settings);
+        assert!(!text_only.contains(app.ui_settings.icons.glyph(IconTarget::ToolbarSearch)));
+        assert!(text_only.contains("Search workspace…"));
     }
 
     #[test]

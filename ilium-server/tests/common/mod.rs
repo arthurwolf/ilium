@@ -108,7 +108,7 @@ impl Drop for TestServer {
 
 impl TestServer {
     /// Starts a real server for `session_name` with the default detection
-    /// cadence (README "Poll cadence" -- `working_poll_interval` measured
+    /// cadence (ARCHITECTURE.md "Poll cadence" -- `working_poll_interval` measured
     /// in seconds), the right choice for every test that only cares about
     /// tree/IPC behavior and never waits on a detection-loop transition.
     pub async fn start(session_name: &str) -> Self {

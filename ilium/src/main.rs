@@ -5,7 +5,7 @@
 //! server is running (spawning a detached `ilium-server` process if not
 //! -- see `session::ensure_server_running`), and then either attaches the
 //! TUI (`ilium_client::run`) or sends one short-lived IPC request and
-//! exits. See README "Architecture" and the workspace `CLAUDE.md` for why
+//! exits. See ARCHITECTURE.md "Process architecture" and the workspace `CLAUDE.md` for why
 //! the actual logic lives in `ilium-client`/`ilium-server` instead of
 //! here.
 //!

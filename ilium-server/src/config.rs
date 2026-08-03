@@ -1,8 +1,9 @@
 //! Server-wide configuration, loaded from `~/.config/ilium/config.toml`
 //! (see `CLAUDE.md`'s "Config & data locations"): the detection loop's
-//! adaptive poll cadence (README "Poll cadence"), user-configured agent
-//! detection signatures (README M5), and the desktop notification toggle
-//! (README M5, `Working -> Done` notifications). Keybinding and theme
+//! adaptive poll cadence (ARCHITECTURE.md "Poll cadence"), user-configured
+//! agent detection signatures (ARCHITECTURE.md M5), and the desktop
+//! notification toggle (ARCHITECTURE.md M5, `Working -> Done` notifications).
+//! Keybinding and theme
 //! config live client-side (`ilium-client/src/config.rs`) since this
 //! crate never touches rendering or input dispatch.
 
@@ -52,7 +53,7 @@ impl Default for DetectionConfig {
 }
 
 /// Whether a pane's `Working -> Done`/`Idle` transition fires a desktop
-/// notification (README M5). A separate table from `[detection]` -- polling
+/// notification (ARCHITECTURE.md M5). A separate table from `[detection]` -- polling
 /// cadence and "should this ever pop a notification" are independent
 /// concerns a user may want to tune separately (e.g. keep fast polling but
 /// disable notifications on a headless box with no notification daemon).

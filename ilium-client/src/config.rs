@@ -734,6 +734,10 @@ pub struct UiSettings {
     /// Capture is deliberately opt-in because prompts and provider details
     /// are persisted in the project session snapshot.
     pub agent_debug_menu_enabled: bool,
+    /// Renders the configured semantic glyph before every right-click menu
+    /// entry. Disabling this preserves every action while restoring compact,
+    /// text-only menus for terminals where icons are distracting.
+    pub show_context_menu_icons: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -751,6 +755,7 @@ impl Default for UiSettings {
             show_inferred_title_icons: false,
             show_tree_row_management_controls: false,
             agent_debug_menu_enabled: false,
+            show_context_menu_icons: true,
             icons: IconSettings::default(),
         }
     }
@@ -835,6 +840,7 @@ struct RawUiConfig {
     show_inferred_title_icons: Option<bool>,
     show_tree_row_management_controls: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
+    show_context_menu_icons: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -1207,6 +1213,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         agent_debug_menu_enabled: raw
             .agent_debug_menu_enabled
             .unwrap_or(defaults.agent_debug_menu_enabled),
+        show_context_menu_icons: raw
+            .show_context_menu_icons
+            .unwrap_or(defaults.show_context_menu_icons),
         icons,
     })
 }
@@ -1928,6 +1937,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_debug_menu_enabled".to_string(),
         toml::Value::Boolean(ui.agent_debug_menu_enabled),
+    );
+    table.insert(
+        "show_context_menu_icons".to_string(),
+        toml::Value::Boolean(ui.show_context_menu_icons),
     );
     let icons = IconTarget::ALL
         .into_iter()
@@ -2670,6 +2683,8 @@ mod tests {
     #[test]
     fn save_ui_settings_round_trips_through_load() {
         let dir = scratch_dir();
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::Bookmark, "🔖".to_string());
         let ui = UiSettings {
             left_panel_sizing: LeftPanelSizingSettings {
                 mode: LeftPanelSizingMode::TerminalWidthDependent,
@@ -2691,8 +2706,9 @@ mod tests {
             show_inferred_title_icons: true,
             show_tree_row_management_controls: true,
             agent_debug_menu_enabled: true,
+            show_context_menu_icons: false,
             use_stable_glyphs: true,
-            icons: IconSettings::default(),
+            icons,
         };
         save_ui_settings(&dir, &ui).expect("save should succeed");
 
@@ -2718,6 +2734,20 @@ mod tests {
                 .ui
                 .use_stable_glyphs
         );
+    }
+
+    #[test]
+    fn context_menu_icons_default_on_and_round_trip_through_ui_config() {
+        let dir = scratch_dir();
+        assert!(load(&dir).unwrap().ui.show_context_menu_icons);
+
+        let ui = UiSettings {
+            show_context_menu_icons: false,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+
+        assert!(!load(&dir).unwrap().ui.show_context_menu_icons);
     }
 
     #[test]

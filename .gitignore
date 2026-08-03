@@ -2,3 +2,8 @@
 target/
 .ilium/
 *.swp
+
+# Working notes, plans, and scratch tooling stay local to each checkout.
+# Published documentation lives at the repository root (README.md,
+# ARCHITECTURE.md, CLAUDE.md) so a clone never depends on this directory.
+/docs/

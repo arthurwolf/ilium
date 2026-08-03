@@ -520,10 +520,11 @@ pub enum AppearanceRow {
     UseStableGlyphs,
     ShowInferredTitleIcons,
     AgentDebugMenu,
+    ContextMenuIcons,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 9] = [
+    const GENERAL: [AppearanceRow; 10] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -533,6 +534,7 @@ impl AppearanceRow {
         Self::UseStableGlyphs,
         Self::ShowInferredTitleIcons,
         Self::AgentDebugMenu,
+        Self::ContextMenuIcons,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -854,6 +856,12 @@ pub enum ContextMenuAction {
     NewFolder,
     AddChatroom,
     ChangeProjectFolder,
+    /// Sets a durable bookmark on the context-menu target. The desired state
+    /// is captured while the menu opens, making the server mutation idempotent
+    /// across multiple attached clients.
+    SetBookmark {
+        is_bookmarked: bool,
+    },
     Rename,
     MoveUp,
     MoveDown,
@@ -872,6 +880,35 @@ pub enum ContextMenuAction {
 }
 
 impl ContextMenuAction {
+    /// Returns the shared semantic icon role for this menu entry. Reusing
+    /// vocabulary already visible elsewhere keeps the Icons tab concise.
+    pub const fn icon_target(self) -> crate::icon_settings::IconTarget {
+        use crate::icon_settings::IconTarget;
+        match self {
+            Self::Search => IconTarget::ToolbarSearch,
+            Self::FocusPane | Self::NewTerminal => IconTarget::Terminal,
+            Self::CreateBoardFromMarkdown => IconTarget::Board,
+            Self::SchedulePaneInput => IconTarget::WaitingBackground,
+            Self::QueuePrompt => IconTarget::Goal,
+            Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
+            Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
+            Self::ToggleGroup | Self::NewGroup => IconTarget::Group,
+            Self::NewAgent(BuiltinAgentProvider::Claude) => IconTarget::Claude,
+            Self::NewAgent(BuiltinAgentProvider::Codex) => IconTarget::Codex,
+            Self::NewAgent(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
+            Self::NewEditor => IconTarget::Editor,
+            Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
+            Self::AddChatroom => IconTarget::Project,
+            Self::SetBookmark { .. } => IconTarget::Bookmark,
+            Self::Rename => IconTarget::RowRename,
+            Self::MoveUp => IconTarget::RowMoveUp,
+            Self::MoveDown => IconTarget::RowMoveDown,
+            Self::OrderBy => IconTarget::TopLevel,
+            Self::Restart => IconTarget::ToolbarRestructure,
+            Self::Settings => IconTarget::ToolbarSettings,
+        }
+    }
+
     /// The concise label rendered in the popup menu.
     pub fn label(self) -> String {
         match self {
@@ -891,6 +928,12 @@ impl ContextMenuAction {
             Self::NewFolder => "Open folder\u{2026}".to_string(),
             Self::AddChatroom => "Add chatroom to project".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
+            Self::SetBookmark {
+                is_bookmarked: true,
+            } => "Bookmark".to_string(),
+            Self::SetBookmark {
+                is_bookmarked: false,
+            } => "Remove bookmark".to_string(),
             Self::Rename => "Rename".to_string(),
             Self::MoveUp => "Move up".to_string(),
             Self::MoveDown => "Move down".to_string(),
@@ -1164,6 +1207,10 @@ pub struct PendingRestructureRequest {
     /// Exact project-local hierarchy captured on the main loop alongside
     /// item extracts, before the asynchronous LLM worker begins.
     pub current_structure: String,
+    /// Complete per-entry activity checkpoint captured with the hierarchy.
+    /// The worker returns it unchanged so the server can preserve anything
+    /// that arrived after inference began as dirty for the next pass.
+    pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
 }
 
 /// Distinguishes an explicit user action from a passive lifecycle trigger.
@@ -1212,9 +1259,16 @@ fn automatic_restructure_retry_delay(consecutive_failures: u32) -> Duration {
 pub enum ProjectRestructureState {
     Queued,
     Running,
+    Applying,
     Complete,
     Failed(String),
-    Skipped,
+    Skipped(ProjectRestructureSkipReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectRestructureSkipReason {
+    Empty,
+    Unchanged,
 }
 
 #[derive(Debug, Clone)]
@@ -1775,6 +1829,38 @@ impl App {
         self.outbox.push(request);
     }
 
+    /// Reports one successful editor/board mutation to the server-owned
+    /// revision stream. The server response, not this optimistic request,
+    /// advances the durable tree revision for every attached client.
+    pub(crate) fn record_client_node_activity(&mut self, node_id: NodeId) {
+        self.queue_request(ClientRequest::RecordNodeActivity { node_id });
+    }
+
+    /// Applies one authoritative activity revision. The two persisted
+    /// checkpoints remain untouched: server focus and restructure events
+    /// advance them independently.
+    pub(crate) fn apply_node_activity(&mut self, node_id: NodeId, activity_revision: u64) {
+        let _ = self
+            .tree
+            .merge_node_activity_revision(node_id, activity_revision);
+    }
+
+    /// Applies the exact revision acknowledged by a server-owned focus
+    /// transition. A later activity event may arrive first on the broadcast
+    /// channel, so this never rewinds `activity_revision`.
+    pub(crate) fn apply_node_focus_checkpoint(&mut self, node_id: NodeId, activity_revision: u64) {
+        let _ = self
+            .tree
+            .merge_node_focus_checkpoint(node_id, activity_revision);
+    }
+
+    /// Optimistically acknowledges the currently cached revision for an
+    /// immediate visual response; the server broadcasts the authoritative
+    /// checkpoint to every attachment and persists it.
+    fn acknowledge_local_focus_activity(&mut self, node_id: NodeId) {
+        let _ = self.tree.mark_node_focused(node_id);
+    }
+
     /// Records a live-output edge only when parsed visible text actually
     /// changed. `TerminalView` owns that allocation-free comparison.
     pub(crate) fn record_terminal_screen_change(
@@ -1811,6 +1897,12 @@ impl App {
 
     pub fn active_pane_id(&self) -> Option<NodeId> {
         self.right_panel_target.active_pane_id()
+    }
+
+    pub(crate) fn focused_pane_id(&self) -> Option<NodeId> {
+        matches!(self.focus, FocusTarget::Pane)
+            .then(|| self.active_pane_id())
+            .flatten()
     }
 
     pub fn displayed_pane_ids(&self) -> Vec<NodeId> {
@@ -3846,6 +3938,14 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Switches every right-click surface between semantic icons and its
+    /// compact text-only presentation without changing any action.
+    pub fn settings_toggle_context_menu_icons(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.show_context_menu_icons = !ui.show_context_menu_icons;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
@@ -3925,6 +4025,7 @@ impl App {
             AppearanceRow::UseStableGlyphs => self.settings_toggle_stable_glyphs(),
             AppearanceRow::ShowInferredTitleIcons => self.settings_toggle_inferred_title_icons(),
             AppearanceRow::AgentDebugMenu => self.settings_toggle_agent_debug_menu(),
+            AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
         }
     }
 
@@ -4261,11 +4362,13 @@ impl App {
             .flatten();
         if previously_focused_pane != Some(id) {
             if let Some(old_id) = previously_focused_pane {
+                self.acknowledge_local_focus_activity(old_id);
                 self.queue_request(ClientRequest::SetPaneFocus {
                     pane_id: old_id,
                     focused: false,
                 });
             }
+            self.acknowledge_local_focus_activity(id);
             self.queue_request(ClientRequest::SetPaneFocus {
                 pane_id: id,
                 focused: true,
@@ -4288,6 +4391,7 @@ impl App {
     pub fn show_split_view(&mut self, split_id: NodeId) {
         if matches!(self.focus, FocusTarget::Pane) {
             if let Some(active_pane_id) = self.active_pane_id() {
+                self.acknowledge_local_focus_activity(active_pane_id);
                 self.queue_request(ClientRequest::SetPaneFocus {
                     pane_id: active_pane_id,
                     focused: false,
@@ -4317,6 +4421,7 @@ impl App {
     pub(crate) fn leave_pane_focus(&mut self) {
         if matches!(self.focus, FocusTarget::Pane) {
             if let Some(id) = self.active_pane_id() {
+                self.acknowledge_local_focus_activity(id);
                 self.queue_request(ClientRequest::SetPaneFocus {
                     pane_id: id,
                     focused: false,
@@ -4632,6 +4737,15 @@ impl App {
         self.queue_request(ClientRequest::MoveNode { node_id, direction });
     }
 
+    /// Queues an idempotent bookmark assignment. The server remains the
+    /// authority and updates every attached client through its tree snapshot.
+    pub fn request_set_node_bookmarked(&mut self, node_id: NodeId, is_bookmarked: bool) {
+        self.queue_request(ClientRequest::SetNodeBookmarked {
+            node_id,
+            is_bookmarked,
+        });
+    }
+
     /// Queues a `ReparentNode` request -- an arbitrary move to `new_parent`
     /// at `index` (`None` appends at the end), backing both mouse
     /// drag-and-drop (`crate::mouse`) and the leader/move-mode indent/outdent
@@ -4921,7 +5035,9 @@ impl App {
     pub fn open_board_path_picker(&mut self, state: CreateBoardState) {
         let picker_root = self.project_cwd_for_node(state.parent_group);
         let picker = match state.storage_kind {
-            BoardStorageKind::Folder => ExplorerOverlay::open_folder_at(&picker_root),
+            BoardStorageKind::Folder => {
+                ExplorerOverlay::open_folder_for(&picker_root, "Use Folder")
+            }
             BoardStorageKind::MarkdownFile => ExplorerOverlay::open_at(&picker_root),
         };
         match picker {
@@ -4961,7 +5077,10 @@ impl App {
             return;
         };
         match board.add_card(title) {
-            Ok(()) => self.status_message = Some("Card saved".to_string()),
+            Ok(()) => {
+                self.status_message = Some("Card saved".to_string());
+                self.record_client_node_activity(pane_id);
+            }
             Err(error) => self.status_message = Some(error),
         }
     }
@@ -4975,7 +5094,10 @@ impl App {
             return;
         };
         match board.add_column(title) {
-            Ok(()) => self.status_message = Some("Column saved".to_string()),
+            Ok(()) => {
+                self.status_message = Some("Column saved".to_string());
+                self.record_client_node_activity(pane_id);
+            }
             Err(error) => self.status_message = Some(error),
         }
     }
@@ -5007,12 +5129,15 @@ impl App {
         let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
             return;
         };
+        let content_revision_before = board.content_revision();
         let result = match target {
             BoardRenameTarget::Card => board.rename_selected_card(title),
             BoardRenameTarget::Column => board.rename_selected_column(title),
         };
         if let Err(error) = result {
             self.status_message = Some(error);
+        } else if board.content_revision() != content_revision_before {
+            self.record_client_node_activity(pane_id);
         }
     }
 
@@ -5038,6 +5163,8 @@ impl App {
         };
         if let Err(error) = result {
             self.status_message = Some(error);
+        } else {
+            self.record_client_node_activity(pane_id);
         }
     }
 
@@ -5940,6 +6067,9 @@ impl App {
             None => return ContextMenuAction::GLOBAL_ACTIONS.to_vec(),
         }
         actions.extend([
+            ContextMenuAction::SetBookmark {
+                is_bookmarked: !self.tree.get(target).is_some_and(|node| node.is_bookmarked),
+            },
             ContextMenuAction::Rename,
             ContextMenuAction::MoveUp,
             ContextMenuAction::MoveDown,
@@ -5987,6 +6117,14 @@ impl App {
             ContextMenuAction::NewFolder => self.action_new_folder(),
             ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
+            ContextMenuAction::SetBookmark { is_bookmarked } => {
+                self.request_set_node_bookmarked(target, is_bookmarked);
+                self.status_message = Some(if is_bookmarked {
+                    "Bookmark added".to_string()
+                } else {
+                    "Bookmark removed".to_string()
+                });
+            }
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
                 self.request_move(target, ilium_core::TreeMoveDirection::Up)
@@ -6076,14 +6214,14 @@ impl App {
     pub fn action_new_folder(&mut self) {
         let parent = self.split_parent_group();
         let picker_root = self.project_cwd_for_node(parent);
-        match ExplorerOverlay::open_folder_at(&picker_root) {
+        match ExplorerOverlay::open_folder_for(&picker_root, "Add Folder") {
             Ok(overlay) => self.mode = Mode::FolderExplorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open folder picker: {err}")),
         }
     }
 
     pub fn action_new_project(&mut self) {
-        match ExplorerOverlay::open_folder_at(&self.session_cwd) {
+        match ExplorerOverlay::open_folder_for(&self.session_cwd, "Create Project") {
             Ok(overlay) => {
                 self.mode = Mode::ProjectFolderExplorer(
                     Box::new(overlay),
@@ -6104,7 +6242,7 @@ impl App {
             self.status_message = Some("That entry is not a project".to_string());
             return;
         };
-        match ExplorerOverlay::open_folder_at(&path) {
+        match ExplorerOverlay::open_folder_for(&path, "Use Project Folder") {
             Ok(overlay) => {
                 self.mode = Mode::ProjectFolderExplorer(
                     Box::new(overlay),
@@ -6577,6 +6715,7 @@ impl App {
         let editor_content_area = self.editor_content_area(id);
         let mut pending_key_input = None;
         let mut is_enter_press = false;
+        let mut did_change_client_content = false;
         match self.panes.get_mut(&id) {
             Some(PaneRuntime::Terminal(view)) => {
                 let page_lines = self.last_known_pane_size.0;
@@ -6597,9 +6736,9 @@ impl App {
                 }
             }
             Some(PaneRuntime::Editor(editor)) if editor.view_mode == EditorViewMode::Source => {
-                editor.input(ratatui_textarea::Input::from(crossterm::event::Event::Key(
-                    key,
-                )));
+                did_change_client_content = editor.input(ratatui_textarea::Input::from(
+                    crossterm::event::Event::Key(key),
+                ));
             }
             Some(PaneRuntime::Editor(editor)) => {
                 if !is_press(&key) {
@@ -6637,6 +6776,7 @@ impl App {
                 }
             }
             Some(PaneRuntime::Board(board)) => {
+                let content_revision_before = board.content_revision();
                 if !is_press(&key) {
                     return;
                 }
@@ -6670,6 +6810,7 @@ impl App {
                         self.status_message = Some(error);
                     } else if result == Ok(true) {
                         self.status_message = Some("Card saved".to_string());
+                        self.record_client_node_activity(id);
                     }
                     return;
                 }
@@ -6724,13 +6865,7 @@ impl App {
                         self.action_add_board_column(id);
                         return;
                     }
-                    KeyCode::Char('r') => match BoardPane::load(board.storage.clone()) {
-                        Ok(reloaded) => {
-                            **board = reloaded;
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    },
+                    KeyCode::Char('r') => board.reload(),
                     KeyCode::Char('e') => {
                         self.action_rename_board_selection(id);
                         return;
@@ -6758,6 +6893,7 @@ impl App {
                 if let Err(error) = result {
                     self.status_message = Some(error);
                 }
+                did_change_client_content = board.content_revision() != content_revision_before;
             }
             None => {}
         }
@@ -6767,6 +6903,9 @@ impl App {
                 bytes,
                 submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
             });
+        }
+        if did_change_client_content {
+            self.record_client_node_activity(id);
         }
     }
 
@@ -7052,7 +7191,9 @@ impl App {
             self.project_restructure_jobs.retain(|_, job| {
                 matches!(
                     job.state,
-                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                    ProjectRestructureState::Queued
+                        | ProjectRestructureState::Running
+                        | ProjectRestructureState::Applying
                 )
             });
         }
@@ -7092,7 +7233,9 @@ impl App {
             .is_some_and(|job| {
                 matches!(
                     job.state,
-                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                    ProjectRestructureState::Queued
+                        | ProjectRestructureState::Running
+                        | ProjectRestructureState::Applying
                 )
             })
         {
@@ -7114,6 +7257,32 @@ impl App {
             return;
         };
         let project_name = project.name.clone();
+        let has_unrestructured_activity =
+            match self.tree.project_has_unrestructured_activity(project_id) {
+                Ok(has_unrestructured_activity) => has_unrestructured_activity,
+                Err(error) => {
+                    if !request_origin.is_automatic() {
+                        self.status_message =
+                            Some(format!("Could not read project activity: {error}"));
+                    }
+                    return;
+                }
+            };
+        if !has_unrestructured_activity {
+            self.project_restructure_jobs.insert(
+                project_id,
+                ProjectRestructureJob {
+                    project_name,
+                    state: ProjectRestructureState::Skipped(
+                        ProjectRestructureSkipReason::Unchanged,
+                    ),
+                    request_origin,
+                    input_fingerprint: 0,
+                },
+            );
+            self.refresh_structure_loading();
+            return;
+        }
         let contexts = crate::restructure::gather_project_leaf_contexts(
             &self.tree,
             &self.panes,
@@ -7146,6 +7315,15 @@ impl App {
             &contexts,
             &current_structure,
         );
+        let inference_activity_revisions = match self.tree.project_activity_revisions(project_id) {
+            Ok(inference_activity_revisions) => inference_activity_revisions,
+            Err(error) => {
+                if !request_origin.is_automatic() {
+                    self.status_message = Some(format!("Could not read project activity: {error}"));
+                }
+                return;
+            }
+        };
         if request_origin.is_automatic()
             && !self.automatic_restructure_retry_allows(
                 project_id,
@@ -7160,7 +7338,7 @@ impl App {
                 project_id,
                 ProjectRestructureJob {
                     project_name,
-                    state: ProjectRestructureState::Skipped,
+                    state: ProjectRestructureState::Skipped(ProjectRestructureSkipReason::Empty),
                     request_origin,
                     input_fingerprint,
                 },
@@ -7185,6 +7363,7 @@ impl App {
                 contexts,
                 protected_split_views,
                 current_structure,
+                inference_activity_revisions,
             });
         self.refresh_structure_loading();
     }
@@ -7242,7 +7421,7 @@ impl App {
     pub fn finish_project_restructure(
         &mut self,
         project_id: NodeId,
-        expected_structure: &str,
+        inference_activity_revisions: &[ilium_core::NodeActivityRevision],
         result: anyhow::Result<ilium_core::RestructurePlan>,
     ) {
         let Some(job) = self.project_restructure_jobs.get(&project_id) else {
@@ -7252,42 +7431,61 @@ impl App {
         let input_fingerprint = job.input_fingerprint;
         let mut inference_failed = false;
         let mut plan_to_apply = None;
-        let completed = {
+        {
             let Some(job) = self.project_restructure_jobs.get_mut(&project_id) else {
                 return;
             };
             match result {
                 Ok(plan) => {
-                    let current_structure =
-                        crate::restructure::render_project_structure(&self.tree, project_id);
-                    if current_structure
-                        .as_deref()
-                        .is_ok_and(|current_structure| current_structure == expected_structure)
-                    {
-                        job.state = ProjectRestructureState::Complete;
-                        plan_to_apply = Some(plan);
-                    } else {
-                        job.state = ProjectRestructureState::Failed(
-                            "project changed while inference was running; stale plan discarded"
-                                .to_string(),
-                        );
-                    }
+                    job.state = ProjectRestructureState::Applying;
+                    plan_to_apply = Some(plan);
                 }
                 Err(error) => {
                     job.state = ProjectRestructureState::Failed(error.to_string());
                     inference_failed = true;
                 }
             }
-            matches!(job.state, ProjectRestructureState::Complete)
-        };
+        }
         if let Some(plan) = plan_to_apply {
-            self.request_apply_project_restructure_plan(project_id, plan);
+            self.request_apply_project_restructure_plan(
+                project_id,
+                plan,
+                inference_activity_revisions.to_vec(),
+            );
         }
         if inference_failed && request_origin.is_automatic() {
             self.record_automatic_restructure_failure(project_id, input_fingerprint);
-        } else if completed {
+        }
+        self.refresh_structure_loading();
+    }
+
+    /// Finalizes a job only after the detached server confirms that it applied
+    /// the plan and persisted the exact inference checkpoint transactionally.
+    pub(crate) fn confirm_project_restructure_applied(
+        &mut self,
+        project_id: NodeId,
+        checkpoint_activity_revisions: &[ilium_core::NodeActivityRevision],
+    ) {
+        for checkpoint in checkpoint_activity_revisions {
+            let _ = self.tree.merge_node_restructure_checkpoint(
+                checkpoint.node_id,
+                checkpoint.activity_revision,
+            );
+        }
+        if let Some(job) = self.project_restructure_jobs.get_mut(&project_id) {
+            job.state = ProjectRestructureState::Complete;
             self.automatic_restructure_retries.remove(&project_id);
         }
+        self.refresh_structure_loading();
+    }
+
+    /// Correlates a server-side stale/validation rejection with its project
+    /// instead of leaving an inference-complete job falsely marked successful.
+    pub(crate) fn reject_project_restructure(&mut self, project_id: NodeId, message: String) {
+        if let Some(job) = self.project_restructure_jobs.get_mut(&project_id) {
+            job.state = ProjectRestructureState::Failed(message.clone());
+        }
+        self.status_message = Some(format!("Server error: {message}"));
         self.refresh_structure_loading();
     }
 
@@ -7315,7 +7513,9 @@ impl App {
             .is_some_and(|job| {
                 matches!(
                     job.state,
-                    ProjectRestructureState::Queued | ProjectRestructureState::Running
+                    ProjectRestructureState::Queued
+                        | ProjectRestructureState::Running
+                        | ProjectRestructureState::Applying
                 )
             })
     }
@@ -7329,9 +7529,15 @@ impl App {
                     let state = match &job.state {
                         ProjectRestructureState::Queued => "queued".to_string(),
                         ProjectRestructureState::Running => "thinking".to_string(),
+                        ProjectRestructureState::Applying => "applying".to_string(),
                         ProjectRestructureState::Complete => "complete".to_string(),
                         ProjectRestructureState::Failed(error) => format!("failed: {error}"),
-                        ProjectRestructureState::Skipped => "empty — skipped".to_string(),
+                        ProjectRestructureState::Skipped(ProjectRestructureSkipReason::Empty) => {
+                            "empty — skipped".to_string()
+                        }
+                        ProjectRestructureState::Skipped(
+                            ProjectRestructureSkipReason::Unchanged,
+                        ) => "unchanged — skipped".to_string(),
                     };
                     format!("{}: {state}", job.project_name)
                 })
@@ -7345,7 +7551,9 @@ impl App {
         self.structure_loading = self.project_restructure_jobs.values().any(|job| {
             matches!(
                 job.state,
-                ProjectRestructureState::Queued | ProjectRestructureState::Running
+                ProjectRestructureState::Queued
+                    | ProjectRestructureState::Running
+                    | ProjectRestructureState::Applying
             )
         });
     }
@@ -7360,8 +7568,13 @@ impl App {
         &mut self,
         project_id: NodeId,
         plan: ilium_core::RestructurePlan,
+        inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     ) {
-        self.queue_request(ClientRequest::ApplyProjectRestructurePlan { project_id, plan });
+        self.queue_request(ClientRequest::ApplyProjectRestructurePlan {
+            project_id,
+            plan,
+            inference_activity_revisions,
+        });
     }
 
     /// Compatibility path for the old one-project undo request.
@@ -7597,6 +7810,7 @@ impl App {
         let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&id) else {
             return;
         };
+        let content_revision_before = board.content_revision();
         if board.columns.is_empty() {
             return;
         }
@@ -7772,6 +7986,9 @@ impl App {
             }
             _ => {}
         }
+        if board.content_revision() != content_revision_before {
+            self.record_client_node_activity(id);
+        }
     }
 
     fn handle_editor_pane_mouse(
@@ -7870,6 +8087,7 @@ impl App {
                         .then(|| checkbox_at(editor, chrome.content_area, position))
                         .flatten();
                 if let Some((row, bracket_col, checked)) = clicked_checkbox {
+                    let content_revision_before = editor.content_revision();
                     editor.toggle_checkbox(row, bracket_col, checked);
                     let dirty = editor.dirty;
                     if let Err(error) = self.tree.set_pane_status(id, PaneStatus::Editor { dirty })
@@ -7877,6 +8095,9 @@ impl App {
                         tracing::warn!(
                             "could not mirror editor dirty state for pane {id:?}: {error}"
                         );
+                    }
+                    if editor.content_revision() != content_revision_before {
+                        self.record_client_node_activity(id);
                     }
                 }
                 return;
@@ -8138,6 +8359,58 @@ mod tests {
     }
 
     #[test]
+    fn successful_editor_and_board_edits_report_node_activity() {
+        let directory = tempfile::tempdir().expect("create client activity directory");
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(directory.path().join("project"))
+            .unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(project_id, "notes", PaneContentKind::Editor)
+            .unwrap();
+        app.panes.insert(
+            editor_id,
+            PaneRuntime::Editor(Box::new(EditorPane::empty())),
+        );
+        app.focus_pane(editor_id);
+        app.take_outbound_requests();
+
+        app.handle_pane_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::RecordNodeActivity { node_id }] if *node_id == editor_id
+        ));
+
+        let storage = ilium_core::BoardStorage::MarkdownFile {
+            path: directory.path().join("board.md"),
+        };
+        let board_id = app
+            .tree
+            .add_board(project_id, "board".to_string(), storage.clone())
+            .unwrap();
+        let mut board = BoardPane::create(storage).unwrap();
+        board.add_card("move me".to_string()).unwrap();
+        app.panes
+            .insert(board_id, PaneRuntime::Board(Box::new(board)));
+        app.focus_pane(board_id);
+        app.take_outbound_requests();
+
+        app.handle_pane_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Right,
+            crossterm::event::KeyModifiers::SHIFT,
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::RecordNodeActivity { node_id }] if *node_id == board_id
+        ));
+    }
+
+    #[test]
     fn global_restructure_queues_one_worker_per_nonempty_project_and_skips_empty_projects() {
         let mut app = app();
         let active_project = app
@@ -8160,7 +8433,7 @@ mod tests {
         assert_eq!(pending[0].project_id, active_project);
         assert!(matches!(
             app.project_restructure_jobs[&empty_project].state,
-            ProjectRestructureState::Skipped
+            ProjectRestructureState::Skipped(ProjectRestructureSkipReason::Empty)
         ));
         assert!(app.restructure_status_text().is_some_and(|status| {
             status.contains("active-project: thinking")
@@ -8169,7 +8442,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_restructure_discards_a_plan_when_the_project_changed_in_flight() {
+    fn completed_restructure_applies_a_plan_when_the_project_changed_in_flight() {
         let mut app = app();
         let project_id = app
             .tree
@@ -8186,23 +8459,86 @@ mod tests {
         app.tree
             .rename_node(group_id, "manual organization", None, None)
             .unwrap();
+        app.tree.record_node_activity(pane_id).unwrap();
         app.finish_project_restructure(
             project_id,
-            &pending.current_structure,
+            &pending.inference_activity_revisions,
             Ok(ilium_core::RestructurePlan {
                 children: vec![ilium_core::RestructureNode::Pane {
                     id: pane_id,
-                    title: "stale inferred shell".to_string(),
+                    title: "inferred shell".to_string(),
                     short_title: None,
                     icon: None,
                 }],
             }),
         );
 
-        assert!(app.take_outbound_requests().is_empty());
         assert!(matches!(
             &app.project_restructure_jobs[&project_id].state,
-            ProjectRestructureState::Failed(message) if message.contains("stale plan discarded")
+            ProjectRestructureState::Applying
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::ApplyProjectRestructurePlan {
+                project_id: requested_project,
+                inference_activity_revisions,
+                ..
+            }] if *requested_project == project_id
+                && inference_activity_revisions == &pending.inference_activity_revisions
+        ));
+
+        app.confirm_project_restructure_applied(project_id, &pending.inference_activity_revisions);
+        assert!(app
+            .tree
+            .project_has_unrestructured_activity(project_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn successful_checkpoint_makes_the_next_restructure_skip_unchanged_project() {
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/unchanged-project"))
+            .unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(project_id, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.action_request_project_restructure(project_id);
+        let pending = app.take_pending_restructure_requests().remove(0);
+
+        app.finish_project_restructure(
+            project_id,
+            &pending.inference_activity_revisions,
+            Ok(ilium_core::RestructurePlan {
+                children: vec![ilium_core::RestructureNode::Pane {
+                    id: pane_id,
+                    title: "organized shell".to_string(),
+                    short_title: None,
+                    icon: None,
+                }],
+            }),
+        );
+        assert!(matches!(
+            app.project_restructure_jobs[&project_id].state,
+            ProjectRestructureState::Applying
+        ));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::ApplyProjectRestructurePlan {
+                project_id: requested_project,
+                ..
+            }] if *requested_project == project_id
+        ));
+
+        app.confirm_project_restructure_applied(project_id, &pending.inference_activity_revisions);
+        app.action_request_project_restructure(project_id);
+
+        assert!(app.take_pending_restructure_requests().is_empty());
+        assert!(matches!(
+            app.project_restructure_jobs[&project_id].state,
+            ProjectRestructureState::Skipped(ProjectRestructureSkipReason::Unchanged)
         ));
     }
 
@@ -8222,7 +8558,7 @@ mod tests {
         let automatic_request = app.take_pending_restructure_requests().remove(0);
         app.finish_project_restructure(
             project_id,
-            &automatic_request.current_structure,
+            &automatic_request.inference_activity_revisions,
             Err(anyhow::anyhow!("gateway timed out")),
         );
         assert_eq!(
@@ -8237,7 +8573,7 @@ mod tests {
         let manual_request = app.take_pending_restructure_requests().remove(0);
         app.finish_project_restructure(
             project_id,
-            &manual_request.current_structure,
+            &manual_request.inference_activity_revisions,
             Err(anyhow::anyhow!("manual provider failure")),
         );
         assert_eq!(
@@ -8268,7 +8604,7 @@ mod tests {
         let automatic_request = app.take_pending_restructure_requests().remove(0);
         app.finish_project_restructure(
             project_id,
-            &automatic_request.current_structure,
+            &automatic_request.inference_activity_revisions,
             Err(anyhow::anyhow!("gateway timed out")),
         );
         assert!(app.project_restructure_jobs.contains_key(&project_id));
@@ -8699,6 +9035,65 @@ mod tests {
         assert!(!app
             .context_actions_for(group)
             .contains(&ContextMenuAction::SchedulePaneInput));
+    }
+
+    #[test]
+    fn every_persisted_tree_item_can_toggle_its_context_menu_bookmark() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/bookmark-menu"))
+            .unwrap();
+        let group = app.tree.add_group(project, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = app
+            .tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+        let board = app
+            .tree
+            .add_pane(group, "board", PaneContentKind::Board)
+            .unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, std::path::PathBuf::from("/tmp/bookmark-files"))
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(group, "split", ilium_core::SplitOrientation::Vertical, &[])
+            .unwrap();
+
+        for node_id in [project, group, terminal, editor, board, folder, split] {
+            assert!(app
+                .context_actions_for(node_id)
+                .contains(&ContextMenuAction::SetBookmark {
+                    is_bookmarked: true,
+                }));
+        }
+
+        app.execute_context_action(
+            ContextMenuAction::SetBookmark {
+                is_bookmarked: true,
+            },
+            editor,
+        );
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SetNodeBookmarked {
+                node_id: editor,
+                is_bookmarked: true,
+            }]
+        );
+
+        app.tree.set_node_bookmarked(editor, true).unwrap();
+        assert!(app
+            .context_actions_for(editor)
+            .contains(&ContextMenuAction::SetBookmark {
+                is_bookmarked: false,
+            }));
     }
 
     #[test]
@@ -10985,6 +11380,33 @@ mod tests {
                 .ui
                 .use_stable_glyphs
         );
+    }
+
+    #[test]
+    fn context_menu_icon_setting_persists_and_preserves_all_menu_actions() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(before) = &app.mode else {
+            panic!("tree context menu should open");
+        };
+        let actions_before = before.actions.clone();
+
+        app.settings_adjust_row(AppearanceRow::ContextMenuIcons, 1);
+
+        assert!(!app.ui_settings.show_context_menu_icons);
+        assert!(
+            !crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .show_context_menu_icons
+        );
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(after) = &app.mode else {
+            panic!("tree context menu should remain available");
+        };
+        assert_eq!(after.actions, actions_before);
     }
 
     #[test]

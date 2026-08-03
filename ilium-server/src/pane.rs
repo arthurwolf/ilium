@@ -1,7 +1,7 @@
 //! `PaneResource`: what `ilium-server` keeps in its pane registry for one
 //! tree node -- either a live pty-backed terminal, or (for an editor pane)
 //! just the path it points at, since editor content/editing stays
-//! client-local (see README "Architecture": the server only needs to know
+//! client-local (see ARCHITECTURE.md "Crate roles": the server only needs to know
 //! "this NodeId is an editor pointing at this path" for tree persistence
 //! and for other attached clients to know what's open).
 

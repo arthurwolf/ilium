@@ -1,8 +1,8 @@
 //! `ilium-server`: owns all PTYs and the session tree for one session,
 //! runs the adaptive agent-detection loop, and speaks the `ilium-ipc`
-//! protocol over that session's Unix domain socket. See README
-//! "Architecture" and `CLAUDE.md`'s layering rules -- this crate is the
-//! one place those pieces are wired together; each piece's actual logic
+//! protocol over that session's Unix domain socket. See ARCHITECTURE.md
+//! "Process architecture" and `CLAUDE.md`'s layering rules -- this crate
+//! is the one place those pieces are wired together; each piece's actual logic
 //! lives in its own module (or, for the tree/pty/detection primitives
 //! themselves, in `ilium-core`/`ilium-pty`/`ilium-detect`).
 //!

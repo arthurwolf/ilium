@@ -1,5 +1,5 @@
 //! Desktop notification on a pane's `Working -> Done`/`Idle` transition
-//! (README M5). Three pieces, deliberately kept apart: [`is_finished_transition`]
+//! (ARCHITECTURE.md M5). Three pieces, deliberately kept apart: [`is_finished_transition`]
 //! is the pure decision ("does this status change deserve a notification at
 //! all") that a plain `#[test]` can exercise for every relevant status-pair
 //! combination with no D-Bus/notification-daemon dependency;

@@ -1,10 +1,12 @@
 # CLAUDE.md — ilium
 
-Project-specific rules. This is a Rust project; the global `~/.claude/CLAUDE.md` stack/style section (TypeScript/Bun/Vue) does not apply here — its behavioral rules (scope discipline, verification gate, explore-before-acting, no worktrees, architecture-is-mandatory, no stopping to ask "should I continue") still apply in full. See `README.md` for the product design, architecture, crate choices, and milestone plan — read it before touching code.
+Project-specific rules. This is a Rust project; the global `~/.claude/CLAUDE.md` stack/style section (TypeScript/Bun/Vue) does not apply here — its behavioral rules (scope discipline, verification gate, explore-before-acting, no worktrees, architecture-is-mandatory, no stopping to ask "should I continue") still apply in full. See `ARCHITECTURE.md` for the product design, architecture, crate choices, and milestone plan — read it before touching code. `README.md` is the user-facing install/usage document; keep it free of internal design history.
+
+Documentation lives at the repository root: `README.md` (users), `ARCHITECTURE.md` (design), `CLAUDE.md` (these rules). `docs/` is deliberately git-ignored — it is a scratch area for working notes and plans, so never put anything there that a fresh clone needs.
 
 ## Workspace layout
 
-Cargo workspace, one crate per architectural layer (see README "Architecture"). Do not collapse layers back into a single crate for convenience — the boundaries exist so `ilium-core` and `ilium-detect` stay unit-testable without a PTY, a terminal, or a running server.
+Cargo workspace, one crate per architectural layer (see ARCHITECTURE.md "Crate roles"). Do not collapse layers back into a single crate for convenience — the boundaries exist so `ilium-core` and `ilium-detect` stay unit-testable without a PTY, a terminal, or a running server.
 
 ```
 ilium/                     # workspace root
@@ -60,6 +62,15 @@ ilium/                     # workspace root
 - `ilium-server` IPC protocol: round-trip (de)serialize every message type; a client/server version mismatch should fail loudly, not silently misparse.
 - No test should depend on a real `claude` or `codex` binary being installed — detection tests run against captured fixture text, never by shelling out to the real CLI.
 
+### What's automated vs. what still needs a human
+
+Every crate has unit or integration tests exercising it directly, per the per-crate policy above. End-to-end tests cover both a real PTY-rendered TUI and a live agent-CLI process through detection:
+
+- `ilium/tests/pty_tui_smoke.rs` drives the real `ilium` binary under a genuine PTY (`ilium-pty`, not `std::process::Command` with inherited stdio). In addition to attach/help/settings coverage, it creates two live terminal panes, moves them into a vertical split through the real dialogs, asserts both viewport streams render together, focuses each child, and verifies distinct input reaches each PTY while both remain visible.
+- `ilium-server/tests/live_agent_detection.rs` spawns a fake `codex`-named script by absolute path (never `PATH`, to avoid ever racing a real `codex` install), drives a real `ilium-server` end to end — real `sysinfo` process-tree walk finds it, `ilium-pty`'s live `vt100` feed is scraped, `ilium_detect::classify_activity` runs unmodified — and asserts Codex's visible `Pursuing goal (5m)` status reaches the client as `AgentWithGoal`, followed by the real `Working -> Idle`/`Done` transition and exactly one queued sound through an injected silent recorder.
+
+Genuinely still manual: whether the rendered output actually looks right on a real terminal emulator — font rendering, color contrast, the drag-and-drop/animation "feel." These tests assert structural/textual correctness (the right text lands on the right row at the right time), not visual quality, which has no meaningful automated oracle.
+
 ## Config & data locations
 
 Use the `directories` crate, never hardcode `~`:
@@ -82,8 +93,8 @@ Use the `directories` crate, never hardcode `~`:
 ## Scope reminders specific to this project
 
 - This is a new project with no users yet — no backwards-compatibility shims, no feature flags, no "v2" anything. Change things directly.
-- Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see README "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
-- Milestones in the README (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read the README "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
+- Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
+- Milestones in ARCHITECTURE.md (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read ARCHITECTURE.md "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
 
 ## Icon rendering
 

@@ -675,6 +675,27 @@ pub struct Node {
     /// preference enables inferred title icons.
     #[serde(default)]
     pub inferred_icon: Option<String>,
+    /// User-owned sidebar bookmark. It belongs to the durable domain node so
+    /// every node kind has one consistent right-click action and restored
+    /// sessions keep the user's navigation landmarks.
+    #[serde(default)]
+    pub is_bookmarked: bool,
+    /// Monotonic evidence that this entry's content or user-owned structure
+    /// changed. Terminal I/O and client-owned editor/board mutations advance
+    /// it through the server; manual tree mutations advance it in this crate.
+    #[serde(default)]
+    pub activity_revision: u64,
+    /// The exact activity revision included in this entry's most recently
+    /// applied project restructure. `None` means no trusted checkpoint exists,
+    /// including for snapshots written before activity tracking was added.
+    #[serde(default)]
+    pub last_restructure_activity_revision: Option<u64>,
+    /// The most recent activity revision a user observed by focusing this
+    /// entry. This checkpoint is independent from project restructuring:
+    /// focusing never makes work eligible/ineligible for restructure, and a
+    /// restructure never acknowledges unread entry activity.
+    #[serde(default)]
+    pub last_focus_activity_revision: Option<u64>,
     /// Kept separately from pane title provenance because a manual move can
     /// change the meaning of a structure even when no pane title changed.
     /// Missing fields in older JSON crash snapshots are manual by default.
@@ -684,6 +705,18 @@ pub struct Node {
 }
 
 impl Node {
+    /// Whether this entry has evidence newer than its last successful project
+    /// restructure, or has never participated in one.
+    pub fn has_unrestructured_activity(&self) -> bool {
+        self.last_restructure_activity_revision != Some(self.activity_revision)
+    }
+
+    /// Whether this entry has activity newer than the last user-focus
+    /// checkpoint, or has no trusted focus checkpoint yet.
+    pub fn has_activity_since_focus(&self) -> bool {
+        self.last_focus_activity_revision != Some(self.activity_revision)
+    }
+
     pub fn is_group(&self) -> bool {
         matches!(&self.kind, NodeKind::Container(container) if container.is_group())
     }
@@ -722,6 +755,25 @@ impl Node {
     pub fn is_folder(&self) -> bool {
         matches!(self.kind, NodeKind::Folder { .. })
     }
+}
+
+/// One entry revision captured with a project-restructure request. The server
+/// compares the complete ordered snapshot before applying the inferred plan,
+/// so output or edits arriving while the LLM runs cannot be checkpointed away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeActivityRevision {
+    pub node_id: NodeId,
+    pub activity_revision: u64,
+}
+
+/// Outcome of recording one real content/structure change. Persistence only
+/// needs waking on the clean-to-dirty edge; later revisions remain important
+/// for live stale-plan fencing but do not require repeated snapshot writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeActivityUpdate {
+    pub activity_revision: u64,
+    pub became_unrestructured: bool,
+    pub became_unread_since_focus: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -778,6 +830,8 @@ pub enum TreeError {
     DuplicateSplitViewPane(NodeId),
     #[error("split view {0:?} was referenced more than once in a restructure plan")]
     RestructureDuplicateSplitView(NodeId),
+    #[error("node {0:?} exhausted its activity revision counter")]
+    ActivityRevisionExhausted(NodeId),
     #[error("restructure plan referenced split view {split_view:?} outside project {project:?}")]
     RestructureSplitViewOutsideProject { split_view: NodeId, project: NodeId },
     #[error(
@@ -894,7 +948,7 @@ pub struct GroupListing {
 ///
 /// Derives `Serialize`/`Deserialize` so `ilium-server` can hand a full
 /// snapshot to `ilium-ipc` for the `TreeSnapshot` event and so the JSON
-/// crash-recovery snapshot (README M5) can persist it; deriving serde here
+/// crash-recovery snapshot (ARCHITECTURE.md M5) can persist it; deriving serde here
 /// is not an I/O concern, it's just data shape, so it doesn't violate this
 /// crate's "no I/O" rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -920,6 +974,10 @@ impl Tree {
                 name: "session".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: Some(0),
+                last_focus_activity_revision: Some(0),
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
@@ -939,6 +997,136 @@ impl Tree {
 
     fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, TreeError> {
         self.nodes.get_mut(&id).ok_or(TreeError::NodeNotFound(id))
+    }
+
+    /// Sets one node's durable navigation bookmark. This is intentionally an
+    /// idempotent assignment rather than a client-side toggle, so attached
+    /// clients cannot accidentally invert a newer bookmark decision.
+    pub fn set_node_bookmarked(
+        &mut self,
+        id: NodeId,
+        is_bookmarked: bool,
+    ) -> Result<(), TreeError> {
+        self.get_mut(id)?.is_bookmarked = is_bookmarked;
+        Ok(())
+    }
+
+    /// Advances one entry's activity generation after an accepted mutation.
+    /// The returned edge distinguishes the first change after a restructure
+    /// from subsequent changes while the project is already known dirty.
+    pub fn record_node_activity(&mut self, id: NodeId) -> Result<NodeActivityUpdate, TreeError> {
+        let node = self.get_mut(id)?;
+        let was_unrestructured = node.has_unrestructured_activity();
+        let was_unread_since_focus = node.has_activity_since_focus();
+        node.activity_revision = node
+            .activity_revision
+            .checked_add(1)
+            .ok_or(TreeError::ActivityRevisionExhausted(id))?;
+        Ok(NodeActivityUpdate {
+            activity_revision: node.activity_revision,
+            became_unrestructured: !was_unrestructured,
+            became_unread_since_focus: !was_unread_since_focus,
+        })
+    }
+
+    /// Merges an authoritative server activity revision into a client-side
+    /// tree mirror without allowing delayed events to rewind newer evidence.
+    pub fn merge_node_activity_revision(
+        &mut self,
+        id: NodeId,
+        activity_revision: u64,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        node.activity_revision = node.activity_revision.max(activity_revision);
+        Ok(())
+    }
+
+    /// Merges the exact focus checkpoint carried by a server event. The
+    /// activity generation may already be newer when broadcast/direct event
+    /// channels interleave, so only the generation uses max semantics.
+    pub fn merge_node_focus_checkpoint(
+        &mut self,
+        id: NodeId,
+        activity_revision: u64,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        node.activity_revision = node.activity_revision.max(activity_revision);
+        node.last_focus_activity_revision = Some(activity_revision);
+        Ok(())
+    }
+
+    /// Merges one exact successful-restructure checkpoint without affecting
+    /// the independent focus checkpoint.
+    pub fn merge_node_restructure_checkpoint(
+        &mut self,
+        id: NodeId,
+        activity_revision: u64,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        node.activity_revision = node.activity_revision.max(activity_revision);
+        node.last_restructure_activity_revision = Some(activity_revision);
+        Ok(())
+    }
+
+    /// Acknowledges all activity currently visible in one entry without
+    /// changing its restructure checkpoint. Callers use this on both ends of
+    /// a focus interval so work observed while the pane stayed open is not
+    /// reported as unread after the user leaves it.
+    pub fn mark_node_focused(&mut self, id: NodeId) -> Result<Option<u64>, TreeError> {
+        let node = self.get_mut(id)?;
+        if node.last_focus_activity_revision == Some(node.activity_revision) {
+            return Ok(None);
+        }
+        node.last_focus_activity_revision = Some(node.activity_revision);
+        Ok(Some(node.activity_revision))
+    }
+
+    /// Returns every persisted entry owned by `project_id` in stable ID order.
+    /// Including containers makes new/manual hierarchy changes part of the same
+    /// checkpoint contract as pane content.
+    pub fn project_activity_revisions(
+        &self,
+        project_id: NodeId,
+    ) -> Result<Vec<NodeActivityRevision>, TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+
+        let mut node_ids = self
+            .nodes
+            .values()
+            .filter(|node| {
+                node.id == project_id || self.project_ancestor(node.id) == Some(project_id)
+            })
+            .map(|node| node.id)
+            .collect::<Vec<_>>();
+        node_ids.sort_unstable();
+
+        Ok(node_ids
+            .into_iter()
+            .filter_map(|node_id| {
+                self.get(node_id).map(|node| NodeActivityRevision {
+                    node_id,
+                    activity_revision: node.activity_revision,
+                })
+            })
+            .collect())
+    }
+
+    /// Whether at least one entry in a project has never been restructured or
+    /// has changed after its most recent successful restructure.
+    pub fn project_has_unrestructured_activity(
+        &self,
+        project_id: NodeId,
+    ) -> Result<bool, TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+
+        Ok(self.nodes.values().any(|node| {
+            (node.id == project_id || self.project_ancestor(node.id) == Some(project_id))
+                && node.has_unrestructured_activity()
+        }))
     }
 
     pub fn children_of(&self, id: NodeId) -> Result<&[NodeId], TreeError> {
@@ -1132,6 +1320,10 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::project(path)),
             },
@@ -1184,7 +1376,11 @@ impl Tree {
         else {
             return Err(TreeError::NotAProject(project_id));
         };
+        if *project_path == path {
+            return Ok(());
+        }
         *project_path = path;
+        let _ = self.record_node_activity(project_id)?;
         Ok(())
     }
 
@@ -1208,6 +1404,10 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },
@@ -1240,6 +1440,10 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content,
@@ -1297,6 +1501,10 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Pane {
                     content: PaneContentKind::Board,
@@ -1336,6 +1544,10 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Folder { path },
             },
@@ -1391,6 +1603,10 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::split_view(orientation)),
             },
@@ -1463,6 +1679,9 @@ impl Tree {
             updated.nodes.remove(&id);
         }
         Self::rebuild_restructure_children(&mut updated, ROOT_ID, &plan.children)?;
+        for node in updated.nodes.values_mut() {
+            node.last_restructure_activity_revision = Some(node.activity_revision);
+        }
         *self = updated;
         Ok(())
     }
@@ -1478,6 +1697,25 @@ impl Tree {
         project_id: NodeId,
         plan: RestructurePlan,
     ) -> Result<(), TreeError> {
+        let inference_activity_revisions = self.project_activity_revisions(project_id)?;
+        self.apply_project_restructure_with_activity_checkpoint(
+            project_id,
+            plan,
+            &inference_activity_revisions,
+        )
+        .map(|_| ())
+    }
+
+    /// Applies one project plan and checkpoints only the activity that was
+    /// visible when inference began. Activity arriving while the model works
+    /// is normal: it survives the structural transaction and remains newer
+    /// than the checkpoint so the next restructure still sees it.
+    pub fn apply_project_restructure_with_activity_checkpoint(
+        &mut self,
+        project_id: NodeId,
+        plan: RestructurePlan,
+        inference_activity_revisions: &[NodeActivityRevision],
+    ) -> Result<Vec<NodeActivityRevision>, TreeError> {
         if !self.get(project_id).is_some_and(Node::is_project) {
             return Err(TreeError::NotAProject(project_id));
         }
@@ -1548,8 +1786,56 @@ impl Tree {
         }
 
         Self::rebuild_restructure_children(&mut updated, project_id, &plan.children)?;
+        let checkpoint_activity_revisions =
+            updated.mark_project_restructured_at(project_id, inference_activity_revisions)?;
         *self = updated;
-        Ok(())
+        Ok(checkpoint_activity_revisions)
+    }
+
+    /// Records the inference snapshot for surviving entries. Plan-created
+    /// groups have no snapshot entry and begin at revision zero; defaulting
+    /// every missing entry to zero also keeps malformed partial snapshots
+    /// conservatively dirty instead of acknowledging unseen activity.
+    /// Clamping protects the monotonic contract from an impossible future
+    /// revision on the wire.
+    fn mark_project_restructured_at(
+        &mut self,
+        project_id: NodeId,
+        inference_activity_revisions: &[NodeActivityRevision],
+    ) -> Result<Vec<NodeActivityRevision>, TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+
+        let inference_revisions = inference_activity_revisions
+            .iter()
+            .map(|revision| (revision.node_id, revision.activity_revision))
+            .collect::<HashMap<_, _>>();
+        let mut project_node_ids = self
+            .nodes
+            .values()
+            .filter(|node| {
+                node.id == project_id || self.project_ancestor(node.id) == Some(project_id)
+            })
+            .map(|node| node.id)
+            .collect::<Vec<_>>();
+        project_node_ids.sort_unstable();
+
+        let mut checkpoint_activity_revisions = Vec::with_capacity(project_node_ids.len());
+        for node_id in project_node_ids {
+            let node = self.get_mut(node_id)?;
+            let checkpoint_activity_revision = inference_revisions
+                .get(&node_id)
+                .copied()
+                .unwrap_or(0)
+                .min(node.activity_revision);
+            node.last_restructure_activity_revision = Some(checkpoint_activity_revision);
+            checkpoint_activity_revisions.push(NodeActivityRevision {
+                node_id,
+                activity_revision: checkpoint_activity_revision,
+            });
+        }
+        Ok(checkpoint_activity_revisions)
     }
 
     /// Restores only one project subtree from a tree captured immediately
@@ -1572,16 +1858,36 @@ impl Tree {
             .copied()
             .filter(|node_id| *node_id != project_id && self.is_ancestor_of(project_id, *node_id))
             .collect();
+        let current_activity_checkpoints = current_descendants
+            .iter()
+            .filter_map(|node_id| {
+                self.get(*node_id).map(|node| {
+                    (
+                        *node_id,
+                        (node.activity_revision, node.last_focus_activity_revision),
+                    )
+                })
+            })
+            .collect::<HashMap<_, _>>();
         for node_id in current_descendants {
             self.nodes.remove(&node_id);
         }
 
-        let previous_descendants: Vec<Node> = previous
+        let mut previous_descendants: Vec<Node> = previous
             .nodes
             .values()
             .filter(|node| node.id != project_id && previous.is_ancestor_of(project_id, node.id))
             .cloned()
             .collect();
+        for node in &mut previous_descendants {
+            let Some((activity_revision, last_focus_activity_revision)) =
+                current_activity_checkpoints.get(&node.id)
+            else {
+                continue;
+            };
+            node.activity_revision = *activity_revision;
+            node.last_focus_activity_revision = *last_focus_activity_revision;
+        }
         for node in previous_descendants {
             self.nodes.insert(node.id, node);
         }
@@ -1591,6 +1897,7 @@ impl Tree {
             return Err(TreeError::NotAProject(project_id));
         };
         container.children = previous_children;
+        let _ = self.record_node_activity(project_id)?;
         Ok(())
     }
 
@@ -1758,6 +2065,10 @@ impl Tree {
                             name: title.clone(),
                             short_name: short_title.clone(),
                             inferred_icon: icon.clone(),
+                            is_bookmarked: false,
+                            activity_revision: 0,
+                            last_restructure_activity_revision: None,
+                            last_focus_activity_revision: None,
                             structure_source: StructureSource::LlmRestructure,
                             kind: NodeKind::Container(ContainerNode::group()),
                         },
@@ -1813,6 +2124,9 @@ impl Tree {
         for node_id in &to_remove {
             self.nodes.remove(node_id);
         }
+        if let Some(parent) = parent {
+            let _ = self.record_node_activity(parent)?;
+        }
         Ok(())
     }
 
@@ -1828,13 +2142,21 @@ impl Tree {
         short_name: Option<String>,
         inferred_icon: Option<String>,
     ) -> Result<(), TreeError> {
+        let name = name.into();
         let node = self.get_mut(id)?;
-        node.name = name.into();
+        let did_change = node.name != name
+            || node.short_name != short_name
+            || node.inferred_icon != inferred_icon
+            || node.structure_source != StructureSource::Manual;
+        node.name = name;
         node.short_name = short_name;
         node.inferred_icon = inferred_icon;
         node.structure_source = StructureSource::Manual;
         if let NodeKind::Pane { title_source, .. } = &mut node.kind {
             *title_source = PaneTitleSource::UserSpecified;
+        }
+        if did_change {
+            let _ = self.record_node_activity(id)?;
         }
         Ok(())
     }
@@ -2246,6 +2568,7 @@ impl Tree {
         let moving_node = self.get_mut(id)?;
         moving_node.parent = Some(new_parent);
         moving_node.structure_source = StructureSource::Manual;
+        let _ = self.record_node_activity(id)?;
         Ok(())
     }
 
@@ -2335,8 +2658,12 @@ impl Tree {
                 let delta_i64 = delta as i64;
                 let len_i64 = container.children.len() as i64;
                 let new_pos = (pos_i64 + delta_i64).clamp(0, len_i64 - 1) as usize;
+                if new_pos == pos {
+                    return Ok(());
+                }
                 container.children.remove(pos);
                 container.children.insert(new_pos, id);
+                let _ = self.record_node_activity(id)?;
                 Ok(())
             }
             NodeKind::Pane { .. } | NodeKind::Folder { .. } => {
@@ -2725,9 +3052,139 @@ mod tests {
 
         assert_eq!(tree.project_ancestor(second_pane), Some(second_project));
         assert_eq!(tree.get(second_pane).unwrap().name, "two");
+        tree.record_node_activity(first_pane).unwrap();
+        tree.mark_node_focused(first_pane).unwrap();
+        tree.record_node_activity(first_pane).unwrap();
+        let activity_revision_before_restore = tree.get(first_pane).unwrap().activity_revision;
+        let focus_checkpoint_before_restore =
+            tree.get(first_pane).unwrap().last_focus_activity_revision;
         tree.restore_project_from(first_project, &before).unwrap();
         assert_eq!(tree.get(first_pane).unwrap().name, "one");
         assert_eq!(tree.get(second_pane).unwrap().name, "two");
+        assert_eq!(
+            tree.get(first_pane).unwrap().activity_revision,
+            activity_revision_before_restore
+        );
+        assert_eq!(
+            tree.get(first_pane).unwrap().last_focus_activity_revision,
+            focus_checkpoint_before_restore
+        );
+        assert!(tree.get(first_pane).unwrap().has_activity_since_focus());
+        assert!(
+            tree.project_has_unrestructured_activity(first_project)
+                .unwrap(),
+            "undoing a restructure is itself unrestructured project activity"
+        );
+    }
+
+    #[test]
+    fn focus_and_restructure_checkpoints_advance_independently() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/activity-checkpoints"))
+            .unwrap();
+        let group = tree.add_group(project, "work").unwrap();
+        let pane = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let plan = |title: &str| RestructurePlan {
+            children: vec![RestructureNode::Pane {
+                id: pane,
+                title: title.to_string(),
+                short_title: None,
+                icon: None,
+            }],
+        };
+
+        tree.apply_project_restructure(project, plan("first"))
+            .unwrap();
+        tree.mark_node_focused(pane).unwrap();
+        assert!(!tree.project_has_unrestructured_activity(project).unwrap());
+        assert!(!tree.get(pane).unwrap().has_activity_since_focus());
+
+        tree.record_node_activity(pane).unwrap();
+        assert!(tree.project_has_unrestructured_activity(project).unwrap());
+        assert!(tree.get(pane).unwrap().has_activity_since_focus());
+
+        tree.mark_node_focused(pane).unwrap();
+        assert!(
+            tree.project_has_unrestructured_activity(project).unwrap(),
+            "focusing must not make the project restructure-clean"
+        );
+        assert!(!tree.get(pane).unwrap().has_activity_since_focus());
+
+        tree.apply_project_restructure(project, plan("second"))
+            .unwrap();
+        tree.record_node_activity(pane).unwrap();
+        tree.apply_project_restructure(project, plan("third"))
+            .unwrap();
+        assert!(!tree.project_has_unrestructured_activity(project).unwrap());
+        assert!(
+            tree.get(pane).unwrap().has_activity_since_focus(),
+            "restructuring must not acknowledge unread pane activity"
+        );
+    }
+
+    #[test]
+    fn project_restructure_applies_after_activity_and_keeps_newer_activity_dirty() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/in-flight-activity"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let inference_activity_revisions = tree.project_activity_revisions(project).unwrap();
+        tree.record_node_activity(pane).unwrap();
+
+        let checkpoint_activity_revisions = tree
+            .apply_project_restructure_with_activity_checkpoint(
+                project,
+                RestructurePlan {
+                    children: vec![RestructureNode::Pane {
+                        id: pane,
+                        title: "inferred shell".to_string(),
+                        short_title: None,
+                        icon: None,
+                    }],
+                },
+                &inference_activity_revisions,
+            )
+            .unwrap();
+
+        assert_eq!(tree.get(pane).unwrap().name, "inferred shell");
+        assert_eq!(tree.get(pane).unwrap().activity_revision, 1);
+        assert_eq!(
+            tree.get(pane).unwrap().last_restructure_activity_revision,
+            Some(0)
+        );
+        assert_eq!(
+            checkpoint_activity_revisions
+                .iter()
+                .find(|checkpoint| checkpoint.node_id == pane),
+            Some(&NodeActivityRevision {
+                node_id: pane,
+                activity_revision: 0,
+            })
+        );
+        assert!(
+            tree.project_has_unrestructured_activity(project).unwrap(),
+            "activity newer than the inference snapshot must remain eligible"
+        );
+
+        tree.apply_project_restructure(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Pane {
+                    id: pane,
+                    title: "latest shell".to_string(),
+                    short_title: None,
+                    icon: None,
+                }],
+            },
+        )
+        .unwrap();
+        assert!(!tree.project_has_unrestructured_activity(project).unwrap());
     }
 
     #[test]
@@ -2744,6 +3201,50 @@ mod tests {
             matches!(tree.get(folder).unwrap().kind, NodeKind::Folder { ref path } if path == &PathBuf::from("/tmp/project"))
         );
         assert_eq!(tree.children_of(group).unwrap(), &[folder]);
+    }
+
+    #[test]
+    fn bookmarks_apply_to_every_persisted_tree_node_kind() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/bookmarks")).unwrap();
+        let group = tree.add_group(project, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+        let board = tree
+            .add_board(
+                group,
+                "planning".to_string(),
+                BoardStorage::MarkdownFile {
+                    path: PathBuf::from("/tmp/bookmarks.md"),
+                },
+            )
+            .unwrap();
+        let folder = tree
+            .add_folder(group, PathBuf::from("/tmp/bookmark-files"))
+            .unwrap();
+        let split = tree
+            .create_split_view(
+                group,
+                "split",
+                SplitOrientation::Vertical,
+                &[terminal, editor],
+            )
+            .unwrap();
+
+        for node_id in [project, group, terminal, editor, board, folder, split] {
+            tree.set_node_bookmarked(node_id, true).unwrap();
+            assert!(tree.get(node_id).unwrap().is_bookmarked);
+            tree.set_node_bookmarked(node_id, false).unwrap();
+            assert!(!tree.get(node_id).unwrap().is_bookmarked);
+        }
+        assert!(matches!(
+            tree.set_node_bookmarked(NodeId(u64::MAX), true),
+            Err(TreeError::NodeNotFound(NodeId(u64::MAX)))
+        ));
     }
 
     #[test]
@@ -4327,6 +4828,10 @@ mod tests {
                 name: "orphaned under a pane".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
                 kind: NodeKind::Container(ContainerNode::group()),
             },

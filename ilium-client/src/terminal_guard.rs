@@ -3,7 +3,7 @@
 //! on panic unwind, so a crash never leaves the user's shell stuck in raw
 //! mode. Ported unchanged in spirit from the pre-client/server bin's own
 //! `main.rs::TerminalGuard`; owning terminal lifecycle here (rather than
-//! leaving it to the `ilium` bin) matches ilium-client's README role as
+//! leaving it to the `ilium` bin) matches ilium-client's ARCHITECTURE.md role as
 //! "the ratatui TUI" -- the bin becomes a thin CLI dispatcher in the next
 //! stage, not the thing that manages raw mode.
 

@@ -25,6 +25,25 @@ pub enum TerminalContextAction {
 }
 
 impl TerminalContextAction {
+    /// Returns the shared icon role used by this terminal action.
+    pub const fn icon_target(&self) -> crate::icon_settings::IconTarget {
+        use crate::icon_settings::IconTarget;
+        match self {
+            Self::CopyLineToClipboard | Self::CopyFullTerminalHistoryToClipboard => {
+                IconTarget::Editor
+            }
+            Self::CopyVisibleTerminalToClipboard => IconTarget::Terminal,
+            Self::PasteClipboard => IconTarget::ScreenTransferDown,
+            Self::PasteScreenInto { direction, .. } => match direction {
+                PaneDirection::Left => IconTarget::ScreenTransferLeft,
+                PaneDirection::Right => IconTarget::ScreenTransferRight,
+                PaneDirection::Up => IconTarget::ScreenTransferUp,
+                PaneDirection::Down => IconTarget::ScreenTransferDown,
+            },
+            Self::ShowAgentDebugLog => IconTarget::Done,
+        }
+    }
+
     /// Returns the user-facing menu label for this terminal action.
     pub fn label(&self) -> String {
         match self {

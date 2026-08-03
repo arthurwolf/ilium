@@ -464,6 +464,12 @@ impl EditorPane {
         modified
     }
 
+    /// Current semantic buffer revision for server activity reporting. Saving,
+    /// scrolling, and cursor movement do not advance it.
+    pub const fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
     /// Inserts a semantic text payload in one operation. Voice and future
     /// non-keyboard controllers use this instead of synthesizing hundreds of
     /// terminal key events, while the same dirty/autosave invariants remain
@@ -488,6 +494,9 @@ impl EditorPane {
                 .map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned())
                 .collect()
         };
+        if self.textarea.lines() == lines {
+            return;
+        }
         self.textarea = TextArea::from(lines);
         // A fresh `TextArea` always comes back with the crate's default wrap
         // mode (`WrapMode::None`), regardless of this pane's `line_display` --
@@ -925,6 +934,9 @@ mod tests {
 
         assert_eq!(pane.textarea.wrap_mode(), WrapMode::Glyph);
         assert_eq!(pane.source_visual_rows(3).len(), 3);
+        let revision_after_change = pane.content_revision();
+        pane.replace_contents("abcdefgh");
+        assert_eq!(pane.content_revision(), revision_after_change);
     }
 
     #[test]

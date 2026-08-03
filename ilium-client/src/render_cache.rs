@@ -345,6 +345,34 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             cache.log.merge_synced_entry(entry);
             None
         }
+        ServerEvent::NodeActivityChanged {
+            node_id,
+            activity_revision,
+        } => {
+            app.apply_node_activity(node_id, activity_revision);
+            None
+        }
+        ServerEvent::NodeFocusCheckpointChanged {
+            node_id,
+            activity_revision,
+        } => {
+            app.apply_node_focus_checkpoint(node_id, activity_revision);
+            None
+        }
+        ServerEvent::ProjectRestructureApplied {
+            project_id,
+            checkpoint_activity_revisions,
+        } => {
+            app.confirm_project_restructure_applied(project_id, &checkpoint_activity_revisions);
+            None
+        }
+        ServerEvent::ProjectRestructureRejected {
+            project_id,
+            message,
+        } => {
+            app.reject_project_restructure(project_id, message);
+            None
+        }
     }
 }
 

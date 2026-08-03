@@ -66,6 +66,18 @@ pub enum EditorLineContextAction {
 }
 
 impl EditorLineContextAction {
+    /// Returns the shared icon role used by this editor-line action.
+    pub const fn icon_target(self) -> crate::icon_settings::IconTarget {
+        use crate::icon_settings::IconTarget;
+        match self {
+            Self::CopyLineToClipboard
+            | Self::CopyChapterToClipboard
+            | Self::CopyEntireFileToClipboard
+            | Self::OpenFileInEditor => IconTarget::Editor,
+            Self::CreateAgentFromLine => IconTarget::OtherAgent,
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::CopyLineToClipboard => "Copy line to clipboard",

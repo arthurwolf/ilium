@@ -323,7 +323,7 @@ pub fn apply_naming_worker_event(
         NamingWorkerEvent::Restructure(outcome) => {
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
-                expected_structure,
+                inference_activity_revisions,
                 result,
             } = outcome;
             workers.restructure_worker_finished(project_id);
@@ -338,7 +338,7 @@ pub fn apply_naming_worker_event(
             if let Err(error) = &result {
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
-            app.finish_project_restructure(project_id, &expected_structure, result);
+            app.finish_project_restructure(project_id, &inference_activity_revisions, result);
         }
     }
 }

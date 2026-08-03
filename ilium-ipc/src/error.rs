@@ -1,7 +1,7 @@
 //! Typed errors for the wire-framing layer. A malformed or truncated frame
 //! must always come back as an `Err` the caller can match on -- never a
 //! panic and never a value silently decoded from garbage bytes. This is
-//! what lets a client/server version mismatch fail loudly (README M2)
+//! what lets a client/server version mismatch fail loudly (ARCHITECTURE.md M2)
 //! instead of misparsing whatever bytes happened to be on the wire.
 
 use crate::framing::MAX_FRAME_LEN;

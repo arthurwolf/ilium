@@ -1,7 +1,7 @@
 //! ilium-client: the `ratatui` TUI, a thin renderer/input-dispatcher over
 //! `ilium-ipc` -- see `app.rs`'s module docs for the render-cache
 //! architecture this crate is built around, and the workspace root
-//! `CLAUDE.md` / README "Architecture" for how this fits the
+//! `CLAUDE.md` / ARCHITECTURE.md "Process architecture" for how this fits the
 //! client/server split as a whole.
 //!
 //! Module map:
@@ -1248,14 +1248,9 @@ fn dispatch_pending_app_work(
 
     for request in app.take_pending_restructure_requests() {
         match home_dir {
-            Some(home_dir) => naming_workers.spawn_restructure_worker(
-                request.project_id,
-                request.contexts,
-                request.current_structure,
-                request.protected_split_views,
-                home_dir.to_path_buf(),
-                request.project_cwd,
-            ),
+            Some(home_dir) => {
+                naming_workers.spawn_restructure_worker(request, home_dir.to_path_buf())
+            }
             None => {
                 app.fail_project_restructure(
                     request.project_id,

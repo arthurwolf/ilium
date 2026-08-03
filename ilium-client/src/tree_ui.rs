@@ -421,6 +421,9 @@ pub struct TreeRenderOptions<'a> {
     /// finished sliding into place -- see `App::recently_created`.
     pub recently_created: &'a HashMap<NodeId, u128>,
     pub terminal_activity: &'a TerminalActivityTracker,
+    /// Currently viewed pane. Its activity is visible rather than unread even
+    /// before the server receives the end-of-focus checkpoint.
+    pub focused_pane_id: Option<NodeId>,
     /// Client-only structural transition state. It may temporarily supply the
     /// previous snapshot for exit rendering while `tree` remains authoritative.
     pub transitions: &'a TreeTransitions,
@@ -459,6 +462,7 @@ struct TreeItemBuildContext<'a> {
     titles_loading: &'a HashSet<NodeId>,
     recently_created: &'a HashMap<NodeId, u128>,
     terminal_activity: &'a TerminalActivityTracker,
+    focused_pane_id: Option<NodeId>,
     agent_identifiers: &'a AgentIdentifierSettings,
     icons: &'a IconSettings,
     tree_order: TreeOrder,
@@ -504,6 +508,7 @@ pub(crate) fn visible_tree_node_ids(
             titles_loading: &HashSet::new(),
             recently_created: &HashMap::new(),
             terminal_activity: &TerminalActivityTracker::default(),
+            focused_pane_id: None,
             agent_identifiers: &AgentIdentifierSettings::default(),
             icons: &IconSettings::default(),
             tree_order,
@@ -584,10 +589,14 @@ fn build_item(
             let label = node_label(
                 Span::raw(icon.to_string()),
                 None,
-                Span::raw(title_with_optional_icon(
-                    &node.name,
-                    node.inferred_icon.as_deref(),
-                    context.show_inferred_title_icons,
+                Span::raw(title_with_bookmark(
+                    title_with_optional_icon(
+                        &node.name,
+                        node.inferred_icon.as_deref(),
+                        context.show_inferred_title_icons,
+                    ),
+                    node.is_bookmarked,
+                    context.icons,
                 )),
             );
             let label = apply_recent_pulse(label, flash_on);
@@ -625,10 +634,14 @@ fn build_item(
                     prompt_queue.len()
                 )
             };
-            let display_name = title_with_optional_icon(
-                &display_name,
-                node.inferred_icon.as_deref(),
-                context.show_inferred_title_icons,
+            let display_name = title_with_bookmark(
+                title_with_optional_icon(
+                    &display_name,
+                    node.inferred_icon.as_deref(),
+                    context.show_inferred_title_icons,
+                ),
+                node.is_bookmarked,
+                context.icons,
             );
             let label = scheduled_input.as_ref().map_or_else(
                 || {
@@ -662,6 +675,14 @@ fn build_item(
                     )
                 },
             );
+            let label = apply_unread_title_bold(
+                label,
+                should_apply_unread_title_bold(
+                    status,
+                    node.has_activity_since_focus(),
+                    context.focused_pane_id == Some(node.id),
+                ),
+            );
             TreeItem::new_leaf(
                 node.id,
                 apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density),
@@ -671,10 +692,14 @@ fn build_item(
             let label = node_label(
                 Span::raw(context.icons.glyph(IconTarget::Folder).to_string()),
                 None,
-                Span::raw(title_with_optional_icon(
-                    &node.name,
-                    node.inferred_icon.as_deref(),
-                    context.show_inferred_title_icons,
+                Span::raw(title_with_bookmark(
+                    title_with_optional_icon(
+                        &node.name,
+                        node.inferred_icon.as_deref(),
+                        context.show_inferred_title_icons,
+                    ),
+                    node.is_bookmarked,
+                    context.icons,
                 )),
             );
             // The root itself is a normal tree row. Once opened, its direct
@@ -704,9 +729,20 @@ fn title_with_optional_icon(title: &str, inferred_icon: Option<&str>, enabled: b
     }
 }
 
+/// Adds the user-configured bookmark directly before a node's descriptive
+/// text. Node kind, agent activity, and goal badges remain in their fixed
+/// columns, so this durable marker never changes tree-row alignment.
+fn title_with_bookmark(title: String, is_bookmarked: bool, icons: &IconSettings) -> String {
+    if is_bookmarked {
+        return format!("{} {title}", icons.glyph(IconTarget::Bookmark));
+    }
+    title
+}
+
 #[cfg(test)]
 mod inferred_title_icon_tests {
-    use super::title_with_optional_icon;
+    use super::{title_with_bookmark, title_with_optional_icon};
+    use crate::icon_settings::{IconSettings, IconTarget};
 
     #[test]
     fn inferred_title_icons_are_hidden_by_default_and_prefix_when_enabled() {
@@ -717,6 +753,21 @@ mod inferred_title_icon_tests {
         assert_eq!(
             title_with_optional_icon("Short Title", Some("🔐"), true),
             "🔐 Short Title"
+        );
+    }
+
+    #[test]
+    fn bookmarked_titles_use_the_configured_glyph_immediately_before_text() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::Bookmark, "🔖".to_string());
+
+        assert_eq!(
+            title_with_bookmark("Build the tree".to_string(), true, &icons),
+            "🔖 Build the tree"
+        );
+        assert_eq!(
+            title_with_bookmark("Build the tree".to_string(), false, &icons),
+            "Build the tree"
         );
     }
 }
@@ -953,6 +1004,36 @@ fn apply_recent_pulse(line: Line<'static>, flash_on: bool) -> Line<'static> {
             })
             .collect::<Vec<_>>(),
     )
+}
+
+/// Bolds only the descriptive text span for an entry with unseen activity.
+/// Done-agent bell pulsing suppresses this call entirely, so its on/off
+/// boldness remains visible instead of being flattened into constant bold.
+fn apply_unread_title_bold(mut line: Line<'static>, is_unread: bool) -> Line<'static> {
+    if !is_unread {
+        return line;
+    }
+    if let Some(title) = line.spans.last_mut() {
+        title.style = title.style.add_modifier(Modifier::BOLD);
+    }
+    line
+}
+
+/// Gives the completion bell exclusive ownership of title boldness while it
+/// pulses; ordinary unread panes stay bold unless their content is visible in
+/// the currently focused right panel.
+fn should_apply_unread_title_bold(
+    status: &PaneStatus,
+    has_activity_since_focus: bool,
+    is_currently_focused: bool,
+) -> bool {
+    has_activity_since_focus
+        && !is_currently_focused
+        && !matches!(
+            status,
+            PaneStatus::Agent(_, AgentActivity::Done)
+                | PaneStatus::AgentWithGoal(_, AgentActivity::Done)
+        )
 }
 
 /// Presentation-only inputs shared by every pane-label variant.
@@ -1641,6 +1722,7 @@ impl TreeItemCache {
                     titles_loading: &HashSet::new(),
                     recently_created: &HashMap::new(),
                     terminal_activity: &TerminalActivityTracker::default(),
+                    focused_pane_id: None,
                     agent_identifiers: &AgentIdentifierSettings::default(),
                     icons: &IconSettings::default(),
                     tree_order,
@@ -1692,6 +1774,7 @@ pub fn render(
             titles_loading: options.titles_loading,
             recently_created: options.recently_created,
             terminal_activity: options.terminal_activity,
+            focused_pane_id: options.focused_pane_id,
             agent_identifiers: options.agent_identifiers,
             icons: options.icons,
             tree_order: options.tree_order,
@@ -1731,6 +1814,7 @@ pub fn render(
                 titles_loading: options.titles_loading,
                 recently_created: options.recently_created,
                 terminal_activity: options.terminal_activity,
+                focused_pane_id: options.focused_pane_id,
                 agent_identifiers: options.agent_identifiers,
                 icons: options.icons,
                 tree_order: options.tree_order,
@@ -2193,6 +2277,7 @@ mod tests {
                         titles_loading: &titles_loading,
                         recently_created,
                         terminal_activity: &TerminalActivityTracker::default(),
+                        focused_pane_id: None,
                         transitions,
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2478,6 +2563,35 @@ mod tests {
 
         assert!(line_text(&line).ends_with("« [done] » X: Review auth"));
         assert!(!line_text(&line).contains("— done"));
+    }
+
+    #[test]
+    fn unread_bold_targets_only_the_title_and_yields_to_the_done_bell() {
+        let line = Line::from(vec![
+            Span::raw("icon"),
+            Span::raw("activity"),
+            Span::raw("title"),
+        ]);
+        let bolded = apply_unread_title_bold(line, true);
+
+        assert!(!bolded.spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert!(!bolded.spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert!(bolded.spans[2].style.add_modifier.contains(Modifier::BOLD));
+        assert!(should_apply_unread_title_bold(
+            &PaneStatus::PlainShell,
+            true,
+            false
+        ));
+        assert!(!should_apply_unread_title_bold(
+            &PaneStatus::PlainShell,
+            true,
+            true
+        ));
+        assert!(!should_apply_unread_title_bold(
+            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            true,
+            false
+        ));
     }
 
     #[test]
@@ -2783,6 +2897,7 @@ mod tests {
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
                         terminal_activity: &TerminalActivityTracker::default(),
+                        focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2824,6 +2939,7 @@ mod tests {
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
                         terminal_activity: &TerminalActivityTracker::default(),
+                        focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -2884,6 +3000,7 @@ mod tests {
                         titles_loading: &titles_loading,
                         recently_created: &recently_created,
                         terminal_activity: &TerminalActivityTracker::default(),
+                        focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
@@ -3112,6 +3229,7 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3134,6 +3252,7 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3159,6 +3278,7 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3434,6 +3554,7 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &recently_created,
                 terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,
@@ -3672,6 +3793,7 @@ mod tests {
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
                 tree_order: TreeOrder::Manual,

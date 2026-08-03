@@ -142,6 +142,22 @@ pub async fn handle_request(
             .await;
             false
         }
+        ClientRequest::SetNodeBookmarked {
+            node_id,
+            is_bookmarked,
+        } => {
+            handle_tree_mutation(state, direct_tx, |tree| {
+                tree.set_node_bookmarked(node_id, is_bookmarked)
+            })
+            .await;
+            false
+        }
+        ClientRequest::RecordNodeActivity { node_id } => {
+            if let Err(error) = record_node_activity(state, node_id).await {
+                send_direct_error(direct_tx, error).await;
+            }
+            false
+        }
         ClientRequest::SetAutomaticPaneTitle {
             pane_id,
             title,
@@ -280,8 +296,19 @@ pub async fn handle_request(
             handle_revert_last_restructure(state, direct_tx).await;
             false
         }
-        ClientRequest::ApplyProjectRestructurePlan { project_id, plan } => {
-            handle_apply_project_restructure_plan(state, project_id, plan, direct_tx).await;
+        ClientRequest::ApplyProjectRestructurePlan {
+            project_id,
+            plan,
+            inference_activity_revisions,
+        } => {
+            handle_apply_project_restructure_plan(
+                state,
+                project_id,
+                plan,
+                &inference_activity_revisions,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::RevertProjectRestructure { project_id } => {
@@ -476,6 +503,40 @@ pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     state.prune_stale_restructure_undo().await;
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
+}
+
+/// Advances one entry revision and notifies every attachment. Persistence is
+/// needed only when either independent checkpoint first becomes stale; later
+/// live revisions still fence in-flight plans without causing a snapshot write
+/// for every output chunk.
+pub(crate) async fn record_node_activity(
+    state: &ServerState,
+    node_id: NodeId,
+) -> Result<u64, String> {
+    let update = {
+        let mut tree = state.tree.write().await;
+        tree.record_node_activity(node_id)
+            .map_err(|error| format!("could not record activity for {node_id:?}: {error}"))?
+    };
+    publish_node_activity_update(state, node_id, update);
+    Ok(update.activity_revision)
+}
+
+/// Publishes one already-committed core activity transition. Detection owns a
+/// larger tree/pane transaction and therefore records inside that transaction;
+/// ordinary input/output callers use [`record_node_activity`] above.
+pub(crate) fn publish_node_activity_update(
+    state: &ServerState,
+    node_id: NodeId,
+    update: ilium_core::NodeActivityUpdate,
+) {
+    state.broadcast(ServerEvent::NodeActivityChanged {
+        node_id,
+        activity_revision: update.activity_revision,
+    });
+    if update.became_unrestructured || update.became_unread_since_focus {
+        state.request_snapshot_save();
+    }
 }
 
 /// Validates and persists one timer before waking the detached executor. The
@@ -965,22 +1026,46 @@ async fn handle_apply_project_restructure_plan(
     state: &Arc<ServerState>,
     project_id: NodeId,
     plan: RestructurePlan,
+    inference_activity_revisions: &[ilium_core::NodeActivityRevision],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let mut tree = state.tree.write().await;
     let before = tree.clone();
-    let result = tree.apply_project_restructure(project_id, plan);
+    let result = tree.apply_project_restructure_with_activity_checkpoint(
+        project_id,
+        plan,
+        inference_activity_revisions,
+    );
     drop(tree);
     match result {
-        Ok(()) => {
+        Ok(checkpoint_activity_revisions) => {
             state
                 .restructure_undo
                 .lock()
                 .await
                 .insert(project_id, before);
             broadcast_and_persist(state).await;
+            send_direct(
+                direct_tx,
+                ServerEvent::ProjectRestructureApplied {
+                    project_id,
+                    checkpoint_activity_revisions,
+                },
+            )
+            .await;
         }
-        Err(error) => send_direct_error(direct_tx, format!("restructure failed: {error}")).await,
+        Err(error) => {
+            let message = format!("restructure failed: {error}");
+            tracing::error!(%message, "request failed");
+            send_direct(
+                direct_tx,
+                ServerEvent::ProjectRestructureRejected {
+                    project_id,
+                    message,
+                },
+            )
+            .await;
+        }
     }
 }
 
@@ -1189,20 +1274,49 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
 /// error is surfaced for a missing pane because focus can harmlessly race pane
 /// closure.
 async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focused: bool) {
-    let mut panes = state.panes.write().await;
-    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
-        return;
+    let focus_checkpoint = {
+        let mut tree = state.tree.write().await;
+        match tree.mark_node_focused(pane_id) {
+            Ok(checkpoint) => checkpoint,
+            Err(ilium_core::TreeError::NodeNotFound(_)) => return,
+            Err(error) => {
+                tracing::error!(
+                    "focus activity acknowledgement rejected for pane {pane_id:?}: {error}"
+                );
+                None
+            }
+        }
     };
-    runtime.detection_schedule.client_focused = focused;
-    let detection_was_forced =
-        crate::detection::force_check(&mut runtime.detection_schedule, std::time::Instant::now());
-    drop(panes);
+    if let Some(activity_revision) = focus_checkpoint {
+        state.broadcast(ServerEvent::NodeFocusCheckpointChanged {
+            node_id: pane_id,
+            activity_revision,
+        });
+        state.request_snapshot_save();
+    }
+
+    let (detection_was_forced, is_terminal) = {
+        let mut panes = state.panes.write().await;
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => {
+                runtime.detection_schedule.client_focused = focused;
+                (
+                    crate::detection::force_check(
+                        &mut runtime.detection_schedule,
+                        std::time::Instant::now(),
+                    ),
+                    true,
+                )
+            }
+            Some(PaneResource::Editor { .. }) | None => (false, false),
+        }
+    };
 
     // The server remains authoritative for the acknowledgement. A client must
     // wait for this broadcast rather than mutating its cached tree locally, so
     // every attachment sees the same bell state and a concurrent detector can
     // still win with newer Working/Waiting activity.
-    let acknowledged_status = if focused {
+    let acknowledged_status = if focused && is_terminal {
         let mut tree = state.tree.write().await;
         match tree.acknowledge_agent_completion(pane_id) {
             Ok(status) => status,
@@ -1656,6 +1770,9 @@ async fn forward_output_bytes(
     loop {
         match receiver.recv().await {
             Ok(first_chunk) => {
+                if let Err(error) = record_node_activity(&state, pane_id).await {
+                    tracing::warn!("{error}");
+                }
                 // A bursty PTY reader commonly splits one visual update into
                 // many tiny chunks.  Merge only already-queued chunks: this
                 // adds no deliberate latency, while avoiding one broadcast,
@@ -2093,6 +2210,7 @@ pub(crate) async fn write_key_input(
     // conditional tree transition cannot overwrite a concurrent detector's
     // newer Working/Waiting state.
     if !bytes.is_empty() {
+        let _ = record_node_activity(state, pane_id).await?;
         let acknowledged_status = {
             let mut tree = state.tree.write().await;
             match tree.acknowledge_agent_completion(pane_id) {
@@ -2368,6 +2486,8 @@ async fn handle_mouse_input(
 
     if let Some(message) = error_message {
         send_direct_error(direct_tx, message).await;
+    } else if let Err(error) = record_node_activity(state, pane_id).await {
+        send_direct_error(direct_tx, error).await;
     }
 }
 
@@ -2496,6 +2616,211 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bookmark_request_broadcasts_the_authoritative_tree_and_marks_it_for_persistence() {
+        let directory = tempfile::tempdir().expect("create bookmark test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "bookmark-request".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("bookmark.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let group_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree
+                .project_ids()
+                .into_iter()
+                .next()
+                .expect("fresh server has its launch project");
+            tree.add_group(project_id, "work")
+                .expect("launch project accepts a group")
+        };
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+
+        assert!(
+            !handle_request(
+                &state,
+                ClientRequest::SetNodeBookmarked {
+                    node_id: group_id,
+                    is_bookmarked: true,
+                },
+                &direct_tx,
+            )
+            .await
+        );
+
+        let ServerEvent::TreeSnapshot(snapshot) = events.recv().await.expect("tree broadcast")
+        else {
+            panic!("bookmark update must broadcast a tree snapshot");
+        };
+        assert!(snapshot.get(group_id).unwrap().is_bookmarked);
+        assert!(state.tree.read().await.get(group_id).unwrap().is_bookmarked);
+        assert!(state
+            .snapshot_dirty
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(direct_rx.try_recv().is_err());
+        sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn focus_acknowledges_only_unread_activity_not_restructure_activity() {
+        let directory = tempfile::tempdir().expect("create activity test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "focus-activity".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("focus-activity.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let (project_id, pane_id) = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            let pane_id = tree
+                .add_pane(project_id, "notes", PaneContentKind::Editor)
+                .expect("project accepts an editor");
+            tree.apply_project_restructure(
+                project_id,
+                RestructurePlan {
+                    children: vec![RestructureNode::Pane {
+                        id: pane_id,
+                        title: "notes".to_string(),
+                        short_title: None,
+                        icon: None,
+                    }],
+                },
+            )
+            .expect("initial restructure checkpoints project");
+            tree.mark_node_focused(pane_id)
+                .expect("initial focus checkpoints pane");
+            (project_id, pane_id)
+        };
+        let mut events = state.events.subscribe();
+
+        let activity_revision = record_node_activity(&state, pane_id)
+            .await
+            .expect("editor activity is accepted");
+        assert!(matches!(
+            events.recv().await,
+            Ok(ServerEvent::NodeActivityChanged {
+                node_id,
+                activity_revision: received_revision,
+            }) if node_id == pane_id && received_revision == activity_revision
+        ));
+        {
+            let tree = state.tree.read().await;
+            assert!(tree
+                .project_has_unrestructured_activity(project_id)
+                .unwrap());
+            assert!(tree.get(pane_id).unwrap().has_activity_since_focus());
+        }
+
+        handle_set_pane_focus(&state, pane_id, true).await;
+        assert!(matches!(
+            events.recv().await,
+            Ok(ServerEvent::NodeFocusCheckpointChanged {
+                node_id,
+                activity_revision: received_revision,
+            }) if node_id == pane_id && received_revision == activity_revision
+        ));
+        {
+            let tree = state.tree.read().await;
+            assert!(
+                tree.project_has_unrestructured_activity(project_id)
+                    .unwrap(),
+                "focus must not checkpoint project restructure activity"
+            );
+            assert!(!tree.get(pane_id).unwrap().has_activity_since_focus());
+        }
+
+        sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn accepted_terminal_input_and_output_each_advance_activity() {
+        let directory = tempfile::tempdir().expect("create terminal activity directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "terminal-activity".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("terminal-activity.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            tree.add_pane(project_id, "cat", PaneContentKind::Terminal)
+                .expect("project accepts a terminal")
+        };
+        spawn_and_register_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command("cat".to_string())),
+        )
+        .await
+        .expect("spawn terminal activity fixture");
+        let mut events = state.events.subscribe();
+
+        write_key_input(&state, pane_id, b"x", None)
+            .await
+            .expect("write terminal input");
+        let output_revision = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match events.recv().await {
+                    Ok(ServerEvent::NodeActivityChanged {
+                        node_id,
+                        activity_revision,
+                    }) if node_id == pane_id && activity_revision >= 2 => {
+                        break activity_revision;
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!("terminal activity event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("PTY echo should produce output activity");
+        assert!(
+            output_revision >= 2,
+            "one accepted input and its PTY output must create distinct revisions"
+        );
+        assert_eq!(
+            state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .unwrap()
+                .activity_revision,
+            output_revision
+        );
+
+        let resources: Vec<_> = state.panes.write().await.drain().collect();
+        for (resource_pane_id, resource) in resources {
+            teardown_pane_resource(resource_pane_id, resource);
+        }
+        sound_task.abort();
+    }
+
+    #[tokio::test]
     async fn live_recovery_emits_only_the_missing_pane_tail() {
         let directory = tempfile::tempdir().expect("create recovery test directory");
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
@@ -2585,7 +2910,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_restructure_handler_preserves_splits_and_rejects_dissolution() {
+    async fn project_restructure_handler_rebases_activity_and_preserves_splits() {
         let directory = tempfile::tempdir().expect("create restructure test directory");
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
@@ -2622,7 +2947,17 @@ mod tests {
                 .expect("group accepts a split");
             (project_id, original_group, split_view, first, second)
         };
-        let before_restructure = state.tree.read().await.clone();
+        let inference_tree = state.tree.read().await.clone();
+        let inference_activity_revisions = inference_tree
+            .project_activity_revisions(project_id)
+            .expect("project revisions are readable");
+        state
+            .tree
+            .write()
+            .await
+            .record_node_activity(first)
+            .expect("terminal activity is recorded while inference runs");
+        let before_apply = state.tree.read().await.clone();
         let mut events = state.events.subscribe();
         let (direct_tx, mut direct_rx) = mpsc::channel(8);
 
@@ -2653,11 +2988,26 @@ mod tests {
                     }],
                 }],
             },
+            &inference_activity_revisions,
             &direct_tx,
         )
         .await;
 
-        assert!(direct_rx.try_recv().is_err());
+        let Some(ServerEvent::ProjectRestructureApplied {
+            project_id: applied_project_id,
+            checkpoint_activity_revisions,
+        }) = direct_rx.recv().await
+        else {
+            panic!("activity during inference must not reject a valid restructure");
+        };
+        assert_eq!(applied_project_id, project_id);
+        assert_eq!(
+            checkpoint_activity_revisions
+                .iter()
+                .find(|revision| revision.node_id == first)
+                .map(|revision| revision.activity_revision),
+            Some(inference_tree.get(first).unwrap().activity_revision)
+        );
         let snapshot = tokio::time::timeout(Duration::from_secs(1), events.recv())
             .await
             .expect("successful restructure broadcasts")
@@ -2675,11 +3025,28 @@ mod tests {
             Some(SplitOrientation::Horizontal)
         );
         assert_eq!(
+            snapshot.get(first).unwrap().activity_revision,
+            before_apply.get(first).unwrap().activity_revision
+        );
+        assert_eq!(
+            snapshot
+                .get(first)
+                .unwrap()
+                .last_restructure_activity_revision,
+            Some(inference_tree.get(first).unwrap().activity_revision)
+        );
+        assert!(snapshot
+            .project_has_unrestructured_activity(project_id)
+            .unwrap());
+        assert_eq!(
             state.restructure_undo.lock().await.get(&project_id),
-            Some(&before_restructure)
+            Some(&before_apply)
         );
 
         let valid_tree = state.tree.read().await.clone();
+        let inference_activity_revisions = valid_tree
+            .project_activity_revisions(project_id)
+            .expect("project revisions are readable");
         let prior_undo = state
             .restructure_undo
             .lock()
@@ -2705,14 +3072,19 @@ mod tests {
                     },
                 ],
             },
+            &inference_activity_revisions,
             &direct_tx,
         )
         .await;
 
         assert!(matches!(
             direct_rx.recv().await,
-            Some(ServerEvent::Error { message })
-                if message.contains("changed the protected split-view set")
+            Some(ServerEvent::ProjectRestructureRejected {
+                project_id: rejected_project_id,
+                message,
+            })
+                if rejected_project_id == project_id
+                    && message.contains("changed the protected split-view set")
         ));
         assert_eq!(*state.tree.read().await, valid_tree);
         assert_eq!(

@@ -680,6 +680,7 @@ mod tests {
         let path = scratch_snapshot_path();
         let mut snapshot = sample_snapshot();
         let pane_id = snapshot.panes[1].node_id;
+        snapshot.tree.set_node_bookmarked(pane_id, true).unwrap();
         let mut log = PaneDebugLog::default();
         let _ = log.append(
             1_700_000_000_000,
@@ -712,6 +713,76 @@ mod tests {
         let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
 
         assert!(loaded.agent_debug_logs.is_empty());
+    }
+
+    #[test]
+    fn snapshots_from_before_bookmarks_default_every_node_to_unbookmarked() {
+        fn remove_bookmark_fields(value: &mut serde_json::Value) {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    fields.remove("is_bookmarked");
+                    for child in fields.values_mut() {
+                        remove_bookmark_fields(child);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        remove_bookmark_fields(item);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        remove_bookmark_fields(&mut old_shape);
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert!(loaded.tree.all_ids().all(|node_id| {
+            !loaded
+                .tree
+                .get(node_id)
+                .expect("all ids resolve to tree nodes")
+                .is_bookmarked
+        }));
+    }
+
+    #[test]
+    fn snapshots_from_before_activity_tracking_have_no_trusted_checkpoints() {
+        fn remove_activity_fields(value: &mut serde_json::Value) {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    fields.remove("activity_revision");
+                    fields.remove("last_restructure_activity_revision");
+                    fields.remove("last_focus_activity_revision");
+                    for child in fields.values_mut() {
+                        remove_activity_fields(child);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        remove_activity_fields(item);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        remove_activity_fields(&mut old_shape);
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert!(loaded.tree.all_ids().all(|node_id| {
+            let node = loaded
+                .tree
+                .get(node_id)
+                .expect("all ids resolve to tree nodes");
+            node.activity_revision == 0
+                && node.last_restructure_activity_revision.is_none()
+                && node.last_focus_activity_revision.is_none()
+        }));
     }
 
     #[cfg(unix)]

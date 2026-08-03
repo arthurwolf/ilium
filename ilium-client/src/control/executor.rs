@@ -565,6 +565,10 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
     let pane_id = resolve_node(app, &command.target)?;
     require_editor(app, pane_id)?;
     app.focus_pane(pane_id);
+    let content_revision_before = match app.panes.get(&pane_id) {
+        Some(PaneRuntime::Editor(editor)) => editor.content_revision(),
+        _ => return Err("Target is not an editor pane".to_owned()),
+    };
     match command.action {
         EditorAction::Save => app.action_save_focused_editor(),
         EditorAction::SaveAs => {
@@ -597,6 +601,13 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
         EditorAction::ToggleMinimap => app.action_toggle_editor_minimap(),
         EditorAction::ToggleAutosave => app.action_toggle_editor_autosave(),
     }
+    if app
+        .panes
+        .get(&pane_id)
+        .is_some_and(|runtime| matches!(runtime, PaneRuntime::Editor(editor) if editor.content_revision() != content_revision_before))
+    {
+        app.record_client_node_activity(pane_id);
+    }
     Ok(ExecutionReceipt::immediate(
         app.status_message
             .clone()
@@ -609,6 +620,7 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
     let Some(PaneRuntime::Board(board)) = app.panes.get_mut(&pane_id) else {
         return Err("Target is not a board pane".to_owned());
     };
+    let content_revision_before = board.content_revision();
     match command.action {
         BoardAction::SelectColumn => {
             board.select_column(command.column.ok_or("column is required")?)
@@ -663,6 +675,10 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
             board.select_column(command.column.ok_or("column is required")?);
             board.delete_selected_column()?;
         }
+    }
+    let did_change_content = board.content_revision() != content_revision_before;
+    if did_change_content {
+        app.record_client_node_activity(pane_id);
     }
     Ok(ExecutionReceipt::immediate("Board updated and persisted"))
 }

@@ -82,6 +82,10 @@ pub struct BoardPane {
     /// Live editor for the selected card while its detail panel is open.
     pub detail_editor: Option<CardDetailEditor>,
     markdown_revision: Option<String>,
+    /// Advances only after a semantic board mutation is committed through its
+    /// storage adapter. Callers compare it around interactions to avoid
+    /// reporting navigation or failed/no-op edits as project activity.
+    content_revision: u64,
 }
 
 impl BoardPane {
@@ -104,6 +108,7 @@ impl BoardPane {
             is_detail_panel_open: false,
             detail_editor: None,
             markdown_revision,
+            content_revision: 0,
         })
     }
     pub fn create(storage: BoardStorage) -> Result<Self, String> {
@@ -131,6 +136,7 @@ impl BoardPane {
             is_detail_panel_open: false,
             detail_editor: None,
             markdown_revision: None,
+            content_revision: 0,
         };
         let mut board = board;
         board.save()?;
@@ -153,10 +159,36 @@ impl BoardPane {
     /// Markdown edit). A failed save must never leave the UI showing data that
     /// was not actually committed to disk.
     fn persist_or_restore(&mut self, previous: Self) -> Result<(), String> {
+        let next_content_revision = self
+            .content_revision
+            .checked_add(1)
+            .ok_or_else(|| "board content revision exhausted".to_string())?;
         if let Err(error) = self.save() {
             *self = previous;
             return Err(error);
         }
+        self.content_revision = next_content_revision;
+        Ok(())
+    }
+
+    /// Current committed semantic revision for activity-edge detection.
+    pub const fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
+    /// Reloads the active storage adapter while preserving the local semantic
+    /// revision counter. External content changes are real project activity;
+    /// selecting reload without a disk change remains a no-op.
+    pub fn reload(&mut self) -> Result<(), String> {
+        let mut reloaded = Self::load(self.storage.clone())?;
+        reloaded.content_revision = if reloaded.columns == self.columns {
+            self.content_revision
+        } else {
+            self.content_revision
+                .checked_add(1)
+                .ok_or_else(|| "board content revision exhausted".to_string())?
+        };
+        *self = reloaded;
         Ok(())
     }
 
@@ -353,6 +385,9 @@ impl BoardPane {
             .get_mut(self.selected_column)
             .and_then(|column| column.cards.get_mut(selected_card))
             .ok_or_else(|| "No card selected".to_string())?;
+        if card.title == title {
+            return Ok(());
+        }
         card.title = title.to_string();
         self.persist_or_restore(previous)
     }
@@ -371,6 +406,10 @@ impl BoardPane {
         if self.columns.iter().any(|column| column.title == title) {
             return Err("A column with that name already exists".to_string());
         }
+        let next_content_revision = self
+            .content_revision
+            .checked_add(1)
+            .ok_or_else(|| "board content revision exhausted".to_string())?;
         let previous = self.clone();
         // Captured up front (rather than re-derived from `self` in the
         // failure branch below) so the rollback path does not depend on how
@@ -399,6 +438,7 @@ impl BoardPane {
             *self = previous;
             return Err(error);
         }
+        self.content_revision = next_content_revision;
         Ok(())
     }
 
@@ -418,15 +458,25 @@ impl BoardPane {
             .get_mut(column_index)
             .and_then(|column| column.cards.get_mut(card_index))
             .ok_or_else(|| "No matching board card".to_owned())?;
+        let mut did_change = false;
         if let Some(title) = title {
             let title = title.trim();
             if title.is_empty() {
                 return Err("A card needs a title".to_owned());
             }
-            card.title = title.to_owned();
+            if card.title != title {
+                card.title = title.to_owned();
+                did_change = true;
+            }
         }
         if let Some(body) = body {
-            card.body = body;
+            if card.body != body {
+                card.body = body;
+                did_change = true;
+            }
+        }
+        if !did_change {
+            return Ok(());
         }
         self.selected_column = column_index;
         self.selected_card = Some(card_index);
@@ -471,6 +521,10 @@ impl BoardPane {
         if !column.cards.is_empty() {
             return Err("Move or remove this column's cards first".to_string());
         }
+        let next_content_revision = self
+            .content_revision
+            .checked_add(1)
+            .ok_or_else(|| "board content revision exhausted".to_string())?;
         // Captured up front so the rollback path below can recreate exactly
         // the (empty, per the check above) directory that was removed, even
         // after `*self = previous` restores the in-memory column list.
@@ -507,6 +561,7 @@ impl BoardPane {
             *self = previous;
             return Err(error);
         }
+        self.content_revision = next_content_revision;
         Ok(())
     }
 
@@ -547,6 +602,10 @@ impl BoardPane {
     /// other card, and the full backing Markdown source for
     /// `MarkdownFile`-backed boards).
     pub fn input_detail_editor(&mut self, input: Input) -> Result<bool, String> {
+        let next_content_revision = self
+            .content_revision
+            .checked_add(1)
+            .ok_or_else(|| "board content revision exhausted".to_string())?;
         let Some(editor) = self.detail_editor.as_mut() else {
             return Ok(false);
         };
@@ -611,6 +670,7 @@ impl BoardPane {
             }
             return Err(error);
         }
+        self.content_revision = next_content_revision;
         Ok(true)
     }
 
@@ -1525,6 +1585,25 @@ mod tests {
         assert!(error.contains("press r to reload"));
         assert_eq!(board.columns, columns_before_conflict);
         assert_eq!(fs::read_to_string(&path).unwrap(), external_source);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_advances_revision_only_for_external_semantic_changes() {
+        let path = temporary_path("reload-activity").join("board.md");
+        let storage = BoardStorage::MarkdownFile { path: path.clone() };
+        let mut board = BoardPane::create(storage).unwrap();
+        let initial_revision = board.content_revision();
+        let external_source = "# Board\n\n## To do\n- External task\n\n## Doing\n\n## Done\n";
+        fs::write(&path, external_source).unwrap();
+
+        board.reload().unwrap();
+        assert_eq!(board.content_revision(), initial_revision + 1);
+        assert_eq!(board.columns[0].cards[0].title, "External task");
+
+        let reloaded_revision = board.content_revision();
+        board.reload().unwrap();
+        assert_eq!(board.content_revision(), reloaded_revision);
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 

@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
-    BoardStorage, NodeId, PaneStatus, PaneTitleSource, PromptQueueDelivery, RestructurePlan,
-    SplitOrientation, Tree, TreeMoveDirection,
+    BoardStorage, NodeActivityRevision, NodeId, PaneStatus, PaneTitleSource, PromptQueueDelivery,
+    RestructurePlan, SplitOrientation, Tree, TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -300,6 +300,10 @@ pub enum ClientRequest {
     ApplyProjectRestructurePlan {
         project_id: NodeId,
         plan: RestructurePlan,
+        /// Complete per-entry revision snapshot that the LLM input represented.
+        /// The server applies valid plans after later activity, checkpointing
+        /// only these revisions so anything newer remains eligible next time.
+        inference_activity_revisions: Vec<NodeActivityRevision>,
     },
     /// Restores only `project_id` from its own latest restructure undo point.
     RevertProjectRestructure { project_id: NodeId },
@@ -328,6 +332,15 @@ pub enum ClientRequest {
         expected_title_generation: u64,
         event: AgentDebugEventDraft,
     },
+    /// Assigns the durable bookmark state for any server-owned tree node.
+    /// Appended to preserve every earlier bincode variant discriminant.
+    SetNodeBookmarked {
+        node_id: NodeId,
+        is_bookmarked: bool,
+    },
+    /// Reports a successful client-owned editor or board content mutation.
+    /// Terminal input/output is recorded directly by the server instead.
+    RecordNodeActivity { node_id: NodeId },
 }
 
 impl ClientRequest {
@@ -371,6 +384,8 @@ impl ClientRequest {
             Self::UpdateAgentDebugMenu { .. } => "update_agent_debug_menu",
             Self::GetPaneDebugLog { .. } => "get_pane_debug_log",
             Self::RecordAgentDebugEvent { .. } => "record_agent_debug_event",
+            Self::SetNodeBookmarked { .. } => "set_node_bookmarked",
+            Self::RecordNodeActivity { .. } => "record_node_activity",
         }
     }
 
@@ -387,6 +402,7 @@ impl ClientRequest {
                 }
                 | Self::MouseInput { .. }
                 | Self::SetPaneFocus { .. }
+                | Self::RecordNodeActivity { .. }
         )
     }
 }
@@ -524,4 +540,25 @@ pub enum ServerEvent {
         pane_id: NodeId,
         entry: AgentDebugEntry,
     },
+    /// One accepted content/structure edge. Clients update the matching
+    /// revision and independently decide whether it is unread for this view.
+    NodeActivityChanged {
+        node_id: NodeId,
+        activity_revision: u64,
+    },
+    /// One user-focus interval acknowledged all activity through this exact
+    /// revision. This is independent from project restructure checkpoints.
+    NodeFocusCheckpointChanged {
+        node_id: NodeId,
+        activity_revision: u64,
+    },
+    /// Confirms that the server atomically applied and checkpointed a project
+    /// restructure rather than merely receiving an LLM result client-side.
+    ProjectRestructureApplied {
+        project_id: NodeId,
+        checkpoint_activity_revisions: Vec<NodeActivityRevision>,
+    },
+    /// Correlates a structurally invalid apply with the project job that
+    /// initiated it, keeping the footer state truthful.
+    ProjectRestructureRejected { project_id: NodeId, message: String },
 }

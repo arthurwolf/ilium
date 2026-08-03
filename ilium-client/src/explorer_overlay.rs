@@ -45,6 +45,12 @@ pub struct ExplorerOverlay {
     offset: usize,
     show_hidden: bool,
     selection: ExplorerSelection,
+    /// Folder pickers keep navigation and confirmation distinct. This flag
+    /// records whether keyboard focus is on the explicit bottom action.
+    folder_action_focused: bool,
+    /// The operation that will receive `current_dir` after explicit
+    /// confirmation. File pickers have no such action.
+    folder_action_label: Option<String>,
     /// An explicit path entry field. Keeping it inside the same overlay
     /// preserves the directory listing while a user pastes/types a path.
     manual_path: Option<String>,
@@ -63,7 +69,18 @@ impl ExplorerOverlay {
     }
 
     pub fn open_folder_at(dir: &Path) -> anyhow::Result<Self> {
-        Self::open(dir, ExplorerSelection::Folder)
+        Self::open_folder_for(dir, "Select Folder")
+    }
+
+    /// Opens a directory-only picker with a caller-specific confirmation
+    /// label, keeping the same navigation contract for every folder use.
+    pub fn open_folder_for(
+        dir: &Path,
+        folder_action_label: impl Into<String>,
+    ) -> anyhow::Result<Self> {
+        let mut overlay = Self::open(dir, ExplorerSelection::Folder)?;
+        overlay.folder_action_label = Some(folder_action_label.into());
+        Ok(overlay)
     }
 
     fn open(dir: &Path, selection: ExplorerSelection) -> anyhow::Result<Self> {
@@ -74,6 +91,8 @@ impl ExplorerOverlay {
             offset: 0,
             show_hidden: false,
             selection,
+            folder_action_focused: false,
+            folder_action_label: None,
             manual_path: None,
         };
         overlay.reload()?;
@@ -142,14 +161,12 @@ impl ExplorerOverlay {
 
     /// Descends into the selected directory (re-listing in place, cursor
     /// back at the top) or, for a file, returns its path so the caller can
-    /// open it.
+    /// open it. Folder rows always navigate: confirmation is deliberately
+    /// reserved for the picker action at the bottom of the dialog.
     fn activate(&mut self) -> anyhow::Result<Option<PathBuf>> {
         let Some(entry) = self.entries.get(self.selected) else {
             return Ok(None);
         };
-        if self.selection == ExplorerSelection::Folder {
-            return Ok(Some(self.current_dir.clone()));
-        }
         if entry.is_dir {
             self.navigate_to(entry.path.clone())?;
             Ok(None)
@@ -158,26 +175,7 @@ impl ExplorerOverlay {
         }
     }
 
-    /// Activates the row under a repeated mouse click. Keyboard folder mode
-    /// deliberately selects `current_dir` on Enter, but a pointer gesture
-    /// names a visible child directory and must therefore return that child.
-    fn activate_clicked_entry(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let Some(entry) = self.entries.get(self.selected) else {
-            return Ok(None);
-        };
-        if self.selection != ExplorerSelection::Folder {
-            return self.activate();
-        }
-        if entry.name == ".." {
-            self.navigate_up()?;
-            return Ok(None);
-        }
-        Ok(Some(entry.path.clone()))
-    }
-
-    /// Descends into the selected directory without selecting it. Folder
-    /// mode reserves Enter for "select this current folder", so Right/`l`
-    /// retains a way to browse down into a child directory.
+    /// Descends into the selected directory without treating it as a file.
     fn navigate_selected_directory(&mut self) -> anyhow::Result<()> {
         let Some(entry) = self.entries.get(self.selected) else {
             return Ok(());
@@ -193,6 +191,13 @@ impl ExplorerOverlay {
             self.navigate_to(parent.to_path_buf())?;
         }
         Ok(())
+    }
+
+    /// Returns the currently displayed directory only after an intentional
+    /// confirmation gesture. This gives keyboard and mouse users one stable,
+    /// discoverable way to commit a folder choice.
+    fn confirm_current_folder(&self) -> Option<PathBuf> {
+        (self.selection == ExplorerSelection::Folder).then(|| self.current_dir.clone())
     }
 
     /// Lists `current_dir` with the flipped hidden-files flag before
@@ -257,7 +262,9 @@ impl ExplorerOverlay {
                     if !canonical.is_dir() {
                         anyhow::bail!("entered path is not a directory");
                     }
-                    return Ok(Some(canonical));
+                    self.navigate_to(canonical)?;
+                    self.manual_path = None;
+                    return Ok(None);
                 }
                 KeyCode::Backspace => {
                     manual_path.pop();
@@ -283,8 +290,26 @@ impl ExplorerOverlay {
             KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_hidden()?;
             }
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1, viewport_rows),
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1, viewport_rows),
+            KeyCode::Tab if self.selection == ExplorerSelection::Folder => {
+                self.folder_action_focused = true;
+            }
+            KeyCode::BackTab if self.selection == ExplorerSelection::Folder => {
+                self.folder_action_focused = false;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') if self.folder_action_focused => {
+                return Ok(self.confirm_current_folder());
+            }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(self.confirm_current_folder());
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.folder_action_focused = false;
+                self.move_selection(-1, viewport_rows);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.folder_action_focused = false;
+                self.move_selection(1, viewport_rows);
+            }
             KeyCode::PageUp => self.move_selection(-(viewport_rows as i64), viewport_rows),
             KeyCode::PageDown => self.move_selection(viewport_rows as i64, viewport_rows),
             KeyCode::Home => self.select_first(),
@@ -324,15 +349,20 @@ impl ExplorerOverlay {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
+                if self.selection == ExplorerSelection::Folder
+                    && layout.action_area.contains(position)
+                {
+                    return Ok(self.confirm_current_folder());
+                }
                 if let Some(index) = row_at(&layout, self.offset, self.entries.len(), position) {
-                    // A click on the already-selected row activates it; in
-                    // folder mode that selects the visible directory itself
-                    // rather than silently choosing the parent currently in
-                    // the picker title.
-                    if index == self.selected {
-                        return self.activate_clicked_entry();
+                    if self.selection == ExplorerSelection::File && index == self.selected {
+                        return self.activate();
                     }
                     self.selected = index;
+                    self.folder_action_focused = false;
+                    if self.selection == ExplorerSelection::Folder {
+                        return self.navigate_selected_directory().map(|()| None);
+                    }
                 }
             }
             _ => {}
@@ -419,15 +449,24 @@ struct ExplorerLayout {
     /// Entry rows only, i.e. `table_area` minus the header row -- used for
     /// mouse hit-testing and for sizing a page-up/page-down jump.
     rows_area: Rect,
+    /// Explicit folder-confirmation control. It shares the popup's width so
+    /// the large target remains easy to acquire with a mouse.
+    action_area: Rect,
     hint_area: Rect,
 }
 
 fn layout_for(screen_area: Rect) -> ExplorerLayout {
     let popup_area = centered_rect(70, 70, screen_area);
     let inner = theme::block(true).inner(popup_area);
-    let sections = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+    let sections = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
     let table_area = sections[0];
-    let hint_area = sections[1];
+    let action_area = sections[1];
+    let hint_area = sections[2];
     let rows_area = Rect::new(
         table_area.x,
         table_area.y.saturating_add(1),
@@ -438,6 +477,7 @@ fn layout_for(screen_area: Rect) -> ExplorerLayout {
         popup_area,
         table_area,
         rows_area,
+        action_area,
         hint_area,
     }
 }
@@ -500,7 +540,8 @@ fn visible_columns(width: u16) -> Vec<Column> {
 }
 
 /// Draws the picker: a bordered, titled `Table` with per-row icons and a
-/// one-line key-binding hint along the bottom. `now` drives the "modified"
+/// explicit folder-confirmation control and a one-line key-binding hint along
+/// the bottom. `now` drives the "modified"
 /// column's relative-time text and is sampled once per frame by the
 /// caller, not re-sampled per row.
 pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, now: SystemTime) {
@@ -538,14 +579,29 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
         .with_selected((!overlay.entries.is_empty()).then_some(overlay.selected));
     frame.render_stateful_widget(table, layout.table_area, &mut table_state);
 
+    if let Some(folder_action_label) = &overlay.folder_action_label {
+        let action_style = if overlay.folder_action_focused {
+            theme::selected_style()
+        } else {
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        };
+        let action_text = format!(" [ {folder_action_label} ] ");
+        frame.render_widget(
+            Paragraph::new(action_text)
+                .alignment(Alignment::Center)
+                .style(action_style),
+            layout.action_area,
+        );
+    }
+
     let hint = if let Some(manual_path) = &overlay.manual_path {
-        format!("Path: {manual_path}_ · Enter select folder · Esc return to browser")
+        format!("Path: {manual_path}_ · Enter go to folder · Esc return to browser")
     } else if overlay.entries.is_empty() {
-        "(empty directory) · ←/⌫ up · Ctrl+L enter path · Ctrl+H hidden files · Esc cancel"
+        "(empty directory) · Tab action · Ctrl+Enter confirm · ←/⌫ up · Ctrl+L enter path · Esc cancel"
             .to_string()
     } else {
         if overlay.selection == ExplorerSelection::Folder {
-            "↑↓/j/k move · Enter select folder · →/l descend · Ctrl+L enter path · ←/⌫/h up · Ctrl+H hidden files · Esc cancel".to_string()
+            "↑↓/j/k move · Enter/→ open · Tab action · Ctrl+Enter confirm · ←/⌫/h up · Ctrl+L path · Esc cancel".to_string()
         } else {
             "↑↓/j/k move · →/Enter/l open · right-click .md board · ←/⌫/h up · Ctrl+H hidden files · Esc cancel".to_string()
         }
@@ -737,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_mode_selects_the_current_directory_and_uses_right_to_descend() {
+    fn folder_mode_navigates_rows_and_confirms_current_directory_explicitly() {
         let dir = scratch_dir("folder-select");
         std::fs::create_dir(dir.join("sub")).expect("mkdir");
         std::fs::write(dir.join("ignored.txt"), b"not selectable").expect("write file");
@@ -750,15 +806,24 @@ mod tests {
             .expect("sub dir listed");
 
         let descended = overlay
-            .handle(&key_event(KeyCode::Right, KeyModifiers::NONE), SCREEN)
-            .expect("right should descend");
+            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .expect("enter should descend");
         assert_eq!(descended, None);
         assert_eq!(overlay.current_dir, dir.join("sub"));
 
         let selected = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
-            .expect("enter should select folder");
+            .handle(&key_event(KeyCode::Enter, KeyModifiers::CONTROL), SCREEN)
+            .expect("control-enter should confirm the current directory");
         assert_eq!(selected, Some(dir.join("sub")));
+
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("reopen folder picker");
+        overlay
+            .handle(&key_event(KeyCode::Tab, KeyModifiers::NONE), SCREEN)
+            .expect("tab should focus the confirmation action");
+        let selected = overlay
+            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .expect("action enter should confirm the current directory");
+        assert_eq!(selected, Some(dir));
     }
 
     #[test]
@@ -791,8 +856,9 @@ mod tests {
 
         let selected = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
-            .expect("manual path should select its directory");
-        assert_eq!(selected, Some(selected_directory));
+            .expect("manual path should navigate to its directory");
+        assert_eq!(selected, None);
+        assert_eq!(overlay.current_dir, selected_directory);
     }
 
     #[test]
@@ -854,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_mode_double_click_selects_the_clicked_directory() {
+    fn folder_mode_click_navigates_and_action_button_confirms() {
         let dir = scratch_dir("folder-mouse-select");
         let selected_directory = dir.join("docs");
         std::fs::create_dir(&selected_directory).expect("mkdir");
@@ -867,25 +933,26 @@ mod tests {
         let layout = layout_for(SCREEN);
         let row = layout.rows_area.y + index as u16;
 
-        let first_click = mouse_event(
+        let click = mouse_event(
             MouseEventKind::Down(MouseButton::Left),
             layout.rows_area.x,
             row,
         );
         assert_eq!(
-            overlay.handle(&first_click, SCREEN).expect("select docs"),
+            overlay.handle(&click, SCREEN).expect("navigate to docs"),
             None
         );
+        assert_eq!(overlay.current_dir, selected_directory);
 
-        let second_click = mouse_event(
+        let confirm_click = mouse_event(
             MouseEventKind::Down(MouseButton::Left),
-            layout.rows_area.x,
-            row,
+            layout.action_area.x,
+            layout.action_area.y,
         );
         assert_eq!(
             overlay
-                .handle(&second_click, SCREEN)
-                .expect("select docs folder"),
+                .handle(&confirm_click, SCREEN)
+                .expect("confirm docs folder"),
             Some(selected_directory)
         );
     }

@@ -84,13 +84,12 @@ pub struct SessionTitleWorkerResult {
     pub trigger: TitleTrigger,
 }
 
-/// One restructure result plus the exact hierarchy snapshot it was inferred
-/// from. The main loop compares that snapshot with its current render-cache
-/// tree before applying the plan, so a slow model cannot overwrite manual
-/// organization performed while it was thinking.
+/// One restructure result plus the activity checkpoint visible to inference.
+/// The server applies valid plans even when newer activity arrived, then uses
+/// this checkpoint to keep that newer activity eligible for the next pass.
 pub struct RestructureWorkerResult {
     pub project_id: NodeId,
-    pub expected_structure: String,
+    pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     pub result: anyhow::Result<ilium_core::RestructurePlan>,
 }
 
@@ -369,13 +368,18 @@ impl NamingWorkers {
     /// disk-I/O-inside-the-closure pattern.
     pub fn spawn_restructure_worker(
         &mut self,
-        project_id: NodeId,
-        mut contexts: Vec<crate::restructure::LeafContext>,
-        current_structure: String,
-        protected_split_views: Vec<crate::restructure::ProtectedSplitViewContext>,
+        request: crate::app::PendingRestructureRequest,
         home: PathBuf,
-        cwd: PathBuf,
     ) {
+        let crate::app::PendingRestructureRequest {
+            project_id,
+            project_cwd,
+            mut contexts,
+            protected_split_views,
+            current_structure,
+            inference_activity_revisions,
+            ..
+        } = request;
         if !self.restructure_in_flight.insert(project_id) {
             return;
         }
@@ -383,7 +387,7 @@ impl NamingWorkers {
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
-            crate::restructure::resolve_content_extracts(&mut contexts, &home, &cwd);
+            crate::restructure::resolve_content_extracts(&mut contexts, &home, &project_cwd);
             let _permit = concurrency_limiter.acquire();
             let result = crate::restructure::infer_restructure_plan_with_protected_splits(
                 &inference_settings,
@@ -396,7 +400,7 @@ impl NamingWorkers {
             let _ =
                 events_tx.blocking_send(NamingWorkerEvent::Restructure(RestructureWorkerResult {
                     project_id,
-                    expected_structure: current_structure,
+                    inference_activity_revisions,
                     result,
                 }));
         });

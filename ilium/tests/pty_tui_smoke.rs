@@ -734,7 +734,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("✓ Manual")
+                // The check mark and the label are asserted separately because
+                // a configurable order icon renders between them, so pinning
+                // the adjacent pair would break on any icon change.
+                screen.contains('✓')
+                    && screen.contains("Manual")
                     && screen.contains("Type")
                     && screen.contains("Age up (newest first)")
                     && screen.contains("Age down (oldest first)")
@@ -1642,11 +1646,15 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
             }],
         }],
     };
+    let inference_activity_revisions = tree_before_restructure
+        .project_activity_revisions(project_id)
+        .expect("project activity revisions should be readable");
     control_connection
         .requests
         .send(ClientRequest::ApplyProjectRestructurePlan {
             project_id,
             plan: restructure_plan,
+            inference_activity_revisions,
         })
         .await
         .expect("submit deterministic project restructure");
@@ -3269,15 +3277,20 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
 
-    // Folder-picker Enter intentionally selects its current directory, so
-    // this creates the project root without ever displaying ordinary files.
+    // Folder pickers navigate on Enter; Tab then Enter explicitly commits
+    // the current directory through the bottom action without displaying files.
     tui.write(b"\x01f").expect("open folder picker");
     assert!(
         wait_until(|| tui.screen_text().contains("Open Folder"), WAIT_TIMEOUT).await,
         "expected folder picker, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\r").expect("select current project folder");
+    assert!(
+        tui.screen_text().contains("Add Folder"),
+        "expected explicit folder-creation action, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\t\r").expect("confirm current project folder");
     assert!(
         wait_until(
             || {

@@ -262,6 +262,10 @@ mod tests {
                         icon: Some("🖥️".to_string()),
                     }],
                 },
+                inference_activity_revisions: vec![ilium_core::NodeActivityRevision {
+                    node_id: NodeId(2),
+                    activity_revision: 7,
+                }],
             },
             ClientRequest::RevertProjectRestructure {
                 project_id: NodeId(1),
@@ -282,6 +286,11 @@ mod tests {
                     "Automatic title requested",
                 ),
             },
+            ClientRequest::SetNodeBookmarked {
+                node_id: NodeId(2),
+                is_bookmarked: true,
+            },
+            ClientRequest::RecordNodeActivity { node_id: NodeId(2) },
         ]
     }
 
@@ -370,6 +379,25 @@ mod tests {
             ServerEvent::PaneDebugEntryAppended {
                 pane_id: NodeId(2),
                 entry: sample_debug_entry(),
+            },
+            ServerEvent::NodeActivityChanged {
+                node_id: NodeId(2),
+                activity_revision: 7,
+            },
+            ServerEvent::NodeFocusCheckpointChanged {
+                node_id: NodeId(2),
+                activity_revision: 7,
+            },
+            ServerEvent::ProjectRestructureApplied {
+                project_id: NodeId(1),
+                checkpoint_activity_revisions: vec![ilium_core::NodeActivityRevision {
+                    node_id: NodeId(2),
+                    activity_revision: 7,
+                }],
+            },
+            ServerEvent::ProjectRestructureRejected {
+                project_id: NodeId(1),
+                message: "project changed during inference".to_string(),
             },
         ]
     }

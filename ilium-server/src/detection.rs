@@ -1,6 +1,6 @@
 //! The adaptive agent-detection loop: the timing/scheduling/backoff logic
 //! that calls into `ilium-detect`'s pure `identify_agent`/`classify_activity`
-//! functions for every pty-backed pane (see README "Poll cadence" and
+//! functions for every pty-backed pane (see ARCHITECTURE.md "Poll cadence" and
 //! `ilium-detect`'s module docs -- that crate deliberately owns none of
 //! this loop itself).
 //!
@@ -622,6 +622,7 @@ async fn run_due_panes(
     let mut pending_sounds = Vec::new();
     let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
+    let mut pending_activity_updates = Vec::new();
     let mut tree_snapshot_changed = false;
     let mut pending_debug_events = Vec::new();
     {
@@ -664,7 +665,7 @@ async fn run_due_panes(
             // unbounded process-table scan loop.
             //
             // Scoped to panes where an agent process was actually identified:
-            // per README "Poll cadence", `Idle`/`Done`/`PlainShell` panes are
+            // per ARCHITECTURE.md "Poll cadence", `Idle`/`Done`/`PlainShell` panes are
             // meant to poll slow specifically *because* they don't change on
             // their own -- but an ordinary shell can still produce continuous
             // PTY output on its own (`tail -f`, a build log, `top`). Without
@@ -1122,6 +1123,12 @@ async fn run_due_panes(
                 tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
                 continue;
             }
+            match tree.record_node_activity(pane_id) {
+                Ok(update) => pending_activity_updates.push((pane_id, update)),
+                Err(error) => tracing::error!(
+                    "detection loop: pane {pane_id:?} activity update rejected: {error}"
+                ),
+            }
 
             // Queued only once the status update actually took -- a
             // rejected `set_pane_status` above (a stale/inconsistent
@@ -1158,6 +1165,10 @@ async fn run_due_panes(
                 status: new_status,
             });
         }
+    }
+
+    for (pane_id, update) in pending_activity_updates {
+        crate::ipc::handlers::publish_node_activity_update(state, pane_id, update);
     }
 
     for (pane_id, source, context, event) in pending_debug_events {
@@ -1596,7 +1607,7 @@ fn promote_to_done(
 }
 
 /// The next poll interval for a pane just classified as `status`, per
-/// README "Poll cadence": `Working`, `WaitingBackground`, and
+/// ARCHITECTURE.md "Poll cadence": `Working`, `WaitingBackground`, and
 /// `WaitingApproval` panes poll fast, everything else (idle, done, or no
 /// agent detected at all) polls slow.
 ///

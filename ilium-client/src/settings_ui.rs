@@ -610,6 +610,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
                 terminal_activity: &app.terminal_activity,
+                focused_pane_id: app.focused_pane_id(),
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,
                 icons: &app.ui_settings.icons,
@@ -2417,6 +2418,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::UseStableGlyphs => "Use stable glyphs",
         AppearanceRow::ShowInferredTitleIcons => "Show inferred title icons",
         AppearanceRow::AgentDebugMenu => "Agent debug menu",
+        AppearanceRow::ContextMenuIcons => "Right-click menu icons",
     }
 }
 
@@ -2459,6 +2461,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::AgentDebugMenu => {
             "Show a detected-agent right-click history action and persist prompts, detection evidence, session phases, LLM work, and errors in this project's private session snapshot."
+        }
+        AppearanceRow::ContextMenuIcons => {
+            "Show the configurable semantic icon beside every tree, terminal, editor-line, and file right-click action."
         }
     }
 }
@@ -2512,6 +2517,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off".to_string()
+            }
+        }
+        AppearanceRow::ContextMenuIcons => {
+            if ui.show_context_menu_icons {
+                "On".to_string()
+            } else {
+                "Off (text only)".to_string()
             }
         }
     }
