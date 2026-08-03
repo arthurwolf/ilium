@@ -34,15 +34,13 @@ mod sounds;
 mod state;
 mod task_guard;
 
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream as StdUnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::UnixListener;
-
 use ilium_detect::AgentSignature;
+use ilium_platform::secure_fs;
+use ilium_transport::{Liveness, SessionEndpoint};
 
 use crate::config::{DetectionConfig, HttpApiConfig, NotificationsConfig, SessionRecoveryConfig};
 use crate::error::ServerError;
@@ -110,11 +108,20 @@ const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(200);
 /// a socket that accepts a connection belongs to a live server and is never
 /// displaced.
 pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
-    prepare_socket_path(&options.socket_path)?;
-    let listener =
-        UnixListener::bind(&options.socket_path).map_err(|source| ServerError::SocketBind {
+    let endpoint = SessionEndpoint::from_path(&options.socket_path);
+    // A live session must never be displaced; only a crashed predecessor's
+    // debris may be cleared, which `bind` does for itself.
+    if endpoint.probe_liveness() == Liveness::Live {
+        return Err(ServerError::SessionAlreadyRunning(
+            options.socket_path.clone(),
+        ));
+    }
+    let listener = endpoint
+        .bind()
+        .await
+        .map_err(|source| ServerError::SocketBind {
             path: options.socket_path.clone(),
-            source,
+            source: std::io::Error::other(source),
         })?;
     if let Some(ready_log_metadata) = &options.ready_log_metadata {
         publish_ready_log_metadata(ready_log_metadata)?;
@@ -224,13 +231,12 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     // but any other failure (e.g. a permissions problem) is worth a warning
     // rather than being discarded, matching `ipc::handlers::handle_kill_session`'s
     // identical cleanup.
-    match std::fs::remove_file(&options.socket_path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => tracing::warn!(
-            "failed to remove session socket file {:?} on shutdown: {error}",
+    // A no-op where endpoints have no filesystem presence.
+    if let Err(error) = endpoint.remove_stale() {
+        tracing::warn!(
+            "failed to remove session endpoint {:?} on shutdown: {error}",
             options.socket_path
-        ),
+        );
     }
     tracing::info!(session_name = %state.session_name, "detached session server stopped");
     Ok(())
@@ -256,9 +262,7 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
         })?;
     let contents = format!("pid={}\nlog_path={log_path}\n", std::process::id());
     let write_result = std::fs::write(&temporary_path, contents)
-        .and_then(|()| {
-            std::fs::set_permissions(&temporary_path, std::fs::Permissions::from_mode(0o600))
-        })
+        .and_then(|()| secure_fs::restrict_file_to_owner(&temporary_path))
         .and_then(|()| std::fs::rename(&temporary_path, &metadata.active_log_path_file));
     if let Err(source) = write_result {
         let _ = std::fs::remove_file(&temporary_path);
@@ -268,24 +272,6 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
         });
     }
     Ok(())
-}
-
-/// Refuses to replace a live session listener while allowing a daemon to
-/// recover from the stale filesystem entry a crashed predecessor leaves.
-fn prepare_socket_path(socket_path: &Path) -> Result<(), ServerError> {
-    if !socket_path.exists() {
-        return Ok(());
-    }
-
-    match StdUnixStream::connect(socket_path) {
-        Ok(_) => Err(ServerError::SessionAlreadyRunning(
-            socket_path.to_path_buf(),
-        )),
-        Err(_) => {
-            std::fs::remove_file(socket_path)?;
-            Ok(())
-        }
-    }
 }
 
 /// Applies a crash-recovery snapshot: replaces `state.tree` wholesale (the
@@ -461,7 +447,7 @@ mod restore_tests {
 
     use ilium_core::{PaneContentKind, Tree, ROOT_ID};
     use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
-    use tokio::net::UnixStream;
+    use ilium_transport::SessionStream;
 
     use super::*;
     use crate::pane::{PaneSnapshotKind, TerminalOrigin};
@@ -488,7 +474,7 @@ mod restore_tests {
     /// unrelated broadcast can never make this a flaky "next frame must
     /// match" assertion.
     async fn expect_event(
-        stream: &mut UnixStream,
+        stream: &mut SessionStream,
         timeout: Duration,
         predicate: impl Fn(&ServerEvent) -> bool,
     ) -> ServerEvent {
@@ -590,7 +576,8 @@ mod restore_tests {
         let bound = wait_until(|| socket_path.exists(), Duration::from_secs(5)).await;
         assert!(bound, "server did not bind its socket in time");
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = SessionEndpoint::from_path(&socket_path)
+            .connect()
             .await
             .expect("connect to the session socket");
         write_frame(
@@ -960,7 +947,8 @@ mod restore_tests {
             "server did not bind its socket"
         );
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = SessionEndpoint::from_path(&socket_path)
+            .connect()
             .await
             .expect("connect to the session socket");
         write_frame(&mut client, &ClientRequest::RestartServer)
@@ -1013,19 +1001,27 @@ mod socket_tests {
         }
     }
 
-    #[test]
-    fn refuses_to_replace_a_live_session_socket() {
+    /// Asserts through `run` rather than a private helper, because refusing to
+    /// displace a live session is the behaviour that matters: two servers must
+    /// never both own one project's session.
+    #[tokio::test]
+    async fn refuses_to_replace_a_live_session_endpoint() {
         let directory = tempfile::tempdir().expect("tempdir");
         let socket_path = directory.path().join("live.sock");
-        let _listener =
-            std::os::unix::net::UnixListener::bind(&socket_path).expect("bind listener");
+        let endpoint = SessionEndpoint::from_path(&socket_path);
+        let _listener = endpoint.bind().await.expect("bind an occupying listener");
 
-        let result = prepare_socket_path(&socket_path);
+        let result = run(server_options(&directory, socket_path.clone(), None)).await;
 
         assert!(
-            matches!(result, Err(ServerError::SessionAlreadyRunning(path)) if path == socket_path)
+            matches!(&result, Err(ServerError::SessionAlreadyRunning(path)) if *path == socket_path),
+            "expected SessionAlreadyRunning, got {result:?}"
         );
-        assert!(socket_path.exists(), "live socket must remain in place");
+        assert_eq!(
+            endpoint.probe_liveness(),
+            Liveness::Live,
+            "the occupying listener must remain usable"
+        );
     }
 
     #[tokio::test]
@@ -1066,7 +1062,8 @@ mod socket_tests {
             )
         );
 
-        let mut client = tokio::net::UnixStream::connect(&socket_path)
+        let mut client = SessionEndpoint::from_path(&socket_path)
+            .connect()
             .await
             .expect("connect to ready server");
         ilium_ipc::write_frame(&mut client, &ilium_ipc::ClientRequest::KillSession)
@@ -1083,8 +1080,10 @@ mod socket_tests {
     async fn failed_bind_preserves_previous_ready_metadata() {
         let directory = tempfile::tempdir().expect("tempdir");
         let socket_path = directory.path().join("already-live.sock");
-        let _listener =
-            std::os::unix::net::UnixListener::bind(&socket_path).expect("bind live listener");
+        let _listener = SessionEndpoint::from_path(&socket_path)
+            .bind()
+            .await
+            .expect("bind live listener");
         let active_log_path_file = directory.path().join(".active-log-path");
         let previous_contents = "pid=42\nlog_path=/tmp/previous-log.txt\n";
         std::fs::write(&active_log_path_file, previous_contents).expect("seed previous metadata");

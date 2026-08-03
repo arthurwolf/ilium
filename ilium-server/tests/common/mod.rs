@@ -31,7 +31,7 @@ use std::time::Duration;
 use ilium_ipc::{read_frame, ServerEvent};
 use ilium_server::config::{DetectionConfig, NotificationsConfig};
 use ilium_server::{run, NoopSoundPlayer, ServerOptions, SoundPlayer};
-use tokio::net::UnixStream;
+use ilium_transport::{SessionEndpoint, SessionStream};
 
 /// Polls `condition` until it's true or `timeout` elapses, without a fixed
 /// sleep -- the server binding its socket (or, for
@@ -58,7 +58,7 @@ pub async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) 
 /// unrelated broadcasts, so a strict "the very next frame must match"
 /// assertion would be a flaky test for the wrong reason.
 pub async fn expect_event(
-    stream: &mut UnixStream,
+    stream: &mut SessionStream,
     timeout: Duration,
     predicate: impl Fn(&ServerEvent) -> bool,
 ) -> ServerEvent {
@@ -228,8 +228,9 @@ impl TestServer {
         }
     }
 
-    pub async fn connect(&self) -> UnixStream {
-        UnixStream::connect(&self.socket_path)
+    pub async fn connect(&self) -> SessionStream {
+        SessionEndpoint::from_path(&self.socket_path)
+            .connect()
             .await
             .expect("connect to the session socket")
     }

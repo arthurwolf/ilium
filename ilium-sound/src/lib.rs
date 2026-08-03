@@ -628,11 +628,15 @@ impl<'a> CommandSpec<'a> {
     }
 }
 
+/// Only Linux needs to try a list of players in turn: macOS and Windows each
+/// ship exactly one built-in command, so their `play_file` calls it directly.
+#[cfg(target_os = "linux")]
 struct OwnedCommandSpec<'a> {
     program: &'a str,
     arguments: Vec<&'a OsStr>,
 }
 
+#[cfg(target_os = "linux")]
 impl<'a> OwnedCommandSpec<'a> {
     fn new(program: &'a str, arguments: Vec<&'a OsStr>) -> Self {
         Self { program, arguments }
@@ -647,6 +651,7 @@ fn run_first_available(commands: &[CommandSpec<'_>]) -> Result<(), SoundError> {
     )
 }
 
+#[cfg(target_os = "linux")]
 fn run_first_available_owned(commands: &[OwnedCommandSpec<'_>]) -> Result<(), SoundError> {
     resolve_playback_attempts(
         commands

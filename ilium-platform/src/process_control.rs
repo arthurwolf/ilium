@@ -63,6 +63,35 @@ pub fn terminate(process_id: u32) -> io::Result<()> {
     Ok(())
 }
 
+/// Replaces the calling process with `command`, and so does not return on
+/// success -- only a failure to start the replacement comes back.
+///
+/// The client uses this to restart itself in place: the terminal keeps talking
+/// to one process at one place in the shell's job control, rather than gaining
+/// a child that outlives its parent's prompt.
+///
+/// Unix does this natively with `exec`. Windows has no equivalent, so the
+/// closest honest approximation is to start the replacement and exit
+/// immediately, handing over the console. The observable difference is a brief
+/// moment where both processes exist.
+#[cfg(unix)]
+pub fn replace_current_process(command: &mut std::process::Command) -> io::Error {
+    use std::os::unix::process::CommandExt;
+
+    // `exec` only returns when it fails; on success this process is gone.
+    command.exec()
+}
+
+#[cfg(windows)]
+pub fn replace_current_process(command: &mut std::process::Command) -> io::Error {
+    match command.spawn() {
+        // The replacement owns the console now; leaving immediately is what
+        // makes this stand in for `exec`.
+        Ok(_) => std::process::exit(0),
+        Err(error) => error,
+    }
+}
+
 /// Whether the process still exists.
 ///
 /// Used to confirm that the exact process which owned a session socket has

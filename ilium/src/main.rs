@@ -24,7 +24,6 @@ mod error;
 mod session;
 
 use std::ffi::OsString;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
 use std::time::Duration;
@@ -257,10 +256,11 @@ fn restart_client_process(
     executable_path: &Path,
     project_session: &session::ProjectSession,
 ) -> Result<(), CliError> {
-    let source = ProcessCommand::new(executable_path)
-        .args(client_restart_args(project_session))
-        .current_dir(&project_session.project_root)
-        .exec();
+    let source = ilium_platform::process_control::replace_current_process(
+        ProcessCommand::new(executable_path)
+            .args(client_restart_args(project_session))
+            .current_dir(&project_session.project_root),
+    );
     Err(CliError::RestartClient {
         path: executable_path.to_path_buf(),
         source,

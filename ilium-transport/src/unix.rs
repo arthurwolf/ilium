@@ -87,5 +87,9 @@ pub(crate) fn is_transient_accept_error(error: &io::Error) -> bool {
         io::ErrorKind::ConnectionAborted
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::Interrupted
+            // Should not surface from an async accept, but it describes "no
+            // connection ready yet" rather than a broken listener, so
+            // treating it as fatal would be wrong if it ever did.
+            | io::ErrorKind::WouldBlock
     )
 }

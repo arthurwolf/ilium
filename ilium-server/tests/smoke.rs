@@ -1,5 +1,5 @@
 //! End-to-end smoke test: runs a real `ilium_server::run` bound to a
-//! tempdir UDS socket, connects a raw `tokio::net::UnixStream` (playing
+//! tempdir session endpoint, connects a raw transport stream (playing
 //! the part of `ilium-client`, which doesn't exist yet), and drives it
 //! through `Attach` -> `NewPane` -> `KillSession` asserting the
 //! `ServerEvent`s that come back. Hermetic: a tempdir socket/snapshot
@@ -10,6 +10,13 @@
 //! Shared server-startup/polling/frame-reading helpers live in
 //! `tests/common/mod.rs`, alongside `live_agent_detection.rs`'s own use of
 //! the same `TestServer`.
+
+//! Unix-only: every fixture here is a `/bin/sh` script that emits specific
+//! ANSI sequences to imitate a real agent CLI, and the server drives it through
+//! a real PTY. Porting the fixtures to `cmd`/PowerShell would test the fixture
+//! rewrite as much as the server, so Windows coverage for these paths comes
+//! from the cross-platform tests instead. See docs/TODO.md.
+#![cfg(unix)]
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;

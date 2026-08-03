@@ -266,37 +266,38 @@ fn from_arguments(class: &AgentClass, arguments: &[String]) -> Option<String> {
     class.provider()?.session_id_from_arguments(arguments)
 }
 
-#[cfg(target_os = "linux")]
+/// Identifies the session by which transcript file the agent process currently
+/// holds open.
+///
+/// Returns `None` where the platform cannot enumerate another process's open
+/// files at all, which is a different answer from "it has none open": the
+/// caller must fall back to other evidence rather than concluding the agent
+/// has no session. `ilium_platform::process_info` documents which platforms
+/// can answer.
 fn from_open_files(
     pid: u32,
     class: &AgentClass,
     locator: &TranscriptLocator,
     excluded_session_ids: &HashSet<String>,
 ) -> Option<OpenFileDiscovery> {
-    let entries = std::fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
-    let verified_session_ids =
-        sorted_session_ids(entries.filter_map(Result::ok).filter_map(|entry| {
-            let target = std::fs::read_link(entry.path()).ok()?;
-            locator
-                .transcript_from_path(class, &target)
-                .map(|transcript| transcript.session_id)
-        }));
+    if !ilium_platform::process_info::open_files_are_observable() {
+        return None;
+    }
+    let verified_session_ids = sorted_session_ids(
+        ilium_platform::process_info::open_file_paths(pid)
+            .into_iter()
+            .filter_map(|target| {
+                locator
+                    .transcript_from_path(class, &target)
+                    .map(|transcript| transcript.session_id)
+            }),
+    );
     let discovered_session_id =
         uniquely_discovered_session_id(verified_session_ids.iter().cloned(), excluded_session_ids);
     Some(OpenFileDiscovery {
         discovered_session_id,
         verified_session_ids,
     })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn from_open_files(
-    _pid: u32,
-    _class: &AgentClass,
-    _locator: &TranscriptLocator,
-    _excluded_session_ids: &HashSet<String>,
-) -> Option<OpenFileDiscovery> {
-    None
 }
 
 fn sorted_session_ids(session_ids: impl Iterator<Item = String>) -> Vec<String> {

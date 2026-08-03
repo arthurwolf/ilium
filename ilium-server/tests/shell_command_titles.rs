@@ -11,7 +11,7 @@ mod common;
 use common::{expect_event, TestServer};
 
 async fn create_plain_shell(
-    client: &mut tokio::net::UnixStream,
+    client: &mut ilium_transport::SessionStream,
     session_name: &str,
 ) -> ilium_core::NodeId {
     write_frame(
@@ -50,7 +50,7 @@ async fn create_plain_shell(
     pane_id
 }
 
-async fn stop(mut server: TestServer, client: &mut tokio::net::UnixStream) {
+async fn stop(mut server: TestServer, client: &mut ilium_transport::SessionStream) {
     write_frame(client, &ClientRequest::KillSession)
         .await
         .expect("kill test session");

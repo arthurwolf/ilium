@@ -44,6 +44,13 @@
 //! `PaneStatusChanged` broadcast) is exactly the production code path,
 //! nothing faked except the one external binary name and its output.
 
+//! Unix-only: every fixture here is a `/bin/sh` script that emits specific
+//! ANSI sequences to imitate a real agent CLI, and the server drives it through
+//! a real PTY. Porting the fixtures to `cmd`/PowerShell would test the fixture
+//! rewrite as much as the server, so Windows coverage for these paths comes
+//! from the cross-platform tests instead. See docs/TODO.md.
+#![cfg(unix)]
+
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};

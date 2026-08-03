@@ -23,6 +23,7 @@ ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
 ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
 ilium-pty = { version = "0.1.0", path = "../ilium-pty" }
 ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
+ilium-transport = { version = "0.1.0", path = "../ilium-transport" }
 notify-rust = "4.18.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

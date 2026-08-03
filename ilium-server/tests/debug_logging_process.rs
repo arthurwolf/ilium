@@ -1,12 +1,11 @@
 //! Process-boundary proof for the detached server's durable diagnostics.
 
-use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use ilium_core::ROOT_ID;
 use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
-use tokio::net::UnixStream;
+use ilium_transport::{SessionEndpoint, SessionStream};
 
 struct ChildGuard(Child);
 
@@ -32,7 +31,7 @@ async fn wait_for_socket(path: &std::path::Path) {
 }
 
 async fn read_until(
-    stream: &mut UnixStream,
+    stream: &mut SessionStream,
     predicate: impl Fn(&ServerEvent) -> bool,
 ) -> ServerEvent {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -87,7 +86,8 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
     let mut child = ChildGuard(child);
     wait_for_socket(&socket_path).await;
 
-    let mut client = UnixStream::connect(&socket_path)
+    let mut client = SessionEndpoint::from_path(&socket_path)
+        .connect()
         .await
         .expect("connect primary client");
     write_frame(
@@ -117,7 +117,8 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
     })
     .await;
 
-    let mut rejected_client = UnixStream::connect(&socket_path)
+    let mut rejected_client = SessionEndpoint::from_path(&socket_path)
+        .connect()
         .await
         .expect("connect rejected client");
     write_frame(
@@ -160,8 +161,18 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
     assert!(log.contains("request_name=\"kill_session\""));
     assert!(log.contains("request failed"));
     assert!(log.contains("wrong-session"));
+    assert_owner_only(&log_directory, &log_path);
+}
+
+/// Owner-only modes are a Unix concept; on Windows the same protection comes
+/// from the log directory's inherited profile ACL, which exposes no mode bits
+/// to compare. See `ilium_platform::secure_fs`.
+#[cfg(unix)]
+fn assert_owner_only(log_directory: &std::path::Path, log_path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
     assert_eq!(
-        std::fs::metadata(&log_directory)
+        std::fs::metadata(log_directory)
             .expect("log directory metadata")
             .permissions()
             .mode()
@@ -169,11 +180,17 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
         0o700
     );
     assert_eq!(
-        std::fs::metadata(&log_path)
+        std::fs::metadata(log_path)
             .expect("log metadata")
             .permissions()
             .mode()
             & 0o777,
         0o600
     );
+}
+
+#[cfg(not(unix))]
+fn assert_owner_only(log_directory: &std::path::Path, log_path: &std::path::Path) {
+    assert!(log_directory.is_dir());
+    assert!(log_path.is_file());
 }

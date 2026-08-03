@@ -1,4 +1,4 @@
-//! IPC layer: accepts connections on the session's UDS and drives each one
+//! IPC layer: accepts connections on the session's endpoint and drives each one
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
@@ -10,7 +10,7 @@ pub(crate) mod handlers;
 
 use std::sync::Arc;
 
-use tokio::net::UnixListener;
+use ilium_transport::{is_transient_accept_error, SessionListener};
 
 use crate::state::ServerState;
 
@@ -21,9 +21,9 @@ use crate::state::ServerState;
 /// is unrecoverable -- rare enough on a UDS that surfacing it up to
 /// `run`'s top-level error boundary is the right call, matching how a
 /// listener dying is a session-level event, not a per-connection one.
-pub async fn accept_loop(state: Arc<ServerState>, listener: UnixListener) {
+pub async fn accept_loop(state: Arc<ServerState>, mut listener: SessionListener) {
     loop {
-        let (stream, _peer_addr) = match listener.accept().await {
+        let stream = match listener.accept().await {
             Ok(accepted) => accepted,
             // A peer that aborts/resets its connection mid-handshake (or an
             // interrupted syscall) is a per-connection blip, not a problem
@@ -52,17 +52,4 @@ pub async fn accept_loop(state: Arc<ServerState>, listener: UnixListener) {
         });
         state.track_connection_task(handle);
     }
-}
-
-/// Whether an `accept()` failure is a one-off blip scoped to the connection
-/// attempt that failed (safe to retry) rather than a sign the listener
-/// itself is broken (which should propagate up, see `accept_loop`).
-fn is_transient_accept_error(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::ConnectionAborted
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::Interrupted
-            | std::io::ErrorKind::WouldBlock
-    )
 }

@@ -47,6 +47,14 @@
 //! is kept only as a defensive fallback in case that ever hangs, so this
 //! test itself cannot hang the suite even if the graceful path regresses.
 
+//! Unix-only for now. The fixtures are `/bin/sh` scripts made executable with
+//! `chmod`, the panes run `cat`, and one assertion checks the session socket's
+//! filesystem type -- none of which exist on Windows, where the endpoint is a
+//! named pipe with no filesystem presence. Porting this is tracked in
+//! docs/TODO.md; until then Windows has no end-to-end TUI coverage, which is a
+//! real gap rather than an accepted difference.
+#![cfg(unix)]
+
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -85,7 +93,27 @@ const PROJECT_NAME: &str = "Smoketest";
 /// starting up, a real render loop drawing a frame) is not deterministic
 /// under test-runner load. Mirrors `ilium-pty`'s and
 /// `ilium-server`'s own integration test helper of the same name.
-async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> bool {
+async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
+    wait_until_polling(condition, timeout, Duration::from_millis(20)).await
+}
+
+/// Waits for a condition that is only true for one *transient* frame, such as
+/// a mid-animation label position.
+///
+/// The ordinary 20 ms cadence is wrong for these: the state is not late, it is
+/// brief, so a longer timeout cannot recover a sample taken on either side of
+/// it. Only a finer interval reduces the chance of stepping over the frame
+/// entirely, which is what made the pane-removal assertion fail on a loaded
+/// machine while passing when run alone.
+async fn wait_for_transient_frame(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
+    wait_until_polling(condition, timeout, Duration::from_millis(2)).await
+}
+
+async fn wait_until_polling(
+    mut condition: impl FnMut() -> bool,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if condition() {
@@ -94,7 +122,7 @@ async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> b
         if tokio::time::Instant::now() >= deadline {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(poll_interval).await;
     }
 }
 
@@ -2114,7 +2142,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("selecting the first pane row below the default group");
     tui.write(b"\x01x")
         .expect("writing Ctrl+A then x (ClosePane)");
-    let removal_motion_observed = wait_until(
+    let removal_motion_observed = wait_for_transient_frame(
         || {
             tui.screen_text().matches("shell").count() >= 3
                 && tui.with_screen(|screen| {

@@ -7,10 +7,6 @@
 //! making every project attach to a machine-wide `default` session.
 
 use std::fmt::Write as _;
-// The liveness probe below is still Unix-only; the Windows arm arrives with
-// the named-pipe transport (see `ilium_ipc`'s transport boundary).
-#[cfg(unix)]
-use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -20,6 +16,7 @@ use ilium_ipc::{write_frame, ClientRequest};
 use ilium_platform::file_lock::ExclusiveFileLock;
 use ilium_platform::runtime_dir::{self, MAX_SOCKET_PATH_BYTES};
 use ilium_platform::{detached, process_control, secure_fs};
+use ilium_transport::{Liveness, SessionEndpoint};
 use sha2::{Digest, Sha256};
 
 use crate::error::CliError;
@@ -243,38 +240,20 @@ fn socket_key(project_root: &Path, session_name: &str, slug_budget: usize) -> St
     format!("{readable_slug}-{digest_prefix}-{session_name}")
 }
 
-/// True only for a connect error that proves the filesystem entry is a dead
-/// listener rather than a live one this process merely failed to reach.
-/// `ConnectionRefused` is the kernel's answer when nothing is `accept()`ing
-/// on the socket; `NotFound` covers a path removed by a concurrent racer
-/// between the caller's existence check and this connect attempt. Anything
-/// else -- `EMFILE`/`ENFILE` (fd exhaustion, not exotic in a process that
-/// spawns many PTYs), `EACCES`, a transient `EINTR`, and similar -- says
-/// nothing about the listener's liveness, so the socket must be left alone:
-/// deleting it out from under a healthy server would let a caller spawn a
-/// second server for the same project.
-fn connect_error_proves_dead_listener(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-    )
-}
-
 /// True if the socket accepts a connection. A filesystem entry proven dead
 /// (see `connect_error_proves_dead_listener`) is removed so a replacement
 /// server can bind it; any other connect failure leaves it in place.
 pub fn is_session_live(socket_path: &Path) -> bool {
-    if !socket_path.exists() {
-        return false;
-    }
-    match StdUnixStream::connect(socket_path) {
-        Ok(_) => true,
-        Err(error) => {
-            if connect_error_proves_dead_listener(&error) {
-                let _ = std::fs::remove_file(socket_path);
-            }
+    let endpoint = SessionEndpoint::from_path(socket_path);
+    match endpoint.probe_liveness() {
+        Liveness::Live => true,
+        // Debris a crashed server left behind: clear it so the next attach
+        // starts a fresh server instead of tripping over a dead entry.
+        Liveness::StaleListener => {
+            let _ = endpoint.remove_stale();
             false
         }
+        Liveness::Absent => false,
     }
 }
 
@@ -720,44 +699,39 @@ fn reset_storage_paths(session: &ProjectSession) -> Vec<PathBuf> {
 /// handles a failed send or timeout by falling back to the peer-PID signal,
 /// preserving compatibility with a server from an earlier local build.
 async fn request_graceful_restart(session: &ProjectSession) -> Result<(), std::io::Error> {
-    let mut stream = tokio::net::UnixStream::connect(&session.socket_path).await?;
+    let mut stream = SessionEndpoint::from_path(&session.socket_path)
+        .connect()
+        .await
+        .map_err(std::io::Error::other)?;
     write_frame(&mut stream, &ClientRequest::RestartServer)
         .await
         .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
-/// Returns the process ID at the other end of a live session socket. A
-/// connection failure that proves the listener is dead (see
-/// `connect_error_proves_dead_listener`) removes the stale filesystem entry
-/// and reports that no server needs replacing; any other connect failure
-/// (fd exhaustion, permissions, a transient interrupt) leaves the socket in
-/// place, since it says nothing about whether a server is still listening.
+/// Returns the process ID at the other end of a live session endpoint.
+///
+/// A connect failure alone proves nothing -- descriptor exhaustion, a
+/// permissions problem, or a transient interrupt all look the same from here
+/// -- so debris is only cleared when a probe positively identifies it, never
+/// on a failed connect. Clearing a healthy server's endpoint would let a
+/// caller start a second server for the same project.
 async fn server_process_id(socket_path: &Path) -> Result<Option<u32>, CliError> {
-    let stream = match tokio::net::UnixStream::connect(socket_path).await {
-        Ok(stream) => stream,
-        Err(error) => {
-            if connect_error_proves_dead_listener(&error) {
-                let _ = std::fs::remove_file(socket_path);
-            }
-            return Ok(None);
+    let endpoint = SessionEndpoint::from_path(socket_path);
+    let Ok(stream) = endpoint.connect().await else {
+        // A failed connect says nothing about liveness on its own; only a
+        // probe distinguishes debris from a server this process merely could
+        // not reach, and only debris may be cleared.
+        if endpoint.probe_liveness() == Liveness::StaleListener {
+            let _ = endpoint.remove_stale();
         }
+        return Ok(None);
     };
-    let credentials = stream
-        .peer_cred()
-        .map_err(|source| CliError::ServerProcessLookup {
-            path: socket_path.to_path_buf(),
-            source,
-        })?;
-    let pid = credentials
-        .pid()
+    let pid = stream
+        .peer_process_id()
         .ok_or_else(|| CliError::ServerProcessLookup {
             path: socket_path.to_path_buf(),
-            source: std::io::Error::other("session socket did not report a peer process ID"),
+            source: std::io::Error::other("session endpoint did not report a peer process ID"),
         })?;
-    let pid = u32::try_from(pid).map_err(|_| CliError::ServerProcessLookup {
-        path: socket_path.to_path_buf(),
-        source: std::io::Error::other("session socket reported an invalid peer process ID"),
-    })?;
     Ok(Some(pid))
 }
 

@@ -27,6 +27,7 @@ ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-inference = { version = "0.1.0", path = "../ilium-inference" }
 ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
 ilium-sound = { version = "0.1.0", path = "../ilium-sound" }
+ilium-transport = { version = "0.1.0", path = "../ilium-transport" }
 ilium-voice = { version = "0.1.0", path = "../ilium-voice" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 ilium-platform = { version = "0.1.0", path = "../ilium-platform" }

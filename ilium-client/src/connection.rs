@@ -1,4 +1,4 @@
-//! Owns the client's Unix domain socket connection to `ilium-server` for
+//! Owns the client's transport connection to `ilium-server` for
 //! one session: sends the initial `Attach`, then drives a reader task
 //! (decodes `ServerEvent` frames into a channel `crate::run`'s event loop
 //! selects on) and a writer task (encodes queued `ClientRequest`s) each
@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use ilium_ipc::{ClientRequest, IpcError, ServerEvent};
-use tokio::net::UnixStream;
+use ilium_transport::{SessionEndpoint, SessionReadHalf, SessionWriteHalf};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -51,13 +51,13 @@ impl Connection {
     /// for `session` -- the very first frame the server will read on this
     /// connection (see `ilium_server::ipc::handlers::handle_attach`).
     pub async fn connect(socket_path: &Path, session: String) -> Result<Self, ConnectionError> {
-        let stream =
-            UnixStream::connect(socket_path)
-                .await
-                .map_err(|source| ConnectionError::Connect {
-                    path: socket_path.to_path_buf(),
-                    source,
-                })?;
+        let stream = SessionEndpoint::from_path(socket_path)
+            .connect()
+            .await
+            .map_err(|source| ConnectionError::Connect {
+                path: socket_path.to_path_buf(),
+                source: std::io::Error::other(source),
+            })?;
         let (read_half, write_half) = stream.into_split();
 
         let (event_tx, event_rx) = mpsc::channel::<ServerEvent>(CHANNEL_CAPACITY);
@@ -110,10 +110,7 @@ impl Drop for Connection {
 /// forwarding frames, so awaiting here never risks stalling anything else
 /// (unlike the main loop itself, which must never block on a full channel
 /// -- see `crate::run`'s outbound-request send).
-async fn read_loop(
-    mut read_half: tokio::net::unix::OwnedReadHalf,
-    event_tx: mpsc::Sender<ServerEvent>,
-) {
+async fn read_loop(mut read_half: SessionReadHalf, event_tx: mpsc::Sender<ServerEvent>) {
     loop {
         let event: ServerEvent = match ilium_ipc::read_frame(&mut read_half).await {
             Ok(event) => event,
@@ -138,7 +135,7 @@ async fn read_loop(
 /// the sender side is dropped (session shutdown) or a write fails (server
 /// gone).
 async fn write_loop(
-    mut write_half: tokio::net::unix::OwnedWriteHalf,
+    mut write_half: SessionWriteHalf,
     mut request_rx: mpsc::Receiver<ClientRequest>,
 ) {
     while let Some(request) = request_rx.recv().await {

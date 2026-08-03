@@ -19,6 +19,10 @@ ilium/                     # workspace root
 │   └── src/lib.rs             # single-file crate: AGENT_SIGNATURES registry, identify_agent, classify_activity
 ├── ilium-ipc/                # shared request/event types, wire (de)serialization
 │   └── src/{protocol,framing,error}.rs
+├── ilium-platform/          # adapter: every OS-specific decision, one place
+│   └── src/{secure_fs,file_lock,runtime_dir,process_info,process_control,detached,thread_priority}.rs
+├── ilium-transport/         # adapter: the local client/server channel --
+│   └── src/{endpoint,stream,unix,windows}.rs   # UDS on Unix, named pipe on Windows
 ├── ilium-kilo-gateway/      # adapter: Kilo Gateway (OpenAI-compatible) HTTP client, used only by ilium-client's background naming workers
 │   └── src/lib.rs
 ├── ilium-server/            # owns PTYs + tree, IPC server, adaptive detection loop -- one process per session
@@ -33,6 +37,13 @@ ilium/                     # workspace root
 └── ilium/                    # the `ilium` bin: clap entrypoint, spawns ilium-server as a detached
     └── src/{main,session,error}.rs   # process and hands off to ilium_client::run for the TUI
 ```
+
+`ilium-platform` owns every operating-system decision (owner-only files, locks, runtime
+directories, process inspection and control, detached spawn, worker thread priority). No other
+crate may reach for `std::os::unix`, `libc`, `windows-sys`, or procfs directly -- if something is
+missing, add it there rather than growing a `#[cfg]` branch at the call site. `ilium-transport`
+owns *where* IPC bytes travel, which is the other genuinely per-platform concern; `ilium-ipc` stays
+generic over any async byte stream and must not learn about sockets or pipes.
 
 `ilium-ipc` holds the message types both `ilium-server` and `ilium-client` depend on — never let the client reach into server-internal types directly, and never let `ilium-core` depend on `ilium-ipc` (core is pure domain, ipc is transport). `ilium-kilo-gateway` is a narrow adapter crate of its own (an LLM HTTP client, not part of the mux/detection architecture); only `ilium-client` depends on it.
 

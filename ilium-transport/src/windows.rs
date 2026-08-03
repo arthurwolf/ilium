@@ -213,6 +213,7 @@ pub(crate) fn is_transient_accept_error(error: &io::Error) -> bool {
         io::ErrorKind::ConnectionAborted
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::Interrupted
+            | io::ErrorKind::WouldBlock
             | io::ErrorKind::BrokenPipe
     )
 }
