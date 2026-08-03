@@ -1,0 +1,121 @@
+# Cross-platform build and test gate.
+#
+# Job layout follows the private-repository minute budget rather than
+# convenience: GitHub bills macOS runners at roughly ten times the Linux rate
+# and Windows at roughly 1.7x, so the macOS job is deliberately kept off pull
+# requests and runs only on `master` pushes or an explicit manual dispatch.
+# Linux is the fast inner loop and gates everything.
+#
+# Windows and macOS are expected to fail until the platform port lands
+# (`ilium-ipc` is Unix-domain-socket only, `ilium-client` depends on `zbus`
+# unconditionally, and agent detection reads `/proc`). They are blocking on
+# purpose: the red job is the porting checklist.
+
+name: CI
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+    workflow_dispatch:
+
+# A newer push to the same ref makes the older run's minutes worthless; on a
+# metered private repository, cancelling them is real money saved.
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    CARGO_TERM_COLOR: always
+    # Incremental artifacts are pure overhead on a runner that never rebuilds
+    # the same tree twice, and they bloat what the cache action has to store.
+    CARGO_INCREMENTAL: 0
+    RUST_BACKTRACE: 1
+
+jobs:
+    lint:
+        name: Format and clippy (Linux)
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v4
+
+            # `cpal` links against ALSA, so ilium-voice cannot build on a bare
+            # runner image without the development headers.
+            - name: Install Linux build dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+
+            # rust-toolchain.toml drives the version; rustup on the runner
+            # honours it automatically on the first cargo invocation.
+            - name: Show toolchain
+              run: |
+                  rustc --version
+                  cargo --version
+
+            - uses: Swatinem/rust-cache@v2
+
+            - name: cargo fmt --check
+              run: cargo fmt --all --check
+
+            # `-D warnings` is passed to clippy rather than set in RUSTFLAGS so
+            # that a warning inside a third-party dependency cannot fail the
+            # build; only this workspace's own code is held to the bar.
+            - name: cargo clippy
+              run: cargo clippy --workspace --all-targets -- -D warnings
+
+    test-linux:
+        name: Test (Linux)
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Linux build dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+
+            - uses: Swatinem/rust-cache@v2
+
+            - name: cargo build
+              run: cargo build --workspace --all-targets
+
+            # The live OpenAI tests carry `#[ignore]`; the default test run
+            # skips them, so no API key ever needs to exist as a repo secret.
+            - name: cargo test
+              run: cargo test --workspace
+
+    test-windows:
+        name: Test (Windows)
+        runs-on: windows-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: Swatinem/rust-cache@v2
+
+            - name: cargo build
+              run: cargo build --workspace --all-targets
+
+            - name: cargo test
+              run: cargo test --workspace
+
+    test-macos:
+        name: Test (macOS)
+        # Skipped on pull requests purely for cost. Push to master or dispatch
+        # this workflow by hand when a macOS answer is actually needed.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        runs-on: macos-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: Swatinem/rust-cache@v2
+
+            - name: cargo build
+              run: cargo build --workspace --all-targets
+
+            - name: cargo test
+              run: cargo test --workspace

@@ -1,0 +1,6 @@
+# Pins one toolchain for local development and CI alike, so a clippy lint or
+# formatting rule that passes on a developer machine cannot fail on a runner
+# (or the reverse) purely because the two resolved different `stable` builds.
+[toolchain]
+channel = "1.96.1"
+components = ["clippy", "rustfmt"]
