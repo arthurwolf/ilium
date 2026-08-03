@@ -165,17 +165,18 @@ impl IsolatedXdgDirs {
         })
     }
 
-    fn as_pairs(&self) -> [(&'static str, &Path); 4] {
+    /// Deliberately does *not* pin `SHELL`. Shell panes spawn `$SHELL`, so an
+    /// inherited one does make pane contents depend on the host -- macOS ships
+    /// bash 3.2, which prints a "the default interactive shell is now zsh"
+    /// banner into every pane. But one test installs a *fake* shell through its
+    /// own `.env("SHELL", ...)`, and these pairs are applied afterwards, so
+    /// pinning here would silently overwrite that fixture. Tests that need a
+    /// deterministic shell set it themselves.
+    fn as_pairs(&self) -> [(&'static str, &Path); 3] {
         [
             ("XDG_DATA_HOME", &self.data_home),
             ("XDG_CONFIG_HOME", &self.config_home),
             ("XDG_RUNTIME_DIR", &self.runtime_dir),
-            // Shell panes spawn `$SHELL`, so an inherited one makes pane
-            // contents depend on whoever is running the tests. It is not a
-            // hypothetical: macOS ships bash 3.2 as the default login shell and
-            // it prints a "the default interactive shell is now zsh" banner
-            // into every pane, shifting the rows these tests assert against.
-            ("SHELL", Path::new("/bin/sh")),
         ]
     }
 }
