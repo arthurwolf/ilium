@@ -90,7 +90,9 @@ jobs:
     test-windows:
         name: Test (Windows)
         runs-on: windows-latest
-        timeout-minutes: 45
+        # Longer than the other jobs: this runner has half the cores, and a
+        # cancelled run saves no cache, so a rebuild here starts cold.
+        timeout-minutes: 60
         steps:
             - uses: actions/checkout@v4
 
@@ -99,8 +101,17 @@ jobs:
             - name: cargo build
               run: cargo build --workspace --all-targets
 
+            # `--no-fail-fast` so one run reports every crate instead of
+            # stopping at the first failure, which is what makes this a porting
+            # checklist rather than a one-bug-per-run drip.
+            #
+            # `--test-threads=1` is diagnostic and temporary: a test in
+            # `ilium-client` hangs here until the job times out, and libtest
+            # prints each test's name *before* running it only when
+            # single-threaded, so the hang names itself in the log. Remove once
+            # that test is identified and fixed.
             - name: cargo test
-              run: cargo test --workspace
+              run: cargo test --workspace --no-fail-fast -- --test-threads=1
 
     test-macos:
         name: Test (macOS)
