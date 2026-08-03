@@ -288,7 +288,18 @@ impl TestServer {
             http_api: ilium_server::config::HttpApiConfig { port: 0 },
         };
 
-        let server_task = tokio::spawn(run(options));
+        // Wrapped so a server that gives up *after* binding says so. Nothing
+        // inspects this task's result until the test ends, so an error here
+        // otherwise surfaces only as a client that connects successfully and
+        // then receives nothing at all -- which is exactly the shape the macOS
+        // detection failures take.
+        let server_task = tokio::spawn(async move {
+            let result = run(options).await;
+            if let Err(error) = &result {
+                eprintln!("ilium-server run() exited with an error: {error}");
+            }
+            result
+        });
 
         // Liveness, not a filesystem check: a Windows session endpoint is a
         // named pipe with no file to appear, so `Path::exists` would wait
