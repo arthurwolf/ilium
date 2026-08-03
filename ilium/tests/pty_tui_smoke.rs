@@ -165,11 +165,17 @@ impl IsolatedXdgDirs {
         })
     }
 
-    fn as_pairs(&self) -> [(&'static str, &Path); 3] {
+    fn as_pairs(&self) -> [(&'static str, &Path); 4] {
         [
             ("XDG_DATA_HOME", &self.data_home),
             ("XDG_CONFIG_HOME", &self.config_home),
             ("XDG_RUNTIME_DIR", &self.runtime_dir),
+            // Shell panes spawn `$SHELL`, so an inherited one makes pane
+            // contents depend on whoever is running the tests. It is not a
+            // hypothetical: macOS ships bash 3.2 as the default login shell and
+            // it prints a "the default interactive shell is now zsh" banner
+            // into every pane, shifting the rows these tests assert against.
+            ("SHELL", Path::new("/bin/sh")),
         ]
     }
 }
