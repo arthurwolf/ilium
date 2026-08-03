@@ -21,6 +21,7 @@ use ilium_agent_debug::{
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentActivity, NodeId, PaneStatus};
 use ilium_ipc::ServerEvent;
+use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
 
@@ -47,50 +48,6 @@ const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub fn spawn(state: std::sync::Arc<ServerState>) -> JoinHandle<()> {
     tokio::spawn(run_loop(state))
 }
-
-/// Niceness applied to the thread running a detection tick's `sysinfo`
-/// refresh (see `run_loop`'s `spawn_blocking` call). Deliberately an
-/// *absolute* value applied via `setpriority`, not a delta applied via
-/// `nice` -- `spawn_blocking` closures run on a small pool of threads tokio
-/// reuses across many calls, so a relative adjustment would silently
-/// compound (thread niceness creeping up every tick) rather than settling
-/// at a fixed, always-correct value.
-#[cfg(target_os = "linux")]
-const DETECTION_THREAD_NICENESS: i32 = 10;
-
-/// Lowers this thread's scheduling niceness so `ilium_detect::refresh`'s
-/// unavoidable `/proc` scan never competes on equal footing with
-/// keystroke-path work when *other* processes on the machine are loading
-/// the CPU. `setpriority(PRIO_PROCESS, 0, _)` with a pid of 0 only ever
-/// targets the calling thread (see `man 2 setpriority`) -- never another
-/// thread or process -- so this always succeeds under normal user
-/// permissions; only *lowering* niceness numerically (raising scheduling
-/// priority) needs `CAP_SYS_NICE`. Linux-only: niceness is a Linux/POSIX
-/// scheduling concept with no equivalent this crate targets elsewhere.
-/// Failure is logged and otherwise ignored -- a tick must still run at
-/// default priority rather than not run at all.
-#[cfg(target_os = "linux")]
-fn lower_current_thread_niceness() {
-    // SAFETY: `setpriority` takes no pointers; `PRIO_PROCESS` + pid `0`
-    // restricts its effect to the calling thread alone (see doc comment
-    // above), which is always permitted regardless of caller privilege.
-    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, DETECTION_THREAD_NICENESS) };
-    // `setpriority` only returns -1 on genuine failure here: the target
-    // value (10) is not itself a valid "already there, returned -1 by
-    // coincidence" case, so there's no ambiguity to disambiguate via errno.
-    if result == -1 {
-        let error = std::io::Error::last_os_error();
-        tracing::warn!(
-            "detection loop: failed to set thread niceness to {DETECTION_THREAD_NICENESS}: \
-             {error}; continuing at default scheduling priority"
-        );
-    }
-}
-
-/// Non-Linux no-op: no scheduling-niceness equivalent is wired up on other
-/// targets, so a detection tick simply runs at default thread priority.
-#[cfg(not(target_os = "linux"))]
-fn lower_current_thread_niceness() {}
 
 async fn run_loop(state: std::sync::Arc<ServerState>) {
     let mut system = System::new();
@@ -127,7 +84,9 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
             // equal footing with keystroke-path work for CPU time. Only
             // ever adjusts the calling thread's own niceness (never another
             // thread's), so this never needs elevated privileges.
-            lower_current_thread_niceness();
+            // The `sysinfo` process scan below must never compete on equal
+            // footing with keystroke-path work when the machine is loaded.
+            lower_current_thread(WorkerPriority::BelowNormal);
             ilium_detect::refresh(&mut system);
             system
         })

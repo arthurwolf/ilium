@@ -16,7 +16,7 @@ ilium-client = { version = "0.1.0", path = "../ilium-client" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
-libc = "0.2.183"
+ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 tracing = "0.1.44"

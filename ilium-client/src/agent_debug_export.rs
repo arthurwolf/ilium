@@ -4,11 +4,11 @@
 //! writes the user-selected local path.
 
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use ilium_core::{AgentActivity, AgentClass, NodeId};
 use ilium_ipc::{AgentDebugEntry, AgentDebugSource};
+use ilium_platform::secure_fs;
 
 use crate::app::{AgentDebugLogCache, AgentDebugLogFilter};
 
@@ -63,14 +63,14 @@ pub fn render_report(
 /// prevents an editable destination from accidentally redirecting sensitive
 /// prompt/session evidence into an unrelated target.
 pub fn write_report(path: &Path, report: &str) -> io::Result<()> {
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = secure_fs::private_open_options()
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(path)?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    // The open above only applies the mode when it creates the file, so an
+    // existing report from an earlier export is tightened here too.
+    secure_fs::restrict_file_to_owner(path)?;
     file.write_all(report.as_bytes())?;
     file.flush()
 }
@@ -283,9 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_report_is_private_and_replaces_existing_content() {
-        use std::os::unix::fs::PermissionsExt;
-
+    fn saved_report_replaces_existing_content() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("agent-debug.log");
         std::fs::write(&path, "older and longer content").expect("seed destination");
@@ -293,12 +291,29 @@ mod tests {
         write_report(&path, "new report\n").expect("save report");
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new report\n");
+    }
+
+    /// Owner-only modes are a Unix concept; Windows gets the same protection
+    /// from the destination directory's ACL. See `ilium_platform::secure_fs`.
+    #[cfg(unix)]
+    #[test]
+    fn saved_report_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("agent-debug.log");
+
+        write_report(&path, "new report\n").expect("save report");
+
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
     }
 
+    /// Refusing a symlink destination is the `O_NOFOLLOW` guarantee, which only
+    /// Unix provides.
+    #[cfg(unix)]
     #[test]
     fn saved_report_refuses_a_symlink_destination() {
         use std::os::unix::fs::symlink;

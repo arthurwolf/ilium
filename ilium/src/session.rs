@@ -7,18 +7,19 @@
 //! making every project attach to a machine-wide `default` session.
 
 use std::fmt::Write as _;
-use std::fs::{File, OpenOptions};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+// The liveness probe below is still Unix-only; the Windows arm arrives with
+// the named-pipe transport (see `ilium_ipc`'s transport boundary).
+#[cfg(unix)]
 use std::os::unix::net::UnixStream as StdUnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use chrono::Local;
-use directories::BaseDirs;
 use ilium_ipc::{write_frame, ClientRequest};
+use ilium_platform::file_lock::ExclusiveFileLock;
+use ilium_platform::runtime_dir::{self, MAX_SOCKET_PATH_BYTES};
+use ilium_platform::{detached, process_control, secure_fs};
 use sha2::{Digest, Sha256};
 
 use crate::error::CliError;
@@ -29,9 +30,10 @@ const SERVER_START_TIMEOUT: Duration = Duration::from_secs(5);
 const SERVER_START_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const SERVER_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const GRACEFUL_RESTART_TIMEOUT: Duration = Duration::from_secs(1);
-const MAX_SOCKET_PATH_BYTES: usize = 100;
+/// Upper bound on the readable slug regardless of available budget: past this
+/// the extra characters stop aiding recognition and only crowd out the parts
+/// of the name that carry identity.
 const MAX_SOCKET_SLUG_BYTES: usize = 48;
-const DEBUG_LOG_ROOT: &str = "/tmp/.ilium";
 const ACTIVE_LOG_PATH_FILE: &str = ".active-log-path";
 const SERVER_START_LOCK_FILE: &str = ".server-start.lock";
 /// How many timestamped debug logs `prune_stale_logs` leaves behind per
@@ -93,14 +95,26 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         source,
     })?;
     let socket_dir = runtime_socket_dir()?;
-    let socket_key = socket_key(&project_root, session_name);
+    // The readable slug is decoration; the digest and the session name carry
+    // identity. So the slug takes whatever the *actual* directory leaves over
+    // rather than a fixed cap, which is what made macOS fail: its per-session
+    // temporary directory alone consumed most of `sun_path`.
+    let socket_key = socket_key(
+        &project_root,
+        session_name,
+        slug_budget(&socket_dir, session_name),
+    );
     let socket_path = socket_dir.join(format!("{socket_key}.sock"));
     if socket_path.as_os_str().len() >= MAX_SOCKET_PATH_BYTES {
+        // Only reachable when the digest, the session name, and `.sock` alone
+        // overflow the budget -- an empty slug cannot shrink any further.
         return Err(CliError::SocketPathTooLong(socket_path));
     }
 
-    let log_root = Path::new(DEBUG_LOG_ROOT);
-    ensure_private_directory(log_root)?;
+    let log_root = runtime_dir::debug_log_root().map_err(|source| CliError::SessionStorage {
+        path: PathBuf::from("debug log root"),
+        source,
+    })?;
     let log_directory = log_root.join(&socket_key);
     ensure_private_directory(&log_directory)?;
 
@@ -115,58 +129,18 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
     })
 }
 
-/// Holds the cross-process first-attach lock for one project session.
-/// Keeping the file descriptor alive keeps `flock` ownership alive.
-struct ServerStartLock(File);
-
-impl Drop for ServerStartLock {
-    fn drop(&mut self) {
-        // SAFETY: the descriptor remains owned by this guard until after the
-        // unlock call and `LOCK_UN` does not dereference process memory.
-        unsafe {
-            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
-        }
-    }
-}
-
 /// Serializes the socket recheck, log-path publication, and detached spawn so
 /// simultaneous clients cannot start competing servers with different logs.
-fn acquire_server_start_lock(session: &ProjectSession) -> Result<ServerStartLock, CliError> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(&session.server_start_lock_file)
-        .map_err(|source| CliError::SessionStorage {
+///
+/// The returned guard holds the lock until it drops; `ilium_platform` owns
+/// both the lock mechanism and the lock file's owner-only permissions.
+fn acquire_server_start_lock(session: &ProjectSession) -> Result<ExclusiveFileLock, CliError> {
+    ExclusiveFileLock::acquire(&session.server_start_lock_file).map_err(|source| {
+        CliError::SessionStorage {
             path: session.server_start_lock_file.clone(),
             source,
-        })?;
-    std::fs::set_permissions(
-        &session.server_start_lock_file,
-        std::fs::Permissions::from_mode(0o600),
-    )
-    .map_err(|source| CliError::SessionStorage {
-        path: session.server_start_lock_file.clone(),
-        source,
-    })?;
-
-    loop {
-        // SAFETY: `file` owns a valid descriptor for the full call and flock
-        // only changes kernel lock state associated with that descriptor.
-        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-        if result == 0 {
-            return Ok(ServerStartLock(file));
         }
-        let source = std::io::Error::last_os_error();
-        if source.kind() != std::io::ErrorKind::Interrupted {
-            return Err(CliError::SessionStorage {
-                path: session.server_start_lock_file.clone(),
-                source,
-            });
-        }
-    }
+    })
 }
 
 fn ensure_private_directory(path: &Path) -> Result<(), CliError> {
@@ -187,11 +161,9 @@ fn ensure_private_directory(path: &Path) -> Result<(), CliError> {
             ),
         });
     }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|source| {
-        CliError::SessionStorage {
-            path: path.to_path_buf(),
-            source,
-        }
+    secure_fs::restrict_directory_to_owner(path).map_err(|source| CliError::SessionStorage {
+        path: path.to_path_buf(),
+        source,
     })
 }
 
@@ -209,19 +181,37 @@ fn validate_session_name(session_name: &str) -> Result<(), CliError> {
 }
 
 fn runtime_socket_dir() -> Result<PathBuf, CliError> {
-    let directory = BaseDirs::new()
-        .as_ref()
-        .and_then(BaseDirs::runtime_dir)
-        .map(|runtime_dir| runtime_dir.join("ilium"))
-        .unwrap_or_else(|| std::env::temp_dir().join("ilium"));
-    std::fs::create_dir_all(&directory).map_err(|source| CliError::SessionStorage {
-        path: directory.clone(),
+    runtime_dir::session_socket_directory().map_err(|source| CliError::SessionStorage {
+        path: PathBuf::from("session socket directory"),
         source,
-    })?;
-    Ok(directory)
+    })
 }
 
-fn socket_key(project_root: &Path, session_name: &str) -> String {
+/// How many bytes the readable slug may occupy so the finished socket path
+/// still fits `sockaddr_un`.
+///
+/// Everything else in the path is fixed-size or identity-critical: the
+/// directory, one separator, the twelve-character digest, its two separators,
+/// the session name, and `.sock`. Whatever remains is the slug's, which may be
+/// nothing at all.
+fn slug_budget(socket_dir: &Path, session_name: &str) -> usize {
+    const DIGEST_PREFIX_BYTES: usize = 12;
+    const SEPARATOR_BYTES: usize = 3; // one after the directory, two in the key
+    const EXTENSION_BYTES: usize = ".sock".len();
+
+    MAX_SOCKET_PATH_BYTES
+        .saturating_sub(socket_dir.as_os_str().len())
+        .saturating_sub(DIGEST_PREFIX_BYTES)
+        .saturating_sub(SEPARATOR_BYTES)
+        .saturating_sub(session_name.len())
+        .saturating_sub(EXTENSION_BYTES)
+        // One byte of headroom keeps the finished path strictly below the
+        // limit, which is what `resolve_project_session` checks.
+        .saturating_sub(1)
+        .min(MAX_SOCKET_SLUG_BYTES)
+}
+
+fn socket_key(project_root: &Path, session_name: &str, slug_budget: usize) -> String {
     let mut readable_slug: String = project_root
         .to_string_lossy()
         .chars()
@@ -237,8 +227,8 @@ fn socket_key(project_root: &Path, session_name: &str) -> String {
     // boundary. Path components routinely contain multi-byte UTF-8
     // characters (accents, CJK, emoji), so a fixed byte offset can land
     // mid-character; walk back to the nearest valid boundary first.
-    if readable_slug.len() > MAX_SOCKET_SLUG_BYTES {
-        let mut truncate_at = MAX_SOCKET_SLUG_BYTES;
+    if readable_slug.len() > slug_budget {
+        let mut truncate_at = slug_budget;
         while truncate_at > 0 && !readable_slug.is_char_boundary(truncate_at) {
             truncate_at -= 1;
         }
@@ -417,54 +407,20 @@ fn spawn_server_detached(session: &ProjectSession) -> Result<PathBuf, CliError> 
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    // SAFETY: this closure runs in the forked child between `fork()` and
-    // `execve()`, while the child is still single-threaded and must only
-    // call async-signal-safe functions (see `Command::pre_exec`'s safety
-    // contract). `libc::fork`, `libc::setsid`, and `libc::_exit` all are;
-    // nothing here allocates, locks, or touches Rust-level global state.
-    // `std::io::Error::last_os_error` merely reads `errno`.
-    unsafe {
-        command.pre_exec(|| match libc::fork() {
-            -1 => Err(std::io::Error::last_os_error()),
-            0 => {
-                // Grandchild: leave the middle process's session/group so
-                // it can never reacquire a controlling terminal, then
-                // fall through to `execve` for the real server binary.
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
+    // `ilium_platform::detached` owns how each platform reaches a process that
+    // outlives this one with no controlling terminal, including reaping the
+    // intermediate process on Unix so nothing is left unwaited.
+    match detached::spawn_detached(&mut command) {
+        Ok(()) => Ok(log_path),
+        Err(source) => Err(if source.kind() == std::io::ErrorKind::NotFound {
+            CliError::ServerBinaryNotFound(server_binary)
+        } else {
+            CliError::SpawnServer {
+                session: session.name.clone(),
+                source,
             }
-            _ => {
-                // Middle process: exit immediately without unwinding --
-                // `std::process::exit` is not async-signal-safe this soon
-                // after `fork()`, `_exit` is. The parent reaps this pid
-                // right below.
-                libc::_exit(0);
-            }
-        });
+        }),
     }
-
-    let mut middle_process = match command.spawn() {
-        Ok(middle_process) => middle_process,
-        Err(source) => {
-            return Err(if source.kind() == std::io::ErrorKind::NotFound {
-                CliError::ServerBinaryNotFound(server_binary)
-            } else {
-                CliError::SpawnServer {
-                    session: session.name.clone(),
-                    source,
-                }
-            });
-        }
-    };
-    // `spawn()` only returns `Ok` once the exec-status pipe closes, which
-    // requires the middle process to have already run `_exit` above --
-    // so this reaps an already-dead process and does not block. Without
-    // it the middle process would sit as a zombie for this CLI's
-    // lifetime, the exact leak this function exists to avoid.
-    let _ = middle_process.wait();
-    Ok(log_path)
 }
 
 /// Returns only after this project session owns a live server socket, together
@@ -805,19 +761,11 @@ async fn server_process_id(socket_path: &Path) -> Result<Option<u32>, CliError> 
     Ok(Some(pid))
 }
 
-/// Sends the normal Unix termination signal to one server process identified
-/// by its live socket peer credentials. `ESRCH` is success: the graceful
-/// shutdown can finish between the preceding liveness probe and this fallback.
+/// Asks one server process, identified by its live socket peer credentials,
+/// to terminate. An already-exited process is success: the graceful shutdown
+/// can finish between the preceding liveness probe and this fallback.
 fn terminate_server(server_pid: u32) -> Result<(), CliError> {
-    let result = unsafe { libc::kill(server_pid as libc::pid_t, libc::SIGTERM) };
-    if result == 0 {
-        return Ok(());
-    }
-    let source = std::io::Error::last_os_error();
-    if source.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(CliError::ServerTermination {
+    process_control::terminate(server_pid).map_err(|source| CliError::ServerTermination {
         pid: server_pid,
         source,
     })
@@ -843,8 +791,7 @@ async fn wait_for_server_process_stop(server_pid: u32, timeout: Duration) -> Res
 /// Checks the signal table without delivering a signal. `EPERM` still means
 /// the process exists; the current user merely lacks permission to signal it.
 fn is_process_running(process_id: u32) -> bool {
-    let result = unsafe { libc::kill(process_id as libc::pid_t, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    process_control::is_running(process_id)
 }
 
 #[cfg(test)]
@@ -868,24 +815,11 @@ mod tests {
         assert_ne!(first_session.log_directory, second_session.log_directory);
         assert!(first_session.snapshot_path.starts_with(&first));
         assert!(second_session.snapshot_path.starts_with(&second));
-        assert!(first_session.log_directory.starts_with(DEBUG_LOG_ROOT));
-        assert!(second_session.log_directory.starts_with(DEBUG_LOG_ROOT));
-        assert_eq!(
-            std::fs::metadata(DEBUG_LOG_ROOT)
-                .expect("debug root")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        assert_eq!(
-            std::fs::metadata(&first_session.log_directory)
-                .expect("session log directory")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
+        let log_root = runtime_dir::debug_log_root().expect("debug log root");
+        assert!(first_session.log_directory.starts_with(&log_root));
+        assert!(second_session.log_directory.starts_with(&log_root));
+        assert_private_directory(&log_root);
+        assert_private_directory(&first_session.log_directory);
         assert_eq!(
             first_session
                 .active_log_path_file
@@ -1102,13 +1036,43 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("competing lock should acquire after release");
         competing_thread.join().expect("competing thread");
-        assert_eq!(
-            std::fs::metadata(&session.server_start_lock_file)
-                .expect("lock metadata")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        assert_private_file(&session.server_start_lock_file);
+    }
+
+    /// Owner-only modes are a Unix concept; on Windows the same protection
+    /// comes from the parent directory's inherited ACL, which exposes no mode
+    /// bits to compare. See `ilium_platform::secure_fs`.
+    #[cfg(unix)]
+    fn assert_private_directory(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = std::fs::metadata(path)
+            .expect("directory metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "{path:?} should be owner-only");
+    }
+
+    #[cfg(not(unix))]
+    fn assert_private_directory(path: &Path) {
+        assert!(path.is_dir(), "{path:?} should exist");
+    }
+
+    #[cfg(unix)]
+    fn assert_private_file(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = std::fs::metadata(path)
+            .expect("file metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "{path:?} should be owner-only");
+    }
+
+    #[cfg(not(unix))]
+    fn assert_private_file(path: &Path) {
+        assert!(path.is_file(), "{path:?} should exist");
     }
 }

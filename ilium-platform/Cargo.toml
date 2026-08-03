@@ -1,0 +1,26 @@
+[package]
+name = "ilium-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+directories = "6.0.0"
+tracing = "0.1.44"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# `SetThreadPriority` is the Windows counterpart to POSIX niceness.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
+# Darwin has no procfs; `libproc` wraps the `proc_pidinfo` family that answers
+# the same questions (a process's working directory and its open files).
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14.11"
+
+[dev-dependencies]
+tempfile = "3.27.0"

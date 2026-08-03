@@ -15,6 +15,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
+use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender as AsyncSender;
 
 use crate::icon_settings::{
@@ -120,7 +121,7 @@ fn run_worker(
     requests_rx: Receiver<IconSearchRequest>,
     events_tx: AsyncSender<IconSemanticSearchEvent>,
 ) {
-    crate::background_priority::lower_current_thread();
+    lower_current_thread(WorkerPriority::Lowest);
     let mut index: Option<IconSemanticIndex> = None;
     while let Ok(mut request) = requests_rx.recv() {
         // Once the index is available, collapse a typing burst to its newest

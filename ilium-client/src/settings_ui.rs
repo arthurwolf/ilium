@@ -2631,7 +2631,7 @@ fn debug_lines(settings: &DebugSettings, selected: usize) -> Vec<Line<'static>> 
         &[(
             "File logging",
             on_off(settings.file_logging_enabled),
-            "Write major actions, every instrumented error, and full text LLM requests/responses to this session's timestamped /tmp/.ilium log. Credential headers/URL parameters are redacted; binary audio is summarized.",
+            "Write major actions, every instrumented error, and full text LLM requests/responses to this session's timestamped debug log. Credential headers/URL parameters are redacted; binary audio is summarized.",
         )],
         selected,
     )

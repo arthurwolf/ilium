@@ -7,7 +7,6 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
@@ -365,17 +364,16 @@ fn with_project_lock<T>(
         .create(true)
         .truncate(false)
         .open(lock_path)?;
-    let lock_result = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) };
-    if lock_result != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    // `File::lock` is the portable exclusive lock: `flock` on Unix,
+    // `LockFileEx` on Windows.
+    lock.lock()?;
     let result = operation();
     // `lock` (the fd) releases the flock unconditionally on drop, so a failed
     // explicit unlock here is not itself a correctness problem. Treating it
     // as fatal would turn an already-succeeded `operation()` (e.g. a message
     // already appended and fsynced) into a reported failure, inviting a
     // caller retry that re-runs the operation and duplicates its effect.
-    let _ = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
+    let _ = lock.unlock();
     result
 }
 

@@ -33,7 +33,6 @@ pub mod agent_debug_export;
 pub mod agent_debug_ui;
 pub mod agent_from_line;
 pub mod app;
-pub mod background_priority;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;

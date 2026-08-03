@@ -1,5 +1,40 @@
-use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Asserts the log directory and file are readable only by their owner.
+///
+/// Owner-only *modes* are a Unix concept. On Windows the same guarantee comes
+/// from the log directory's inherited profile ACL (see
+/// `ilium_platform::secure_fs`), which exposes no mode bits to compare, so
+/// there is nothing to assert rather than something weaker to assert.
+#[cfg(unix)]
+fn assert_owner_only(log_directory: &Path, log_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    assert_eq!(
+        std::fs::metadata(log_directory)
+            .expect("log directory")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(log_path)
+            .expect("log file")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[cfg(not(unix))]
+fn assert_owner_only(log_directory: &Path, log_path: &Path) {
+    // Still prove both exist; only the mode comparison is Unix-specific.
+    assert!(log_directory.is_dir());
+    assert!(log_path.is_file());
+}
 
 static FORMATTED_FIELDS: AtomicUsize = AtomicUsize::new(0);
 
@@ -58,22 +93,7 @@ fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
         enabled_log.matches("repeated diagnostic call site").count(),
         1
     );
-    assert_eq!(
-        std::fs::metadata(&log_directory)
-            .expect("log directory")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
-    );
-    assert_eq!(
-        std::fs::metadata(&log_path)
-            .expect("log file")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
+    assert_owner_only(&log_directory, &log_path);
 
     ilium_logging::set_enabled(false).expect("disable");
     tracing::error!(message = "disabled again", "diagnostic test event");

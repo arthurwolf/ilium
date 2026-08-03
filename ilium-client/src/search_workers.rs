@@ -12,6 +12,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 
+use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender;
 
 use crate::search_ui::{self, SearchResult, WorkspaceSearchRequest};
@@ -71,7 +72,7 @@ impl SearchWorkers {
         let handle = thread::Builder::new()
             .name("ilium-workspace-search".to_string())
             .spawn(move || {
-                crate::background_priority::lower_current_thread();
+                lower_current_thread(WorkerPriority::Lowest);
                 // `is_idle` has no way to observe this thread's death other
                 // than the completion event it promises to send (see the
                 // doc comment on `start`): a scan across arbitrary retained

@@ -378,7 +378,9 @@ fn process_log_for_project(project_dir: &Path) -> Option<(PathBuf, String)> {
         .ok()?
         .to_string_lossy()
         .into_owned();
-    let log_root = std::fs::read_dir("/tmp/.ilium").ok()?;
+    // Ask the same authority the CLI uses rather than duplicating its path
+    // choice, which differs per platform.
+    let log_root = std::fs::read_dir(ilium_platform::runtime_dir::debug_log_root().ok()?).ok()?;
     for session_entry in log_root.filter_map(Result::ok) {
         let Ok(file_type) = session_entry.file_type() else {
             continue;
@@ -1149,8 +1151,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .map(|entry| entry.file_name())
         .find(|name| name.to_string_lossy().ends_with(".sock"))
         .expect("isolated session socket");
-    let session_log_directory =
-        Path::new("/tmp/.ilium").join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
+    let session_log_directory = ilium_platform::runtime_dir::debug_log_root()
+        .expect("debug log root")
+        .join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
     let active_log_path = active_log_path_from_metadata(
         &std::fs::read_to_string(session_log_directory.join(".active-log-path"))
             .expect("read active log metadata"),

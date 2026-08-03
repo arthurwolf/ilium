@@ -1,0 +1,163 @@
+//! Where ilium puts per-user runtime state: session sockets and debug logs.
+//!
+//! The hard constraint here is socket path length. A Unix-domain socket
+//! address is a fixed-size `sockaddr_un` whose `sun_path` is 108 bytes on
+//! Linux but only 104 on macOS and the BSDs, and the kernel truncates or
+//! rejects rather than growing it. That budget is small enough that the
+//! *directory* choice alone can exhaust it: macOS hands every process a
+//! per-session temporary directory like
+//! `/var/folders/df/djsxfhc17x95674wsm_g8s980000gn/T/`, which spends half the
+//! address before the file name starts.
+//!
+//! So the socket directory is chosen to be short on every platform rather than
+//! merely conventional, and [`MAX_SOCKET_PATH_BYTES`] is published so callers
+//! can budget the file name against the directory they actually got.
+
+use std::io;
+use std::path::PathBuf;
+
+use crate::secure_fs;
+
+/// The longest a session socket path may be, in bytes, including the
+/// terminating NUL the kernel requires.
+///
+/// This is the smallest limit across supported platforms (macOS's 104-byte
+/// `sun_path`) minus a small margin, so one number is correct everywhere
+/// instead of a per-platform value callers would have to reason about.
+pub const MAX_SOCKET_PATH_BYTES: usize = 100;
+
+/// Directory holding one socket per project session, created private.
+///
+/// Linux uses `$XDG_RUNTIME_DIR` when the session manager provides one: it is
+/// short, already per-user, and cleared at logout. macOS has no such thing and
+/// its temp directory is far too long, so a short well-known path under `/tmp`
+/// is used instead, suffixed with the user id so two users on one machine keep
+/// separate, mutually inaccessible directories. Windows does not put named
+/// pipes on the filesystem at all, but the same directory still holds the
+/// per-session lock and marker files, so it resolves under the user's own
+/// local application data.
+pub fn session_socket_directory() -> io::Result<PathBuf> {
+    let directory = socket_directory_path();
+    secure_fs::create_private_directory(&directory)?;
+    Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn socket_directory_path() -> PathBuf {
+    use directories::BaseDirs;
+
+    BaseDirs::new()
+        .as_ref()
+        .and_then(BaseDirs::runtime_dir)
+        .map(|runtime_dir| runtime_dir.join("ilium"))
+        .unwrap_or_else(short_shared_directory)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn socket_directory_path() -> PathBuf {
+    // Deliberately not `BaseDirs::runtime_dir` or `std::env::temp_dir()`: on
+    // macOS both resolve to the long per-session `/var/folders/...` path that
+    // overflows `sun_path`. See the module comment.
+    short_shared_directory()
+}
+
+#[cfg(windows)]
+fn socket_directory_path() -> PathBuf {
+    use directories::BaseDirs;
+
+    BaseDirs::new()
+        .map(|base_dirs| base_dirs.data_local_dir().join("ilium").join("run"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ilium"))
+}
+
+/// A short, per-user directory under the shared temporary root.
+///
+/// The user id suffix is what makes this safe to place in a world-writable
+/// directory: each user gets a distinct path, and [`secure_fs`] creates it
+/// `0o700` so no one else can enter it or plant symlinks inside.
+#[cfg(unix)]
+fn short_shared_directory() -> PathBuf {
+    // SAFETY: `getuid` takes no arguments, touches no process memory, and is
+    // documented as always succeeding.
+    let user_id = unsafe { libc::getuid() };
+    PathBuf::from(format!("/tmp/.ilium-{user_id}"))
+}
+
+/// Root directory for timestamped debug logs, created private.
+///
+/// Logs contain terminal contents, so this is owner-only for the same reason
+/// the socket directory is. On Unix it deliberately shares the short per-user
+/// path: a long log path costs nothing, but keeping one root keeps cleanup
+/// (and a user's own `rm -rf`) to a single place.
+pub fn debug_log_root() -> io::Result<PathBuf> {
+    let directory = debug_log_root_path();
+    secure_fs::create_private_directory(&directory)?;
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn debug_log_root_path() -> PathBuf {
+    short_shared_directory().join("logs")
+}
+
+#[cfg(windows)]
+fn debug_log_root_path() -> PathBuf {
+    use directories::BaseDirs;
+
+    BaseDirs::new()
+        .map(|base_dirs| base_dirs.data_local_dir().join("ilium").join("logs"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ilium").join("logs"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_socket_directory_leaves_room_for_a_session_file_name() {
+        let directory = session_socket_directory().expect("socket directory");
+
+        // The whole point of this module: whatever directory a platform
+        // resolves to must leave a usable file-name budget, not merely exist.
+        // 40 bytes is enough for a digest, a session name, and `.sock`.
+        let remaining = MAX_SOCKET_PATH_BYTES.saturating_sub(directory.as_os_str().len());
+        assert!(
+            remaining >= 40,
+            "socket directory {directory:?} leaves only {remaining} bytes for a file name"
+        );
+    }
+
+    #[test]
+    fn the_socket_directory_is_created_and_private() {
+        let directory = session_socket_directory().expect("socket directory");
+
+        assert!(directory.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&directory)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+
+    #[test]
+    fn the_debug_log_root_is_created_and_private() {
+        let directory = debug_log_root().expect("log root");
+
+        assert!(directory.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&directory)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+}

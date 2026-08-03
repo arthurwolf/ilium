@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use ilium_core::BoardStorage;
@@ -1181,14 +1180,10 @@ fn save_markdown_board(
         .write(true)
         .open(path)
         .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    // SAFETY: `file` owns a valid descriptor for the duration of this call,
-    // and the descriptor is not shared with another thread here.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(format!(
-            "Could not lock {}: {}",
-            path.display(),
-            std::io::Error::last_os_error()
-        ));
+    // `File::lock` is the portable exclusive lock: `flock` on Unix,
+    // `LockFileEx` on Windows.
+    if let Err(error) = file.lock() {
+        return Err(format!("Could not lock {}: {error}", path.display()));
     }
     let write_result = (|| -> Result<(), String> {
         let mut current_source = String::new();
@@ -1220,7 +1215,7 @@ fn save_markdown_board(
     // Best-effort: the descriptor closing at end of scope would release the
     // lock regardless, but unlocking explicitly keeps the held-lock window
     // as tight as the read-compare-write section it protects.
-    let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    let _ = file.unlock();
     write_result
 }
 fn read_sorted(path: &Path) -> Result<Vec<PathBuf>, String> {

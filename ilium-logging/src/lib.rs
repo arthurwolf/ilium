@@ -6,10 +6,11 @@
 //! `tracing` events through this boundary. Disabling logging closes the file
 //! immediately and turns writes into a sink without changing call sites.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+use ilium_platform::secure_fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -66,32 +67,31 @@ impl LoggerState {
                     path: self.path.clone(),
                     source: io::Error::new(io::ErrorKind::InvalidInput, "log path has no parent"),
                 })?;
-            std::fs::create_dir_all(parent).map_err(|source| LoggingError::PrepareFile {
-                path: self.path.clone(),
-                source,
-            })?;
-            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(
-                |source| LoggingError::PrepareFile {
+            // Log files hold terminal contents, so both the directory and the
+            // file are owner-only; `secure_fs` owns what that means per
+            // platform.
+            secure_fs::create_private_directory(parent).map_err(|source| {
+                LoggingError::PrepareFile {
                     path: self.path.clone(),
                     source,
-                },
-            )?;
-            let opened_file = OpenOptions::new()
+                }
+            })?;
+            let opened_file = secure_fs::private_open_options()
                 .create(true)
                 .append(true)
-                .mode(0o600)
-                .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
                 .open(&self.path)
                 .map_err(|source| LoggingError::PrepareFile {
                     path: self.path.clone(),
                     source,
                 })?;
-            opened_file
-                .set_permissions(std::fs::Permissions::from_mode(0o600))
-                .map_err(|source| LoggingError::PrepareFile {
+            // The open above only sets the mode when it creates the file, so
+            // an existing log from an older build is tightened here.
+            secure_fs::restrict_file_to_owner(&self.path).map_err(|source| {
+                LoggingError::PrepareFile {
                     path: self.path.clone(),
                     source,
-                })?;
+                }
+            })?;
             *file = Some(opened_file);
         } else if !enabled {
             *file = None;
@@ -501,6 +501,11 @@ mod tests {
         assert_eq!(std::fs::read_to_string(path).expect("log"), "kept\n");
     }
 
+    /// Refusing to follow a symlink is an `O_NOFOLLOW` guarantee, which only
+    /// Unix provides; on Windows the equivalent protection comes from the log
+    /// directory's ACL rather than from the open itself, so there is nothing
+    /// for this test to assert there. See `ilium_platform::secure_fs`.
+    #[cfg(unix)]
     #[test]
     fn enabling_refuses_a_symlink_log_target() {
         let directory = tempfile::tempdir().expect("tempdir");
