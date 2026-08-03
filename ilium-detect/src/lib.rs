@@ -913,15 +913,17 @@ pub fn identify_agent_with_extra(
 fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
     let arguments = process.cmd();
     let invoked = argument_file_name(arguments, 0);
-    // When the first argument is an interpreter, the *script* it was handed is
-    // the name worth matching. That is exactly how the kernel launches a
-    // shebang script: executing `#!/bin/sh /path/codex` builds an argument
-    // vector of `["/bin/sh", "/path/codex"]`, so the agent's own name is the
-    // second entry, never the first.
+    // When the first argument is an interpreter, the program it was handed is
+    // the name worth matching. Where that program sits is not fixed: a shebang
+    // launch produces `["/bin/sh", "/path/codex"]`, while a shell running a
+    // command line produces `["/bin/sh", "-c", "/path/codex"]`. Both occur --
+    // Linux replaces the process name with the script's on exec, so the
+    // distinction only becomes visible on macOS, where a pane's command stays
+    // `sh -c ...` forever.
     let script = invoked
         .as_deref()
         .is_some_and(is_interpreter_name)
-        .then(|| argument_file_name(arguments, 1))
+        .then(|| interpreted_program_name(arguments))
         .flatten();
 
     let mut candidates = vec![process.name().to_string_lossy().to_lowercase()];
@@ -931,6 +933,28 @@ fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
         }
     }
     candidates
+}
+
+/// The lowercase file name of the program an interpreter was asked to run.
+///
+/// Skips the interpreter's own flags, then takes the first whitespace-separated
+/// token of what follows. The token matters: `sh -c` receives an entire command
+/// line as one argument, so `sh -c "vim codex.md"` would otherwise be read as a
+/// program named `vim codex.md` -- which contains `codex` and would be matched
+/// as the agent by a registry that works on substrings.
+fn interpreted_program_name(arguments: &[std::ffi::OsString]) -> Option<String> {
+    let program = arguments
+        .iter()
+        .skip(1)
+        .find(|argument| !argument.to_string_lossy().starts_with('-'))?;
+    let first_token = program
+        .to_string_lossy()
+        .split_whitespace()
+        .next()?
+        .to_owned();
+    Path::new(&first_token)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
 }
 
 /// File name of the argument at `index`, lowercased.
@@ -1023,6 +1047,50 @@ mod tests {
         assert!(!is_interpreter_name("codex"));
         assert!(!is_interpreter_name("claude"));
         assert!(!is_interpreter_name(""));
+    }
+
+    /// Both shapes a real pane produces. A shebang launch puts the script
+    /// straight after the interpreter; a shell running a command line puts it
+    /// after `-c`, which is what macOS keeps reporting for a live pane.
+    #[test]
+    fn an_interpreter_is_followed_to_its_program_whichever_shape_it_takes() {
+        let shebang = [
+            std::ffi::OsString::from("/bin/sh"),
+            std::ffi::OsString::from("/tmp/fixtures/codex"),
+        ];
+        let command_line = [
+            std::ffi::OsString::from("/bin/sh"),
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("/tmp/fixtures/codex"),
+        ];
+
+        assert_eq!(interpreted_program_name(&shebang).as_deref(), Some("codex"));
+        assert_eq!(
+            interpreted_program_name(&command_line).as_deref(),
+            Some("codex")
+        );
+    }
+
+    /// `sh -c` receives a whole command line as one argument, so the program is
+    /// its first token. Without that, `vim codex.md` reads as a program whose
+    /// name contains `codex`, and a substring registry would call it the agent.
+    #[test]
+    fn a_command_line_is_reduced_to_the_program_it_runs() {
+        let editing_a_file = [
+            std::ffi::OsString::from("/bin/sh"),
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("vim codex.md"),
+        ];
+
+        assert_eq!(
+            interpreted_program_name(&editing_a_file).as_deref(),
+            Some("vim"),
+            "the program is the first token, not the whole command line"
+        );
+        assert!(
+            classify_process_name_with_extra("vim", &[]).is_none(),
+            "editing a file named after an agent must not look like the agent"
+        );
     }
 
     #[test]
