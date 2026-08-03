@@ -1373,8 +1373,10 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
         tui.screen_text()
     );
     let client_process_id = tui.process_id().expect("client PTY should report a PID");
+    // Asks `ilium_platform` rather than reading `/proc` directly: procfs does
+    // not exist on macOS, where this assertion used to fail with NotFound.
     assert_eq!(
-        std::fs::read_link(format!("/proc/{client_process_id}/exe"))
+        ilium_platform::process_info::executable_path(client_process_id)
             .expect("read initial client executable"),
         restartable_binary
     );
@@ -1421,8 +1423,8 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     assert!(
         wait_until(
             || {
-                std::fs::read_link(format!("/proc/{client_process_id}/exe"))
-                    .is_ok_and(|path| path == original_binary)
+                ilium_platform::process_info::executable_path(client_process_id)
+                    .is_some_and(|path| path == original_binary)
             },
             WAIT_TIMEOUT,
         )
@@ -3167,7 +3169,13 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .into_iter()
         .fold(attach_command, |command, (key, value)| {
             command.env(key, value.to_string_lossy().to_string())
-        });
+        })
+        // This test asserts against specific tree rows while a shell pane is
+        // open, so the shell's own greeting has to be predictable. macOS ships
+        // bash 3.2 as the login shell, which prints a multi-line "the default
+        // interactive shell is now zsh" banner into the pane and pushes those
+        // rows out of place.
+        .env("SHELL", "/bin/sh");
     let mut tui = PtySession::spawn(attach_command).expect("spawn boundary-move TUI");
 
     assert!(

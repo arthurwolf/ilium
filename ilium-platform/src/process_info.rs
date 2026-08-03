@@ -92,6 +92,64 @@ pub fn working_directory(process_id: u32) -> Option<PathBuf> {
     None
 }
 
+/// The executable a running process was started from.
+///
+/// Used to prove a restarted client is running the same binary as before, not
+/// a stale one. `None` where the process is gone or the platform cannot say.
+#[cfg(target_os = "linux")]
+pub fn executable_path(process_id: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{process_id}/exe")).ok()
+}
+
+#[cfg(target_os = "macos")]
+pub fn executable_path(process_id: u32) -> Option<PathBuf> {
+    use std::ffi::c_void;
+
+    let process_id = i32::try_from(process_id).ok()?;
+    let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: `proc_pidpath` writes at most `buffersize` bytes into `buffer`,
+    // which is a live allocation of exactly that length.
+    let written = unsafe {
+        libc::proc_pidpath(
+            process_id,
+            buffer.as_mut_ptr().cast::<c_void>(),
+            buffer.len() as u32,
+        )
+    };
+    if written <= 0 {
+        return None;
+    }
+    buffer.truncate(written as usize);
+    Some(PathBuf::from(String::from_utf8_lossy(&buffer).into_owned()))
+}
+
+#[cfg(windows)]
+pub fn executable_path(process_id: u32) -> Option<PathBuf> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // SAFETY: integers in, handle out; closed on every path below.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut buffer = vec![0u16; 32_768];
+    let mut length = buffer.len() as u32;
+    // SAFETY: `handle` is valid, and the callee writes at most `length` UTF-16
+    // units into `buffer` while updating `length` to what it wrote.
+    let queried =
+        unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut length) };
+    // SAFETY: same handle, closed exactly once.
+    unsafe { CloseHandle(handle) };
+    if queried == 0 {
+        return None;
+    }
+    buffer.truncate(length as usize);
+    Some(PathBuf::from(String::from_utf16_lossy(&buffer)))
+}
+
 /// Every path the process currently holds open.
 ///
 /// Descriptors with no filesystem path (sockets, pipes, the terminal itself)
@@ -172,12 +230,26 @@ mod tests {
         assert!(open_file_paths(std::process::id()).is_empty());
     }
 
+    #[test]
+    fn the_current_process_executable_is_readable() {
+        let expected = std::env::current_exe().expect("current exe");
+
+        let reported = executable_path(std::process::id()).expect("executable is readable");
+
+        assert_eq!(
+            reported.canonicalize().ok(),
+            expected.canonicalize().ok(),
+            "reported executable should match the running test binary"
+        );
+    }
+
     /// A process id that cannot exist must be reported as unknown rather than
     /// panicking or blocking, because detection races real process exits.
     #[test]
     fn an_absent_process_is_reported_as_unknown() {
         // 0 is never a normal user process on any supported platform.
         assert_eq!(working_directory(0), None);
+        assert_eq!(executable_path(0), None);
         assert!(open_file_paths(0).is_empty());
     }
 }
