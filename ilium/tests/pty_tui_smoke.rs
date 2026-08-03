@@ -898,6 +898,20 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
+    // On the bottom row specifically, not merely somewhere. The footer is the
+    // last row of the frame, and a host that scrolls when its bottom-right
+    // cell is written -- which is what the footer's own last cell is -- would
+    // leave it one row high, still findable by a containment check but sitting
+    // where the next full-screen overlay will paint over it.
+    let footer_rows = tui.with_screen(|screen| rows_containing(screen, "VOICE"));
+    let bottom_row = tui.with_screen(|screen| screen.size().0) - 1;
+    assert_eq!(
+        footer_rows,
+        vec![bottom_row],
+        "the footer must occupy the terminal's bottom row. bottom rows are {:#?}",
+        tui.with_screen(|screen| bottom_rows(screen, 3)),
+    );
+
     // A freshly attached client starts with every group collapsed and
     // focus on the (empty) pane panel, so phase 1's "cat" pane isn't
     // actually listed yet -- expand it to also prove out tree navigation
