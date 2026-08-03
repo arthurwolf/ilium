@@ -15,8 +15,8 @@
 //!    Its first rendered frame is
 //!    asserted to contain structural chrome (the sidebar title from
 //!    `ilium_client::tree_ui::sidebar_title`) and the pane created in
-//!    phase 1 (named after its command line, `"cat"`, per
-//!    `TerminalOrigin::default_pane_name`). A scripted leader-key + help
+//!    phase 1 (named after its command line -- see `IDLE_PANE_LABEL`, which
+//!    differs per platform -- per `TerminalOrigin::default_pane_name`). A scripted leader-key + help
 //!    keystroke (`Ctrl+B` then `?`, configured through the real
 //!    `[keyboard]` table) is then
 //!    written to the pty, proving input routing and rendering are both
@@ -47,21 +47,30 @@
 //! is kept only as a defensive fallback in case that ever hangs, so this
 //! test itself cannot hang the suite even if the graceful path regresses.
 
-//! Unix-only for now. The fixtures are `/bin/sh` scripts made executable with
-//! `chmod`, the panes run `cat`, and one assertion checks the session socket's
-//! filesystem type -- none of which exist on Windows, where the endpoint is a
-//! named pipe with no filesystem presence. Porting this is tracked in
-//! docs/TODO.md; until then Windows has no end-to-end TUI coverage, which is a
-//! real gap rather than an accepted difference.
-#![cfg(unix)]
+//! Most of this suite is still Unix-only, and each such test says so at its
+//! own `#[cfg(unix)]` rather than the whole file being gated: the fixtures are
+//! `/bin/sh` scripts made executable with `chmod`, and one assertion reads the
+//! session socket's filesystem type, which on Windows is a named pipe with no
+//! filesystem presence at all. The attach-and-render test below carries no
+//! such dependency and runs everywhere, so Windows has end-to-end coverage of
+//! the part that matters most -- a real PTY, a detached server, IPC, rendering,
+//! and keyboard routing. Porting the remainder is tracked in docs/TODO.md.
 
+#[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(unix)]
 use ilium_client::connection::Connection;
-use ilium_core::{RestructureNode, RestructurePlan, Tree};
-use ilium_ipc::{ClientRequest, ServerEvent};
+#[cfg(unix)]
+use ilium_core::Tree;
+#[cfg(unix)]
+use ilium_core::{RestructureNode, RestructurePlan};
+#[cfg(unix)]
+use ilium_ipc::ClientRequest;
+#[cfg(unix)]
+use ilium_ipc::ServerEvent;
 use ilium_pty::{PtyCommand, PtySession};
 
 /// How long phases of this test wait for the server/TUI/help overlay to
@@ -73,6 +82,7 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Mirrors `ilium_client::tree_ui::RECENTLY_CREATED_PULSE_MS` (crate-private
 /// there, so duplicated here rather than imported) -- the total window a
 /// freshly created pane's row flashes for.
+#[cfg(unix)]
 const PULSE_WINDOW: Duration = Duration::from_millis(1400);
 
 /// Session name this test's isolated `ilium` uses throughout -- fixed
@@ -105,6 +115,7 @@ async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool 
 /// it. Only a finer interval reduces the chance of stepping over the frame
 /// entirely, which is what made the pane-removal assertion fail on a loaded
 /// machine while passing when run alone.
+#[cfg(unix)]
 async fn wait_for_transient_frame(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     wait_until_polling(condition, timeout, Duration::from_millis(2)).await
 }
@@ -167,7 +178,14 @@ impl IsolatedXdgDirs {
         // leaves no room for even an empty readable slug. A short prefix
         // directly under `/tmp` keeps the derived socket short while staying
         // unique per test, which parallel tests require.
+        // Unix only: the length budget is a Unix concern. Windows session
+        // endpoints are named pipes, which have no `sockaddr_un` limit and no
+        // `/tmp` to be short under, so there the ordinary temporary root is
+        // both correct and the only one that exists.
+        #[cfg(unix)]
         let runtime_root = tempfile::Builder::new().prefix("il").tempdir_in("/tmp")?;
+        #[cfg(windows)]
+        let runtime_root = tempfile::Builder::new().prefix("il").tempdir()?;
         let runtime_dir = runtime_root.path().to_path_buf();
         Ok(Self {
             data_home,
@@ -287,6 +305,32 @@ impl Drop for KillSessionOnDrop<'_> {
     }
 }
 
+/// A pane command that stays alive without producing output until it is
+/// killed, and the label the tree shows for it (the server names a
+/// command-backed pane after its joined command line -- see
+/// `ilium_server::pane::TerminalOrigin::default_pane_name`).
+///
+/// `cat` with no arguments blocks on stdin forever. Windows has no `cat`;
+/// `findstr x` is the nearest stock equivalent that keeps reading stdin
+/// instead of exiting immediately, which several alternatives (`more`,
+/// `pause`) do not.
+#[cfg(unix)]
+const IDLE_PANE_ARGUMENTS: &[&str] = &["cat"];
+#[cfg(unix)]
+const IDLE_PANE_LABEL: &str = "cat";
+#[cfg(windows)]
+const IDLE_PANE_ARGUMENTS: &[&str] = &["findstr", "x"];
+#[cfg(windows)]
+const IDLE_PANE_LABEL: &str = "findstr x";
+
+/// The full argument list for the one-shot subcommand that creates one idle
+/// pane, so the command and the label asserted against it cannot drift apart.
+fn new_idle_pane_arguments() -> Vec<&'static str> {
+    let mut arguments = vec!["new-pane", "--"];
+    arguments.extend_from_slice(IDLE_PANE_ARGUMENTS);
+    arguments
+}
+
 /// Resolves the `ilium` binary under test. Cargo's adjacent test binary is
 /// the default, while `ILIUM_PTY_SMOKE_BINARY` lets the same isolated flow
 /// prove a release-installed client and its sibling server after deployment.
@@ -323,6 +367,7 @@ async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::
 
 /// Finds the one socket owned by this test's isolated runtime directory and
 /// returns both its stable path and the detached server peer PID.
+#[cfg(unix)]
 async fn isolated_server_identity(xdg: &IsolatedXdgDirs) -> (PathBuf, u32) {
     let socket_directory = xdg.runtime_dir.join("ilium");
     let socket_paths = std::fs::read_dir(&socket_directory)
@@ -362,6 +407,7 @@ async fn isolated_server_identity(xdg: &IsolatedXdgDirs) -> (PathBuf, u32) {
 /// connection. The PTY client remains the UI under test; this second client
 /// exists only to submit a deterministic restructure request and inspect the
 /// same broadcast snapshot every real attached client receives.
+#[cfg(unix)]
 async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tree {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
@@ -423,6 +469,7 @@ fn seed_tree_row_management_controls(xdg: &IsolatedXdgDirs) {
 
 /// Enables the otherwise opt-in agent-debug surface for an isolated client
 /// and detached server without touching the developer's real config.
+#[cfg(unix)]
 fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
     let ilium_config_dir = xdg.config_home.join("ilium");
     std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
@@ -447,6 +494,7 @@ fn active_log_path_from_metadata(metadata: &str) -> Option<PathBuf> {
     (!metadata.is_empty()).then(|| PathBuf::from(metadata))
 }
 
+#[cfg(unix)]
 fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathBuf, String)> {
     let project_path = project_dir
         .canonicalize()
@@ -491,6 +539,7 @@ fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathB
 /// build and a single-package one. Matching `"label":...,"value":...` as
 /// adjacent text therefore asserts a feature-unification detail rather than
 /// what the log actually says.
+#[cfg(unix)]
 fn logged_prompt_submissions(contents: &str) -> Vec<String> {
     contents
         .lines()
@@ -516,6 +565,7 @@ fn logged_prompt_submissions(contents: &str) -> Vec<String> {
 /// resolved to a different prefix", "the log exists but recorded a shorter
 /// prompt because the keystrokes went to the tree") are all invisible in a bare
 /// "expected X, found nothing".
+#[cfg(unix)]
 fn process_log_diagnostics(log_root: &Path, project_dir: &Path) -> String {
     let mut report = format!(
         "log root: {log_root:?}\nproject dir as given: {project_dir:?}\ncanonical project path: {:?}\n",
@@ -562,6 +612,7 @@ fn process_log_diagnostics(log_root: &Path, project_dir: &Path) -> String {
 /// Produces a deterministic process literally named `codex` whose visible
 /// status changes only in volatile counters. The detector must keep polling
 /// it while the journal retains one semantic conclusion.
+#[cfg(unix)]
 fn write_change_only_fake_codex(directory: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
@@ -608,7 +659,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let new_pane_output = {
         let mut command = tokio::process::Command::new(ilium_binary());
         command
-            .args(["new-pane", "--", "cat"])
+            .args(new_idle_pane_arguments())
             .current_dir(&project_dir);
         for (key, value) in xdg.as_pairs() {
             command.env(key, value);
@@ -687,7 +738,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let pane_listed = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("cat") && screen.contains("📟")
+            screen.contains(IDLE_PANE_LABEL) && screen.contains("📟")
         },
         WAIT_TIMEOUT,
     )
@@ -834,7 +885,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the final PTY-rendered action strip, not only its in-memory TestBackend
     // buffer: every action must remain visible, ordered, and separated after
     // crossterm writes it to a vt100 terminal surface.
-    let terminal_rows = tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "cat"]));
+    let terminal_rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", IDLE_PANE_LABEL]));
     assert_eq!(
         terminal_rows.len(),
         1,
@@ -1344,7 +1396,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml")),
         std::fs::read_to_string(&active_log_path)
     );
-    let logged_action = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    let logged_action = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
     assert!(
         logged_action.status.success(),
         "creating a logged pane failed: stdout={:?} stderr={:?}",
@@ -1399,6 +1451,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 /// Replaces the executable path underneath a live client with a marker shim,
 /// activates Restart through the real right-click menu, and proves the same
 /// process loads the replacement before reattaching to the untouched server.
+#[cfg(unix)]
 #[tokio::test]
 async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() {
     use std::os::unix::fs::PermissionsExt;
@@ -1588,6 +1641,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
 /// through the real CLI, detached server, IPC connection, PTYs, and TUI.
 /// Unit tests pin exact rectangles; this test proves those layers remain
 /// connected when two live terminal streams share the right panel.
+#[cfg(unix)]
 #[tokio::test]
 async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -1711,7 +1765,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         tui.screen_text()
     );
     let split_child_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "cat"]));
+        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", IDLE_PANE_LABEL]));
     assert_eq!(split_child_rows.len(), 2, "expected two split child rows");
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[0]))
         .expect("focus first split child");
@@ -1935,6 +1989,7 @@ fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
 /// Finds text only inside the leftmost rendered cells. A full terminal row
 /// also contains the right pane, whose title may repeat an agent label and
 /// must never be mistaken for the corresponding tree row during mouse tests.
+#[cfg(unix)]
 fn rows_containing_before_column(
     screen: &vt100::Screen,
     needle: &str,
@@ -1999,6 +2054,7 @@ fn first_cell_containing(screen: &vt100::Screen, needle: &str) -> Option<(u16, u
 /// exactly what `ilium_client::tree_ui`'s creation-pulse flash
 /// (`Modifier::REVERSED`, applied by `apply_recent_pulse`) produces on a
 /// freshly created node's row.
+#[cfg(unix)]
 fn row_has_inverse_cell(screen: &vt100::Screen, row: u16) -> bool {
     let cols = screen.size().1;
     (0..cols).any(|col| screen.cell(row, col).is_some_and(vt100::Cell::inverse))
@@ -2029,6 +2085,7 @@ fn sgr_mouse_up(column: u16, row: u16) -> Vec<u8> {
 
 /// Encodes xterm SGR pointer motion while the left button remains held.
 /// Crossterm exposes this as `MouseEventKind::Drag(MouseButton::Left)`.
+#[cfg(unix)]
 fn sgr_mouse_drag(column: u16, row: u16) -> Vec<u8> {
     format!(
         "\x1b[<32;{};{}M",
@@ -2063,6 +2120,7 @@ fn sgr_mouse_move(column: u16, row: u16) -> Vec<u8> {
 /// this exercises the real end-to-end pipeline (keystroke -> server ->
 /// tree snapshot -> render) without needing to reverse-engineer the
 /// toolbar's exact pixel position at this pty's fixed size.
+#[cfg(unix)]
 #[tokio::test]
 async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_create_burst() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -2381,6 +2439,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 /// server. A fake `codex` executable records stdin locally, so this proves the
 /// modal's selected agent, generated prompt, and final Enter reached the live
 /// child process without invoking any real installed agent or network access.
+#[cfg(unix)]
 #[tokio::test]
 async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt() {
     use std::os::unix::fs::PermissionsExt;
@@ -2572,6 +2631,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
 /// action and the generic New board dialog's file picker. The source files
 /// use ordinary todo syntax (`#` plus `* [ ]`) rather than only ilium's
 /// canonical writer syntax, and creation must leave both files untouched.
+#[cfg(unix)]
 #[tokio::test]
 async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -3137,6 +3197,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 /// countdown rendering, and delayed PTY delivery through the real TUI and
 /// detached server. The live child is `cat`, so the submitted marker can be
 /// observed only after the server writes the scheduled text plus Enter.
+#[cfg(unix)]
 #[tokio::test]
 async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -3279,6 +3340,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
 /// client request, detached server, and shared tree domain. The row starts
 /// below its nested group; clicking the rendered Up action must outdent it
 /// into the enclosing group immediately before that former parent.
+#[cfg(unix)]
 #[tokio::test]
 async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -3441,6 +3503,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
 /// rows by mouse, then open the deep file. This protects the complete widget
 /// identifier path virtual rows need; selecting only a synthetic final ID
 /// makes the first level appear but breaks at the next directory.
+#[cfg(unix)]
 #[tokio::test]
 async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -3586,6 +3649,7 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
 /// Focusing and unfocusing the left panel also produces real PTY resizes; the
 /// default toolbar filter hides them until the operator explicitly reveals
 /// them, and Save follows the same active policy.
+#[cfg(unix)]
 #[tokio::test]
 async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
