@@ -701,6 +701,38 @@ fn logged_prompt_submissions(contents: &str) -> Vec<String> {
         .collect()
 }
 
+/// Everything the server recorded about identifying and classifying agents
+/// in this session.
+///
+/// When a pane that is running a recognisable agent is not shown as one, the
+/// detector already wrote down why -- which process it looked at, which
+/// signature it compared, and what it concluded. Reading that back is the
+/// difference between "detection did not happen" and knowing which step
+/// declined.
+#[cfg(unix)]
+fn detection_diagnostics(log_root: &Path, project_dir: &Path) -> String {
+    let Some((log_path, contents)) = process_log_for_project(log_root, project_dir) else {
+        return format!(
+            "no process log found for {project_dir:?}\n{}",
+            process_log_diagnostics(log_root, project_dir)
+        );
+    };
+    let decisions: Vec<&str> = contents
+        .lines()
+        .filter(|line| {
+            line.contains("identity") || line.contains("Detection") || line.contains("detection")
+        })
+        .collect();
+    format!(
+        "detection decisions in {log_path:?}:\n  {}",
+        if decisions.is_empty() {
+            "(none -- the detector never recorded a decision for any pane)".to_string()
+        } else {
+            decisions.join("\n  ")
+        }
+    )
+}
+
 /// Explains what a failed process-log expectation actually saw. Every step the
 /// match depends on is reported -- the canonical project path, each session
 /// directory's active-log metadata, whether the file it names is readable, and
@@ -947,8 +979,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     assert!(
         tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
         "expected the global voice control over Settings. \
-         terminal is {:?} and its bottom rows are {:#?}, full screen: {:?}",
+         terminal is {:?}, the frame's top border is on row(s) {:?} and its \
+         bottom border on row(s) {:?}, bottom rows are {:#?}, full screen: {:?}",
         tui.with_screen(|screen| screen.size()),
+        tui.with_screen(|screen| rows_containing(screen, "\u{256d}")),
+        tui.with_screen(|screen| rows_containing(screen, "\u{2570}")),
         tui.with_screen(|screen| bottom_rows(screen, 3)),
         tui.screen_text()
     );
@@ -3844,7 +3879,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
             DETECTION_TIMEOUT,
         )
         .await,
-        "expected a detected working Codex row, got: {:?}",
+        "expected a detected working Codex row.\n{}\nscreen: {:?}",
+        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
         tui.screen_text()
     );
     let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
