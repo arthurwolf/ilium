@@ -970,6 +970,16 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
+    // Bisects where the footer is lost on a host that clips or scrolls
+    // differently: it is present on the plain frame (asserted above), so if it
+    // is still here with Settings open, only the tab navigated to below can
+    // have displaced it.
+    assert!(
+        tui.screen_text().contains("VOICE"),
+        "the footer's voice control vanished when Settings opened. bottom rows are {:#?}",
+        tui.with_screen(|screen| bottom_rows(screen, 3)),
+    );
+
     // Settings opens on User Interface. Eight real Tab key events reach the
     // Voice control tab in the registry order, proving the feature is wired
     // into the same navigable settings surface as every established tab.
@@ -995,14 +1005,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     assert!(
         tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
-        "expected the global voice control over Settings. \
-         terminal is {:?}, the frame's top border is on row(s) {:?} and its \
-         bottom border on row(s) {:?}, bottom rows are {:#?}, full screen: {:?}",
+        "expected the global voice control over Settings, and it was present \
+         both on the plain frame and with Settings first opened, so the Voice \
+         control tab's own rendering displaced it. terminal is {:?}, rows \
+         mentioning VOICE are {:?}, bottom rows are {:#?}",
         tui.with_screen(|screen| screen.size()),
-        tui.with_screen(|screen| rows_containing(screen, "\u{256d}")),
-        tui.with_screen(|screen| rows_containing(screen, "\u{2570}")),
+        tui.with_screen(|screen| rows_containing(screen, "VOICE")),
         tui.with_screen(|screen| bottom_rows(screen, 3)),
-        tui.screen_text()
     );
 
     // Open the API-key child dialog from the real Settings screen. Both the
