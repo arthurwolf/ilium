@@ -2765,6 +2765,32 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         "expected dialog.md in board path picker, got: {:?}",
         tui.screen_text()
     );
+    // The two key presses below assume the listing is exactly `..`,
+    // `context.md`, `dialog.md`. Asserting that first means a platform which
+    // surfaces an extra entry reports what it actually showed, instead of
+    // silently selecting the wrong file and failing later on the create form.
+    let picker_rows = tui.with_screen(|screen| {
+        let cols = screen.size().1;
+        screen
+            .rows(0, cols)
+            .filter(|row| row.contains(".md") || row.contains(".."))
+            .map(|row| row.trim().to_string())
+            .collect::<Vec<_>>()
+    });
+    // Matched on the picker's own file rows. A bare name would also hit the
+    // sidebar, which lists `context.md` as an open pane well above the dialog.
+    let dialog_below_context = tui.with_screen(|screen| {
+        let context_row = rows_containing_in_order(screen, &["\u{1f4c4} context.md"]);
+        let dialog_row = rows_containing_in_order(screen, &["\u{1f4c4} dialog.md"]);
+        match (context_row.first(), dialog_row.first()) {
+            (Some(context), Some(dialog)) => *dialog == context + 1,
+            _ => false,
+        }
+    });
+    assert!(
+        dialog_below_context,
+        "board path picker should list dialog.md directly below context.md, rows were: {picker_rows:#?}"
+    );
     tui.write(b"\x1b[B\x1b[B\r")
         .expect("select dialog.md below parent and context.md");
     assert!(
