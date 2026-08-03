@@ -209,21 +209,28 @@ fn slug_budget(socket_dir: &Path, session_name: &str) -> usize {
 }
 
 fn socket_key(project_root: &Path, session_name: &str, slug_budget: usize) -> String {
+    // The slug becomes a *file name*, so it must contain nothing a path
+    // separator or a filesystem could reinterpret. Allowing everything except
+    // `/` and `.` was enough while paths were Unix-shaped; a Windows path like
+    // `C:\Users\me` would otherwise keep its `\`, silently nesting directories
+    // when the key is joined onto the log root, and its `:`, which Windows
+    // rejects in a file name outright. Anything outside a conservative
+    // alphanumeric set collapses to `-`.
     let mut readable_slug: String = project_root
         .to_string_lossy()
         .chars()
         .map(|character| {
-            if character == '/' || character == '.' {
-                '-'
-            } else {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
                 character
+            } else {
+                '-'
             }
         })
         .collect();
-    // `String::truncate` panics unless the byte offset falls on a char
-    // boundary. Path components routinely contain multi-byte UTF-8
-    // characters (accents, CJK, emoji), so a fixed byte offset can land
-    // mid-character; walk back to the nearest valid boundary first.
+    // The mapping above already guarantees ASCII, so truncation is safe
+    // today; the boundary walk stays as cheap insurance because `truncate`
+    // panics on a non-boundary offset, and relaxing the mapping later would
+    // otherwise turn an accented or CJK project path into a crash.
     if readable_slug.len() > slug_budget {
         let mut truncate_at = slug_budget;
         while truncate_at > 0 && !readable_slug.is_char_boundary(truncate_at) {
@@ -871,8 +878,10 @@ mod tests {
     #[test]
     fn socket_key_does_not_panic_on_multibyte_path_boundary() {
         let root = tempfile::tempdir().expect("tempdir");
-        // Repeated multi-byte characters guarantee byte offset 48 (the slug
-        // truncation point) lands mid-character rather than on a boundary.
+        // Multi-byte characters throughout the path exercise the slug
+        // sanitizer and its truncation together: every one of them must
+        // collapse to an ASCII placeholder rather than reaching a file name
+        // or landing mid-character at the truncation point.
         let unicode_dir = root.path().join("café-日本語-😀-projet-de-test-longue");
         std::fs::create_dir_all(&unicode_dir).expect("unicode project dir");
 

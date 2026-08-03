@@ -135,20 +135,33 @@ struct IsolatedXdgDirs {
     data_home: PathBuf,
     config_home: PathBuf,
     runtime_dir: PathBuf,
+    /// Keeps the short runtime directory alive; dropping it removes the
+    /// directory. Declared last so it outlives nothing that still needs it.
+    _runtime_root: tempfile::TempDir,
 }
 
 impl IsolatedXdgDirs {
     fn under(root: &Path) -> std::io::Result<Self> {
         let data_home = root.join("data");
         let config_home = root.join("config");
-        let runtime_dir = root.join("runtime");
-        for dir in [&data_home, &config_home, &runtime_dir] {
+        for dir in [&data_home, &config_home] {
             std::fs::create_dir_all(dir)?;
         }
+        // The runtime directory deliberately does *not* live under `root`. A
+        // session socket must fit `sockaddr_un` (100 bytes here), and a
+        // platform temporary directory can spend most of that budget on its
+        // own: macOS hands out paths like
+        // `/var/folders/df/djsxfhc17x95674wsm_g8s980000gn/T/.tmpR6qv4y/`, which
+        // leaves no room for even an empty readable slug. A short prefix
+        // directly under `/tmp` keeps the derived socket short while staying
+        // unique per test, which parallel tests require.
+        let runtime_root = tempfile::Builder::new().prefix("il").tempdir_in("/tmp")?;
+        let runtime_dir = runtime_root.path().to_path_buf();
         Ok(Self {
             data_home,
             config_home,
             runtime_dir,
+            _runtime_root: runtime_root,
         })
     }
 

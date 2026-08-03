@@ -39,19 +39,27 @@ pub fn terminate(process_id: u32) -> io::Result<()> {
 
 #[cfg(windows)]
 pub fn terminate(process_id: u32) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER};
+    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
+    // Asking whether the process still exists is more reliable than reading
+    // the error code from a failed open. Windows reports an exited process
+    // inconsistently -- `ERROR_INVALID_PARAMETER` when the id is gone entirely,
+    // but `ERROR_ACCESS_DENIED` while an exited process still has a handle open
+    // somewhere -- and "already gone" is the outcome asked for either way.
+    if !is_running(process_id) {
+        return Ok(());
+    }
     // SAFETY: `OpenProcess` takes only integers and returns a handle this
     // function closes on every path below.
     let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, process_id) };
     if handle.is_null() {
-        let error = io::Error::last_os_error();
-        // The process is already gone, which is the outcome asked for.
-        if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+        // It exited between the check above and here, which is still the
+        // outcome asked for.
+        if !is_running(process_id) {
             return Ok(());
         }
-        return Err(error);
+        return Err(io::Error::last_os_error());
     }
     // SAFETY: `handle` is a valid process handle owned by this function.
     let result = unsafe { TerminateProcess(handle, 1) };
