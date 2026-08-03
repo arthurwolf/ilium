@@ -18,16 +18,14 @@
 //! | | working directory | open files |
 //! |---|---|---|
 //! | Linux | `/proc/<pid>/cwd` | `/proc/<pid>/fd` |
-//! | macOS | `proc_pidinfo` | unavailable |
+//! | macOS | `proc_pidinfo` | `proc_pidinfo` + `proc_pidfdinfo` |
 //! | Windows | unavailable | unavailable |
 //!
-//! macOS can answer the working directory through `proc_pidinfo`, whose
-//! structures `libc` declares, so there is no hand-written struct layout to
-//! get wrong. Mapping a *descriptor* to a path additionally needs
-//! `vnode_fdinfowithpath` and its flavor constant, which `libc` does not
-//! declare; hand-writing that layout risks silently reading misaligned bytes,
-//! which is worse than reporting nothing. Session identity there falls back to
-//! parsing the agent's own command line, which `ilium-detect` already does.
+//! macOS answers both through the `proc_*info` family. The descriptor path
+//! needs two declarations `libc` omits, so the reply's byte count is checked
+//! against the size passed in: a layout that did not match would read
+//! misaligned memory rather than fail, and this turns that into no answer
+//! instead of a fabricated one.
 //!
 //! Windows has no unprivileged equivalent of either. Enumerating another
 //! process's handles means `NtQueryInformationProcess` with
@@ -166,10 +164,127 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
         .collect()
 }
 
-/// See the module comment: the structures needed to turn a macOS descriptor
-/// into a path are not declared by `libc`, and guessing their layout would
-/// risk reading misaligned memory rather than merely returning less.
-#[cfg(not(target_os = "linux"))]
+/// Darwin's descriptor table, read through `proc_pidinfo`/`proc_pidfdinfo`.
+///
+/// `libc` declares every piece except the file-info header and the flavor
+/// constant, which [`darwin`] supplies. A wrong layout there would read
+/// misaligned memory rather than fail, so every call checks the byte count the
+/// kernel reports against the size it was given and discards anything that
+/// disagrees -- a mismatch yields no path instead of a fabricated one.
+#[cfg(target_os = "macos")]
+pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
+    use std::ffi::c_void;
+
+    let Ok(process_id) = i32::try_from(process_id) else {
+        return Vec::new();
+    };
+    // Sizing call first: passing a null buffer asks how many bytes the table
+    // currently needs, which is the only way to allocate exactly enough.
+    // SAFETY: a null buffer with zero size is the documented sizing form.
+    let needed = unsafe {
+        libc::proc_pidinfo(
+            process_id,
+            libc::PROC_PIDLISTFDS,
+            0,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if needed <= 0 {
+        return Vec::new();
+    }
+    let count = needed as usize / std::mem::size_of::<libc::proc_fdinfo>();
+    let mut descriptors: Vec<libc::proc_fdinfo> = vec![unsafe { std::mem::zeroed() }; count];
+    let capacity = (count * std::mem::size_of::<libc::proc_fdinfo>()) as i32;
+    // SAFETY: `descriptors` owns `capacity` bytes and is written at most that
+    // far; the kernel reports how much it actually used.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            process_id,
+            libc::PROC_PIDLISTFDS,
+            0,
+            descriptors.as_mut_ptr().cast::<c_void>(),
+            capacity,
+        )
+    };
+    if written <= 0 {
+        return Vec::new();
+    }
+    descriptors.truncate(written as usize / std::mem::size_of::<libc::proc_fdinfo>());
+
+    descriptors
+        .iter()
+        .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
+        .filter_map(|descriptor| darwin_vnode_path(process_id, descriptor.proc_fd))
+        .collect()
+}
+
+/// The filesystem path behind one vnode descriptor, or `None` when the kernel
+/// declines or answers with an unexpected size.
+#[cfg(target_os = "macos")]
+fn darwin_vnode_path(process_id: i32, descriptor: i32) -> Option<PathBuf> {
+    use std::ffi::c_void;
+
+    let mut info: darwin::VnodeFdInfoWithPath = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<darwin::VnodeFdInfoWithPath>() as i32;
+    // SAFETY: `info` is a live local of exactly the type this flavor returns,
+    // and `size` is its real size.
+    let written = unsafe {
+        libc::proc_pidfdinfo(
+            process_id,
+            descriptor,
+            darwin::PROC_PIDFDVNODEPATHINFO,
+            std::ptr::addr_of_mut!(info).cast::<c_void>(),
+            size,
+        )
+    };
+    // Anything short means the structure was not filled as declared -- either
+    // the descriptor vanished or this layout is wrong. Either way the bytes
+    // are not a path.
+    if written != size {
+        return None;
+    }
+    let path_bytes: Vec<u8> = info
+        .vnode
+        .vip_path
+        .iter()
+        .flatten()
+        .take_while(|byte| **byte != 0)
+        .map(|byte| *byte as u8)
+        .collect();
+    (!path_bytes.is_empty())
+        .then(|| PathBuf::from(String::from_utf8_lossy(&path_bytes).into_owned()))
+}
+
+/// The two declarations `libc` is missing, from `<sys/proc_info.h>`.
+///
+/// Both have been stable since the interface was introduced. `vnode_info_path`
+/// itself comes from `libc`, so the part most likely to drift with the SDK is
+/// not restated here.
+#[cfg(target_os = "macos")]
+mod darwin {
+    /// `PROC_PIDFDVNODEPATHINFO`.
+    pub const PROC_PIDFDVNODEPATHINFO: i32 = 2;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct ProcFileInfo {
+        pub open_flags: u32,
+        pub status: u32,
+        pub offset: i64,
+        pub file_type: i32,
+        pub guard_flags: u32,
+    }
+
+    #[repr(C)]
+    pub struct VnodeFdInfoWithPath {
+        pub file_info: ProcFileInfo,
+        pub vnode: libc::vnode_info_path,
+    }
+}
+
+/// Windows has no unprivileged equivalent; see the module comment.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     let _ = process_id;
     Vec::new()
@@ -178,7 +293,7 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
 /// Whether this platform can enumerate a process's open files, so callers can
 /// distinguish "this process has none" from "this platform cannot say".
 pub const fn open_files_are_observable() -> bool {
-    cfg!(target_os = "linux")
+    cfg!(any(target_os = "linux", target_os = "macos"))
 }
 
 #[cfg(test)]
@@ -201,7 +316,10 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    /// Also the proof that the hand-written Darwin layout is right: a wrong
+    /// one yields no path, so this failing on macOS means the structures need
+    /// revisiting rather than the feature being unavailable.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn an_open_file_appears_in_the_process_open_file_list() {
         let root = tempfile::tempdir().expect("temp dir");
@@ -223,7 +341,7 @@ mod tests {
 
     /// Where open files cannot be observed, the answer must be an honest empty
     /// list rather than a wrong one, and must agree with the capability flag.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     #[test]
     fn open_files_are_reported_as_unobservable() {
         assert!(!open_files_are_observable());
