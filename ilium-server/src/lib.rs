@@ -443,15 +443,16 @@ pub(crate) async fn restore_snapshot(
 #[cfg(test)]
 mod restore_tests {
 
-    /// A command that reads standard input and stays alive, spelled per
-    /// platform.
+    /// A command that stays alive and prints nothing, spelled per platform.
     ///
     /// These fixtures need a pane whose process keeps running until the test
-    /// kills it. `cat` is the obvious choice on Unix and does not exist on
-    /// Windows, where a snapshot naming it simply fails to respawn and the
-    /// restored tree no longer matches what was saved.
+    /// kills it *and* produces no output, because output advances the pane's
+    /// activity revision and the restored tree then no longer equals the saved
+    /// one. `cat` gives both properties on Unix. Windows has no `cat`; `more`
+    /// exits immediately with nothing to page, and a bare `pause` prints
+    /// "Press any key to continue", so the prompt is discarded.
     fn long_running_pane_command() -> String {
-        if cfg!(windows) { "pause" } else { "cat" }.to_string()
+        if cfg!(windows) { "pause > nul" } else { "cat" }.to_string()
     }
 
     use std::path::PathBuf;

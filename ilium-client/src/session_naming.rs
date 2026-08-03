@@ -581,7 +581,15 @@ mod tests {
         assert!(
             prompt.contains(&transcript_path.display().to_string())
                 || prompt.contains(&resolved_transcript.display().to_string()),
-            "prompt should name the transcript it read"
+            "prompt should name the transcript it read.\n  given:    {}\n  resolved: {}\n  rendered: {}",
+            transcript_path.display(),
+            resolved_transcript.display(),
+            // The rendered element, so a mismatch shows the form actually
+            // embedded rather than only that neither guess matched.
+            prompt
+                .split_once("<transcript-path>")
+                .and_then(|(_, rest)| rest.split_once("</transcript-path>"))
+                .map_or("(no transcript-path element)", |(value, _)| value),
         );
     }
 
