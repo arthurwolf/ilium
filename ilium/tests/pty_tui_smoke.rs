@@ -340,29 +340,143 @@ fn ilium_binary() -> String {
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_ilium").to_string())
 }
 
+/// Numbers each one-shot subcommand's capture file, so concurrent tests
+/// sharing a debug-log root cannot overwrite each other's evidence.
+static ONE_SHOT_SEQUENCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// Runs a one-shot `ilium` subcommand (`new-pane`/`kill-session`) to
-/// completion with the isolated XDG env applied, returning its captured
-/// stdout+stderr for assertions. Panics (failing the test) if it doesn't
-/// exit within [`WAIT_TIMEOUT`] -- a hang here means the CLI itself is
-/// broken, which is exactly what this test exists to catch.
+/// completion with the isolated XDG env applied, returning what it printed
+/// (stdout and stderr merged, which every caller treats the same way) for
+/// assertions. Panics (failing the test) if it doesn't exit within
+/// [`WAIT_TIMEOUT`] -- a hang here means either the CLI or the detached
+/// server it starts is broken, which is exactly what this test exists to
+/// catch.
+///
+/// Output is captured to a file rather than through `Command::output()`
+/// because a timeout drops that future along with everything the subcommand
+/// had already written. What it printed before hanging is usually the whole
+/// answer, so on timeout it is reported along with [`session_state_report`].
 async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::process::Output {
+    let sequence = ONE_SHOT_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let capture_path = xdg.debug_log_dir.join(format!("one-shot-{sequence}.log"));
+    let capture = std::fs::File::create(&capture_path)
+        .unwrap_or_else(|error| panic!("create one-shot capture {capture_path:?}: {error}"));
+    let capture_error = capture
+        .try_clone()
+        .expect("share the one-shot capture between stdout and stderr");
+
     let mut command = tokio::process::Command::new(ilium_binary());
-    command.args(args).current_dir(cwd);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::from(capture))
+        .stderr(std::process::Stdio::from(capture_error));
     for (key, value) in xdg.as_pairs() {
         command.env(key, value);
     }
-    // Without this, a `command.output()` that hits the `timeout` below drops
+    // Without this, a `command.status()` that hits the `timeout` below drops
     // its `Child` handle without killing the underlying process (tokio only
     // kills-on-drop when asked to): the one-shot subcommand would keep
     // running as an orphan indefinitely instead of dying with the timeout
     // that was supposed to bound it.
     command.kill_on_drop(true);
 
-    let output = tokio::time::timeout(WAIT_TIMEOUT, command.output())
+    let captured = || std::fs::read_to_string(&capture_path).unwrap_or_default();
+    let status = tokio::time::timeout(WAIT_TIMEOUT, command.status())
         .await
-        .unwrap_or_else(|_| panic!("`ilium {args:?}` did not exit within {WAIT_TIMEOUT:?}"))
+        .unwrap_or_else(|_| {
+            panic!(
+                "`ilium {args:?}` did not exit within {WAIT_TIMEOUT:?}.\nit printed: {:?}\n{}",
+                captured(),
+                session_state_report(xdg)
+            )
+        })
         .unwrap_or_else(|error| panic!("failed to spawn `ilium {args:?}`: {error}"));
-    output
+
+    std::process::Output {
+        status,
+        stdout: captured().into_bytes(),
+        stderr: Vec::new(),
+    }
+}
+
+/// What this test's isolated session looks like on disk right now: whether a
+/// runtime endpoint was ever created, and whatever the client and the
+/// detached server wrote to their own logs.
+///
+/// A one-shot subcommand that never returns has either failed to start the
+/// server or failed to reach it, and those two look identical from the
+/// outside. The runtime directory tells them apart -- on Unix the session
+/// socket is a file that either exists or does not; on Windows the endpoint
+/// is a named pipe with no filesystem presence, so there the logs are the
+/// only evidence there is.
+fn session_state_report(xdg: &IsolatedXdgDirs) -> String {
+    let mut report = String::new();
+    for (label, directory) in [
+        ("runtime", xdg.runtime_dir.join("ilium")),
+        ("runtime root", xdg.runtime_dir.clone()),
+        ("debug logs", xdg.debug_log_dir.clone()),
+    ] {
+        match std::fs::read_dir(&directory) {
+            Ok(entries) => {
+                let names: Vec<String> = entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect();
+                report.push_str(&format!("{label} {directory:?}: {names:?}\n"));
+            }
+            Err(error) => report.push_str(&format!("{label} {directory:?}: {error}\n")),
+        }
+    }
+    for (path, contents) in walk_log_files(&xdg.debug_log_dir) {
+        report.push_str(&format!("--- {path:?}\n{contents}\n"));
+    }
+    // The decisive question behind a hung subcommand is whether the detached
+    // server was ever started, and nothing else here answers it: file logging
+    // is off by default (and one test asserts that), so an absent log proves
+    // nothing either way.
+    let mut system = sysinfo::System::new();
+    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let servers: Vec<String> = system
+        .processes()
+        .values()
+        .filter(|process| {
+            process
+                .name()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains("ilium")
+        })
+        .map(|process| {
+            format!(
+                "{} pid={} cmd={:?}",
+                process.name().to_string_lossy(),
+                process.pid(),
+                process.cmd()
+            )
+        })
+        .collect();
+    report.push_str(&format!("ilium processes alive: {servers:#?}\n"));
+    report
+}
+
+/// Every readable file under `root`, one level of session directories deep --
+/// the shape `ilium_logging` writes: one directory per session, holding its
+/// timestamped log plus the `.active-log-path` pointer.
+fn walk_log_files(root: &Path) -> Vec<(PathBuf, String)> {
+    let mut files = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return files;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(walk_log_files(&path));
+        } else if let Ok(contents) = std::fs::read_to_string(&path) {
+            files.push((path, contents));
+        }
+    }
+    files
 }
 
 /// Finds the one socket owned by this test's isolated runtime directory and
@@ -444,6 +558,9 @@ fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
     std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
     std::fs::write(
         ilium_config_dir.join("config.toml"),
+        // Deliberately no `[debug] file_logging_enabled`: this test asserts
+        // further down that the Settings screen shows it off by default, so
+        // seeding it on here would be seeding the answer.
         "[keyboard]\nshortcut_base = \"b\"\n",
     )
     .expect("write isolated keyboard config");
@@ -656,28 +773,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // cwd is; pointed at `project_dir` so it lands in the same place
     // phase 2 attaches to, though `NewPane` itself doesn't care since
     // `cat` needs no real filesystem content.
-    let new_pane_output = {
-        let mut command = tokio::process::Command::new(ilium_binary());
-        command
-            .args(new_idle_pane_arguments())
-            .current_dir(&project_dir);
-        for (key, value) in xdg.as_pairs() {
-            command.env(key, value);
-        }
-        // See `run_one_shot`'s identical setting: without it, a timeout on
-        // the `command.output()` below would leave this one-shot subcommand
-        // running as an orphan instead of actually dying with the timeout.
-        command.kill_on_drop(true);
-        tokio::time::timeout(WAIT_TIMEOUT, command.output())
-            .await
-            .expect("`ilium new-pane -- cat` did not exit in time")
-            .expect("failed to spawn `ilium new-pane -- cat`")
-    };
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
     assert!(
         new_pane_output.status.success(),
-        "`ilium new-pane -- cat` failed: stdout={:?} stderr={:?}",
-        String::from_utf8_lossy(&new_pane_output.stdout),
-        String::from_utf8_lossy(&new_pane_output.stderr)
+        "`ilium {:?}` failed: {:?}",
+        new_idle_pane_arguments(),
+        String::from_utf8_lossy(&new_pane_output.stdout)
     );
 
     // Phase 2: the actual attaching form, inside a real pty at a fixed

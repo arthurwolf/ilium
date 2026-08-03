@@ -134,19 +134,35 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
 /// Writes a short-lived working phase followed by an idle screen. Unlike the
 /// queue fixture above, this process never reads terminal input, isolating the
 /// focus acknowledgement from queue-delivery acknowledgement behavior.
-fn write_finished_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+/// A fake agent that reports working until the caller says otherwise, then
+/// reports completion. Returns both the script and the marker file that
+/// drives the transition.
+///
+/// Marker-driven rather than timed: a fixture that is "working" for a fixed
+/// two seconds is only observed in that state if a detection poll happens to
+/// land inside the window, and on a loaded CI runner the first poll after
+/// pane creation routinely does not. The test would then never see the
+/// working status it is about to acknowledge -- a failure about scheduling
+/// luck, not about the behaviour under test.
+fn write_finished_fake_codex_binary(
+    bin_dir: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
     let script_path = bin_dir.join("codex");
-    let script = "#!/bin/sh\n\
-                  printf 'Cogitating (esc to interrupt)\\n'\n\
-                  sleep 2\n\
-                  printf '\\033[2J\\033[HDone. Ready for the next instruction.\\n'\n\
-                  sleep 60\n";
+    let finish_marker = bin_dir.join("finish-marker");
+    let script = format!(
+        "#!/bin/sh\n\
+         printf 'Cogitating (esc to interrupt)\\n'\n\
+         while [ ! -f '{marker}' ]; do sleep 0.1; done\n\
+         printf '\\033[2J\\033[HDone. Ready for the next instruction.\\n'\n\
+         sleep 60\n",
+        marker = finish_marker.display()
+    );
     let mut file = std::fs::File::create(&script_path).expect("create finished fake codex");
     file.write_all(script.as_bytes())
         .expect("write finished fake codex");
     file.set_permissions(std::fs::Permissions::from_mode(0o700))
         .expect("make finished fake codex executable");
-    script_path
+    (script_path, finish_marker)
 }
 
 /// Resolves the first pane created through the root shortcut. The server
@@ -172,7 +188,7 @@ fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
 #[tokio::test]
 async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the finished fake codex");
-    let fake_codex_path = write_finished_fake_codex_binary(fake_bin_dir.path());
+    let (fake_codex_path, finish_marker) = write_finished_fake_codex_binary(fake_bin_dir.path());
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(100),
         idle_poll_interval: Duration::from_millis(100),
@@ -226,6 +242,10 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
         )
     })
     .await;
+
+    // Only now: the fixture holds its working state until this marker exists,
+    // so the working status above cannot have been missed between polls.
+    std::fs::write(&finish_marker, b"finish").expect("release the fake agent into its done state");
     let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
