@@ -846,6 +846,10 @@ mod tests {
         assert_eq!(paths, vec![named_session.snapshot_path]);
     }
 
+    /// Unix-only: clearing debris is a filesystem operation, and a Windows
+    /// session endpoint is a named pipe with no filesystem presence to leave
+    /// behind or remove. See `ilium_transport`.
+    #[cfg(unix)]
     #[test]
     fn stale_socket_is_not_live_and_is_removed() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -857,9 +861,7 @@ mod tests {
 
     #[test]
     fn terminating_an_already_exited_server_is_successful() {
-        let mut child = std::process::Command::new("true")
-            .spawn()
-            .expect("spawn short-lived process");
+        let mut child = short_lived_process().expect("spawn short-lived process");
         let process_id = child.id();
         child.wait().expect("wait for short-lived process");
 
@@ -1018,6 +1020,22 @@ mod tests {
             .expect("competing lock should acquire after release");
         competing_thread.join().expect("competing thread");
         assert_private_file(&session.server_start_lock_file);
+    }
+
+    /// A process that exits immediately, named differently per platform:
+    /// `true` is a Unix utility with no Windows counterpart.
+    #[cfg(unix)]
+    fn short_lived_process() -> std::io::Result<std::process::Child> {
+        std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+    }
+
+    #[cfg(not(unix))]
+    fn short_lived_process() -> std::io::Result<std::process::Child> {
+        std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
     }
 
     /// Owner-only modes are a Unix concept; on Windows the same protection
