@@ -71,7 +71,49 @@ pub async fn expect_event(
         }
     })
     .await
-    .expect("timed out waiting for the expected server event")
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for the expected server event\nlive process table:\n{}",
+            process_table_snapshot()
+        )
+    })
+}
+
+/// What the machine's process table looked like when a wait gave up.
+///
+/// Agent detection matches on process names and command lines, and those differ
+/// per platform in ways that are invisible from a bare timeout: a shebang
+/// script is reported under its own name on Linux but under its interpreter's
+/// on macOS. Printing the table turns "no event arrived" into evidence about
+/// why, without another round trip through CI.
+fn process_table_snapshot() -> String {
+    let output = if cfg!(windows) {
+        std::process::Command::new("wmic")
+            .args([
+                "process",
+                "get",
+                "ProcessId,ParentProcessId,Name,CommandLine",
+            ])
+            .output()
+    } else {
+        std::process::Command::new("ps")
+            .args(["-Ao", "pid,ppid,comm,args"])
+            .output()
+    };
+    match output {
+        Ok(output) => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            // Only lines plausibly related to a pane keep this readable; a CI
+            // runner's full table is hundreds of unrelated processes.
+            .filter(|line| {
+                ["codex", "claude", "sh", "cmd.exe", "ilium"]
+                    .iter()
+                    .any(|needle| line.contains(needle))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(error) => format!("could not read the process table: {error}"),
+    }
 }
 
 pub struct TestServer {

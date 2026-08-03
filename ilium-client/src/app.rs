@@ -9432,7 +9432,10 @@ mod tests {
     fn request_new_markdown_board_preserves_the_existing_file_as_its_storage() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let path = PathBuf::from("/tmp/project/release-plan.md");
+        // An absolute path in the platform's own shape: `/tmp/...` is relative
+        // on Windows, so normalization would resolve it against the current
+        // directory and no longer match what was passed in.
+        let path = std::env::temp_dir().join("project").join("release-plan.md");
 
         app.request_new_markdown_board(group, path.clone());
 
