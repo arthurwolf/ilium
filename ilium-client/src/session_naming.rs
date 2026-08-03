@@ -570,12 +570,12 @@ mod tests {
         assert!(prompt.contains("repair auth"));
         assert!(prompt.contains("I found the race."));
         assert!(prompt.contains("test passed"));
-        // Resolved before comparing: the prompt carries the path the locator
-        // found, and `%TEMP%` hands out an 8.3 short name while resolving it
-        // yields the long one.
-        let resolved_transcript = ilium_platform::paths::canonicalize(&transcript_path)
-            .unwrap_or_else(|_| transcript_path.clone());
-        assert!(prompt.contains(&resolved_transcript.display().to_string()));
+        // The unresolved path on purpose: the locator builds the transcript
+        // path by joining the *given* home directory with the project slug, so
+        // that is the form the prompt carries. Resolving it here would compare
+        // against a path nothing ever produced -- `/private/var/...` on macOS,
+        // the long name on Windows.
+        assert!(prompt.contains(&transcript_path.display().to_string()));
     }
 
     #[test]

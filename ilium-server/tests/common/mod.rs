@@ -62,9 +62,19 @@ pub async fn expect_event(
     timeout: Duration,
     predicate: impl Fn(&ServerEvent) -> bool,
 ) -> ServerEvent {
-    tokio::time::timeout(timeout, async {
+    // Every event seen while waiting, kept outside the future so a timeout can
+    // still report them. "No matching event arrived" says nothing on its own;
+    // what the server *did* send usually names the cause immediately.
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let observed_in_loop = std::sync::Arc::clone(&observed);
+    tokio::time::timeout(timeout, async move {
         loop {
             let event: ServerEvent = read_frame(stream).await.expect("read a server event");
+            if let Ok(mut seen) = observed_in_loop.lock() {
+                // Truncated: a `TreeSnapshot` or `ScreenUpdate` carries far
+                // more detail than a failure report needs.
+                seen.push(format!("{event:?}").chars().take(240).collect());
+            }
             if predicate(&event) {
                 return event;
             }
@@ -72,8 +82,18 @@ pub async fn expect_event(
     })
     .await
     .unwrap_or_else(|_| {
+        let seen = observed
+            .lock()
+            .map(|seen| {
+                if seen.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    seen.join("\n  ")
+                }
+            })
+            .unwrap_or_else(|_| "(unavailable)".to_string());
         panic!(
-            "timed out waiting for the expected server event\nlive process table:\n{}",
+            "timed out waiting for the expected server event\nevents received:\n  {seen}\nlive process table:\n{}",
             process_table_snapshot()
         )
     })
