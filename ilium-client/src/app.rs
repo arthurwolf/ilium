@@ -1570,9 +1570,27 @@ fn elapsed_frame_delay(elapsed_millis: u128, frame_millis: u64) -> Duration {
 }
 
 impl App {
+    /// Asks the terminal which image protocol it supports, upgrading markdown
+    /// image rendering from the half-block fallback when it answers.
+    ///
+    /// Kept out of [`App::new`] on purpose. Probing writes capability queries
+    /// (Kitty graphics, primary device attributes, text-area size) to stdout
+    /// and then *blocks* reading a reply, so a constructor that did it would
+    /// perform host I/O and stall wherever nothing answers. That is not
+    /// theoretical: it hung every `App::new` in the Windows test run for
+    /// roughly forty minutes each, and would equally hang a real user whose
+    /// terminal stays silent. Only the entry point calls this, exactly once.
+    pub fn probe_terminal_image_support(&mut self) {
+        if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
+            self.markdown_picker = picker;
+        }
+    }
+
     /// Starts a client session with an empty render-cache tree -- the real
     /// tree arrives moments later as the first `ServerEvent::TreeSnapshot`
     /// once `Attach` completes (see `crate::render_cache::apply`).
+    ///
+    /// Does no host I/O, so it stays usable from tests without a terminal.
     pub fn new(session_name: String, session_cwd: PathBuf) -> Self {
         let started_at = Instant::now();
         Self {
@@ -1648,11 +1666,12 @@ impl App {
             titles_loading: HashSet::new(),
             pending_editor_opens: Vec::new(),
             pending_pane_focuses: Vec::new(),
-            // Talks to stdio once at startup; falls back to half-block
-            // rendering (works everywhere, no protocol needed) if the
-            // terminal doesn't answer the capability query.
-            markdown_picker: ratatui_image::picker::Picker::from_query_stdio()
-                .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks()),
+            // Deliberately the protocol-free fallback rather than a probed
+            // one: probing writes escape sequences to stdout and blocks
+            // waiting for the terminal to answer, which is host I/O and has no
+            // place in a constructor. `probe_terminal_image_support` upgrades
+            // this once, from the real entry point.
+            markdown_picker: ratatui_image::picker::Picker::halfblocks(),
             markdown_rasterizer: crate::markdown::raster::HeaderRasterizer::new(),
             recently_created: HashMap::new(),
             terminal_activity: TerminalActivityTracker::default(),

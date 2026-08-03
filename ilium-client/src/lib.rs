@@ -370,6 +370,9 @@ async fn run_inner(
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
 
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
+    // The one place a terminal capability query belongs: a real process with a
+    // real terminal attached, once. See `App::probe_terminal_image_support`.
+    app.probe_terminal_image_support();
     app.apply_ui_settings(config.ui);
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
