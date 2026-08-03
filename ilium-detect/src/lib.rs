@@ -896,6 +896,53 @@ pub fn identify_agent_with_extra(
     )
 }
 
+/// A process's arguments as the program itself would see them.
+///
+/// A pane runs its command through `$SHELL -c "<command line>"`. Linux replaces
+/// the shell image on exec, so the process ends up reporting the program's own
+/// tokenised argv. macOS keeps the wrapper's: the entire command line stays a
+/// single argument, and nothing in it ever equals `--resume` or `--session-id`.
+/// Anything scanning arguments for a flag therefore works on one platform and
+/// silently finds nothing on the other.
+///
+/// Splitting on whitespace is deliberately simple. It is enough for the flags
+/// this is used to find, and a path containing spaces would already be
+/// ambiguous in a shell command line without quoting this cannot see.
+pub fn effective_arguments(process: &sysinfo::Process) -> Vec<String> {
+    let arguments: Vec<String> = process
+        .cmd()
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    expand_shell_command_line(&arguments)
+}
+
+/// The pure half of [`effective_arguments`], so the expansion can be tested
+/// without a live process.
+fn expand_shell_command_line(arguments: &[String]) -> Vec<String> {
+    let is_interpreter = arguments
+        .first()
+        .and_then(|argument| Path::new(argument).file_name())
+        .is_some_and(|name| is_interpreter_name(&name.to_string_lossy().to_lowercase()));
+    if !is_interpreter {
+        return arguments.to_vec();
+    }
+    let Some(command_index) = arguments
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, argument)| !argument.starts_with('-'))
+        .map(|(index, _)| index)
+    else {
+        return arguments.to_vec();
+    };
+    let mut expanded: Vec<String> = arguments[..command_index].to_vec();
+    for argument in &arguments[command_index..] {
+        expanded.extend(argument.split_whitespace().map(str::to_owned));
+    }
+    expanded
+}
+
 /// Every lowercase name a process may legitimately be recognised by, most
 /// authoritative first.
 ///
@@ -1091,6 +1138,46 @@ mod tests {
             classify_process_name_with_extra("vim", &[]).is_none(),
             "editing a file named after an agent must not look like the agent"
         );
+    }
+
+    /// The shape macOS reports for a pane: the shell keeps its own argv and
+    /// the program's whole command line stays one argument, so a flag scan
+    /// finds nothing until it is expanded.
+    #[test]
+    fn a_shell_wrapped_command_line_expands_into_the_tokens_the_program_sees() {
+        let wrapped = [
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "/tmp/claude --resume abc123 /tmp/session.jsonl".to_string(),
+        ];
+
+        let expanded = expand_shell_command_line(&wrapped);
+
+        assert_eq!(
+            expanded,
+            vec![
+                "/bin/sh",
+                "-c",
+                "/tmp/claude",
+                "--resume",
+                "abc123",
+                "/tmp/session.jsonl"
+            ]
+        );
+    }
+
+    /// A program that is not an interpreter already reports its own argv, and
+    /// splitting it again would corrupt an argument that legitimately contains
+    /// a space.
+    #[test]
+    fn a_direct_invocation_is_left_alone() {
+        let direct = [
+            "/tmp/claude".to_string(),
+            "--resume".to_string(),
+            "abc 123".to_string(),
+        ];
+
+        assert_eq!(expand_shell_command_line(&direct), direct.to_vec());
     }
 
     #[test]

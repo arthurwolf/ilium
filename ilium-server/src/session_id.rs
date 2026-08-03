@@ -165,11 +165,11 @@ pub fn discover_with_trace(
         outcome: "accepted",
         detail: format!("canonical cwd matches {}", project_cwd.display()),
     });
-    let arguments: Vec<String> = process
-        .cmd()
-        .iter()
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect();
+    // Through `ilium_detect`, which expands a shell wrapper's single
+    // command-line argument into the tokens the program itself sees. macOS
+    // keeps `sh -c "<command line>"` intact, so scanning raw arguments for
+    // `--resume` or `--session-id` finds nothing there.
+    let arguments = ilium_detect::effective_arguments(process);
 
     // A current descriptor owned by the exact detected PID is stronger than
     // immutable launch arguments: an in-process resume can legitimately make
