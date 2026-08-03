@@ -1164,7 +1164,23 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
             WAIT_TIMEOUT,
         )
         .await,
-        "expected the complete checked Order by submenu, got: {:?}",
+        "expected the complete checked Order by submenu. the click was sent to \
+         column {} row {} (the row \"Order by\" was rendered on), and the menu's \
+         left border is on column(s) {:?}. got: {:?}",
+        context_column + 1,
+        order_rows[0],
+        tui.with_screen(|screen| {
+            let (rows, columns) = screen.size();
+            (0..columns)
+                .filter(|column| {
+                    (0..rows).any(|row| {
+                        screen
+                            .cell(row, *column)
+                            .is_some_and(|cell| cell.contents() == "\u{2502}")
+                    })
+                })
+                .collect::<Vec<_>>()
+        }),
         tui.screen_text()
     );
     // Avoid escape-prefixed arrows in the real PTY: under load the terminal
