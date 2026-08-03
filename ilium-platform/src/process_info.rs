@@ -9,19 +9,30 @@
 //! exit between the caller's decision to inspect it and the inspection itself,
 //! and on a platform with no unprivileged way to ask, the honest answer is
 //! also "unknown". Callers already treat that as ordinary: a pane falls back
-//! to the project root, and detection reports the agent without a session id.
+//! to the project root, and detection identifies the agent without pinning it
+//! to a specific session.
 //!
-//! Platform coverage differs, and deliberately so:
+//! Platform coverage is uneven, and the gaps are deliberate rather than
+//! pending:
 //!
-//! - Linux reads `/proc/<pid>/cwd` and `/proc/<pid>/fd`, which are cheap,
-//!   unprivileged for one's own processes, and exact.
-//! - macOS has no procfs; `libproc`'s `proc_pidinfo` family answers the same
-//!   two questions for processes the caller owns.
-//! - Windows has no equivalent that works unprivileged. Enumerating another
-//!   process's handles means `NtQueryInformationProcess` with
-//!   `SystemHandleInformation`, an unstable interface that generally requires
-//!   elevation, so both functions report "unknown" and agent detection
-//!   degrades to identity-without-session rather than pretending.
+//! | | working directory | open files |
+//! |---|---|---|
+//! | Linux | `/proc/<pid>/cwd` | `/proc/<pid>/fd` |
+//! | macOS | `proc_pidinfo` | unavailable |
+//! | Windows | unavailable | unavailable |
+//!
+//! macOS can answer the working directory through `proc_pidinfo`, whose
+//! structures `libc` declares, so there is no hand-written struct layout to
+//! get wrong. Mapping a *descriptor* to a path additionally needs
+//! `vnode_fdinfowithpath` and its flavor constant, which `libc` does not
+//! declare; hand-writing that layout risks silently reading misaligned bytes,
+//! which is worse than reporting nothing. Session identity there falls back to
+//! parsing the agent's own command line, which `ilium-detect` already does.
+//!
+//! Windows has no unprivileged equivalent of either. Enumerating another
+//! process's handles means `NtQueryInformationProcess` with
+//! `SystemHandleInformation`, an unstable interface that generally requires
+//! elevation.
 
 use std::path::PathBuf;
 
@@ -33,10 +44,46 @@ pub fn working_directory(process_id: u32) -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 pub fn working_directory(process_id: u32) -> Option<PathBuf> {
-    use libproc::libproc::proc_pid;
+    use std::ffi::c_void;
 
     let process_id = i32::try_from(process_id).ok()?;
-    proc_pid::pidcwd(process_id).ok()
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as i32;
+    // SAFETY: `proc_pidinfo` writes at most `size` bytes into `info`, which is
+    // a live, correctly sized local of exactly the type this flavor returns.
+    // The layout comes from `libc`, so it tracks the SDK rather than being
+    // restated here.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            process_id,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            std::ptr::addr_of_mut!(info).cast::<c_void>(),
+            size,
+        )
+    };
+    // A short read means the kernel did not populate the whole structure, so
+    // the path field cannot be trusted.
+    if written < size {
+        return None;
+    }
+    // `vip_path` is a fixed 1024-byte buffer that `libc` declares as nested
+    // arrays to stay compatible with older compilers; flatten it and stop at
+    // the terminator.
+    let path_bytes: Vec<u8> = info
+        .pvi_cdir
+        .vip_path
+        .iter()
+        .flatten()
+        .take_while(|byte| **byte != 0)
+        .map(|byte| *byte as u8)
+        .collect();
+    if path_bytes.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(
+        String::from_utf8_lossy(&path_bytes).into_owned(),
+    ))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -45,11 +92,11 @@ pub fn working_directory(process_id: u32) -> Option<PathBuf> {
     None
 }
 
-/// Every regular file the process currently holds open.
+/// Every path the process currently holds open.
 ///
-/// Entries that are not regular files (sockets, pipes, the terminal itself)
-/// are omitted: the only caller matches these paths against transcript files
-/// on disk, so a descriptor with no path is noise rather than information.
+/// Descriptors with no filesystem path (sockets, pipes, the terminal itself)
+/// resolve to synthetic targets that simply fail to match any transcript path
+/// later, so they are left in rather than filtered by type.
 #[cfg(target_os = "linux")]
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(format!("/proc/{process_id}/fd")) else {
@@ -57,53 +104,23 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     };
     entries
         .filter_map(Result::ok)
-        // `/proc/<pid>/fd/<n>` is a symlink to the opened path; a descriptor
-        // pointing at a socket or pipe resolves to a synthetic `socket:[...]`
-        // target, which simply fails to match any transcript path later.
         .filter_map(|entry| std::fs::read_link(entry.path()).ok())
         .collect()
 }
 
-#[cfg(target_os = "macos")]
-pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
-    use libproc::libproc::file_info::{pidfdinfo, ListFDs, ProcFDType};
-    use libproc::libproc::proc_pid::listpidinfo;
-
-    let Ok(process_id) = i32::try_from(process_id) else {
-        return Vec::new();
-    };
-    // `listpidinfo` needs an upper bound on how many descriptors to retrieve.
-    // Agent CLIs hold a modest number; a generous cap costs one allocation and
-    // avoids a second round trip to size the list exactly.
-    const MAX_INSPECTED_DESCRIPTORS: usize = 1024;
-    let Ok(descriptors) = listpidinfo::<ListFDs>(process_id, MAX_INSPECTED_DESCRIPTORS) else {
-        return Vec::new();
-    };
-    descriptors
-        .iter()
-        .filter(|descriptor| ProcFDType::from(descriptor.proc_fdtype) == ProcFDType::VNode)
-        .filter_map(|descriptor| {
-            let info: libproc::libproc::file_info::VnodeFdInfoWithPath =
-                pidfdinfo(process_id, descriptor.proc_fd).ok()?;
-            let path = info
-                .pvip
-                .vip_path
-                .iter()
-                .take_while(|byte| **byte != 0)
-                .map(|byte| *byte as u8)
-                .collect::<Vec<u8>>();
-            if path.is_empty() {
-                return None;
-            }
-            Some(PathBuf::from(String::from_utf8_lossy(&path).into_owned()))
-        })
-        .collect()
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// See the module comment: the structures needed to turn a macOS descriptor
+/// into a path are not declared by `libc`, and guessing their layout would
+/// risk reading misaligned memory rather than merely returning less.
+#[cfg(not(target_os = "linux"))]
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     let _ = process_id;
     Vec::new()
+}
+
+/// Whether this platform can enumerate a process's open files, so callers can
+/// distinguish "this process has none" from "this platform cannot say".
+pub const fn open_files_are_observable() -> bool {
+    cfg!(target_os = "linux")
 }
 
 #[cfg(test)]
@@ -126,7 +143,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     #[test]
     fn an_open_file_appears_in_the_process_open_file_list() {
         let root = tempfile::tempdir().expect("temp dir");
@@ -144,6 +161,15 @@ mod tests {
             "expected {canonical:?} among {open_paths:?}"
         );
         drop(held);
+    }
+
+    /// Where open files cannot be observed, the answer must be an honest empty
+    /// list rather than a wrong one, and must agree with the capability flag.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn open_files_are_reported_as_unobservable() {
+        assert!(!open_files_are_observable());
+        assert!(open_file_paths(std::process::id()).is_empty());
     }
 
     /// A process id that cannot exist must be reported as unknown rather than

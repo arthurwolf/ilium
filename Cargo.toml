@@ -12,6 +12,7 @@ members = [
     "ilium-logging",
     "ilium-platform",
     "ilium-pty",
+    "ilium-transport",
     "ilium-server",
     "ilium-sound",
     "ilium-voice",

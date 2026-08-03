@@ -1,0 +1,24 @@
+[package]
+name = "ilium-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sha2 = "0.10.9"
+thiserror = "2.0.18"
+tokio = { version = "1", features = ["net", "io-util", "time"] }
+
+# `GetNamedPipeServerProcessId` is the named-pipe counterpart to a Unix
+# socket's peer credentials.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Pipes",
+] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
