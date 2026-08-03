@@ -1144,7 +1144,15 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected one Order by action row, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_down(0, context_column + 1, order_rows[0]))
+    // Aimed at the label itself. A fixed offset from the menu's border assumes
+    // every entry's icon occupied the width the client modelled for it, and the
+    // hosts disagree about that for icons carrying a variation selector -- the
+    // menu's own right border lands on two different columns on Windows for
+    // exactly that reason.
+    let order_label_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, order_rows[0], "Order by"))
+        .expect("the Order by label should have a rendered column");
+    tui.write(&sgr_mouse_down(0, order_label_column, order_rows[0]))
         .expect("opening the Order by submenu");
     assert!(
         wait_until(
@@ -1165,9 +1173,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         )
         .await,
         "expected the complete checked Order by submenu. the click was sent to \
-         column {} row {} (the row \"Order by\" was rendered on), and the menu's \
-         left border is on column(s) {:?}. got: {:?}",
-        context_column + 1,
+         column {} row {} (the rendered position of the \"Order by\" label), and \
+         the menu's left border is on column(s) {:?}. got: {:?}",
+        order_label_column,
         order_rows[0],
         tui.with_screen(|screen| {
             let (rows, columns) = screen.size();
@@ -2288,6 +2296,34 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
 /// Wide emoji can be stored as one multi-codepoint cell followed by a blank
 /// continuation cell, so matching cell contents is more reliable than byte
 /// offsets in a flattened screen row for mouse-coordinate assertions.
+/// The column where `needle`'s first character is rendered on `row`.
+///
+/// Clicking a menu entry by its label's own position rather than by a fixed
+/// offset from the menu's assumed origin: what a user aims at is the text, and
+/// an offset silently depends on how wide the host rendered the icon before
+/// it, which the hosts do not agree on.
+fn column_of_text_in_row(screen: &vt100::Screen, row: u16, needle: &str) -> Option<u16> {
+    let columns = screen.size().1;
+    let rendered: String = screen.rows(0, columns).nth(usize::from(row))?;
+    let byte_offset = rendered.find(needle)?;
+    let prefix_columns = rendered[..byte_offset]
+        .chars()
+        .map(|character| u16::try_from(unicode_width_of(character)).unwrap_or(1))
+        .sum::<u16>();
+    Some(prefix_columns)
+}
+
+/// The cell width the renderer assigns one character. Zero-width joiners and
+/// variation selectors take no cell of their own, which is exactly where the
+/// hosts disagree, so they are counted as zero here to match what `vt100`
+/// reports back.
+fn unicode_width_of(character: char) -> usize {
+    match character {
+        '\u{fe0f}' | '\u{fe0e}' | '\u{200d}' => 0,
+        _ => unicode_width::UnicodeWidthChar::width(character).unwrap_or(0),
+    }
+}
+
 fn first_cell_containing(screen: &vt100::Screen, needle: &str) -> Option<(u16, u16)> {
     let (rows, columns) = screen.size();
     for row in 0..rows {
