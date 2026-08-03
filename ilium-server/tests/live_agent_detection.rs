@@ -809,6 +809,16 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
+    // Turns the server's own session-discovery reasoning into broadcast debug
+    // entries. Without it a discovery that resolves nothing is indistinguishable
+    // from one that never ran, because a decision is only recorded when the
+    // identity changes.
+    write_frame(
+        &mut client,
+        &ClientRequest::UpdateAgentDebugMenu { enabled: true },
+    )
+    .await
+    .expect("enable the agent debug recorder");
 
     // Same `$SHELL -c "<command_line>"` mechanism as the `Working`/`Idle`
     // test above. The real spawned process exposes the resume ID in argv and
