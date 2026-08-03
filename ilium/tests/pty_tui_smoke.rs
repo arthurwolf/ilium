@@ -340,6 +340,32 @@ fn ilium_binary() -> String {
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_ilium").to_string())
 }
 
+/// How long to wait for the detection loop to classify a freshly spawned
+/// agent process.
+///
+/// Longer than [`WAIT_TIMEOUT`], which is a budget for the client to repaint
+/// after an input it already received. Detection has to wait for the pane's
+/// process to start, produce recognisable output, and then be caught by a
+/// poll whose interval the test configures -- a chain of real process
+/// scheduling that a loaded CI runner stretches well past a repaint. The
+/// fixtures involved run until killed, so their state does not expire while
+/// this waits: a longer bound cannot mask a regression here, it can only stop
+/// reporting one that isn't there.
+#[cfg(unix)]
+const DETECTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a one-shot `ilium` subcommand gets to finish.
+///
+/// Deliberately longer than [`WAIT_TIMEOUT`], and deliberately longer than
+/// the CLI's own worst case: `new-pane` bounds each of its three stages
+/// separately (starting the detached server, receiving the baseline tree, and
+/// confirming the pane), so it can legitimately take the sum of them before
+/// reporting its own precise error. A harness bound shorter than that can only
+/// ever replace that error with "did not exit in time", which says strictly
+/// less. This is the patience to *observe* a failure, not an expectation about
+/// how long success takes.
+const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Numbers each one-shot subcommand's capture file, so concurrent tests
 /// sharing a debug-log root cannot overwrite each other's evidence.
 static ONE_SHOT_SEQUENCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -382,11 +408,11 @@ async fn run_one_shot(xdg: &IsolatedXdgDirs, cwd: &Path, args: &[&str]) -> std::
     command.kill_on_drop(true);
 
     let captured = || std::fs::read_to_string(&capture_path).unwrap_or_default();
-    let status = tokio::time::timeout(WAIT_TIMEOUT, command.status())
+    let status = tokio::time::timeout(ONE_SHOT_TIMEOUT, command.status())
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "`ilium {args:?}` did not exit within {WAIT_TIMEOUT:?}.\nit printed: {:?}\n{}",
+                "`ilium {args:?}` did not exit within {ONE_SHOT_TIMEOUT:?}.\nit printed: {:?}\n{}",
                 captured(),
                 session_state_report(xdg)
             )
@@ -920,7 +946,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     assert!(
         tui.screen_text().contains("VOICE OFF") && tui.screen_text().contains("F8"),
-        "expected the global voice control over Settings, got: {:?}",
+        "expected the global voice control over Settings. \
+         terminal is {:?} and its bottom rows are {:#?}, full screen: {:?}",
+        tui.with_screen(|screen| screen.size()),
+        tui.with_screen(|screen| bottom_rows(screen, 3)),
         tui.screen_text()
     );
 
@@ -2077,6 +2106,17 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
 /// from `Screen::rows` (one string per row, by construction) rather than
 /// splitting `contents()` on newlines, so the returned index always
 /// matches `Screen::cell`'s row argument exactly.
+/// The last `count` rendered rows. The footer -- status bar and voice control
+/// -- is the bottom row of the frame, so when an assertion about it fails, the
+/// question is what is actually there, not what the other forty rows say.
+fn bottom_rows(screen: &vt100::Screen, count: usize) -> Vec<String> {
+    let (rows, columns) = screen.size();
+    let all: Vec<String> = screen.rows(0, columns).collect();
+    all.into_iter()
+        .skip(usize::from(rows).saturating_sub(count))
+        .collect()
+}
+
 fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
     let cols = screen.size().1;
     screen
@@ -3801,7 +3841,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
                     !rows_containing_before_column(screen, "Codex:", 60).is_empty()
                 })
             },
-            WAIT_TIMEOUT,
+            DETECTION_TIMEOUT,
         )
         .await,
         "expected a detected working Codex row, got: {:?}",
