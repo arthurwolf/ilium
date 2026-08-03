@@ -7679,12 +7679,19 @@ impl App {
             return;
         }
 
+        // The right button is the host's own affordance (copy line/screen/
+        // history, paste, screen transfer) in every terminal pane, whether or
+        // not the foreground app negotiated mouse tracking. Claude Code turns
+        // on full tracking (DECSET 1000/1002/1003/1006) while Codex turns on
+        // none, so gating this menu on that negotiation made the same
+        // right-click open a menu in one agent pane and silently forward a
+        // button-2 report the agent ignores in the other. The wheel below is
+        // still gated, because a tracking app really does act on scroll.
         if matches!(
             mouse.kind,
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right)
-        ) && self.panes.get(&id).is_some_and(
-            |pane| matches!(pane, PaneRuntime::Terminal(view) if !view.wants_mouse_protocol()),
-        ) {
+        ) && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
+        {
             let source_row = usize::from(position.y.saturating_sub(viewport.content_area.y));
             self.open_terminal_pane_context_menu(id, source_row, position.x, position.y);
             return;
@@ -7737,9 +7744,10 @@ impl App {
 
         // The wheel scrolls this view's own scrollback rather than being
         // forwarded, unless the foreground app has actually negotiated a
-        // mouse protocol (e.g. `htop`, `vim`) and is asking to receive
-        // wheel events itself. Most agent CLIs and a plain shell prompt
-        // never negotiate one, which is exactly the "no scrollback"
+        // mouse protocol (e.g. `htop`, `vim`, Claude Code) and is asking to
+        // receive wheel events itself -- that app scrolls its own view, so
+        // taking the wheel from it would break its scrolling. A plain shell
+        // prompt and Codex negotiate nothing, which is the "no scrollback"
         // complaint this feature addresses.
         use crossterm::event::MouseEventKind;
         if matches!(
@@ -10775,6 +10783,72 @@ mod tests {
                 TerminalContextAction::CopyFullTerminalHistoryToClipboard,
                 TerminalContextAction::PasteClipboard,
             ]
+        );
+    }
+
+    /// Claude Code turns on xterm mouse tracking and Codex does not, so a
+    /// right-click menu conditioned on that negotiation appeared in Codex
+    /// panes and not Claude ones. The menu is the host's own affordance:
+    /// it must open either way.
+    #[test]
+    fn right_click_opens_the_terminal_menu_even_when_the_agent_tracks_the_mouse() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                // The exact modes Claude Code sets on startup: press/release,
+                // button-motion, any-motion, SGR encoding.
+                view.feed(b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h");
+                view.feed(b"first terminal line\r\nclicked terminal line");
+                view
+            })),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        assert!(
+            matches!(app.panes.get(&pane_id), Some(PaneRuntime::Terminal(view)) if view.wants_mouse_protocol()),
+            "fixture must reproduce a pane whose agent tracks the mouse"
+        );
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 1);
+        app.take_outbound_requests();
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("right click should open the terminal menu in a mouse-tracking agent pane");
+        };
+        assert_eq!(menu.pane_id, pane_id);
+        assert_eq!(menu.source_line_text, "clicked terminal line");
+        // The click must not also reach the agent as a button-2 report.
+        assert!(
+            app.take_outbound_requests()
+                .iter()
+                .all(|request| !matches!(request, ClientRequest::MouseInput { .. })),
+            "the host consumed this right click, so nothing should be forwarded to the pty"
         );
     }
 

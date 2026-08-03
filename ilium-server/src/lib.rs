@@ -451,7 +451,7 @@ mod restore_tests {
     /// Windows, where a snapshot naming it simply fails to respawn and the
     /// restored tree no longer matches what was saved.
     fn long_running_pane_command() -> String {
-        if cfg!(windows) { "more" } else { "cat" }.to_string()
+        if cfg!(windows) { "pause" } else { "cat" }.to_string()
     }
 
     use std::path::PathBuf;

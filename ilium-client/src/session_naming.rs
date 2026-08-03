@@ -570,12 +570,19 @@ mod tests {
         assert!(prompt.contains("repair auth"));
         assert!(prompt.contains("I found the race."));
         assert!(prompt.contains("test passed"));
-        // The unresolved path on purpose: the locator builds the transcript
-        // path by joining the *given* home directory with the project slug, so
-        // that is the form the prompt carries. Resolving it here would compare
-        // against a path nothing ever produced -- `/private/var/...` on macOS,
-        // the long name on Windows.
-        assert!(prompt.contains(&transcript_path.display().to_string()));
+        // Either form is correct. The prompt embeds the transcript path as the
+        // locator discovered it, and whether that is the given path or its
+        // resolved twin is a platform detail: macOS reaches a temporary
+        // directory through a `/var` -> `/private/var` symlink and Windows
+        // hands out 8.3 short names, so the two differ there and nowhere else.
+        // Pinning one form asserts the platform, not the behaviour.
+        let resolved_transcript = ilium_platform::paths::canonicalize(&transcript_path)
+            .unwrap_or_else(|_| transcript_path.clone());
+        assert!(
+            prompt.contains(&transcript_path.display().to_string())
+                || prompt.contains(&resolved_transcript.display().to_string()),
+            "prompt should name the transcript it read"
+        );
     }
 
     #[test]

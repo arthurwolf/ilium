@@ -514,8 +514,10 @@ impl TerminalView {
     /// `true` once the pane's foreground app has negotiated an xterm mouse
     /// protocol -- when it has, wheel events belong to that app (it's
     /// asking to receive them), not to this view's own scrollback
-    /// navigation. Most agent CLIs (and a plain shell prompt) never
-    /// negotiate one, which is exactly the case this feature targets.
+    /// navigation. Agent CLIs differ here: Claude Code negotiates full
+    /// tracking (DECSET 1000/1002/1003/1006), Codex negotiates none, and a
+    /// plain shell prompt never does -- so this must be read per pane and
+    /// never assumed from the pane being an agent.
     pub fn wants_mouse_protocol(&self) -> bool {
         self.parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None
     }
