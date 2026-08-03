@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn overflowing_room_draws_a_scrollbar_and_starts_at_the_live_tail() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let project_id = app
             .tree
             .add_project(PathBuf::from("/tmp/chatroom-scroll-render"))

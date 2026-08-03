@@ -3201,7 +3201,7 @@ mod tests {
 
     #[test]
     fn icons_tab_renders_the_assignment_preview_and_chaptered_catalogue() {
-        let app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let app = App::new("test-session".to_string(), std::env::temp_dir());
         let state = SettingsState {
             tab: SettingsTab::Icons,
             ..SettingsState::default()
@@ -3303,7 +3303,7 @@ mod tests {
 
     #[test]
     fn triggers_tab_renders_event_cards_and_wrapped_action_chips() {
-        let app = App::new("test-session".to_owned(), std::path::PathBuf::from("/tmp"));
+        let app = App::new("test-session".to_owned(), std::env::temp_dir());
         let state = SettingsState {
             tab: SettingsTab::Triggers,
             selected_row: 6,
@@ -3337,7 +3337,7 @@ mod tests {
 
     #[test]
     fn icons_tab_keeps_the_catalogue_button_visible_at_compact_width() {
-        let app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let app = App::new("test-session".to_string(), std::env::temp_dir());
         let state = SettingsState {
             tab: SettingsTab::Icons,
             ..SettingsState::default()
@@ -3634,7 +3634,7 @@ mod tests {
 
     #[test]
     fn running_inference_test_is_visibly_boxed_in_the_rendered_settings_screen() {
-        let mut app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
         app.request_inference_test();
         let state = SettingsState {
@@ -3665,7 +3665,7 @@ mod tests {
 
     #[test]
     fn running_ollama_discovery_is_visibly_boxed_in_the_rendered_settings_screen() {
-        let mut app = App::new("test-session".to_string(), std::path::PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
         app.request_model_refresh();
         let state = SettingsState {
@@ -4047,7 +4047,7 @@ mod tests {
         // elsewhere in this file (e.g. `keyboard_preset_hit_testing_maps_...`).
         let area = Rect::new(0, 0, 120, 50);
         let popup = centered_rect(78, 58, area);
-        let app = App::new("probe".to_string(), std::path::PathBuf::from("/tmp"));
+        let app = App::new("probe".to_string(), std::env::temp_dir());
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal

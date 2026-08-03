@@ -1675,7 +1675,6 @@ mod create_split_orientation_mouse_tests {
     use super::*;
     use crate::app::App;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     /// Regression test: the Vertical/Horizontal row hit-tests used to match
     /// on `mouse.row` alone, with no `x`/popup-containment guard -- unlike
@@ -1684,7 +1683,7 @@ mod create_split_orientation_mouse_tests {
     /// rendered underneath this modal) must cancel, not advance the flow.
     #[test]
     fn clicking_outside_the_popup_on_an_orientation_row_cancels_instead_of_advancing() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         app.open_create_split_dialog();
         let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
@@ -1710,7 +1709,7 @@ mod create_split_orientation_mouse_tests {
     /// inside the popup still advances into the pane-picker step.
     #[test]
     fn clicking_inside_the_popup_on_the_vertical_row_advances_to_the_member_picker() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         app.open_create_split_dialog();
         let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
@@ -1740,7 +1739,7 @@ mod agent_from_line_mouse_tests {
 
     #[test]
     fn clicking_create_submits_the_dialog_prompt() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let editor_id = app
@@ -1790,7 +1789,6 @@ mod agent_from_line_mouse_tests {
 mod scheduled_input_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     fn click(app: &mut App, area: Rect) {
         handle_mouse_event(
@@ -1806,7 +1804,7 @@ mod scheduled_input_mouse_tests {
 
     #[test]
     fn scheduled_input_checkbox_and_button_have_real_mouse_targets() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -1843,11 +1841,10 @@ mod scheduled_input_mouse_tests {
 mod agent_debug_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     #[test]
     fn clicking_the_top_save_button_opens_the_destination_path_prompt() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -1890,7 +1887,7 @@ mod agent_debug_mouse_tests {
 
     #[test]
     fn clicking_the_top_resize_filter_switch_reveals_animation_resizes() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let pane_id = ilium_core::NodeId(7);
         app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
@@ -1921,7 +1918,6 @@ mod agent_debug_mouse_tests {
 mod tree_order_context_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     fn click(app: &mut App, column: u16, row: u16) {
         handle_mouse_event(
@@ -1937,7 +1933,7 @@ mod tree_order_context_mouse_tests {
 
     #[test]
     fn context_menu_mouse_opens_order_submenu_and_applies_clicked_mode() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane = app
@@ -1987,7 +1983,6 @@ mod tree_order_context_mouse_tests {
 mod markdown_board_context_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     #[test]
     fn right_clicking_a_markdown_editor_row_exposes_and_runs_create_board() {
@@ -2002,7 +1997,7 @@ mod markdown_board_context_mouse_tests {
         // name, so an unresolved expectation cannot match what the app stores.
         let path = ilium_platform::paths::canonicalize(&path).unwrap_or(path);
 
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let editor_id = app
@@ -2089,7 +2084,7 @@ mod chatroom_scroll_mouse_tests {
 
     #[test]
     fn wheel_and_scrollbar_drag_route_through_the_virtual_chatroom_view() {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         let project_id = app
             .tree
             .add_project(PathBuf::from("/tmp/chatroom-scroll-mouse"))
@@ -2163,7 +2158,6 @@ mod row_action_click_tests {
     use super::*;
     use crate::app::App;
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-    use std::path::PathBuf;
 
     /// Locates `id`'s on-screen row (via the same hit-test path rendering
     /// uses) and clicks the row-action strip's `Retitle` slot on it, through
@@ -2207,7 +2201,7 @@ mod row_action_click_tests {
     }
 
     fn test_app() -> App {
-        let mut app = App::new("test-session".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
         app
     }
@@ -2378,7 +2372,6 @@ mod shared_dialog_mouse_tests {
     use crate::text_prompt::TextPromptState;
     use crossterm::event::KeyModifiers;
     use ilium_ipc::ClientRequest;
-    use std::path::PathBuf;
 
     /// Clicks the center of one exact shared dialog target.
     fn click(app: &mut App, area: Rect) {
@@ -2395,7 +2388,7 @@ mod shared_dialog_mouse_tests {
 
     /// Builds a predictable viewport so centered modal geometry is stable.
     fn app() -> App {
-        let mut app = App::new("dialog-mouse-test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("dialog-mouse-test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         app
     }

@@ -397,13 +397,12 @@ fn chip_label(action: Option<TriggerAction>, icons: &IconSettings) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use super::*;
 
     #[test]
     fn narrow_document_wraps_chips_without_overlapping_hit_rectangles() {
-        let app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let app = App::new("test".to_owned(), std::env::temp_dir());
         let document = build_document(&app, 28, 6, 2);
         assert!(document.lines.len() > build_document(&app, 100, 6, 2).lines.len());
         for row in 0..document.lines.len() as u16 {
@@ -420,7 +419,7 @@ mod tests {
 
     #[test]
     fn narrow_document_wraps_every_description_without_clipping_words() {
-        let app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let app = App::new("test".to_owned(), std::env::temp_dir());
         let width = 28;
         let document = build_document(&app, width, 0, 0);
 
@@ -442,7 +441,7 @@ mod tests {
 
     #[test]
     fn vs16_action_icons_never_share_a_physical_row() {
-        let app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let app = App::new("test".to_owned(), std::env::temp_dir());
         let document = build_document(&app, 100, 0, 0);
 
         for row in 0..document.lines.len() as u16 {
@@ -473,7 +472,7 @@ mod tests {
 
     #[test]
     fn hit_test_returns_the_exact_wrapped_chip() {
-        let app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let app = App::new("test".to_owned(), std::env::temp_dir());
         let area = Rect::new(10, 4, 32, 12);
         let document = build_document(&app, area.width - 1, 0, 0);
         let chip = document

@@ -8367,7 +8367,7 @@ mod tests {
     use super::*;
 
     fn app() -> App {
-        App::new("test-session".to_string(), PathBuf::from("/tmp"))
+        App::new("test-session".to_string(), std::env::temp_dir())
     }
 
     #[test]
@@ -9900,7 +9900,7 @@ mod tests {
     #[test]
     fn finished_trigger_routes_retitle_and_owning_project_restructure() {
         let mut app = app();
-        let project_id = app.tree.add_project(PathBuf::from("/tmp")).unwrap();
+        let project_id = app.tree.add_project(std::env::temp_dir()).unwrap();
         let group_id = app
             .tree
             .ensure_project_default_group(project_id, "default")
@@ -9936,7 +9936,7 @@ mod tests {
     #[test]
     fn configured_none_and_user_titles_prevent_automatic_retitle_work() {
         let mut app = app();
-        let project_id = app.tree.add_project(PathBuf::from("/tmp")).unwrap();
+        let project_id = app.tree.add_project(std::env::temp_dir()).unwrap();
         let group_id = app
             .tree
             .ensure_project_default_group(project_id, "default")

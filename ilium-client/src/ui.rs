@@ -1544,7 +1544,7 @@ mod tests {
 
     #[test]
     fn right_panel_title_prefixes_done_without_mutating_the_pane_name() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -1574,7 +1574,7 @@ mod tests {
 
     #[test]
     fn completed_agent_renders_a_full_width_red_close_action_at_the_panel_bottom() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -1623,7 +1623,7 @@ mod tests {
 
     #[test]
     fn rapid_terminal_switches_never_mix_the_previous_pane_into_the_right_panel() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let first = app
             .tree
@@ -1674,7 +1674,7 @@ mod tests {
     fn voice_control_dot_is_black_when_disabled_and_red_when_enabled() {
         let backend = TestBackend::new(22, 1);
         let mut terminal = Terminal::new(backend).expect("test terminal");
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
 
         terminal
             .draw(|frame| draw_voice_control(frame, frame.area(), &app))
@@ -1706,7 +1706,7 @@ mod tests {
 
     #[test]
     fn stacked_voice_credential_prompt_renders_over_live_settings() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         app.mode = Mode::Settings(crate::app::SettingsState {
             tab: crate::app::SettingsTab::VoiceControl,
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[test]
     fn agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -1859,7 +1859,7 @@ mod tests {
 
     #[test]
     fn tree_order_submenu_renders_one_check_before_the_active_option() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         app.ui_settings.tree_order = crate::config::TreeOrder::AgeDescending;
         app.open_context_menu(ROOT_ID, 2, 2);
@@ -1901,7 +1901,7 @@ mod tests {
 
     #[test]
     fn context_menu_icons_follow_the_live_ui_preference() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
         app.open_context_menu(ROOT_ID, 2, 2);
         let Mode::ContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
@@ -1932,7 +1932,7 @@ mod tests {
 
     #[test]
     fn scheduled_input_dialog_renders_all_aerated_controls() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -1965,7 +1965,7 @@ mod tests {
 
     #[test]
     fn split_view_renders_both_terminal_members_and_active_slot_chrome() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let first = app
             .tree
@@ -2018,7 +2018,7 @@ mod tests {
 
     #[test]
     fn split_view_renders_configured_directional_screen_transfer_controls() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let left = app
             .tree

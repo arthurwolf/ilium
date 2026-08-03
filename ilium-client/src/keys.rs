@@ -1995,11 +1995,10 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
 mod indent_outdent_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
 
     #[test]
     fn f8_toggles_semantic_vad_and_preserves_push_to_talk_edges() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
 
         handle_event(
             &mut app,
@@ -2094,7 +2093,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn debug_log_r_key_reveals_panel_animation_resize_events() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let pane_id = ilium_core::NodeId(7);
         app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
             pane_id,
@@ -2119,7 +2118,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn search_typing_updates_the_visible_prompt_without_running_a_scan() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.action_open_search();
 
         handle_event(
@@ -2137,7 +2136,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn icon_picker_queues_cpu_semantic_search_and_selects_its_result() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Icons,
@@ -2200,7 +2199,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn icon_picker_v_switches_between_dense_and_single_column_modes() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 160, 45));
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Icons,
@@ -2256,7 +2255,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn changing_the_shortcut_base_updates_dispatch_immediately() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let ctrl_a = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
         let ctrl_b = Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
 
@@ -2285,7 +2284,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn ctrl_b_arrow_and_page_defaults_dispatch_group_navigation_actions() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let first_group = app.tree.add_group(ROOT_ID, "first").unwrap();
         let first = app
             .tree
@@ -2369,7 +2368,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn voice_api_key_prompt_preserves_exact_settings_parent_until_commit() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::VoiceControl,
             selected_row: 1,
@@ -2414,7 +2413,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn modal_stack_restores_arbitrary_depth_in_last_opened_first_closed_order() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::VoiceControl,
             selected_row: 1,
@@ -2443,7 +2442,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn inference_field_and_file_action_menu_restore_their_exact_parents() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::OpenAi;
         let selected_row = crate::settings_ui::inference_rows(&app.inference_settings)
             .iter()
@@ -2501,7 +2500,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn triggers_keyboard_navigation_toggles_chips_and_none_clears_actions() {
-        let mut app = App::new("test".to_owned(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Triggers,
             selected_row: 6,
@@ -2539,7 +2538,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn context_menu_keyboard_opens_order_submenu_and_applies_selection() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane = app
@@ -2583,7 +2582,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -2624,7 +2623,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn atomic_paste_reuses_existing_character_input_for_text_prompt_modes() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::Rename(TextPromptState::new("before-"));
 
         handle_event(&mut app, Event::Paste("café 世界".to_string()));
@@ -2637,7 +2636,7 @@ mod indent_outdent_tests {
 
     #[test]
     fn split_orientation_dialog_can_skip_the_optional_member_picker() {
-        let mut app = App::new("test".to_string(), PathBuf::from("/tmp"));
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         app.tree_state.select(vec![group]);
         app.open_create_split_dialog();

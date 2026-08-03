@@ -76,6 +76,9 @@ pub async fn expect_event(
 
 pub struct TestServer {
     pub socket_path: PathBuf,
+    /// Keeps the short socket directory alive for this server's lifetime;
+    /// dropping it removes the directory. See `short_socket_dir`.
+    _socket_dir: tempfile::TempDir,
     pub snapshot_path: PathBuf,
     pub project_cwd: PathBuf,
     pub home_dir: PathBuf,
@@ -104,6 +107,23 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         self.server_task.abort();
     }
+}
+
+/// A short-lived directory directly under `/tmp`, short enough that a session
+/// socket bound inside it fits `sockaddr_un` on every platform.
+///
+/// Windows endpoints are named pipes with no filesystem presence, so the
+/// directory is merely unused there rather than wrong.
+fn short_socket_dir() -> tempfile::TempDir {
+    let parent = if cfg!(windows) {
+        std::env::temp_dir()
+    } else {
+        std::path::PathBuf::from("/tmp")
+    };
+    tempfile::Builder::new()
+        .prefix("is")
+        .tempdir_in(parent)
+        .expect("create short socket directory")
 }
 
 impl TestServer {
@@ -177,8 +197,16 @@ impl TestServer {
         agent_debug_menu_enabled: bool,
     ) -> Self {
         let dir = tempfile::tempdir().expect("create tempdir");
-        let socket_path = dir.path().join(format!("{session_name}.sock"));
         let snapshot_path = dir.path().join(format!("{session_name}.snapshot.json"));
+        // The socket deliberately does not live under `dir`. A Unix socket
+        // address is a fixed-size `sockaddr_un` -- 104 bytes on macOS -- and a
+        // platform temporary directory can spend most of that on its own:
+        // macOS hands out paths like
+        // `/var/folders/df/djsxfhc17x95674wsm_g8s980000gn/T/.tmpR6qv4y/`, so
+        // binding inside one fails outright. A short prefix directly under
+        // `/tmp` stays unique per test while leaving room for the name.
+        let socket_dir = short_socket_dir();
+        let socket_path = socket_dir.path().join(format!("{session_name}.sock"));
 
         let options = ServerOptions {
             session_name: session_name.to_string(),
@@ -222,6 +250,7 @@ impl TestServer {
 
         Self {
             socket_path,
+            _socket_dir: socket_dir,
             snapshot_path,
             project_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
