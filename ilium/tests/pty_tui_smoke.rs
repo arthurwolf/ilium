@@ -1137,6 +1137,33 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected Order by in the tree context menu, got: {:?}",
         tui.screen_text()
     );
+    // Dismissal first, which is both real behaviour and the one observation
+    // that separates the two ways the submenu click below can fail: if a click
+    // outside the menu closes it, the client is receiving mouse events while an
+    // overlay is open and any later failure is about where the entry's hit box
+    // is; if it does not close, no mouse event is reaching the client at all
+    // once a menu is up.
+    let dismiss_column = tui.with_screen(|screen| screen.size().1) - 4;
+    let dismiss_row = tui.with_screen(|screen| screen.size().0) - 4;
+    tui.write(&sgr_mouse_down(0, dismiss_column, dismiss_row))
+        .expect("pressing outside the tree context menu");
+    tui.write(&sgr_mouse_up(dismiss_column, dismiss_row))
+        .expect("releasing outside the tree context menu");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("Tree actions"), WAIT_TIMEOUT).await,
+        "clicking outside the tree context menu should dismiss it, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Reopened for the submenu interaction below.
+    tui.write(&sgr_mouse_down(2, context_column, default_rows[0]))
+        .expect("right-clicking the default group again");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        "expected the tree context menu to reopen, got: {:?}",
+        tui.screen_text()
+    );
+
     let order_rows = tui.with_screen(|screen| rows_containing(screen, "Order by"));
     assert_eq!(
         order_rows.len(),
