@@ -166,8 +166,10 @@ pub(crate) fn probe_liveness(identity: &Path) -> Liveness {
         // Every instance busy also proves a server is there.
         Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => Liveness::Live,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Liveness::Absent,
-        // Inconclusive: never claim a session is dead on ambiguous evidence.
-        Err(_) => Liveness::Live,
+        // Neither confirmed alive nor safe to act on. A named pipe has nothing
+        // to delete either way, so this only affects whether callers treat the
+        // session as running.
+        Err(_) => Liveness::Unreachable,
     }
 }
 

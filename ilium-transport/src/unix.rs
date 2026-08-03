@@ -33,17 +33,25 @@ pub(crate) async fn accept(listener: &mut Listener) -> io::Result<Stream> {
 /// Probes synchronously, with the blocking standard-library socket: callers
 /// run this before a runtime exists.
 pub(crate) fn probe_liveness(identity: &Path) -> Liveness {
-    if !identity.exists() {
+    use std::os::unix::fs::FileTypeExt;
+
+    let Ok(metadata) = std::fs::symlink_metadata(identity) else {
         return Liveness::Absent;
+    };
+    // An entry that is not a socket at all cannot have a listener behind it,
+    // whatever `connect` would say about it. Deciding this by file type rather
+    // than by error code matters because the kernels disagree: connecting to a
+    // regular file is `ECONNREFUSED` on Linux but `ENOTSOCK` on macOS, and only
+    // the former looks like a dead listener.
+    if !metadata.file_type().is_socket() {
+        return Liveness::StaleListener;
     }
     match std::os::unix::net::UnixStream::connect(identity) {
         Ok(_) => Liveness::Live,
         Err(error) if connect_error_proves_dead_listener(&error) => Liveness::StaleListener,
-        // Anything else says nothing about liveness -- descriptor exhaustion
-        // and permission errors are about *this* process, not the server --
-        // so the safe answer is "live": never delete another process's socket
-        // on inconclusive evidence.
-        Err(_) => Liveness::Live,
+        // Anything else is about *this* process rather than the server, so the
+        // endpoint is neither confirmed alive nor safe to delete.
+        Err(_) => Liveness::Unreachable,
     }
 }
 

@@ -11,15 +11,27 @@ use crate::unix as imp;
 use crate::windows as imp;
 
 /// What a liveness probe found at an endpoint.
+///
+/// The distinction between [`StaleListener`](Liveness::StaleListener) and
+/// [`Unreachable`](Liveness::Unreachable) is the one that matters: only the
+/// former may be deleted. Removing a healthy server's endpoint because this
+/// process happened to be out of descriptors would let a second server start
+/// for the same project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Liveness {
     /// Something accepted a connection: a server owns this session.
     Live,
     /// Nothing is listening and nothing was left behind.
     Absent,
-    /// Nothing is listening, but debris remains that a bind must clear first.
-    /// Only reachable on platforms whose endpoints have filesystem presence.
+    /// Nothing is listening, and what remains is provably debris a bind must
+    /// clear first. Only reachable on platforms whose endpoints have
+    /// filesystem presence.
     StaleListener,
+    /// Something is there but this process could not reach it, for reasons
+    /// that say nothing about whether a server is alive -- descriptor
+    /// exhaustion, a permissions problem, an interrupted call. Not live, and
+    /// never safe to delete.
+    Unreachable,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -285,5 +297,21 @@ mod tests {
 
         assert_eq!(endpoint.probe_liveness(), Liveness::StaleListener);
         endpoint.bind().await.expect("rebind over stale debris");
+    }
+
+    /// A path that is not a socket at all is debris, and deciding that by file
+    /// type rather than by connect error is what makes the answer the same on
+    /// every kernel: connecting to a regular file is `ECONNREFUSED` on Linux
+    /// but `ENOTSOCK` on macOS, and only the first looks like a dead listener.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_regular_file_at_the_endpoint_is_debris_rather_than_a_live_session() {
+        let (_directory, endpoint) = test_endpoint("not-a-socket.sock");
+        std::fs::write(endpoint.as_path(), b"not a socket").expect("write a regular file");
+
+        assert_eq!(endpoint.probe_liveness(), Liveness::StaleListener);
+
+        endpoint.remove_stale().expect("clear debris");
+        assert!(!endpoint.as_path().exists());
     }
 }

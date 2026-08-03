@@ -253,7 +253,8 @@ pub fn is_session_live(socket_path: &Path) -> bool {
             let _ = endpoint.remove_stale();
             false
         }
-        Liveness::Absent => false,
+        // Not live, and not ours to delete: see `Liveness::Unreachable`.
+        Liveness::Absent | Liveness::Unreachable => false,
     }
 }
 
@@ -783,6 +784,11 @@ mod tests {
         let first_session = resolve_project_session(&first, DEFAULT_SESSION_NAME).expect("first");
         let second_session =
             resolve_project_session(&second, DEFAULT_SESSION_NAME).expect("second");
+        // `resolve_project_session` canonicalizes, and macOS reaches a
+        // temporary directory through a `/var` -> `/private/var` symlink, so
+        // the raw tempdir path would never prefix-match the resolved one.
+        let first = first.canonicalize().expect("canonical first project");
+        let second = second.canonicalize().expect("canonical second project");
 
         assert_ne!(first_session.socket_path, second_session.socket_path);
         assert_ne!(first_session.snapshot_path, second_session.snapshot_path);
@@ -827,7 +833,8 @@ mod tests {
         let paths = reset_storage_paths(&default_session);
 
         assert!(paths.contains(&default_session.snapshot_path));
-        assert!(paths.contains(&root.path().join(".ilium").join("sessions.yml")));
+        let canonical_root = root.path().canonicalize().expect("canonical project root");
+        assert!(paths.contains(&canonical_root.join(".ilium").join("sessions.yml")));
     }
 
     #[test]
