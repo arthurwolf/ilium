@@ -976,7 +976,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // have displaced it.
     assert!(
         tui.screen_text().contains("VOICE"),
-        "the footer's voice control vanished when Settings opened. bottom rows are {:#?}",
+        "the footer's voice control vanished when Settings opened. rows written \
+         to their last column are {:?} (a written last cell wraps, and on the \
+         last row scrolls), bottom rows are {:#?}",
+        tui.with_screen(rows_touching_last_column),
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
@@ -2167,6 +2170,24 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
 /// from `Screen::rows` (one string per row, by construction) rather than
 /// splitting `contents()` on newlines, so the returned index always
 /// matches `Screen::cell`'s row argument exactly.
+/// Rows whose final cell holds something.
+///
+/// A terminal wraps -- and, on the last row, scrolls -- when its rightmost
+/// cell is written. That is normally harmless because ratatui does not write
+/// there, so a row that reaches the last column means the rendered content is
+/// wider than ratatui modelled it, which is what an icon whose cell width the
+/// host disagrees about produces.
+fn rows_touching_last_column(screen: &vt100::Screen) -> Vec<u16> {
+    let (rows, columns) = screen.size();
+    (0..rows)
+        .filter(|row| {
+            screen
+                .cell(*row, columns - 1)
+                .is_some_and(|cell| !cell.contents().trim().is_empty())
+        })
+        .collect()
+}
+
 /// The last `count` rendered rows. The footer -- status bar and voice control
 /// -- is the bottom row of the frame, so when an assertion about it fails, the
 /// question is what is actually there, not what the other forty rows say.
