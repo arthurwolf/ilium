@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 /// Ensures process detection never consumes the host's file-descriptor budget.
 ///
@@ -726,17 +726,27 @@ fn is_numbered_option_line(line: &str) -> bool {
 /// panes), not once per pane -- the tick's timing/scheduling/adaptive
 /// backoff is the caller's responsibility, not this crate's.
 ///
-/// Deliberately cheap: `identify_agent`'s tree walk only needs pid/parent
-/// chains and process names, which sysinfo always populates. `cwd` and
-/// `environ` are per-process filesystem reads (`readlink`/`open`+`read`
-/// under `/proc`) and cost proportionally to *every* process on the
-/// machine if fetched here -- entirely wasted on the >99% of processes
-/// that are never an agent CLI. Session-ID discovery (which does need
-/// those fields, scoped to just the one matched pid) is app-level
-/// orchestration that lives above this crate.
+/// Deliberately cheap: `identify_agent`'s tree walk needs pid/parent chains,
+/// process names, and the command line. `cwd` and `environ` are per-process
+/// filesystem reads (`readlink`/`open`+`read` under `/proc`) and cost
+/// proportionally to *every* process on the machine if fetched here --
+/// entirely wasted on the >99% of processes that are never an agent CLI.
+/// Session-ID discovery (which does need those fields, scoped to just the one
+/// matched pid) is app-level orchestration that lives above this crate.
+///
+/// The command line is the exception, and it is not optional: a CLI installed
+/// as a shebang script is reported by macOS under its *interpreter's* name, so
+/// without arguments there is nothing left to recognise `claude` or `codex` by
+/// there (see `identifying_process_names`). `OnlyIfNotSet` keeps that cheap --
+/// a process's arguments never change, so this reads them once per process
+/// rather than on every tick.
 pub fn refresh(system: &mut System) {
     configure_process_refresh();
-    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::OnlyIfNotSet),
+    );
 }
 
 /// A parent-pid -> direct-children-pids adjacency, built once from an
