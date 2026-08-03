@@ -957,7 +957,7 @@ fn expand_shell_command_line(arguments: &[String]) -> Vec<String> {
 /// process was actually invoked as. Only its file name is considered, and it is
 /// only consulted when the kernel name matched nothing, so `sh -c "codex …"`
 /// cannot masquerade as the agent: its first argument is the shell itself.
-fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
+pub fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
     let arguments = process.cmd();
     let invoked = argument_file_name(arguments, 0);
     // When the first argument is an interpreter, the program it was handed is

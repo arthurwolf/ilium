@@ -881,6 +881,23 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "the help overlay should not be showing before the help keystroke is sent"
     );
 
+    // The footer -- status bar plus voice control -- is the bottom row of the
+    // frame, and every later assertion about it assumes it is drawn at all.
+    // Checked here, on the plain frame, because that is the only moment its
+    // absence has an unambiguous cause: no overlay is covering it, so the
+    // frame's own borders say whether the client's layout fits the terminal
+    // it was given.
+    assert!(
+        wait_until(|| tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
+        "expected the footer's voice control on the plain frame. terminal is \
+         {:?}, the frame's top border is on row(s) {:?} and its bottom border \
+         on row(s) {:?}, bottom rows are {:#?}",
+        tui.with_screen(|screen| screen.size()),
+        tui.with_screen(|screen| rows_containing(screen, "\u{256d}")),
+        tui.with_screen(|screen| rows_containing(screen, "\u{2570}")),
+        tui.with_screen(|screen| bottom_rows(screen, 3)),
+    );
+
     // A freshly attached client starts with every group collapsed and
     // focus on the (empty) pane panel, so phase 1's "cat" pane isn't
     // actually listed yet -- expand it to also prove out tree navigation

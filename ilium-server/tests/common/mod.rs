@@ -100,10 +100,50 @@ pub async fn expect_event(
             })
             .unwrap_or_else(|_| "(unavailable)".to_string());
         panic!(
-            "timed out waiting for the expected server event\nevents received:\n  {seen}\nlive process table:\n{}",
+            "timed out waiting for the expected server event\nevents received:\n  {seen}\nwhat the detector sees:\n{}\nlive process table:\n{}",
+            detector_view(),
             process_table_snapshot()
         )
     })
+}
+
+/// What the *detector* sees, as opposed to what `ps` reports.
+///
+/// The two can disagree, and only the first one matters: detection matches on
+/// `sysinfo`'s view of a process's name and command line, which on macOS is
+/// assembled differently from `ps` output and can be incomplete for a process
+/// that has just started. When a pane running a recognisable agent is never
+/// classified, the question is which names the detector had to match against
+/// and what it concluded from them -- neither of which a process table shows.
+fn detector_view() -> String {
+    let mut system = sysinfo::System::new();
+    ilium_detect::refresh(&mut system);
+    let mut report = String::new();
+    for (pid, process) in system.processes() {
+        let arguments = process
+            .cmd()
+            .iter()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let name = process.name().to_string_lossy().into_owned();
+        if !name.contains("codex")
+            && !name.contains("claude")
+            && !arguments.contains("codex")
+            && !arguments.contains("claude")
+        {
+            continue;
+        }
+        report.push_str(&format!(
+            "  pid={pid} name={name:?} cmd={arguments:?}\n    candidates: {:?}\n    identified: {:?}\n",
+            ilium_detect::identifying_process_names(process),
+            ilium_detect::identify_agent(&system, *pid),
+        ));
+    }
+    if report.is_empty() {
+        report.push_str("  (the detector sees no process mentioning an agent)\n");
+    }
+    report
 }
 
 /// What the machine's process table looked like when a wait gave up.
