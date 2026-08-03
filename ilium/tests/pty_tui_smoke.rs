@@ -1152,8 +1152,15 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let order_label_column = tui
         .with_screen(|screen| column_of_text_in_row(screen, order_rows[0], "Order by"))
         .expect("the Order by label should have a rendered column");
+    // A complete click, press and release. Sending only a press is what a
+    // terminal that reports button transitions makes look sufficient; a
+    // Windows console reports button *state* per event, so the two halves are
+    // not interchangeable there and half a click is not an interaction a user
+    // can perform anyway.
     tui.write(&sgr_mouse_down(0, order_label_column, order_rows[0]))
-        .expect("opening the Order by submenu");
+        .expect("pressing the Order by entry");
+    tui.write(&sgr_mouse_up(order_label_column, order_rows[0]))
+        .expect("releasing the Order by entry");
     assert!(
         wait_until(
             || {
