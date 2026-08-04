@@ -1447,7 +1447,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                     && screen.contains("Quick picks")
                     && screen.contains("Official UTF-8 chapters first")
                     && screen.contains("12372 total")
-                    && screen.contains("[● Multi-column]")
+                    && screen.contains("Multi-column")
             },
             WAIT_TIMEOUT,
         )
@@ -1459,7 +1459,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("switching the catalogue to its single-column inspection view");
     assert!(
         wait_until(
-            || tui.screen_text().contains("[● Single column]"),
+            || tui.with_screen(selected_catalogue_view) == Some("Single column"),
             WAIT_TIMEOUT
         )
         .await,
@@ -1470,7 +1470,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("restoring the default multi-column catalogue view");
     assert!(
         wait_until(
-            || tui.screen_text().contains("[● Multi-column]"),
+            || tui.with_screen(selected_catalogue_view) == Some("Multi-column"),
             WAIT_TIMEOUT
         )
         .await,
@@ -2380,6 +2380,31 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
 /// Wide emoji can be stored as one multi-codepoint cell followed by a blank
 /// continuation cell, so matching cell contents is more reliable than byte
 /// offsets in a flattened screen row for mouse-coordinate assertions.
+/// Which of the icon catalogue's two view entries carries the selection dot.
+///
+/// The entries render as `[● Multi-column]  [ Single column ]` and its mirror,
+/// but matching that text whole asserts the host's cell-width model as much as
+/// the client's state: `\u{25cf}` is East Asian Ambiguous, and a host that
+/// gives it two cells shifts the rest of the row, so the brackets no longer sit
+/// where the string says. The order of the dot and the two labels survives
+/// that, and is what the selection actually means.
+fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
+    let columns = screen.size().1;
+    let row = screen
+        .rows(0, columns)
+        .find(|text| text.contains("Multi-column") && text.contains("Single column"))?;
+    let dot = row.find('\u{25cf}')?;
+    let multi = row.find("Multi-column")?;
+    let single = row.find("Single column")?;
+    if dot < multi {
+        Some("Multi-column")
+    } else if dot < single {
+        Some("Single column")
+    } else {
+        None
+    }
+}
+
 /// The column where `needle`'s first character is rendered on `row`.
 ///
 /// Clicking a menu entry by its label's own position rather than by a fixed
