@@ -683,6 +683,27 @@ fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathB
     None
 }
 
+/// This session's own log directory under an isolated debug-log root.
+///
+/// Found by the marker file every session writer creates rather than by
+/// deriving the directory's name from the session socket: a socket is a Unix
+/// idea, and on Windows the session endpoint is a named pipe with no
+/// filesystem presence to read a name from at all.
+fn session_log_directory(debug_log_dir: &Path) -> PathBuf {
+    let mut directories: Vec<PathBuf> = std::fs::read_dir(debug_log_dir)
+        .unwrap_or_else(|error| panic!("read isolated debug log root {debug_log_dir:?}: {error}"))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".active-log-path").is_file())
+        .collect();
+    assert_eq!(
+        directories.len(),
+        1,
+        "expected exactly one session log directory under {debug_log_dir:?}, got {directories:?}"
+    );
+    directories.remove(0)
+}
+
 /// Every `submitted input` value the log recorded for an accepted prompt.
 ///
 /// Parsed rather than substring-matched: the record is a serialized
@@ -1667,18 +1688,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected disabled-by-default Debug file logging, got: {:?}",
         tui.screen_text()
     );
-    let socket_file_name = std::fs::read_dir(xdg.runtime_dir.join("ilium"))
-        .expect("read isolated socket directory")
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name())
-        .find(|name| name.to_string_lossy().ends_with(".sock"))
-        .expect("isolated session socket");
     // This test's own root, not the machine-wide default: the spawned
     // processes were given `DEBUG_LOG_DIR_ENV`, but this lookup runs in the
     // test process, which never sees it.
-    let session_log_directory = xdg
-        .debug_log_dir
-        .join(socket_file_name.to_string_lossy().trim_end_matches(".sock"));
+    let session_log_directory = session_log_directory(&xdg.debug_log_dir);
     let active_log_path = active_log_path_from_metadata(
         &std::fs::read_to_string(session_log_directory.join(".active-log-path"))
             .expect("read active log metadata"),
