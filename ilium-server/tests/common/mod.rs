@@ -183,7 +183,22 @@ fn process_table_snapshot() -> String {
     }
 }
 
+/// Serializes the servers these tests start.
+///
+/// Each one runs a real detection loop that scans the whole machine's process
+/// table on every tick, and the tests wait on events that need several ticks
+/// to arrive. Run concurrently on a small CI runner, several such servers
+/// multiply that cost against each other until whichever test is unluckiest
+/// exhausts its wait -- which is why the failures rotate between tests rather
+/// than sticking to one. Serializing them makes each test's timeout a
+/// statement about the server's behaviour rather than about how many other
+/// servers happened to be scanning at the same moment.
+static LIVE_SERVER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub struct TestServer {
+    /// Held for this server's lifetime, so the next test's server does not
+    /// start until this one is dropped.
+    _live_server_guard: tokio::sync::MutexGuard<'static, ()>,
     pub socket_path: PathBuf,
     /// Keeps the short socket directory alive for this server's lifetime;
     /// dropping it removes the directory. See `short_socket_dir`.
@@ -305,6 +320,9 @@ impl TestServer {
         sound_player: Arc<dyn SoundPlayer>,
         agent_debug_menu_enabled: bool,
     ) -> Self {
+        // Taken before anything is started, and released when this server is
+        // dropped at the end of the test.
+        let live_server_guard = LIVE_SERVER_LOCK.lock().await;
         let dir = tempfile::tempdir().expect("create tempdir");
         let snapshot_path = dir.path().join(format!("{session_name}.snapshot.json"));
         // The socket deliberately does not live under `dir`. A Unix socket
@@ -369,6 +387,7 @@ impl TestServer {
         assert!(bound, "server did not bind its socket in time");
 
         Self {
+            _live_server_guard: live_server_guard,
             socket_path,
             _socket_dir: socket_dir,
             snapshot_path,
