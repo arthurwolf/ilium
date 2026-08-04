@@ -1145,8 +1145,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // overlay is open and any later failure is about where the entry's hit box
     // is; if it does not close, no mouse event is reaching the client at all
     // once a menu is up.
+    // Far to the right of the menu, which never extends past the tree column,
+    // and deliberately near the top of the screen: every mouse interaction
+    // that has worked on Windows so far was on a low row and both that have
+    // failed were on high ones, so keeping the horizontal outsideness while
+    // changing only the row is what tells a row-dependent coordinate problem
+    // apart from "no click is delivered while a menu is open".
     let dismiss_column = tui.with_screen(|screen| screen.size().1) - 4;
-    let dismiss_row = tui.with_screen(|screen| screen.size().0) - 4;
+    let dismiss_row = 3;
     tui.write(&sgr_mouse_down(0, dismiss_column, dismiss_row))
         .expect("pressing outside the tree context menu");
     tui.write(&sgr_mouse_up(dismiss_column, dismiss_row))
