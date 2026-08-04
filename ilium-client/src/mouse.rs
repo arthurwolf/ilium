@@ -59,8 +59,48 @@ fn to_ipc_button(button: MouseButton) -> ilium_ipc::MouseButton {
     }
 }
 
+/// Environment variable naming a file to append one line per mouse event to.
+///
+/// Off unless set, and set by nothing in normal use. It exists because a
+/// terminal host can deliver mouse input differently enough that a surface
+/// stops responding while everything visible looks correct, and from outside
+/// the process that is indistinguishable from the surface ignoring a click it
+/// did receive. Nothing else in the client can answer which of the two it is.
+pub const MOUSE_TRACE_FILE_ENV: &str = "ILIUM_MOUSE_TRACE_FILE";
+
+/// Appends what the client actually received, and the mode it arrived in, when
+/// [`MOUSE_TRACE_FILE_ENV`] names a file. Best-effort: a diagnostic that fails
+/// must never disturb the input path it is observing.
+fn trace_mouse_event(app: &App, mouse: &MouseEvent) {
+    use std::io::Write;
+
+    let Some(path) = std::env::var_os(MOUSE_TRACE_FILE_ENV) else {
+        return;
+    };
+    // Only the mode this trace exists to explain carries detail; the rest
+    // just need to be distinguishable, and `Mode` is not `Debug`.
+    let mode = match &app.mode {
+        Mode::ContextMenu(menu) => format!("ContextMenu(area={:?})", menu.area),
+        Mode::Normal => "Normal".to_string(),
+        _ => "other".to_string(),
+    };
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let _ = writeln!(
+        file,
+        "{:?} at column {} row {} in mode {mode}",
+        mouse.kind, mouse.column, mouse.row
+    );
+}
+
 /// Top-level mouse dispatch, called for every `Event::Mouse`.
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    trace_mouse_event(app, &mouse);
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));

@@ -154,6 +154,10 @@ struct IsolatedXdgDirs {
     /// finds somebody else's log.
     debug_log_dir: PathBuf,
     runtime_dir: PathBuf,
+    /// Where the client appends every mouse event it receives. Only the
+    /// interactions this test performs land here, so a surface that does not
+    /// respond can be told apart from a click that never arrived.
+    mouse_trace_file: PathBuf,
     /// Keeps the short runtime directory alive; dropping it removes the
     /// directory. Declared last so it outlives nothing that still needs it.
     _runtime_root: tempfile::TempDir,
@@ -167,6 +171,7 @@ impl IsolatedXdgDirs {
         // the same directory and a seeded `config.toml` is found either way.
         let ilium_config_dir = config_home.join("ilium");
         let debug_log_dir = root.join("debug-logs");
+        let mouse_trace_file = root.join("mouse-events.log");
         for dir in [&data_home, &config_home, &ilium_config_dir, &debug_log_dir] {
             std::fs::create_dir_all(dir)?;
         }
@@ -193,6 +198,7 @@ impl IsolatedXdgDirs {
             ilium_config_dir,
             debug_log_dir,
             runtime_dir,
+            mouse_trace_file,
             _runtime_root: runtime_root,
         })
     }
@@ -204,7 +210,7 @@ impl IsolatedXdgDirs {
     /// own `.env("SHELL", ...)`, and these pairs are applied afterwards, so
     /// pinning here would silently overwrite that fixture. Tests that need a
     /// deterministic shell set it themselves.
-    fn as_pairs(&self) -> [(&'static str, &Path); 5] {
+    fn as_pairs(&self) -> [(&'static str, &Path); 6] {
         [
             ("XDG_DATA_HOME", &self.data_home),
             ("XDG_CONFIG_HOME", &self.config_home),
@@ -221,6 +227,10 @@ impl IsolatedXdgDirs {
             (
                 ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
                 &self.debug_log_dir,
+            ),
+            (
+                ilium_client::mouse::MOUSE_TRACE_FILE_ENV,
+                &self.mouse_trace_file,
             ),
         ]
     }
@@ -1181,7 +1191,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("releasing outside the tree context menu");
     assert!(
         wait_until(|| !tui.screen_text().contains("Tree actions"), WAIT_TIMEOUT).await,
-        "clicking outside the tree context menu should dismiss it, got: {:?}",
+        "clicking outside the tree context menu should dismiss it. the click was \
+         sent to column {dismiss_column} row {dismiss_row}, and the client \
+         received these mouse events:\n{}\ngot: {:?}",
+        std::fs::read_to_string(&xdg.mouse_trace_file).unwrap_or_default(),
         tui.screen_text()
     );
 
