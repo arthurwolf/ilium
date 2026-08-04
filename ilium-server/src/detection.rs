@@ -22,7 +22,9 @@ use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentActivity, NodeId, PaneStatus};
 use ilium_ipc::ServerEvent;
 use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
+use std::sync::Arc;
 use sysinfo::{Pid, System};
+
 use tokio::task::JoinHandle;
 
 use crate::notifications::{self, PendingNotification};
@@ -46,7 +48,38 @@ const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// handle. The loop runs until aborted (session shutdown) -- it has no
 /// other exit condition, matching the lifetime of the session itself.
 pub fn spawn(state: std::sync::Arc<ServerState>) -> JoinHandle<()> {
-    tokio::spawn(run_loop(state))
+    tokio::spawn(supervise_loop(state))
+}
+
+/// Keeps the detection loop running for the life of the server.
+///
+/// The loop's tick classifies every due pane, and that work reaches real
+/// processes through platform interfaces whose failure modes differ per OS. A
+/// panic anywhere in it would otherwise end the spawned task silently: no
+/// error surfaces, the process keeps running, and every pane simply stops
+/// being classified for the rest of the session. That is precisely the
+/// outcome this crate's error boundary exists to prevent -- one pane's
+/// detection failure must never take down every pane's status updates -- and
+/// it is also close to undiagnosable, because nothing is written down when it
+/// happens.
+///
+/// The loop therefore runs in its own task, whose completion is a signal:
+/// cancellation means the server is shutting down, anything else means the
+/// loop died and is restarted after saying so. The inner handle aborts on
+/// drop, so cancelling this supervisor cancels the loop with it rather than
+/// leaving it running detached.
+async fn supervise_loop(state: std::sync::Arc<ServerState>) {
+    loop {
+        let loop_task =
+            crate::task_guard::AbortOnDropHandle::new(tokio::spawn(run_loop(Arc::clone(&state))));
+        match loop_task.join().await {
+            Ok(()) => return,
+            Err(error) if error.is_cancelled() => return,
+            Err(error) => {
+                tracing::error!("agent detection loop panicked and is restarting: {error}");
+            }
+        }
+    }
 }
 
 async fn run_loop(state: std::sync::Arc<ServerState>) {

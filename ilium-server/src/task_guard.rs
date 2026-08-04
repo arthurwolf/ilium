@@ -31,22 +31,38 @@ use tokio::task::JoinHandle;
 /// to (not instead of) any explicit `.abort()` call already on a normal
 /// shutdown path -- `JoinHandle::abort` is a harmless no-op on a task that
 /// is already finished or already aborted, so the two never conflict.
-pub struct AbortOnDropHandle<T>(JoinHandle<T>);
+/// The handle is optional only so [`AbortOnDropHandle::join`] can take it
+/// out: awaiting a task the guard still owns would abort it on drop the moment
+/// the await completed.
+pub struct AbortOnDropHandle<T>(Option<JoinHandle<T>>);
 
 impl<T> AbortOnDropHandle<T> {
     pub fn new(handle: JoinHandle<T>) -> Self {
-        Self(handle)
+        Self(Some(handle))
     }
 
     /// Requests cancellation without waiting for it to take effect. Safe to
     /// call more than once, including implicitly once more via `Drop`.
     pub fn abort(&self) {
-        self.0.abort();
+        if let Some(handle) = &self.0 {
+            handle.abort();
+        }
+    }
+
+    /// Waits for the task to finish, reporting how it ended. Consumes the
+    /// guard, because a joined handle has nothing left to abort.
+    pub async fn join(mut self) -> Result<T, tokio::task::JoinError> {
+        let Some(handle) = self.0.take() else {
+            unreachable!("the handle is only taken here, and this consumes the guard");
+        };
+        handle.await
     }
 }
 
 impl<T> Drop for AbortOnDropHandle<T> {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(handle) = &self.0 {
+            handle.abort();
+        }
     }
 }
