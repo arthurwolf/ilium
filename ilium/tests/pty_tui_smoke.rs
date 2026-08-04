@@ -2420,12 +2420,21 @@ fn sgr_mouse_up(column: u16, row: u16) -> Vec<u8> {
 /// a button still held makes every later press read as motion with a button
 /// down rather than as a new press, and nothing after it behaves like a click.
 fn sgr_mouse_release(button: u8, column: u16, row: u16) -> Vec<u8> {
-    format!(
-        "\x1b[<{button};{};{}m",
-        column.saturating_add(1),
-        row.saturating_add(1)
-    )
-    .into_bytes()
+    let column = column.saturating_add(1);
+    let row = row.saturating_add(1);
+    // Both encodings of the same release. xterm reports it as the pressed
+    // button's own number with a final `m`, which is the first form; the
+    // legacy encoding reports releases as button 3 regardless of which was
+    // held, and hosts differ on which they recognise. A host that only
+    // understands the second would otherwise keep believing the button is
+    // still held, and every later press arrives as motion-with-button rather
+    // than as a press -- which the context menu, acting only on
+    // `Down(MouseButton::Left)`, ignores entirely.
+    //
+    // Sending both is safe: whichever form the host does not treat as the
+    // release of a held button is a release of a button that was not held,
+    // which every surface here already ignores.
+    format!("\x1b[<{button};{column};{row}m\x1b[<3;{column};{row}m").into_bytes()
 }
 
 /// Encodes xterm SGR pointer motion while the left button remains held.
