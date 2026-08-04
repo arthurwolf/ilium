@@ -175,13 +175,24 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     use std::ffi::c_void;
 
+    /// Where the descriptor table is assumed to start when the kernel will not
+    /// say, and how far it is allowed to grow. A process holding more open
+    /// files than this is not one of the agent CLIs being looked for.
+    const INITIAL_DESCRIPTOR_CAPACITY: usize = 256;
+    const MAXIMUM_DESCRIPTOR_CAPACITY: usize = 16_384;
+
     let Ok(process_id) = i32::try_from(process_id) else {
         return Vec::new();
     };
-    // Sizing call first: passing a null buffer asks how many bytes the table
-    // currently needs, which is the only way to allocate exactly enough.
+    let descriptor_size = std::mem::size_of::<libc::proc_fdinfo>();
+
+    // The sizing form -- a null buffer and zero size -- is documented to report
+    // how many bytes the table needs, but it is only a hint and not every
+    // kernel answers it: some return zero, which would otherwise be read as
+    // "this process has no open files" and silently end the search. Treat any
+    // non-positive answer as "unknown" and grow instead.
     // SAFETY: a null buffer with zero size is the documented sizing form.
-    let needed = unsafe {
+    let hinted = unsafe {
         libc::proc_pidinfo(
             process_id,
             libc::PROC_PIDLISTFDS,
@@ -190,33 +201,47 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
             0,
         )
     };
-    if needed <= 0 {
-        return Vec::new();
-    }
-    let count = needed as usize / std::mem::size_of::<libc::proc_fdinfo>();
-    let mut descriptors: Vec<libc::proc_fdinfo> = vec![unsafe { std::mem::zeroed() }; count];
-    let capacity = (count * std::mem::size_of::<libc::proc_fdinfo>()) as i32;
-    // SAFETY: `descriptors` owns `capacity` bytes and is written at most that
-    // far; the kernel reports how much it actually used.
-    let written = unsafe {
-        libc::proc_pidinfo(
-            process_id,
-            libc::PROC_PIDLISTFDS,
-            0,
-            descriptors.as_mut_ptr().cast::<c_void>(),
-            capacity,
-        )
+    let mut count = if hinted > 0 {
+        hinted as usize / descriptor_size
+    } else {
+        INITIAL_DESCRIPTOR_CAPACITY
     };
-    if written <= 0 {
-        return Vec::new();
-    }
-    descriptors.truncate(written as usize / std::mem::size_of::<libc::proc_fdinfo>());
 
-    descriptors
-        .iter()
-        .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
-        .filter_map(|descriptor| darwin_vnode_path(process_id, descriptor.proc_fd))
-        .collect()
+    loop {
+        let mut descriptors: Vec<libc::proc_fdinfo> = vec![unsafe { std::mem::zeroed() }; count];
+        let Ok(capacity) = i32::try_from(count * descriptor_size) else {
+            return Vec::new();
+        };
+        // SAFETY: `descriptors` owns `capacity` bytes and is written at most
+        // that far; the kernel reports how much it actually used.
+        let written = unsafe {
+            libc::proc_pidinfo(
+                process_id,
+                libc::PROC_PIDLISTFDS,
+                0,
+                descriptors.as_mut_ptr().cast::<c_void>(),
+                capacity,
+            )
+        };
+        if written <= 0 {
+            return Vec::new();
+        }
+        let used = written as usize;
+        // A completely filled buffer is indistinguishable from a truncated
+        // one -- the call reports bytes written, not bytes needed -- so grow
+        // and ask again rather than searching a table that may be cut short of
+        // the descriptor being looked for.
+        if used >= count * descriptor_size && count * 2 <= MAXIMUM_DESCRIPTOR_CAPACITY {
+            count *= 2;
+            continue;
+        }
+        descriptors.truncate(used / descriptor_size);
+        return descriptors
+            .iter()
+            .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
+            .filter_map(|descriptor| darwin_vnode_path(process_id, descriptor.proc_fd))
+            .collect();
+    }
 }
 
 /// The filesystem path behind one vnode descriptor, or `None` when the kernel
