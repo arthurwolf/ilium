@@ -1132,6 +1132,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let context_column = 8;
     tui.write(&sgr_mouse_down(2, context_column, default_rows[0]))
         .expect("right-clicking the default group");
+    tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
+        .expect("releasing the right button over the default group");
     assert!(
         wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
         "expected Order by in the tree context menu, got: {:?}",
@@ -1158,6 +1160,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // Reopened for the submenu interaction below.
     tui.write(&sgr_mouse_down(2, context_column, default_rows[0]))
         .expect("right-clicking the default group again");
+    tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
+        .expect("releasing the right button over the default group again");
     assert!(
         wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
         "expected the tree context menu to reopen, got: {:?}",
@@ -2398,8 +2402,20 @@ fn sgr_mouse_down(button: u8, column: u16, row: u16) -> Vec<u8> {
 /// tracking on press, so click-only tests must release explicitly to clear
 /// that state without accidentally carrying it into a later row action.
 fn sgr_mouse_up(column: u16, row: u16) -> Vec<u8> {
+    sgr_mouse_release(0, column, row)
+}
+
+/// Encodes an xterm SGR release for any button.
+///
+/// A press that is never released is not merely untidy. A terminal that
+/// reports button transitions treats each sequence independently, so an
+/// unreleased button changes nothing about what follows -- which is why Unix
+/// runs never noticed. A Windows console reports button *state* per event, so
+/// a button still held makes every later press read as motion with a button
+/// down rather than as a new press, and nothing after it behaves like a click.
+fn sgr_mouse_release(button: u8, column: u16, row: u16) -> Vec<u8> {
     format!(
-        "\x1b[<0;{};{}m",
+        "\x1b[<{button};{};{}m",
         column.saturating_add(1),
         row.saturating_add(1)
     )
