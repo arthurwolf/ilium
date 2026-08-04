@@ -1066,12 +1066,17 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("typing the isolated smoke-test API key");
     let api_key_layout = ilium_client::modal::text_prompt_dialog_layout_for_size(120, 44);
     let replace_button = api_key_layout.actions.confirm_button;
-    tui.write(&sgr_mouse_down(
-        0,
-        replace_button.x + replace_button.width / 2,
-        replace_button.y,
-    ))
-    .expect("click Replace in the nested API-key dialog");
+    let replace_column = replace_button.x + replace_button.width / 2;
+    tui.write(&sgr_mouse_down(0, replace_column, replace_button.y))
+        .expect("press Replace in the nested API-key dialog");
+    // Released, like every other click here. A terminal that reports button
+    // transitions treats each sequence on its own, so a press left held only
+    // ever mattered to the surface it was aimed at. A Windows console reports
+    // button state, so the button stays down for the rest of the session and
+    // every later press arrives as a drag -- which is exactly what the client's
+    // own mouse trace showed happening to every interaction after this one.
+    tui.write(&sgr_mouse_up(replace_column, replace_button.y))
+        .expect("release Replace in the nested API-key dialog");
     assert!(
         wait_until(
             || {
