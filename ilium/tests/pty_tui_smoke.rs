@@ -1139,6 +1139,28 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected Order by in the tree context menu, got: {:?}",
         tui.screen_text()
     );
+    // Keyboard dismissal first. Whether the client still reacts to *any* input
+    // while a menu is open is a different question from whether it reacts to
+    // clicks, and the two are indistinguishable from a screen that simply does
+    // not change.
+    tui.write(b"\x1b")
+        .expect("pressing Escape over the tree context menu");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("Tree actions"), WAIT_TIMEOUT).await,
+        "Escape should dismiss the tree context menu, got: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(&sgr_mouse_down(2, context_column, default_rows[0]))
+        .expect("right-clicking the default group after Escape");
+    tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
+        .expect("releasing the right button after Escape");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        "expected the tree context menu after Escape, got: {:?}",
+        tui.screen_text()
+    );
+
     // Dismissal first, which is both real behaviour and the one observation
     // that separates the two ways the submenu click below can fail: if a click
     // outside the menu closes it, the client is receiving mouse events while an
