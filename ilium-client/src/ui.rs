@@ -1106,6 +1106,20 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 // `viewport.outer_area` is the area that actually lines up
                 // with the border column.
                 draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
+            } else if viewport.toolbar_area.is_some() {
+                // Same reasoning as the completed-agent branch above: once
+                // `content_area` has been shrunk by one row for the toolbar
+                // (see `PaneViewport::with_agent_toolbar_reserved`), the
+                // block and the terminal content must be rendered separately
+                // rather than through `.block(...)`, which would otherwise
+                // carve its own inner area straight from `outer_area` and
+                // draw terminal content underneath the reserved toolbar row.
+                let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
+                frame.render_widget(block, viewport.outer_area);
+                term.with_screen(|screen| {
+                    frame.render_widget(PseudoTerminal::new(screen), viewport.content_area);
+                });
+                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
             } else {
                 term.with_screen(|screen| {
                     let widget = PseudoTerminal::new(screen)
@@ -1131,6 +1145,32 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 board.as_ref(),
                 app.kanban_board_settings.card_preview_lines,
                 app.kanban_board_settings.minimum_column_width,
+            );
+        }
+    }
+
+    if let Some(toolbar_area) = viewport.toolbar_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            let below_row = Rect::new(
+                viewport.content_area.x,
+                viewport.content_area.y,
+                viewport.content_area.width,
+                viewport.content_area.height.min(1),
+            );
+            let hovered = app
+                .hovered_agent_toolbar_action
+                .and_then(|(pane_id, action)| (pane_id == viewport.pane_id).then_some(action));
+            crate::agent_toolbar::render(
+                frame,
+                toolbar_area,
+                below_row,
+                app.agent_toolbar_provider(viewport.pane_id),
+                &app.ui_settings.icons,
+                app.agent_toolbar_effort
+                    .get(&viewport.pane_id)
+                    .copied()
+                    .unwrap_or_default(),
+                hovered,
             );
         }
     }

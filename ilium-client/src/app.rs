@@ -27,6 +27,7 @@ use tui_tree_widget::TreeState;
 use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
+use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::board::BoardPane;
 use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
@@ -523,10 +524,11 @@ pub enum AppearanceRow {
     ShowInferredTitleIcons,
     AgentDebugMenu,
     ContextMenuIcons,
+    AgentToolbar,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 10] = [
+    const GENERAL: [AppearanceRow; 11] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -537,6 +539,7 @@ impl AppearanceRow {
         Self::ShowInferredTitleIcons,
         Self::AgentDebugMenu,
         Self::ContextMenuIcons,
+        Self::AgentToolbar,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -1406,6 +1409,20 @@ pub struct App {
     pub hovered_tree_node: Option<TreeNodeHit>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
+    /// Panes ever observed with a detected agent status. Once a pane's
+    /// toolbar row is reserved it stays reserved for that pane's lifetime,
+    /// even if detection later reverts to `PlainShell` -- otherwise a live
+    /// agent PTY could get resized (and, per `terminal_view`'s module doc,
+    /// have its transcript disrupted) purely because detection flapped.
+    pub agent_toolbar_latched_panes: HashSet<NodeId>,
+    /// Client-local effort-cycle state per pane (`Auto` when absent). Purely
+    /// optimistic presentation -- nothing here observes the agent's actual
+    /// reasoning effort.
+    pub agent_toolbar_effort: HashMap<NodeId, EffortLevel>,
+    /// The agent-toolbar button currently under the pointer, if any -- drives
+    /// the hover tooltip. Scoped by pane so more than one visible toolbar
+    /// (a split view) can't leave a stale hover on an unrelated pane.
+    pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
     help_leader_pending: bool,
     /// The session's project directory. Every new terminal pane spawns
     /// here (server-side), and the file-picker overlay always opens
@@ -1660,6 +1677,9 @@ impl App {
             hovered_tree_node: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
+            agent_toolbar_latched_panes: HashSet::new(),
+            agent_toolbar_effort: HashMap::new(),
+            hovered_agent_toolbar_action: None,
             help_leader_pending: false,
             session_cwd,
             project_name: None,
@@ -1848,6 +1868,30 @@ impl App {
         }
 
         self.outbox.push(request);
+    }
+
+    /// Writes raw bytes into a terminal pane's PTY, scrolling that pane's
+    /// local view to the live tail first. Shared by every non-keyboard
+    /// source of terminal input (voice control, the agent toolbar) so they
+    /// all go through the exact same `ClientRequest::KeyInput` shape a real
+    /// keypress does -- in particular, the server's own session-identity
+    /// tracking (`agent_session_identity_transition_rule`) observes these
+    /// bytes the same way it observes typed input, so a toolbar `/clear`
+    /// invalidates session identity exactly like a hand-typed one would.
+    pub(crate) fn send_terminal_bytes(
+        &mut self,
+        pane_id: NodeId,
+        bytes: Vec<u8>,
+        submission: Option<PromptSubmissionSource>,
+    ) {
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+            view.scroll_to_bottom();
+        }
+        self.queue_request(ClientRequest::KeyInput {
+            pane_id,
+            bytes,
+            submission,
+        });
     }
 
     /// Reports one successful editor/board mutation to the server-owned
@@ -2093,7 +2137,7 @@ impl App {
     }
 
     pub fn pane_viewports(&self) -> Vec<PaneViewport> {
-        match self.right_panel_target {
+        let viewports = match self.right_panel_target {
             RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
@@ -2111,6 +2155,46 @@ impl App {
                     &self.displayed_pane_ids(),
                 )
             }
+        };
+        viewports
+            .into_iter()
+            .map(|viewport| {
+                if self.shows_agent_toolbar(viewport.pane_id) {
+                    viewport.with_agent_toolbar_reserved()
+                } else {
+                    viewport
+                }
+            })
+            .collect()
+    }
+
+    /// Whether `pane_id` currently reserves a toolbar row: the user hasn't
+    /// turned the toolbar off globally, and the pane is either a detected
+    /// agent right now or was latched as one earlier (see
+    /// `agent_toolbar_latched_panes`'s doc comment). Checking live status
+    /// directly -- not only the latch -- means a pane's toolbar can never
+    /// stay dark just because whichever code path updated its `PaneStatus`
+    /// forgot to also populate the latch; latching still does its one real
+    /// job of keeping the row reserved after that agent exits.
+    pub fn shows_agent_toolbar(&self, pane_id: NodeId) -> bool {
+        self.ui_settings.agent_toolbar_enabled
+            && (self.is_detected_agent_pane(pane_id)
+                || self.agent_toolbar_latched_panes.contains(&pane_id))
+    }
+
+    /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
+    /// when the pane's current status isn't a detected built-in agent (an
+    /// `AgentClass::Other` custom signature, or a latched pane whose agent
+    /// has since exited back to a plain shell). Only the provider-independent
+    /// buttons (Stop/CopyScreen/Close) render in that case.
+    pub fn agent_toolbar_provider(&self, pane_id: NodeId) -> Option<BuiltinAgentProvider> {
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        match status {
+            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => class.provider(),
+            _ => None,
         }
     }
 
@@ -3967,6 +4051,80 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Shows/hides the agent-toolbar row on every detected agent pane at
+    /// once -- the same one flag drives the Settings row, the toolbar's own
+    /// close (X) button, and the right-click/hamburger re-open entries. The
+    /// resize afterward is what actually grows/shrinks each latched pane's
+    /// PTY to match; without it, a pane's terminal content would stay sized
+    /// for the toolbar row until its next unrelated layout change.
+    pub fn settings_toggle_agent_toolbar(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.agent_toolbar_enabled = !ui.agent_toolbar_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
+    /// Executes one agent-toolbar click. `Close`/`Stop`/`CopyScreen` are
+    /// handled locally; every other action resolves through
+    /// `agent_toolbar::command_for` against the pane's live provider and, if
+    /// supported, is written into the PTY exactly like a hand-typed
+    /// submission (see `send_terminal_bytes`'s doc comment).
+    pub fn execute_agent_toolbar_action(&mut self, pane_id: NodeId, action: AgentToolbarAction) {
+        match action {
+            AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
+            AgentToolbarAction::Stop => self.send_terminal_bytes(pane_id, b"\x1b".to_vec(), None),
+            AgentToolbarAction::CopyScreen => {
+                let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+                    return;
+                };
+                let contents = view.with_screen(|screen| screen.contents());
+                self.copy_terminal_text_to_clipboard(
+                    contents,
+                    "Visible terminal copied to clipboard",
+                );
+            }
+            AgentToolbarAction::CycleEffort => {
+                let next = self
+                    .agent_toolbar_effort
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default()
+                    .next();
+                self.agent_toolbar_effort.insert(pane_id, next);
+                if next == EffortLevel::Ultracode {
+                    self.send_terminal_bytes(pane_id, b"ultracode ".to_vec(), None);
+                } else {
+                    let bytes = format!("/effort {}\r", next.command_word()).into_bytes();
+                    self.send_terminal_bytes(
+                        pane_id,
+                        bytes,
+                        Some(PromptSubmissionSource::ToolbarAction),
+                    );
+                }
+            }
+            _ => {
+                let Some(provider) = self.agent_toolbar_provider(pane_id) else {
+                    return;
+                };
+                let Some(command) = crate::agent_toolbar::command_for(provider, action) else {
+                    return;
+                };
+                let mut bytes = command.as_bytes().to_vec();
+                bytes.push(b'\r');
+                self.send_terminal_bytes(
+                    pane_id,
+                    bytes,
+                    Some(PromptSubmissionSource::ToolbarAction),
+                );
+            }
+        }
+    }
+
+    /// Updates which agent-toolbar button is under the pointer, if any.
+    pub(crate) fn set_agent_toolbar_hover(&mut self, hover: Option<(NodeId, AgentToolbarAction)>) {
+        self.hovered_agent_toolbar_action = hover;
+    }
+
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
@@ -4047,6 +4205,7 @@ impl App {
             AppearanceRow::ShowInferredTitleIcons => self.settings_toggle_inferred_title_icons(),
             AppearanceRow::AgentDebugMenu => self.settings_toggle_agent_debug_menu(),
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
+            AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
         }
     }
 
@@ -5468,6 +5627,7 @@ impl App {
         &mut self,
         pane_id: NodeId,
         source_row: usize,
+        click_column: usize,
         column: u16,
         row: u16,
     ) {
@@ -5486,13 +5646,34 @@ impl App {
                 .unwrap_or_default();
             (source_line_text, visible_contents)
         });
+        // Resolved once per click, the same way `handle_pane_mouse`'s
+        // Ctrl+click link detection does: computing it here keeps
+        // `open_target::resolve_at` free of I/O beyond the final metadata
+        // check, so it stays unit-testable without a live terminal.
+        let home_dir =
+            directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf());
+        let open_target = crate::open_target::resolve_at(
+            &source_line_text,
+            click_column,
+            &self.session_cwd,
+            home_dir.as_deref(),
+        )
+        .or_else(|| {
+            view.osc8_link_at(&source_line_text, click_column)
+                .and_then(|url| crate::open_target::resolve_url(&url))
+        });
         let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
-        let mut actions = Vec::with_capacity(5 + screen_transfer_actions.len());
+        let mut actions = Vec::with_capacity(6 + screen_transfer_actions.len());
         // Preserve the existing agent-debug entry point and its first-row
         // activation contract when the user has explicitly enabled it. The
         // activation itself still verifies that this exact pane is an agent.
         if self.ui_settings.agent_debug_menu_enabled {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
+        }
+        if self.is_detected_agent_pane(pane_id) {
+            actions.push(TerminalContextAction::ToggleAgentToolbar {
+                currently_visible: self.shows_agent_toolbar(pane_id),
+            });
         }
         actions.extend([
             TerminalContextAction::CopyLineToClipboard,
@@ -5500,6 +5681,9 @@ impl App {
             TerminalContextAction::CopyFullTerminalHistoryToClipboard,
             TerminalContextAction::PasteClipboard,
         ]);
+        if let Some(open_target) = open_target {
+            actions.push(TerminalContextAction::OpenExternally(open_target));
+        }
         actions.extend(screen_transfer_actions);
         let label_width = actions
             .iter()
@@ -5556,7 +5740,31 @@ impl App {
                 &destination_label,
             ),
             TerminalContextAction::ShowAgentDebugLog => self.open_agent_debug_log(menu.pane_id),
+            TerminalContextAction::ToggleAgentToolbar { .. } => {
+                self.settings_toggle_agent_toolbar()
+            }
+            TerminalContextAction::OpenExternally(target) => self.open_target_externally(target),
         }
+    }
+
+    /// Hands a resolved right-click target to the OS's own opener --
+    /// `xdg-open`/`open`/`ShellExecuteW` depending on platform, never a
+    /// shell, so nothing in the clicked text can be interpreted as a shell
+    /// operator. Shared by the terminal and editor-line context menus, which
+    /// both resolve targets through `open_target::resolve_at`.
+    fn open_target_externally(&mut self, target: crate::open_target::OpenTarget) {
+        use crate::open_target::OpenTarget;
+        let (result, display) = match &target {
+            OpenTarget::Url(url) => (ilium_platform::open_external::open_url(url), url.clone()),
+            OpenTarget::File(path) | OpenTarget::Directory(path) => (
+                ilium_platform::open_external::open_path(path),
+                path.display().to_string(),
+            ),
+        };
+        self.status_message = Some(match result {
+            Ok(()) => format!("Opening {display}"),
+            Err(error) => format!("Could not open {display}: {error}"),
+        });
     }
 
     /// Builds the context-menu entries from the same separator model used by
@@ -5806,10 +6014,11 @@ impl App {
     pub fn open_editor_line_context_menu(
         &mut self,
         source: EditorSourceLine,
+        click_column: usize,
         column: u16,
         row: u16,
     ) {
-        let actions = self.editor_line_context_actions(&source);
+        let actions = self.editor_line_context_actions(&source, click_column);
         let width = 34.min(self.layout.screen_area.width.max(1));
         let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
@@ -5833,7 +6042,7 @@ impl App {
             EditorLineContextAction::CopyLineToClipboard
             | EditorLineContextAction::CopyChapterToClipboard
             | EditorLineContextAction::CopyEntireFileToClipboard => {
-                match self.editor_clipboard_text_for_context_action(action, &source) {
+                match self.editor_clipboard_text_for_context_action(action.clone(), &source) {
                     Ok(text) => self.copy_editor_text_to_clipboard(text, action),
                     Err(message) => self.status_message = Some(message),
                 }
@@ -5854,6 +6063,7 @@ impl App {
                 self.request_new_editor(parent_group, path.clone());
                 self.status_message = Some(format!("Opening {}", path.display()));
             }
+            EditorLineContextAction::OpenExternally(target) => self.open_target_externally(target),
             EditorLineContextAction::CreateAgentFromLine => {
                 let parent_group = self
                     .tree
@@ -5873,6 +6083,7 @@ impl App {
     fn editor_line_context_actions(
         &self,
         source: &EditorSourceLine,
+        click_column: usize,
     ) -> Vec<EditorLineContextAction> {
         let mut actions = vec![EditorLineContextAction::CopyLineToClipboard];
         if crate::editor_line_path::project_file_from_line(&source.text, &self.session_cwd)
@@ -5895,6 +6106,16 @@ impl App {
         }
         actions.push(EditorLineContextAction::CopyEntireFileToClipboard);
         actions.push(EditorLineContextAction::CreateAgentFromLine);
+        let home_dir =
+            directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf());
+        if let Some(target) = crate::open_target::resolve_at(
+            &source.text,
+            click_column,
+            &self.session_cwd,
+            home_dir.as_deref(),
+        ) {
+            actions.push(EditorLineContextAction::OpenExternally(target));
+        }
         actions
     }
 
@@ -5942,6 +6163,9 @@ impl App {
             EditorLineContextAction::CreateAgentFromLine => {
                 Err("Create agent from line does not copy text".to_string())
             }
+            EditorLineContextAction::OpenExternally(_) => {
+                Err("Open externally does not copy text".to_string())
+            }
         }
     }
 
@@ -5962,7 +6186,8 @@ impl App {
                     EditorLineContextAction::CopyEntireFileToClipboard => {
                         "Entire file copied to clipboard"
                     }
-                    EditorLineContextAction::CreateAgentFromLine => {
+                    EditorLineContextAction::CreateAgentFromLine
+                    | EditorLineContextAction::OpenExternally(_) => {
                         unreachable!("only clipboard actions reach the clipboard adapter")
                     }
                 };
@@ -7646,6 +7871,20 @@ impl App {
             return;
         };
         let id = viewport.pane_id;
+        // The hamburger sits on the border/title row, outside `content_area`
+        // entirely, so it must be checked before the `content_area` bail-out
+        // below -- it reuses `theme::CHROME_ICONS`' existing glyph rather
+        // than drawing a second one (see `chrome_hamburger_cell`'s doc
+        // comment), made clickable only for a currently detected agent pane.
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        ) && self.is_detected_agent_pane(id)
+            && theme::chrome_hamburger_cell(viewport.outer_area) == position
+        {
+            self.settings_toggle_agent_toolbar();
+            return;
+        }
         if self
             .completed_agent_close_action(viewport)
             .is_some_and(|action| action.button_area.contains(position))
@@ -7668,6 +7907,45 @@ impl App {
         }
         if !viewport.content_area.contains(position) {
             return;
+        }
+
+        if let Some(toolbar_area) = viewport.toolbar_area {
+            if toolbar_area.contains(position)
+                && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
+            {
+                let provider = self.agent_toolbar_provider(id);
+                let effort = self
+                    .agent_toolbar_effort
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_default();
+                let action = crate::agent_toolbar::action_at(
+                    toolbar_area,
+                    provider,
+                    &self.ui_settings.icons,
+                    effort,
+                    position,
+                );
+                match mouse.kind {
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        if let Some(action) = action {
+                            self.execute_agent_toolbar_action(id, action);
+                        }
+                    }
+                    crossterm::event::MouseEventKind::Moved => {
+                        self.set_agent_toolbar_hover(action.map(|action| (id, action)));
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            if matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
+                && self
+                    .hovered_agent_toolbar_action
+                    .is_some_and(|(hovered_pane, _)| hovered_pane == id)
+            {
+                self.set_agent_toolbar_hover(None);
+            }
         }
 
         if matches!(self.panes.get(&id), Some(PaneRuntime::Editor(_))) {
@@ -7693,7 +7971,14 @@ impl App {
         ) && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
         {
             let source_row = usize::from(position.y.saturating_sub(viewport.content_area.y));
-            self.open_terminal_pane_context_menu(id, source_row, position.x, position.y);
+            let click_column = usize::from(position.x.saturating_sub(viewport.content_area.x));
+            self.open_terminal_pane_context_menu(
+                id,
+                source_row,
+                click_column,
+                position.x,
+                position.y,
+            );
             return;
         }
 
@@ -7785,18 +8070,8 @@ impl App {
         if open {
             match link {
                 crate::terminal_links::TerminalLink::Url(url) => {
-                    match std::process::Command::new("xdg-open").arg(&url).spawn() {
-                        Ok(child) => {
-                            self.status_message = Some(format!("Opening {url}"));
-                            // `xdg-open` hands the URL to the preferred
-                            // browser and exits almost immediately, but a
-                            // dropped `Child` is never reaped on Unix --
-                            // without this it stays a zombie in the process
-                            // table for the rest of this long-lived TUI
-                            // process. Reap it on a detached thread instead
-                            // of blocking the UI on it.
-                            reap_child_on_thread(child);
-                        }
+                    match ilium_platform::open_external::open_url(&url) {
+                        Ok(()) => self.status_message = Some(format!("Opening {url}")),
                         Err(error) => {
                             self.status_message = Some(format!("Could not open link: {error}"))
                         }
@@ -8061,12 +8336,12 @@ impl App {
             }
             let source_visual_row = usize::from(editor.source_scroll_row())
                 + usize::from(position.y.saturating_sub(chrome.content_area.y));
-            let Some(source_row) = editor
-                .source_visual_row_at(chrome.content_area.width, source_visual_row)
-                .map(|visual_row| visual_row.source_row)
+            let Some(visual_row) =
+                editor.source_visual_row_at(chrome.content_area.width, source_visual_row)
             else {
                 return;
             };
+            let source_row = visual_row.source_row;
             let Some(line_text) = editor.textarea.lines().get(source_row).cloned() else {
                 return;
             };
@@ -8074,6 +8349,23 @@ impl App {
                 self.status_message = Some("This editor has no file path".to_string());
                 return;
             };
+            // Same gutter math as `checkbox_at`'s column mapping (including
+            // its "assumes no horizontal scroll" caveat): `start_column` is
+            // `visual_row`'s own first physical-line column, so the on-screen
+            // offset past the gutter lands the click at the right character
+            // even when a long line has wrapped into several visual rows.
+            let gutter_width = if editor.show_line_numbers {
+                usize::from(crate::editor_highlight::line_number_gutter_width(
+                    editor.textarea.lines().len(),
+                ))
+            } else {
+                0
+            };
+            let clicked_col_on_screen =
+                usize::from(position.x.saturating_sub(chrome.content_area.x));
+            let click_column = visual_row
+                .start_column
+                .saturating_add(clicked_col_on_screen.saturating_sub(gutter_width));
             self.open_editor_line_context_menu(
                 EditorSourceLine {
                     pane_id: id,
@@ -8081,6 +8373,7 @@ impl App {
                     line_number: source_row + 1,
                     text: line_text,
                 },
+                click_column,
                 mouse.column,
                 mouse.row,
             );
@@ -8290,22 +8583,6 @@ fn checkbox_at(
     checkbox_span
         .contains(&clicked_col_on_screen)
         .then_some((row, bracket_col, checked))
-}
-
-/// Reaps a spawned child process on a detached thread so it never lingers
-/// as a zombie for the rest of this long-lived TUI process. Only suitable
-/// for short-lived, fire-and-forget children (e.g. `xdg-open` handing a URL
-/// to a browser) -- the thread's only job is to block on `wait()` until the
-/// child exits, then it ends on its own, so there is nothing to cancel or
-/// track a `JoinHandle` for.
-fn reap_child_on_thread(mut child: std::process::Child) {
-    std::thread::spawn(move || match child.wait() {
-        Ok(status) if !status.success() => {
-            tracing::warn!("child process exited with {status}");
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!("failed to reap child process: {error}"),
-    });
 }
 
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {
@@ -10767,7 +11044,9 @@ mod tests {
         let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
             panic!("detected agent right click should retain terminal copy actions");
         };
-        assert_eq!(menu.actions.len(), 4);
+        // The extra entry is `ToggleAgentToolbar`, present for any detected
+        // agent pane -- see the next assertion for its exact position.
+        assert_eq!(menu.actions.len(), 5);
 
         app.ui_settings.agent_debug_menu_enabled = true;
         app.handle_pane_mouse(right_click, position);
@@ -10778,11 +11057,186 @@ mod tests {
             menu.actions,
             vec![
                 TerminalContextAction::ShowAgentDebugLog,
+                TerminalContextAction::ToggleAgentToolbar {
+                    currently_visible: true,
+                },
                 TerminalContextAction::CopyLineToClipboard,
                 TerminalContextAction::CopyVisibleTerminalToClipboard,
                 TerminalContextAction::CopyFullTerminalHistoryToClipboard,
                 TerminalContextAction::PasteClipboard,
             ]
+        );
+    }
+
+    #[test]
+    fn agent_toolbar_actions_send_the_bytes_their_tooltip_promises() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        app.take_outbound_requests();
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Compact);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"/compact\r".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Stop);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"\x1b".to_vec(),
+                submission: None,
+            }]
+        );
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Model(0));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"/model haiku\r".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        // Auto -> Low -> Medium -> High -> XHigh -> Max -> Ultracode: six
+        // clicks reach the one level that deliberately doesn't become a
+        // slash command (see `EffortLevel::Ultracode`'s doc comment).
+        for _ in 0..5 {
+            app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CycleEffort);
+            app.take_outbound_requests();
+        }
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CycleEffort);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"ultracode ".to_vec(),
+                submission: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn closing_the_agent_toolbar_hides_it_and_resizes_the_pty_back_up() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        app.agent_toolbar_latched_panes.insert(pane_id);
+        assert!(app.shows_agent_toolbar(pane_id));
+        // Mirrors what `render_cache`'s `PaneStatusChanged` handler does
+        // right after latching in production -- without it,
+        // `requested_pane_sizes` would still hold the pre-toolbar height and
+        // dedupe away the very resize this test is checking for.
+        app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        let shrunk_height = app.pane_viewport(pane_id).unwrap().content_area.height;
+        app.take_outbound_requests();
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Close);
+
+        assert!(!app.ui_settings.agent_toolbar_enabled);
+        assert!(!app.shows_agent_toolbar(pane_id));
+        let restored = app.pane_viewport(pane_id).unwrap();
+        assert_eq!(restored.toolbar_area, None);
+        assert_eq!(restored.content_area.height, shrunk_height + 1);
+        let resize = app
+            .take_outbound_requests()
+            .into_iter()
+            .find_map(|request| match request {
+                ClientRequest::ResizePane {
+                    pane_id: resized_pane,
+                    rows,
+                    ..
+                } if resized_pane == pane_id => Some(rows),
+                _ => None,
+            });
+        assert_eq!(resize, Some(restored.content_area.height));
+    }
+
+    #[test]
+    fn right_click_on_an_existing_file_offers_open_externally() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let project = tempfile::tempdir().unwrap();
+        let file_path = project.path().join("README.md");
+        std::fs::write(&file_path, "# hi").unwrap();
+        let resolved_path = project.path().join("./README.md");
+
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                view.feed(b"see ./README.md for details");
+                view
+            })),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        // "see ./README.md ..." -- column 4 lands inside the file token.
+        let position = Position::new(viewport.content_area.x + 4, viewport.content_area.y);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("right click should open the terminal menu");
+        };
+        assert!(
+            menu.actions
+                .contains(&TerminalContextAction::OpenExternally(
+                    crate::open_target::OpenTarget::File(resolved_path)
+                )),
+            "menu should offer to open the existing file the click resolved to: {:?}",
+            menu.actions
         );
     }
 
@@ -11285,7 +11739,73 @@ mod tests {
                 EditorLineContextAction::OpenFileInEditor,
                 EditorLineContextAction::CopyEntireFileToClipboard,
                 EditorLineContextAction::CreateAgentFromLine,
+                EditorLineContextAction::OpenExternally(crate::open_target::OpenTarget::File(
+                    target_path
+                )),
             ]
+        );
+    }
+
+    /// Exercises the gutter/visual-row column math end to end: the clicked
+    /// screen column must land on the same character the line-number gutter
+    /// pushed the text past, not three columns short of it.
+    #[test]
+    fn editor_right_click_on_an_existing_path_offers_open_externally() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let project = tempfile::tempdir().unwrap();
+        let target_path = project.path().join("docs").join("guide.md");
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(&target_path, "# Guide\n").unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let editor_id = app
+            .tree
+            .add_pane(group, "main.rs", PaneContentKind::Editor)
+            .unwrap();
+        let mut editor = EditorPane::empty();
+        editor.path = Some(project.path().join("tasks.md"));
+        editor.textarea = ratatui_textarea::TextArea::from([
+            "first();",
+            "see docs/guide.md for details",
+            "third();",
+        ]);
+        assert!(
+            editor.show_line_numbers,
+            "fixture assumes a 3-column gutter"
+        );
+        app.panes
+            .insert(editor_id, PaneRuntime::Editor(Box::new(editor)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: editor_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(editor_id).unwrap();
+        let content = crate::editor_chrome::compute(viewport.content_area, true).content_area;
+        // Gutter is 3 columns ("n  ") for a 3-line buffer; "see " is 4 more,
+        // so column 9 lands on the 'c' of "docs/guide.md".
+        let position = Position::new(content.x + 9, content.y + 1);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: position.x,
+                row: position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        let Mode::EditorLineContextMenu(menu) = &app.mode else {
+            panic!("right-click should open a source-line context menu");
+        };
+        assert_eq!(menu.source.text, "see docs/guide.md for details");
+        assert!(
+            menu.actions
+                .contains(&EditorLineContextAction::OpenExternally(
+                    crate::open_target::OpenTarget::File(target_path.clone())
+                )),
+            "menu should offer to open the existing file the click resolved to: {:?}",
+            menu.actions
         );
     }
 
@@ -11310,12 +11830,15 @@ mod tests {
         };
 
         assert_eq!(
-            app.editor_line_context_actions(&source),
+            app.editor_line_context_actions(&source, 5),
             vec![
                 EditorLineContextAction::CopyLineToClipboard,
                 EditorLineContextAction::OpenFileInEditor,
                 EditorLineContextAction::CopyEntireFileToClipboard,
                 EditorLineContextAction::CreateAgentFromLine,
+                EditorLineContextAction::OpenExternally(crate::open_target::OpenTarget::File(
+                    target_path.clone()
+                )),
             ]
         );
         app.execute_editor_line_context_action(EditorLineContextAction::OpenFileInEditor, source);
@@ -11360,7 +11883,7 @@ mod tests {
         };
 
         assert_eq!(
-            app.editor_line_context_actions(&source),
+            app.editor_line_context_actions(&source, 0),
             vec![
                 EditorLineContextAction::CopyLineToClipboard,
                 EditorLineContextAction::CopyChapterToClipboard,

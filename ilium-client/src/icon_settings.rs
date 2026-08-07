@@ -45,10 +45,22 @@ pub enum IconTarget {
     ScreenTransferRight,
     ScreenTransferUp,
     ScreenTransferDown,
+    OpenExternal,
+    AgentToolbarClose,
+    AgentToolbarCompact,
+    AgentToolbarClear,
+    AgentToolbarConfig,
+    AgentToolbarStop,
+    AgentToolbarCopyScreen,
+    AgentToolbarCopyLastMessage,
+    AgentToolbarEffort,
+    AgentToolbarModel,
+    AgentToolbarExit,
+    AgentToolbarFast,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 45] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -82,6 +94,18 @@ impl IconTarget {
         Self::ScreenTransferRight,
         Self::ScreenTransferUp,
         Self::ScreenTransferDown,
+        Self::OpenExternal,
+        Self::AgentToolbarClose,
+        Self::AgentToolbarCompact,
+        Self::AgentToolbarClear,
+        Self::AgentToolbarConfig,
+        Self::AgentToolbarStop,
+        Self::AgentToolbarCopyScreen,
+        Self::AgentToolbarCopyLastMessage,
+        Self::AgentToolbarEffort,
+        Self::AgentToolbarModel,
+        Self::AgentToolbarExit,
+        Self::AgentToolbarFast,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -119,6 +143,18 @@ impl IconTarget {
             Self::ScreenTransferRight => "Screen transfer: paste right",
             Self::ScreenTransferUp => "Screen transfer: paste up",
             Self::ScreenTransferDown => "Screen transfer: paste down",
+            Self::OpenExternal => "Open in OS (browser/file/folder)",
+            Self::AgentToolbarClose => "Agent toolbar: close",
+            Self::AgentToolbarCompact => "Agent toolbar: compact",
+            Self::AgentToolbarClear => "Agent toolbar: clear",
+            Self::AgentToolbarConfig => "Agent toolbar: config",
+            Self::AgentToolbarStop => "Agent toolbar: stop",
+            Self::AgentToolbarCopyScreen => "Agent toolbar: copy screen",
+            Self::AgentToolbarCopyLastMessage => "Agent toolbar: copy last message",
+            Self::AgentToolbarEffort => "Agent toolbar: effort",
+            Self::AgentToolbarModel => "Agent toolbar: model",
+            Self::AgentToolbarExit => "Agent toolbar: exit",
+            Self::AgentToolbarFast => "Agent toolbar: fast",
         }
     }
 
@@ -157,6 +193,18 @@ impl IconTarget {
             Self::ScreenTransferRight => "screen_transfer_right",
             Self::ScreenTransferUp => "screen_transfer_up",
             Self::ScreenTransferDown => "screen_transfer_down",
+            Self::OpenExternal => "open_external",
+            Self::AgentToolbarClose => "agent_toolbar_close",
+            Self::AgentToolbarCompact => "agent_toolbar_compact",
+            Self::AgentToolbarClear => "agent_toolbar_clear",
+            Self::AgentToolbarConfig => "agent_toolbar_config",
+            Self::AgentToolbarStop => "agent_toolbar_stop",
+            Self::AgentToolbarCopyScreen => "agent_toolbar_copy_screen",
+            Self::AgentToolbarCopyLastMessage => "agent_toolbar_copy_last_message",
+            Self::AgentToolbarEffort => "agent_toolbar_effort",
+            Self::AgentToolbarModel => "agent_toolbar_model",
+            Self::AgentToolbarExit => "agent_toolbar_exit",
+            Self::AgentToolbarFast => "agent_toolbar_fast",
         }
     }
 
@@ -199,6 +247,18 @@ impl IconTarget {
             Self::ScreenTransferRight => "→",
             Self::ScreenTransferUp => "↑",
             Self::ScreenTransferDown => "↓",
+            Self::OpenExternal => "🔗",
+            Self::AgentToolbarClose => "✕",
+            Self::AgentToolbarCompact => "🗜️",
+            Self::AgentToolbarClear => "🧹",
+            Self::AgentToolbarConfig => "🎛️",
+            Self::AgentToolbarStop => "⏹",
+            Self::AgentToolbarCopyScreen => "📋",
+            Self::AgentToolbarCopyLastMessage => "💬",
+            Self::AgentToolbarEffort => "🎚️",
+            Self::AgentToolbarModel => "🧩",
+            Self::AgentToolbarExit => "🚪",
+            Self::AgentToolbarFast => "⚡",
         }
     }
 
@@ -234,6 +294,18 @@ impl IconTarget {
             Self::ScreenTransferRight => &["→", "⇒", "➡️", "▶"],
             Self::ScreenTransferUp => &["↑", "⇑", "⬆️", "▲"],
             Self::ScreenTransferDown => &["↓", "⇓", "⬇️", "▼"],
+            Self::OpenExternal => &["🔗", "↗️", "🌐", "📤"],
+            Self::AgentToolbarClose => &["✕", "×", "✗", "⨯"],
+            Self::AgentToolbarCompact => &["🗜️", "📦", "🤏", "📉"],
+            Self::AgentToolbarClear => &["🧹", "🗑️", "♻️", "⌫"],
+            Self::AgentToolbarConfig => &["🎛️", "⚙️", "🔧", "🛠️"],
+            Self::AgentToolbarStop => &["⏹", "✋", "🛑", "⏸"],
+            Self::AgentToolbarCopyScreen => &["📋", "🖥️", "📸", "🗂️"],
+            Self::AgentToolbarCopyLastMessage => &["💬", "📨", "✉️", "🗨️"],
+            Self::AgentToolbarEffort => &["🎚️", "⚖️", "📶", "🌡️"],
+            Self::AgentToolbarModel => &["🧩", "🧠", "🤖", "✦"],
+            Self::AgentToolbarExit => &["🚪", "⏏️", "👋", "⛔"],
+            Self::AgentToolbarFast => &["⚡", "🚀", "💨", "🏃"],
         }
     }
 }
@@ -275,6 +347,18 @@ pub struct IconSettings {
     pub screen_transfer_right: String,
     pub screen_transfer_up: String,
     pub screen_transfer_down: String,
+    pub open_external: String,
+    pub agent_toolbar_close: String,
+    pub agent_toolbar_compact: String,
+    pub agent_toolbar_clear: String,
+    pub agent_toolbar_config: String,
+    pub agent_toolbar_stop: String,
+    pub agent_toolbar_copy_screen: String,
+    pub agent_toolbar_copy_last_message: String,
+    pub agent_toolbar_effort: String,
+    pub agent_toolbar_model: String,
+    pub agent_toolbar_exit: String,
+    pub agent_toolbar_fast: String,
 }
 
 impl Default for IconSettings {
@@ -319,6 +403,18 @@ impl IconSettings {
             screen_transfer_right: value(IconTarget::ScreenTransferRight),
             screen_transfer_up: value(IconTarget::ScreenTransferUp),
             screen_transfer_down: value(IconTarget::ScreenTransferDown),
+            open_external: value(IconTarget::OpenExternal),
+            agent_toolbar_close: value(IconTarget::AgentToolbarClose),
+            agent_toolbar_compact: value(IconTarget::AgentToolbarCompact),
+            agent_toolbar_clear: value(IconTarget::AgentToolbarClear),
+            agent_toolbar_config: value(IconTarget::AgentToolbarConfig),
+            agent_toolbar_stop: value(IconTarget::AgentToolbarStop),
+            agent_toolbar_copy_screen: value(IconTarget::AgentToolbarCopyScreen),
+            agent_toolbar_copy_last_message: value(IconTarget::AgentToolbarCopyLastMessage),
+            agent_toolbar_effort: value(IconTarget::AgentToolbarEffort),
+            agent_toolbar_model: value(IconTarget::AgentToolbarModel),
+            agent_toolbar_exit: value(IconTarget::AgentToolbarExit),
+            agent_toolbar_fast: value(IconTarget::AgentToolbarFast),
         }
     }
 
@@ -357,6 +453,18 @@ impl IconSettings {
             IconTarget::ScreenTransferRight => &self.screen_transfer_right,
             IconTarget::ScreenTransferUp => &self.screen_transfer_up,
             IconTarget::ScreenTransferDown => &self.screen_transfer_down,
+            IconTarget::OpenExternal => &self.open_external,
+            IconTarget::AgentToolbarClose => &self.agent_toolbar_close,
+            IconTarget::AgentToolbarCompact => &self.agent_toolbar_compact,
+            IconTarget::AgentToolbarClear => &self.agent_toolbar_clear,
+            IconTarget::AgentToolbarConfig => &self.agent_toolbar_config,
+            IconTarget::AgentToolbarStop => &self.agent_toolbar_stop,
+            IconTarget::AgentToolbarCopyScreen => &self.agent_toolbar_copy_screen,
+            IconTarget::AgentToolbarCopyLastMessage => &self.agent_toolbar_copy_last_message,
+            IconTarget::AgentToolbarEffort => &self.agent_toolbar_effort,
+            IconTarget::AgentToolbarModel => &self.agent_toolbar_model,
+            IconTarget::AgentToolbarExit => &self.agent_toolbar_exit,
+            IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
         }
     }
 
@@ -395,6 +503,18 @@ impl IconSettings {
             IconTarget::ScreenTransferRight => &mut self.screen_transfer_right,
             IconTarget::ScreenTransferUp => &mut self.screen_transfer_up,
             IconTarget::ScreenTransferDown => &mut self.screen_transfer_down,
+            IconTarget::OpenExternal => &mut self.open_external,
+            IconTarget::AgentToolbarClose => &mut self.agent_toolbar_close,
+            IconTarget::AgentToolbarCompact => &mut self.agent_toolbar_compact,
+            IconTarget::AgentToolbarClear => &mut self.agent_toolbar_clear,
+            IconTarget::AgentToolbarConfig => &mut self.agent_toolbar_config,
+            IconTarget::AgentToolbarStop => &mut self.agent_toolbar_stop,
+            IconTarget::AgentToolbarCopyScreen => &mut self.agent_toolbar_copy_screen,
+            IconTarget::AgentToolbarCopyLastMessage => &mut self.agent_toolbar_copy_last_message,
+            IconTarget::AgentToolbarEffort => &mut self.agent_toolbar_effort,
+            IconTarget::AgentToolbarModel => &mut self.agent_toolbar_model,
+            IconTarget::AgentToolbarExit => &mut self.agent_toolbar_exit,
+            IconTarget::AgentToolbarFast => &mut self.agent_toolbar_fast,
         };
         *slot = glyph;
     }

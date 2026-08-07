@@ -2419,6 +2419,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ShowInferredTitleIcons => "Show inferred title icons",
         AppearanceRow::AgentDebugMenu => "Agent debug menu",
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
+        AppearanceRow::AgentToolbar => "Agent toolbar",
     }
 }
 
@@ -2464,6 +2465,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ContextMenuIcons => {
             "Show the configurable semantic icon beside every tree, terminal, editor-line, and file right-click action."
+        }
+        AppearanceRow::AgentToolbar => {
+            "Show the action toolbar (compact/clear/model/effort/stop/exit) above every detected agent pane. Open it again from the pane's \u{2261} icon or right-click menu."
         }
     }
 }
@@ -2524,6 +2528,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off (text only)".to_string()
+            }
+        }
+        AppearanceRow::AgentToolbar => {
+            if ui.agent_toolbar_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
             }
         }
     }

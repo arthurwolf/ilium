@@ -57,6 +57,7 @@ mod tests {
             outer_area: Rect::new(10, 4, 40, 12),
             content_area: Rect::new(11, 5, 38, 10),
             slot_index: 0,
+            toolbar_area: None,
         };
 
         let action = layout(viewport).expect("non-empty pane content has an action row");
@@ -72,6 +73,7 @@ mod tests {
             outer_area: Rect::new(10, 4, 2, 2),
             content_area: Rect::new(11, 5, 0, 0),
             slot_index: 0,
+            toolbar_area: None,
         };
 
         assert_eq!(layout(viewport), None);

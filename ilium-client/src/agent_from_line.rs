@@ -56,18 +56,22 @@ pub struct EditorSourceLine {
 }
 
 /// Actions exposed by the source-line context menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorLineContextAction {
     CopyLineToClipboard,
     OpenFileInEditor,
     CopyChapterToClipboard,
     CopyEntireFileToClipboard,
     CreateAgentFromLine,
+    /// Present only when the clicked cell resolved to an allowed-scheme URL
+    /// or a path that exists on disk right now (see
+    /// `crate::open_target::resolve_at`).
+    OpenExternally(crate::open_target::OpenTarget),
 }
 
 impl EditorLineContextAction {
     /// Returns the shared icon role used by this editor-line action.
-    pub const fn icon_target(self) -> crate::icon_settings::IconTarget {
+    pub const fn icon_target(&self) -> crate::icon_settings::IconTarget {
         use crate::icon_settings::IconTarget;
         match self {
             Self::CopyLineToClipboard
@@ -75,16 +79,23 @@ impl EditorLineContextAction {
             | Self::CopyEntireFileToClipboard
             | Self::OpenFileInEditor => IconTarget::Editor,
             Self::CreateAgentFromLine => IconTarget::OtherAgent,
+            Self::OpenExternally(crate::open_target::OpenTarget::Directory(_)) => {
+                IconTarget::Folder
+            }
+            Self::OpenExternally(
+                crate::open_target::OpenTarget::Url(_) | crate::open_target::OpenTarget::File(_),
+            ) => IconTarget::OpenExternal,
         }
     }
 
-    pub const fn label(self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Self::CopyLineToClipboard => "Copy line to clipboard",
-            Self::OpenFileInEditor => "Open in editor",
-            Self::CopyChapterToClipboard => "Copy chapter to clipboard",
-            Self::CopyEntireFileToClipboard => "Copy entire file to clipboard",
-            Self::CreateAgentFromLine => "Create agent from line\u{2026}",
+            Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
+            Self::OpenFileInEditor => "Open in editor".to_string(),
+            Self::CopyChapterToClipboard => "Copy chapter to clipboard".to_string(),
+            Self::CopyEntireFileToClipboard => "Copy entire file to clipboard".to_string(),
+            Self::CreateAgentFromLine => "Create agent from line\u{2026}".to_string(),
+            Self::OpenExternally(target) => target.menu_label().to_string(),
         }
     }
 }

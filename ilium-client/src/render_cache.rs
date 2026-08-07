@@ -104,6 +104,19 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             // change that never actually happened.
             match app.tree.set_pane_status(pane_id, status) {
                 Ok(()) => {
+                    // The common path a pane first becomes a detected agent:
+                    // one incremental `PaneStatusChanged`, not a full
+                    // `TreeSnapshot`. Latching and resizing here (not only in
+                    // `apply_tree_snapshot`) is what makes the toolbar appear
+                    // -- and the PTY's row count shrink to match -- the same
+                    // tick detection actually fires, instead of waiting for
+                    // some unrelated later snapshot.
+                    if became_agent {
+                        app.agent_toolbar_latched_panes.insert(pane_id);
+                        app.resize_displayed_panes(
+                            ilium_ipc::PaneResizeCause::RightPanelPresentation,
+                        );
+                    }
                     let is_plain_terminal = app.tree.get(pane_id).is_some_and(|node| {
                         matches!(
                             node.kind,
@@ -410,6 +423,27 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.panes
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.retain_requested_pane_sizes(&live_pane_ids);
+    // Latches every pane currently showing a detected agent so its toolbar
+    // row, once reserved, survives a later detection revert back to
+    // `PlainShell` -- see `agent_toolbar_latched_panes`'s doc comment for
+    // why that latch (rather than reserving purely off live status) is what
+    // keeps a real agent PTY from getting resized by detection noise.
+    for node in app.tree.panes() {
+        if matches!(
+            &node.kind,
+            ilium_core::NodeKind::Pane {
+                status: ilium_core::PaneStatus::Agent(_, _)
+                    | ilium_core::PaneStatus::AgentWithGoal(_, _),
+                ..
+            }
+        ) {
+            app.agent_toolbar_latched_panes.insert(node.id);
+        }
+    }
+    app.agent_toolbar_latched_panes
+        .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.agent_toolbar_effort
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     // `NodeId` is never reused (see `ilium_core::Tree`), so every one of
     // these pane-keyed caches would otherwise grow by one entry per pane
     // ever created for the life of the client process -- a slow but
@@ -473,6 +507,12 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .is_some_and(|hit| app.tree.get(hit.id).is_none())
     {
         app.hovered_tree_node = None;
+    }
+    if app
+        .hovered_agent_toolbar_action
+        .is_some_and(|(pane_id, _)| !live_pane_ids.contains(&pane_id))
+    {
+        app.hovered_agent_toolbar_action = None;
     }
 
     let (rows, cols) = app.last_known_pane_size;
@@ -1108,6 +1148,66 @@ mod tests {
             app.tree_node_at(Position::new(list.x, list.y + 1))
                 .map(|hit| hit.id),
             Some(agent)
+        );
+    }
+
+    #[test]
+    fn pane_status_changed_alone_latches_and_reserves_the_agent_toolbar_row() {
+        // Regression test: the toolbar must not depend on a full
+        // `TreeSnapshot` following detection -- the server's actual
+        // detection path broadcasts an incremental `PaneStatusChanged`
+        // (`ilium-server::detection`), never a snapshot, so latching only
+        // inside `apply_tree_snapshot` left the toolbar permanently dark for
+        // every pane whose agent was detected after creation (the common
+        // case: a user types `codex` into an already-open shell pane).
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let before = app.pane_viewport(pane_id).unwrap();
+        assert_eq!(before.toolbar_area, None);
+        app.take_outbound_requests(); // drop the initial-size ResizePane
+
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            },
+        );
+
+        assert!(app.agent_toolbar_latched_panes.contains(&pane_id));
+        assert!(app.shows_agent_toolbar(pane_id));
+        let after = app.pane_viewport(pane_id).unwrap();
+        assert!(after.toolbar_area.is_some());
+        assert_eq!(after.content_area.height, before.content_area.height - 1);
+        // The PTY must be told the *reduced* size -- not just the render
+        // area -- or the agent's own bottom row (its input/prompt line)
+        // renders past what the real terminal was told it has.
+        let resize = app
+            .take_outbound_requests()
+            .into_iter()
+            .find_map(|request| match request {
+                ilium_ipc::ClientRequest::ResizePane {
+                    pane_id: resized_pane,
+                    rows,
+                    cols,
+                    ..
+                } if resized_pane == pane_id => Some((rows, cols)),
+                _ => None,
+            });
+        assert_eq!(
+            resize,
+            Some((after.content_area.height, after.content_area.width))
         );
     }
 

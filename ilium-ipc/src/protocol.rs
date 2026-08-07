@@ -91,6 +91,11 @@ pub enum PromptSubmissionSource {
     ScheduledInput,
     QueuedPrompt,
     InitialAgentPrompt,
+    /// A submission written by an agent-toolbar button (e.g. `/compact`,
+    /// `/clear`, a model switch) rather than typed or pasted by hand.
+    /// Appended last to preserve every earlier variant's bincode
+    /// discriminant, matching `ClientRequest`'s own append-only convention.
+    ToolbarAction,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here

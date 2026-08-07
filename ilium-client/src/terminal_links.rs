@@ -56,10 +56,13 @@ pub fn link_at(
         }
         let value = token
             .trim_start_matches(|character: char| {
-                matches!(character, ')' | ']' | '}' | ',' | ';' | '"' | '\'')
+                matches!(character, ')' | ']' | '}' | ',' | ';' | '"' | '\'' | '`')
             })
             .trim_end_matches(|character: char| {
-                matches!(character, ')' | ']' | '}' | ',' | '.' | ';' | '"' | '\'')
+                matches!(
+                    character,
+                    ')' | ']' | '}' | ',' | '.' | ';' | '"' | '\'' | '`'
+                )
             });
         if value.starts_with("https://") || value.starts_with("http://") {
             return Some(TerminalLink::Url(value.to_string()));
@@ -209,6 +212,27 @@ mod tests {
             Some(TerminalLink::File {
                 path: PathBuf::from("/repo/a/b:c.txt"),
                 line: Some(42),
+                column: None,
+            })
+        );
+    }
+
+    #[test]
+    fn strips_markdown_backticks_around_a_fenced_path() {
+        // Markdown-fenced paths (`` `docs/guide.md` ``) are the dominant form
+        // in editor buffers and agent chat output. Leaving the backticks
+        // attached would make the resolved path never exist on disk.
+        let link = link_at(
+            "see `docs/guide.md` for details",
+            5,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/docs/guide.md"),
+                line: None,
                 column: None,
             })
         );

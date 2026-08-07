@@ -1278,7 +1278,7 @@ fn handle_editor_line_context_menu_event(
             app.mode = Mode::EditorLineContextMenu(menu);
         }
         KeyCode::Enter => {
-            let action = menu.actions[menu.selected_index];
+            let action = menu.actions[menu.selected_index].clone();
             app.execute_editor_line_context_action(action, menu.source);
         }
         _ => app.mode = Mode::EditorLineContextMenu(menu),

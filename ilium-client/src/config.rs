@@ -738,6 +738,10 @@ pub struct UiSettings {
     /// entry. Disabling this preserves every action while restoring compact,
     /// text-only menus for terminals where icons are distracting.
     pub show_context_menu_icons: bool,
+    /// Shows the always-available action toolbar above detected agent panes
+    /// (compact/clear/model/effort/etc). Closing it from its own X button or
+    /// toggling it off here are the same action -- this one flag drives both.
+    pub agent_toolbar_enabled: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -756,6 +760,7 @@ impl Default for UiSettings {
             show_tree_row_management_controls: false,
             agent_debug_menu_enabled: false,
             show_context_menu_icons: true,
+            agent_toolbar_enabled: true,
             icons: IconSettings::default(),
         }
     }
@@ -841,6 +846,7 @@ struct RawUiConfig {
     show_tree_row_management_controls: Option<bool>,
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
+    agent_toolbar_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -1216,6 +1222,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_context_menu_icons: raw
             .show_context_menu_icons
             .unwrap_or(defaults.show_context_menu_icons),
+        agent_toolbar_enabled: raw
+            .agent_toolbar_enabled
+            .unwrap_or(defaults.agent_toolbar_enabled),
         icons,
     })
 }
@@ -1941,6 +1950,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "show_context_menu_icons".to_string(),
         toml::Value::Boolean(ui.show_context_menu_icons),
+    );
+    table.insert(
+        "agent_toolbar_enabled".to_string(),
+        toml::Value::Boolean(ui.agent_toolbar_enabled),
     );
     let icons = IconTarget::ALL
         .into_iter()
@@ -2707,6 +2720,7 @@ mod tests {
             show_tree_row_management_controls: true,
             agent_debug_menu_enabled: true,
             show_context_menu_icons: false,
+            agent_toolbar_enabled: false,
             use_stable_glyphs: true,
             icons,
         };

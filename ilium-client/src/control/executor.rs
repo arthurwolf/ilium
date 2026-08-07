@@ -96,12 +96,7 @@ fn execute_terminal_submission(
     require_terminal(app, pane_id)?;
     let mut bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
     bytes.push(b'\r');
-    queue_terminal_text(
-        app,
-        pane_id,
-        bytes,
-        Some(PromptSubmissionSource::VoiceControl),
-    );
+    app.send_terminal_bytes(pane_id, bytes, Some(PromptSubmissionSource::VoiceControl));
     Ok(ExecutionReceipt::queued(
         "Sent and submitted text to the terminal",
     ))
@@ -116,25 +111,8 @@ fn execute_terminal_typing(
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
     let bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
-    queue_terminal_text(app, pane_id, bytes, None);
+    app.send_terminal_bytes(pane_id, bytes, None);
     Ok(ExecutionReceipt::queued("Staged text in the terminal"))
-}
-
-/// Applies the shared presentation update and queues one atomic PTY payload.
-fn queue_terminal_text(
-    app: &mut App,
-    pane_id: ilium_core::NodeId,
-    bytes: Vec<u8>,
-    submission: Option<PromptSubmissionSource>,
-) {
-    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-        view.scroll_to_bottom();
-    }
-    app.queue_request(ClientRequest::KeyInput {
-        pane_id,
-        bytes,
-        submission,
-    });
 }
 
 fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionReceipt, String> {

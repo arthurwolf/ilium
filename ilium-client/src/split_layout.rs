@@ -47,6 +47,13 @@ pub struct PaneViewport {
     pub outer_area: Rect,
     pub content_area: Rect,
     pub slot_index: usize,
+    /// The reserved agent-toolbar row, one cell above `content_area`'s
+    /// current top edge -- `None` unless `App::pane_viewports` decided this
+    /// pane shows its toolbar. This crate stays tree/settings-agnostic (see
+    /// the module doc), so that decision and the resulting shrink of
+    /// `content_area` both happen in `App`, not here; this field only
+    /// carries the result so rendering, PTY sizing, and hit-testing agree.
+    pub toolbar_area: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -62,6 +69,33 @@ impl PaneViewport {
             outer_area,
             content_area,
             slot_index,
+            toolbar_area: None,
+        }
+    }
+
+    /// Reserves one row at the top of `content_area` for the agent toolbar,
+    /// returning the adjusted viewport. A no-op on an already-empty content
+    /// area so a sliver-sized split can't underflow into a huge `Rect`.
+    pub fn with_agent_toolbar_reserved(self) -> Self {
+        if self.content_area.height == 0 {
+            return self;
+        }
+        let toolbar_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y,
+            self.content_area.width,
+            1,
+        );
+        let content_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y.saturating_add(1),
+            self.content_area.width,
+            self.content_area.height.saturating_sub(1),
+        );
+        Self {
+            content_area,
+            toolbar_area: Some(toolbar_area),
+            ..self
         }
     }
 }
@@ -203,6 +237,47 @@ fn grid_areas(area: Rect) -> Vec<Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_toolbar_reservation_shrinks_content_from_the_top() {
+        let viewports =
+            allocate_viewports(Rect::new(0, 0, 40, 20), SplitOrientation::Vertical, &ids(1));
+        let viewport = viewports[0];
+        assert_eq!(viewport.toolbar_area, None);
+
+        let reserved = viewport.with_agent_toolbar_reserved();
+        assert_eq!(reserved.outer_area, viewport.outer_area);
+        assert_eq!(
+            reserved.toolbar_area,
+            Some(Rect::new(
+                viewport.content_area.x,
+                viewport.content_area.y,
+                viewport.content_area.width,
+                1
+            ))
+        );
+        assert_eq!(
+            reserved.content_area,
+            Rect::new(
+                viewport.content_area.x,
+                viewport.content_area.y + 1,
+                viewport.content_area.width,
+                viewport.content_area.height - 1
+            )
+        );
+    }
+
+    #[test]
+    fn agent_toolbar_reservation_is_a_no_op_on_an_empty_content_area() {
+        let viewports = allocate_viewports(
+            Rect::new(u16::MAX, u16::MAX, 1, 1),
+            SplitOrientation::Horizontal,
+            &ids(1),
+        );
+        let reserved = viewports[0].with_agent_toolbar_reserved();
+        assert_eq!(reserved.toolbar_area, None);
+        assert_eq!(reserved.content_area.height, 0);
+    }
 
     fn ids(count: u64) -> Vec<NodeId> {
         (1..=count).map(NodeId).collect()

@@ -25,6 +25,8 @@
 //! - [`detached`] -- spawning a server process that outlives its parent.
 //! - [`thread_priority`] -- lowering one background worker thread so CPU-heavy
 //!   work never competes with keystrokes and rendering.
+//! - [`open_external`] -- handing a URL or path to the OS's own default
+//!   browser/file-manager handler.
 //!
 //! Where a platform genuinely cannot answer a question ([`process_info`] on
 //! Windows, which has no cheap unprivileged equivalent of `/proc/<pid>/fd`),
@@ -33,6 +35,7 @@
 
 pub mod detached;
 pub mod file_lock;
+pub mod open_external;
 pub mod paths;
 pub mod process_control;
 pub mod process_info;

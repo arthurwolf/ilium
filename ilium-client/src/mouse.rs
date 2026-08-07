@@ -940,7 +940,8 @@ fn handle_editor_line_context_menu_mouse(
         return;
     }
     menu.selected_index = item_row;
-    app.execute_editor_line_context_action(menu.actions[item_row], menu.source);
+    let action = menu.actions[item_row].clone();
+    app.execute_editor_line_context_action(action, menu.source);
 }
 
 /// Handles direct manipulation of the agent selector, textarea, and explicit

@@ -7,6 +7,7 @@
 use ilium_core::NodeId;
 use ratatui::layout::Rect;
 
+use crate::open_target::OpenTarget;
 use crate::split_layout::PaneDirection;
 
 /// Actions available from a terminal pane's right-click menu.
@@ -22,6 +23,17 @@ pub enum TerminalContextAction {
         destination_label: String,
     },
     ShowAgentDebugLog,
+    /// Present only for a currently detected agent pane. Flips the same
+    /// global `ui_settings.agent_toolbar_enabled` flag the toolbar's own X
+    /// button and the hamburger icon drive; `currently_visible` only decides
+    /// this entry's label ("Show"/"Hide").
+    ToggleAgentToolbar {
+        currently_visible: bool,
+    },
+    /// Present only when the clicked cell resolved to an allowed-scheme URL
+    /// or a path that exists on disk right now (see
+    /// `crate::open_target::resolve_at`).
+    OpenExternally(OpenTarget),
 }
 
 impl TerminalContextAction {
@@ -41,6 +53,11 @@ impl TerminalContextAction {
                 PaneDirection::Down => IconTarget::ScreenTransferDown,
             },
             Self::ShowAgentDebugLog => IconTarget::Done,
+            Self::ToggleAgentToolbar { .. } => IconTarget::AgentToolbarConfig,
+            Self::OpenExternally(OpenTarget::Directory(_)) => IconTarget::Folder,
+            Self::OpenExternally(OpenTarget::Url(_) | OpenTarget::File(_)) => {
+                IconTarget::OpenExternal
+            }
         }
     }
 
@@ -62,6 +79,13 @@ impl TerminalContextAction {
                 direction.label()
             ),
             Self::ShowAgentDebugLog => "Show debug log".to_string(),
+            Self::ToggleAgentToolbar { currently_visible } => if *currently_visible {
+                "Hide agent toolbar"
+            } else {
+                "Show agent toolbar"
+            }
+            .to_string(),
+            Self::OpenExternally(target) => target.menu_label().to_string(),
         }
     }
 }

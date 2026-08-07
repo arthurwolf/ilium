@@ -32,6 +32,7 @@
 pub mod agent_debug_export;
 pub mod agent_debug_ui;
 pub mod agent_from_line;
+pub mod agent_toolbar;
 pub mod app;
 pub mod board;
 pub mod board_ui;
@@ -62,6 +63,7 @@ pub mod modal;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;

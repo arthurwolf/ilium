@@ -219,6 +219,19 @@ pub fn chrome_title(label: &str) -> Line<'static> {
     }
 }
 
+/// The exact cell `CHROME_ICONS`' leading "\u{2261}" (hamburger) glyph
+/// occupies on a panel's top border row: one cell for the border itself,
+/// then `CHROME_LEFT_INSET`. Every other panel leaves this glyph inert (see
+/// its doc comment); an agent pane makes it clickable to open/close its
+/// toolbar, reusing the glyph that's already there instead of drawing a
+/// second, visually duplicate hamburger.
+pub fn chrome_hamburger_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::Position {
+    ratatui::layout::Position::new(
+        outer_area.x + 1 + CHROME_LEFT_INSET.chars().count() as u16,
+        outer_area.y,
+    )
+}
+
 /// Nerd Font powerline round-cap glyphs used to give the status bar rounded
 /// ends: each is rendered with `fg` = the bar's own accent color and no
 /// explicit `bg` (so it blends into whatever sits outside the bar), the
