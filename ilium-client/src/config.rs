@@ -742,6 +742,9 @@ pub struct UiSettings {
     /// (compact/clear/model/effort/etc). Closing it from its own X button or
     /// toggling it off here are the same action -- this one flag drives both.
     pub agent_toolbar_enabled: bool,
+    /// Shows a short text label after every agent-toolbar icon, turning the
+    /// compact icon row into a traditional, easier-to-read text menu.
+    pub show_toolbar_labels: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -761,6 +764,7 @@ impl Default for UiSettings {
             agent_debug_menu_enabled: false,
             show_context_menu_icons: true,
             agent_toolbar_enabled: true,
+            show_toolbar_labels: true,
             icons: IconSettings::default(),
         }
     }
@@ -847,6 +851,7 @@ struct RawUiConfig {
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
+    show_toolbar_labels: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -1225,6 +1230,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         agent_toolbar_enabled: raw
             .agent_toolbar_enabled
             .unwrap_or(defaults.agent_toolbar_enabled),
+        show_toolbar_labels: raw
+            .show_toolbar_labels
+            .unwrap_or(defaults.show_toolbar_labels),
         icons,
     })
 }
@@ -1954,6 +1962,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_toolbar_enabled".to_string(),
         toml::Value::Boolean(ui.agent_toolbar_enabled),
+    );
+    table.insert(
+        "show_toolbar_labels".to_string(),
+        toml::Value::Boolean(ui.show_toolbar_labels),
     );
     let icons = IconTarget::ALL
         .into_iter()
@@ -2721,6 +2733,7 @@ mod tests {
             agent_debug_menu_enabled: true,
             show_context_menu_icons: false,
             agent_toolbar_enabled: false,
+            show_toolbar_labels: false,
             use_stable_glyphs: true,
             icons,
         };
@@ -2762,6 +2775,20 @@ mod tests {
         save_ui_settings(&dir, &ui).unwrap();
 
         assert!(!load(&dir).unwrap().ui.show_context_menu_icons);
+    }
+
+    #[test]
+    fn toolbar_labels_default_on_and_round_trip_through_ui_config() {
+        let dir = scratch_dir();
+        assert!(load(&dir).unwrap().ui.show_toolbar_labels);
+
+        let ui = UiSettings {
+            show_toolbar_labels: false,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+
+        assert!(!load(&dir).unwrap().ui.show_toolbar_labels);
     }
 
     #[test]

@@ -278,6 +278,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
     app.set_hovered_tree_node(None);
     app.set_tree_toolbar_hover(false, None);
+    if !app.layout.pane_area.contains(position) {
+        app.set_agent_toolbar_hover(None);
+    }
 
     if app.layout.pane_area.contains(position) {
         if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {

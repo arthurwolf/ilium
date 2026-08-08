@@ -1164,12 +1164,16 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 frame,
                 toolbar_area,
                 below_row,
-                app.agent_toolbar_provider(viewport.pane_id),
-                &app.ui_settings.icons,
-                app.agent_toolbar_effort
-                    .get(&viewport.pane_id)
-                    .copied()
-                    .unwrap_or_default(),
+                crate::agent_toolbar::ToolbarContext {
+                    provider: app.agent_toolbar_provider(viewport.pane_id),
+                    icons: &app.ui_settings.icons,
+                    effort: app
+                        .agent_toolbar_effort
+                        .get(&viewport.pane_id)
+                        .copied()
+                        .unwrap_or_default(),
+                    show_labels: app.ui_settings.show_toolbar_labels,
+                },
                 hovered,
             );
         }

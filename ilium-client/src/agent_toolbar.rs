@@ -207,6 +207,36 @@ pub fn command_for(
     }
 }
 
+/// Short label shown to the right of the icon when the toolbar's "show
+/// labels" setting is on. Empty for actions whose button text already
+/// carries a readable word (models, effort) -- appending here would
+/// duplicate it.
+pub const fn action_label(action: AgentToolbarAction) -> &'static str {
+    match action {
+        AgentToolbarAction::Close => "Close",
+        AgentToolbarAction::Stop => "Stop",
+        AgentToolbarAction::CopyScreen => "Screen",
+        AgentToolbarAction::CopyLastMessage => "Copy",
+        AgentToolbarAction::Compact => "Compact",
+        AgentToolbarAction::Clear => "Clear",
+        AgentToolbarAction::Config => "Config",
+        AgentToolbarAction::Exit => "Exit",
+        AgentToolbarAction::Fast => "Fast",
+        AgentToolbarAction::CycleEffort | AgentToolbarAction::Model(_) => "",
+    }
+}
+
+/// Appends `action`'s label after `glyph` when `show_labels` is set, mirroring
+/// how model/effort buttons already carry their own text.
+fn button_text(glyph: &str, action: AgentToolbarAction, show_labels: bool) -> String {
+    let label = action_label(action);
+    if show_labels && !label.is_empty() {
+        format!("{glyph} {label}")
+    } else {
+        glyph.to_string()
+    }
+}
+
 /// One-line hover description shown in the tooltip.
 pub fn tooltip_for(
     action: AgentToolbarAction,
@@ -245,25 +275,48 @@ struct Button {
     text: String,
 }
 
+/// Bundles the toolbar's per-pane presentation inputs. `center_buttons`,
+/// `button_rects`, `action_at`, and `render` all need the same four values
+/// together; grouping them keeps each function's own argument count small
+/// and stops a future addition from tipping any of them over clippy's
+/// too-many-arguments lint.
+#[derive(Clone, Copy)]
+pub struct ToolbarContext<'a> {
+    pub provider: Option<BuiltinAgentProvider>,
+    pub icons: &'a IconSettings,
+    pub effort: EffortLevel,
+    pub show_labels: bool,
+}
+
 /// The centered button group: universal actions available for every pane
 /// (Stop/CopyScreen), then provider-specific actions and models, only for
 /// panes whose provider is known. `provider` is `None` both for an
 /// undetected/custom (`AgentClass::Other`) agent and for a pane whose
 /// detected agent has since exited -- in both cases only the
 /// provider-independent buttons make sense to show.
-fn center_buttons(
-    provider: Option<BuiltinAgentProvider>,
-    icons: &IconSettings,
-    effort: EffortLevel,
-) -> Vec<Button> {
+fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
+    let ToolbarContext {
+        provider,
+        icons,
+        effort,
+        show_labels,
+    } = ctx;
     let mut buttons = vec![
         Button {
             action: AgentToolbarAction::Stop,
-            text: icons.glyph(IconTarget::AgentToolbarStop).to_string(),
+            text: button_text(
+                icons.glyph(IconTarget::AgentToolbarStop),
+                AgentToolbarAction::Stop,
+                show_labels,
+            ),
         },
         Button {
             action: AgentToolbarAction::CopyScreen,
-            text: icons.glyph(IconTarget::AgentToolbarCopyScreen).to_string(),
+            text: button_text(
+                icons.glyph(IconTarget::AgentToolbarCopyScreen),
+                AgentToolbarAction::CopyScreen,
+                show_labels,
+            ),
         },
     ];
     let Some(provider) = provider else {
@@ -274,11 +327,12 @@ fn center_buttons(
         provider: BuiltinAgentProvider,
         action: AgentToolbarAction,
         glyph: &str,
+        show_labels: bool,
     ) {
         if command_for(provider, action).is_some() {
             buttons.push(Button {
                 action,
-                text: glyph.to_string(),
+                text: button_text(glyph, action, show_labels),
             });
         }
     }
@@ -287,36 +341,58 @@ fn center_buttons(
         provider,
         AgentToolbarAction::CopyLastMessage,
         icons.glyph(IconTarget::AgentToolbarCopyLastMessage),
+        show_labels,
     );
     push_if_supported(
         &mut buttons,
         provider,
         AgentToolbarAction::Compact,
         icons.glyph(IconTarget::AgentToolbarCompact),
+        show_labels,
     );
     push_if_supported(
         &mut buttons,
         provider,
         AgentToolbarAction::Clear,
         icons.glyph(IconTarget::AgentToolbarClear),
+        show_labels,
     );
     push_if_supported(
         &mut buttons,
         provider,
         AgentToolbarAction::Config,
         icons.glyph(IconTarget::AgentToolbarConfig),
+        show_labels,
     );
+    // Claude's four models get a distinct size/power-progression glyph each
+    // (small dot -> hollow -> filled -> large filled) rather than sharing one
+    // generic model icon, since Haiku/Sonnet/Opus/Fable is itself a
+    // progression and the shared puzzle-piece glyph didn't communicate that.
+    // Other providers keep the single configurable `AgentToolbarModel` glyph.
+    const CLAUDE_MODEL_ICONS: [&str; 4] = ["\u{b7}", "\u{25cb}", "\u{25cf}", "\u{2b24}"];
     let model_glyph = icons.glyph(IconTarget::AgentToolbarModel);
     for (index, model) in models_for(provider).iter().enumerate() {
+        let glyph = if provider == BuiltinAgentProvider::Claude {
+            CLAUDE_MODEL_ICONS
+                .get(index)
+                .copied()
+                .unwrap_or(model_glyph)
+        } else {
+            model_glyph
+        };
         buttons.push(Button {
             action: AgentToolbarAction::Model(index as u8),
-            text: format!("{model_glyph}{}", model.label),
+            text: format!("{glyph}{}", model.label),
         });
     }
     if command_for(provider, AgentToolbarAction::Fast).is_some() {
         buttons.push(Button {
             action: AgentToolbarAction::Fast,
-            text: icons.glyph(IconTarget::AgentToolbarFast).to_string(),
+            text: button_text(
+                icons.glyph(IconTarget::AgentToolbarFast),
+                AgentToolbarAction::Fast,
+                show_labels,
+            ),
         });
     }
     // Effort cycling has no known equivalent outside Claude Code; gated the
@@ -337,6 +413,7 @@ fn center_buttons(
         provider,
         AgentToolbarAction::Exit,
         icons.glyph(IconTarget::AgentToolbarExit),
+        show_labels,
     );
     buttons
 }
@@ -351,17 +428,16 @@ const BUTTON_GAP: u16 = 2;
 /// the close button is anchored to the right edge; on a terminal too
 /// narrow for both, center buttons are dropped from the right first rather
 /// than overlapping Close, which must stay reachable.
-fn button_rects(
-    area: Rect,
-    provider: Option<BuiltinAgentProvider>,
-    icons: &IconSettings,
-    effort: EffortLevel,
-) -> Vec<(AgentToolbarAction, Rect, String)> {
-    let close_text = icons.glyph(IconTarget::AgentToolbarClose).to_string();
+fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rect, String)> {
+    let close_text = button_text(
+        ctx.icons.glyph(IconTarget::AgentToolbarClose),
+        AgentToolbarAction::Close,
+        ctx.show_labels,
+    );
     let close_width = cell_width(&close_text);
     let close_right_edge = area.width.saturating_sub(close_width);
 
-    let mut center = center_buttons(provider, icons, effort);
+    let mut center = center_buttons(ctx);
     // Drop from the end until the group fits beside Close, rather than
     // silently overlapping it.
     let available_for_center = close_right_edge.saturating_sub(1);
@@ -401,15 +477,13 @@ fn group_width(buttons: &[Button]) -> u16 {
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn action_at(
     area: Rect,
-    provider: Option<BuiltinAgentProvider>,
-    icons: &IconSettings,
-    effort: EffortLevel,
+    ctx: ToolbarContext,
     position: Position,
 ) -> Option<AgentToolbarAction> {
     if !area.contains(position) {
         return None;
     }
-    button_rects(area, provider, icons, effort)
+    button_rects(area, ctx)
         .into_iter()
         .find(|(_, rect, _)| rect.contains(position))
         .map(|(action, ..)| action)
@@ -427,17 +501,27 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     below_row: Rect,
-    provider: Option<BuiltinAgentProvider>,
-    icons: &IconSettings,
-    effort: EffortLevel,
+    ctx: ToolbarContext,
     hovered: Option<AgentToolbarAction>,
 ) {
-    let rects = button_rects(area, provider, icons, effort);
+    let rects = button_rects(area, ctx);
+    // Close is always anchored flush against `area`'s right edge (see
+    // `button_rects`), so including it here would always push `rightmost` to
+    // `area.right()`, leaving zero room and permanently disabling the
+    // "beside the buttons" tooltip placement below in favor of the
+    // `below_row` overlay. Measure the center group only, and separately
+    // track where Close starts so the inline tooltip never overlaps it.
     let rightmost = rects
         .iter()
+        .filter(|(action, ..)| *action != AgentToolbarAction::Close)
         .map(|(_, rect, _)| rect.right())
         .max()
         .unwrap_or(area.x);
+    let close_left = rects
+        .iter()
+        .find(|(action, ..)| *action == AgentToolbarAction::Close)
+        .map(|(_, rect, _)| rect.x)
+        .unwrap_or(area.right());
     for (action, rect, text) in &rects {
         let style = if hovered == Some(*action) {
             Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -450,12 +534,12 @@ pub fn render(
     let Some(hovered_action) = hovered else {
         return;
     };
-    let tooltip = tooltip_for(hovered_action, provider, effort);
+    let tooltip = tooltip_for(hovered_action, ctx.provider, ctx.effort);
     if tooltip.is_empty() {
         return;
     }
     let inline_start = rightmost + 2;
-    let inline_available = area.right().saturating_sub(inline_start);
+    let inline_available = close_left.saturating_sub(1).saturating_sub(inline_start);
     if inline_available >= cell_width(&tooltip) {
         let rect = Rect::new(inline_start, area.y, inline_available, 1);
         frame.render_widget(
@@ -491,11 +575,20 @@ fn rendered_texts(
     provider: Option<BuiltinAgentProvider>,
     icons: &IconSettings,
     effort: EffortLevel,
+    show_labels: bool,
 ) -> Vec<String> {
-    button_rects(area, provider, icons, effort)
-        .into_iter()
-        .map(|(_, _, text)| text)
-        .collect()
+    button_rects(
+        area,
+        ToolbarContext {
+            provider,
+            icons,
+            effort,
+            show_labels,
+        },
+    )
+    .into_iter()
+    .map(|(_, _, text)| text)
+    .collect()
 }
 
 #[cfg(test)]
@@ -503,18 +596,30 @@ mod tests {
     use super::*;
     use ratatui::layout::Position;
 
+    fn ctx(
+        provider: Option<BuiltinAgentProvider>,
+        icons: &IconSettings,
+        effort: EffortLevel,
+        show_labels: bool,
+    ) -> ToolbarContext<'_> {
+        ToolbarContext {
+            provider,
+            icons,
+            effort,
+            show_labels,
+        }
+    }
+
     #[test]
     fn universal_buttons_present_without_a_known_provider() {
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 80, 1);
-        let texts = rendered_texts(area, None, &icons, EffortLevel::Auto);
+        let texts = rendered_texts(area, None, &icons, EffortLevel::Auto, false);
         assert!(texts.len() >= 3); // Stop, CopyScreen, Close
         assert_eq!(
             action_at(
                 area,
-                None,
-                &icons,
-                EffortLevel::Auto,
+                ctx(None, &icons, EffortLevel::Auto, false),
                 Position::new(area.right() - 1, 0)
             ),
             Some(AgentToolbarAction::Close)
@@ -528,7 +633,7 @@ mod tests {
         assert!(command_for(provider, AgentToolbarAction::Fast).is_some());
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 200, 1);
-        let rects = button_rects(area, Some(provider), &icons, EffortLevel::Auto);
+        let rects = button_rects(area, ctx(Some(provider), &icons, EffortLevel::Auto, false));
         assert!(rects
             .iter()
             .any(|(action, ..)| matches!(action, AgentToolbarAction::Model(_))));
@@ -538,13 +643,33 @@ mod tests {
     }
 
     #[test]
+    fn claude_models_get_distinct_progression_icons() {
+        let provider = BuiltinAgentProvider::Claude;
+        let icons = IconSettings::default();
+        let area = Rect::new(0, 0, 200, 1);
+        let rects = button_rects(area, ctx(Some(provider), &icons, EffortLevel::Auto, false));
+        let model_texts: Vec<&str> = rects
+            .iter()
+            .filter(|(action, ..)| matches!(action, AgentToolbarAction::Model(_)))
+            .map(|(_, _, text)| text.as_str())
+            .collect();
+        assert_eq!(model_texts.len(), 4);
+        let unique: std::collections::HashSet<&str> = model_texts.iter().copied().collect();
+        assert_eq!(unique.len(), 4, "each model button must render distinctly");
+        // Doesn't fall back to the shared generic model glyph.
+        assert!(model_texts
+            .iter()
+            .all(|text| !text.starts_with(icons.glyph(IconTarget::AgentToolbarModel))));
+    }
+
+    #[test]
     fn antigravity_hides_compact_and_fast() {
         let provider = BuiltinAgentProvider::Antigravity;
         assert!(command_for(provider, AgentToolbarAction::Compact).is_none());
         assert!(command_for(provider, AgentToolbarAction::Fast).is_none());
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 200, 1);
-        let rects = button_rects(area, Some(provider), &icons, EffortLevel::Auto);
+        let rects = button_rects(area, ctx(Some(provider), &icons, EffortLevel::Auto, false));
         assert!(!rects
             .iter()
             .any(|(action, ..)| *action == AgentToolbarAction::Compact));
@@ -557,7 +682,7 @@ mod tests {
     fn center_group_is_actually_centered() {
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 100, 1);
-        let rects = button_rects(area, None, &icons, EffortLevel::Auto);
+        let rects = button_rects(area, ctx(None, &icons, EffortLevel::Auto, false));
         let center: Vec<_> = rects
             .iter()
             .filter(|(action, ..)| *action != AgentToolbarAction::Close)
@@ -573,9 +698,12 @@ mod tests {
         let area = Rect::new(0, 0, 100, 1);
         let rects = button_rects(
             area,
-            Some(BuiltinAgentProvider::Claude),
-            &icons,
-            EffortLevel::Auto,
+            ctx(
+                Some(BuiltinAgentProvider::Claude),
+                &icons,
+                EffortLevel::Auto,
+                false,
+            ),
         );
         for window in rects.windows(2) {
             let (_, first, _) = &window[0];
@@ -592,9 +720,12 @@ mod tests {
         let area = Rect::new(0, 0, 6, 1);
         let rects = button_rects(
             area,
-            Some(BuiltinAgentProvider::Claude),
-            &icons,
-            EffortLevel::Auto,
+            ctx(
+                Some(BuiltinAgentProvider::Claude),
+                &icons,
+                EffortLevel::Auto,
+                false,
+            ),
         );
         assert!(rects
             .iter()
@@ -615,8 +746,59 @@ mod tests {
         let icons = IconSettings::default();
         let area = Rect::new(0, 5, 80, 1);
         assert_eq!(
-            action_at(area, None, &icons, EffortLevel::Auto, Position::new(2, 0)),
+            action_at(
+                area,
+                ctx(None, &icons, EffortLevel::Auto, false),
+                Position::new(2, 0)
+            ),
             None
+        );
+    }
+
+    #[test]
+    fn show_labels_appends_readable_text_after_icon_only_buttons() {
+        let icons = IconSettings::default();
+        let area = Rect::new(0, 0, 80, 1);
+        let without_labels = rendered_texts(area, None, &icons, EffortLevel::Auto, false);
+        let with_labels = rendered_texts(area, None, &icons, EffortLevel::Auto, true);
+        assert!(with_labels.iter().any(|text| text.contains("Stop")));
+        assert!(with_labels.iter().any(|text| text.contains("Close")));
+        assert!(!without_labels.iter().any(|text| text.contains("Stop")));
+        assert!(!without_labels.iter().any(|text| text.contains("Close")));
+    }
+
+    #[test]
+    fn tooltip_fits_beside_the_buttons_when_area_has_room() {
+        // Regression test: `rightmost` used to be measured across every
+        // button including the right-anchored Close button, which always
+        // sits at `area.right()` and made the inline placement branch
+        // unreachable. With a wide area and a short tooltip, the tooltip
+        // must land in the gap between the center group and Close, not on
+        // `below_row`.
+        let icons = IconSettings::default();
+        let area = Rect::new(0, 0, 120, 1);
+        let below_row = Rect::new(0, 1, 120, 1);
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 2))
+            .expect("test backend");
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    area,
+                    below_row,
+                    ctx(None, &icons, EffortLevel::Auto, false),
+                    Some(AgentToolbarAction::Stop),
+                );
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        let below_row_text: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 1)].symbol())
+            .collect();
+        let tooltip = tooltip_for(AgentToolbarAction::Stop, None, EffortLevel::Auto);
+        assert!(
+            !below_row_text.contains(tooltip.as_str()),
+            "tooltip should fit beside the buttons, not fall through to below_row"
         );
     }
 }

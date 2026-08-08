@@ -2420,6 +2420,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::AgentDebugMenu => "Agent debug menu",
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
         AppearanceRow::AgentToolbar => "Agent toolbar",
+        AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
     }
 }
 
@@ -2468,6 +2469,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::AgentToolbar => {
             "Show the action toolbar (compact/clear/model/effort/stop/exit) above every detected agent pane. Open it again from the pane's \u{2261} icon or right-click menu."
+        }
+        AppearanceRow::ShowToolbarLabels => {
+            "Show a text label after every agent-toolbar icon, turning the compact icon row into a traditional, easier-to-read text menu."
         }
     }
 }
@@ -2535,6 +2539,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off".to_string()
+            }
+        }
+        AppearanceRow::ShowToolbarLabels => {
+            if ui.show_toolbar_labels {
+                "On".to_string()
+            } else {
+                "Off (icons only)".to_string()
             }
         }
     }

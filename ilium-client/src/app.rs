@@ -525,10 +525,11 @@ pub enum AppearanceRow {
     AgentDebugMenu,
     ContextMenuIcons,
     AgentToolbar,
+    ShowToolbarLabels,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 11] = [
+    const GENERAL: [AppearanceRow; 12] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -540,6 +541,7 @@ impl AppearanceRow {
         Self::AgentDebugMenu,
         Self::ContextMenuIcons,
         Self::AgentToolbar,
+        Self::ShowToolbarLabels,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -4064,6 +4066,16 @@ impl App {
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
+    /// Switches the agent toolbar between compact icons-only and icons with
+    /// a text label after each -- a more traditional, easier-to-read menu.
+    /// Only affects presentation; every button keeps the same hit area since
+    /// `agent_toolbar::button_rects` measures the labeled text itself.
+    pub fn settings_toggle_toolbar_labels(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.show_toolbar_labels = !ui.show_toolbar_labels;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Executes one agent-toolbar click. `Close`/`Stop`/`CopyScreen` are
     /// handled locally; every other action resolves through
     /// `agent_toolbar::command_for` against the pane's live provider and, if
@@ -4206,6 +4218,7 @@ impl App {
             AppearanceRow::AgentDebugMenu => self.settings_toggle_agent_debug_menu(),
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
+            AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
         }
     }
 
@@ -7905,10 +7918,10 @@ impl App {
         ) {
             self.focus_pane(id);
         }
-        if !viewport.content_area.contains(position) {
-            return;
-        }
-
+        // The toolbar row sits above `content_area` (see
+        // `PaneViewport::with_agent_toolbar_reserved`), so this must be
+        // checked before the `content_area` bail-out below -- same reasoning
+        // as the hamburger and completed-agent-close checks above.
         if let Some(toolbar_area) = viewport.toolbar_area {
             if toolbar_area.contains(position)
                 && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
@@ -7921,9 +7934,12 @@ impl App {
                     .unwrap_or_default();
                 let action = crate::agent_toolbar::action_at(
                     toolbar_area,
-                    provider,
-                    &self.ui_settings.icons,
-                    effort,
+                    crate::agent_toolbar::ToolbarContext {
+                        provider,
+                        icons: &self.ui_settings.icons,
+                        effort,
+                        show_labels: self.ui_settings.show_toolbar_labels,
+                    },
                     position,
                 );
                 match mouse.kind {
@@ -7946,6 +7962,10 @@ impl App {
             {
                 self.set_agent_toolbar_hover(None);
             }
+        }
+
+        if !viewport.content_area.contains(position) {
+            return;
         }
 
         if matches!(self.panes.get(&id), Some(PaneRuntime::Editor(_))) {
