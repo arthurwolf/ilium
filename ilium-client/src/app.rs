@@ -526,10 +526,11 @@ pub enum AppearanceRow {
     ContextMenuIcons,
     AgentToolbar,
     ShowToolbarLabels,
+    TerminalTextSelection,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 12] = [
+    const GENERAL: [AppearanceRow; 13] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -542,6 +543,7 @@ impl AppearanceRow {
         Self::ContextMenuIcons,
         Self::AgentToolbar,
         Self::ShowToolbarLabels,
+        Self::TerminalTextSelection,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -1425,6 +1427,11 @@ pub struct App {
     /// the hover tooltip. Scoped by pane so more than one visible toolbar
     /// (a split view) can't leave a stale hover on an unrelated pane.
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
+    /// The active mouse-driven text selection over a terminal pane's
+    /// content, if any -- see `crate::terminal_selection`. `None` both
+    /// before a drag starts and immediately after a plain click (no
+    /// movement) collapses it back to nothing.
+    pub terminal_selection: Option<crate::terminal_selection::TerminalSelection>,
     help_leader_pending: bool,
     /// The session's project directory. Every new terminal pane spawns
     /// here (server-side), and the file-picker overlay always opens
@@ -1682,6 +1689,7 @@ impl App {
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
+            terminal_selection: None,
             help_leader_pending: false,
             session_cwd,
             project_name: None,
@@ -4076,6 +4084,23 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Switches whether a left-button drag over a terminal pane's content is
+    /// claimed as a local text selection (see `crate::terminal_selection`)
+    /// or forwarded to the pane's PTY like every other terminal mouse event.
+    /// Drives the Settings row, the agent toolbar's own selection button, and
+    /// the terminal right-click menu entry -- all three flip the same flag.
+    /// Turning it off drops any selection currently shown, since its
+    /// coordinates would otherwise linger on screen with no way to clear
+    /// them via drag.
+    pub fn settings_toggle_terminal_text_selection(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.terminal_text_selection_enabled = !ui.terminal_text_selection_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        if !self.ui_settings.terminal_text_selection_enabled {
+            self.terminal_selection = None;
+        }
+    }
+
     /// Executes one agent-toolbar click. `Close`/`Stop`/`CopyScreen` are
     /// handled locally; every other action resolves through
     /// `agent_toolbar::command_for` against the pane's live provider and, if
@@ -4219,6 +4244,7 @@ impl App {
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
+            AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
         }
     }
 

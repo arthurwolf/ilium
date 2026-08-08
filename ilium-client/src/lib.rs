@@ -85,6 +85,7 @@ pub mod terminal_context_menu;
 pub mod terminal_guard;
 pub mod terminal_links;
 pub mod terminal_naming;
+pub mod terminal_selection;
 pub mod terminal_title_inference;
 pub mod terminal_view;
 pub mod text_prompt;

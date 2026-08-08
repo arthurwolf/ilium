@@ -2421,6 +2421,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
         AppearanceRow::AgentToolbar => "Agent toolbar",
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
+        AppearanceRow::TerminalTextSelection => "Terminal text selection",
     }
 }
 
@@ -2472,6 +2473,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ShowToolbarLabels => {
             "Show a text label after every agent-toolbar icon, turning the compact icon row into a traditional, easier-to-read text menu."
+        }
+        AppearanceRow::TerminalTextSelection => {
+            "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
         }
     }
 }
@@ -2546,6 +2550,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off (icons only)".to_string()
+            }
+        }
+        AppearanceRow::TerminalTextSelection => {
+            if ui.terminal_text_selection_enabled {
+                "On".to_string()
+            } else {
+                "Off (raw mouse forwarded)".to_string()
             }
         }
     }

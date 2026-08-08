@@ -745,6 +745,14 @@ pub struct UiSettings {
     /// Shows a short text label after every agent-toolbar icon, turning the
     /// compact icon row into a traditional, easier-to-read text menu.
     pub show_toolbar_labels: bool,
+    /// Claims left-button drag over a terminal pane's content as a local
+    /// text selection (highlight plus clipboard copy) instead of forwarding
+    /// the raw mouse event to the pane's PTY. On by default because the
+    /// outer terminal's own selection stops working the moment ilium enables
+    /// mouse capture (see `terminal_guard.rs`); turn this off to get raw
+    /// mouse events back for a foreground app that wants to handle its own
+    /// clicks/drags (e.g. clicking a menu inside an agent CLI).
+    pub terminal_text_selection_enabled: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -765,6 +773,7 @@ impl Default for UiSettings {
             show_context_menu_icons: true,
             agent_toolbar_enabled: true,
             show_toolbar_labels: true,
+            terminal_text_selection_enabled: true,
             icons: IconSettings::default(),
         }
     }
@@ -852,6 +861,7 @@ struct RawUiConfig {
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
     show_toolbar_labels: Option<bool>,
+    terminal_text_selection_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -1233,6 +1243,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_toolbar_labels: raw
             .show_toolbar_labels
             .unwrap_or(defaults.show_toolbar_labels),
+        terminal_text_selection_enabled: raw
+            .terminal_text_selection_enabled
+            .unwrap_or(defaults.terminal_text_selection_enabled),
         icons,
     })
 }
@@ -1966,6 +1979,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "show_toolbar_labels".to_string(),
         toml::Value::Boolean(ui.show_toolbar_labels),
+    );
+    table.insert(
+        "terminal_text_selection_enabled".to_string(),
+        toml::Value::Boolean(ui.terminal_text_selection_enabled),
     );
     let icons = IconTarget::ALL
         .into_iter()
@@ -2734,6 +2751,7 @@ mod tests {
             show_context_menu_icons: false,
             agent_toolbar_enabled: false,
             show_toolbar_labels: false,
+            terminal_text_selection_enabled: false,
             use_stable_glyphs: true,
             icons,
         };
@@ -2789,6 +2807,20 @@ mod tests {
         save_ui_settings(&dir, &ui).unwrap();
 
         assert!(!load(&dir).unwrap().ui.show_toolbar_labels);
+    }
+
+    #[test]
+    fn terminal_text_selection_defaults_on_and_round_trips_through_ui_config() {
+        let dir = scratch_dir();
+        assert!(load(&dir).unwrap().ui.terminal_text_selection_enabled);
+
+        let ui = UiSettings {
+            terminal_text_selection_enabled: false,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+
+        assert!(!load(&dir).unwrap().ui.terminal_text_selection_enabled);
     }
 
     #[test]
