@@ -26,7 +26,7 @@ use crate::icon_settings::IconTarget;
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
     editor_chrome, editor_highlight, editor_toolbar, explorer_overlay, help, markdown, minimap,
-    modal, search_ui, terminal_view, theme, tree_ui,
+    modal, search_ui, terminal_selection, terminal_view, theme, tree_ui,
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -1096,6 +1096,13 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 frame.render_widget(block, viewport.outer_area);
                 term.with_screen(|screen| {
                     frame.render_widget(PseudoTerminal::new(screen), action.terminal_area);
+                    draw_terminal_selection(
+                        app,
+                        frame,
+                        viewport.pane_id,
+                        viewport.content_area,
+                        screen,
+                    );
                 });
                 // `action.terminal_area` is already inset inside the block's
                 // border (it's carved out of `viewport.content_area` to leave
@@ -1118,6 +1125,13 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 frame.render_widget(block, viewport.outer_area);
                 term.with_screen(|screen| {
                     frame.render_widget(PseudoTerminal::new(screen), viewport.content_area);
+                    draw_terminal_selection(
+                        app,
+                        frame,
+                        viewport.pane_id,
+                        viewport.content_area,
+                        screen,
+                    );
                 });
                 draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
             } else {
@@ -1125,6 +1139,13 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                     let widget = PseudoTerminal::new(screen)
                         .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
                     frame.render_widget(widget, viewport.outer_area);
+                    draw_terminal_selection(
+                        app,
+                        frame,
+                        viewport.pane_id,
+                        viewport.content_area,
+                        screen,
+                    );
                 });
                 draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
             }
@@ -1173,6 +1194,7 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                         .copied()
                         .unwrap_or_default(),
                     show_labels: app.ui_settings.show_toolbar_labels,
+                    selection_enabled: app.ui_settings.terminal_text_selection_enabled,
                 },
                 hovered,
             );
@@ -1219,6 +1241,26 @@ fn draw_terminal_scrollbar(frame: &mut Frame, area: Rect, term: &terminal_view::
         .track_symbol(Some(" "))
         .style(theme::border_style(false));
     frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+}
+
+/// Highlights `pane_id`'s active text selection, if any, over its just-drawn
+/// terminal content. A no-op for every pane but the one the selection
+/// belongs to, and for an unmoved (empty) selection.
+fn draw_terminal_selection(
+    app: &App,
+    frame: &mut Frame,
+    pane_id: ilium_core::NodeId,
+    content_area: Rect,
+    screen: &vt100::Screen,
+) {
+    let Some(selection) = app
+        .terminal_selection
+        .as_ref()
+        .filter(|selection| selection.pane_id == pane_id)
+    else {
+        return;
+    };
+    terminal_selection::render_highlight(frame, content_area, screen.size(), selection);
 }
 
 /// Draws one editor pane's chrome (always-visible toolbar, main content,

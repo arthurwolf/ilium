@@ -13,6 +13,9 @@ use crate::split_layout::PaneDirection;
 /// Actions available from a terminal pane's right-click menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalContextAction {
+    /// Present only when the pane has an active, non-empty text selection
+    /// at the moment the menu opens (see `crate::terminal_selection`).
+    CopySelectionToClipboard,
     CopyLineToClipboard,
     CopyVisibleTerminalToClipboard,
     CopyFullTerminalHistoryToClipboard,
@@ -41,6 +44,7 @@ impl TerminalContextAction {
     pub const fn icon_target(&self) -> crate::icon_settings::IconTarget {
         use crate::icon_settings::IconTarget;
         match self {
+            Self::CopySelectionToClipboard => IconTarget::AgentToolbarCopyScreen,
             Self::CopyLineToClipboard | Self::CopyFullTerminalHistoryToClipboard => {
                 IconTarget::Editor
             }
@@ -64,6 +68,7 @@ impl TerminalContextAction {
     /// Returns the user-facing menu label for this terminal action.
     pub fn label(&self) -> String {
         match self {
+            Self::CopySelectionToClipboard => "Copy selection".to_string(),
             Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
             Self::CopyVisibleTerminalToClipboard => {
                 "Copy visible terminal to clipboard".to_string()
@@ -96,6 +101,9 @@ pub struct TerminalPaneContextMenu {
     pub source_line_text: String,
     pub visible_contents: String,
     pub full_history: String,
+    /// The pane's selected text at the moment the menu opened, if it had a
+    /// non-empty selection -- see `crate::terminal_selection`.
+    pub selection_text: Option<String>,
     pub area: Rect,
     pub actions: Vec<TerminalContextAction>,
     pub selected_index: usize,

@@ -4109,6 +4109,9 @@ impl App {
     pub fn execute_agent_toolbar_action(&mut self, pane_id: NodeId, action: AgentToolbarAction) {
         match action {
             AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
+            AgentToolbarAction::ToggleTextSelection => {
+                self.settings_toggle_terminal_text_selection()
+            }
             AgentToolbarAction::Stop => self.send_terminal_bytes(pane_id, b"\x1b".to_vec(), None),
             AgentToolbarAction::CopyScreen => {
                 let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
@@ -5685,6 +5688,16 @@ impl App {
                 .unwrap_or_default();
             (source_line_text, visible_contents)
         });
+        // Captured once at open time, like every other field on this menu:
+        // a selection can only shrink/move via a fresh drag, and this menu
+        // being open already means no drag is in progress.
+        let selection_text = self
+            .terminal_selection
+            .as_ref()
+            .filter(|selection| selection.pane_id == pane_id)
+            .and_then(|selection| {
+                view.with_screen(|screen| crate::terminal_selection::text(screen, selection))
+            });
         // Resolved once per click, the same way `handle_pane_mouse`'s
         // Ctrl+click link detection does: computing it here keeps
         // `open_target::resolve_at` free of I/O beyond the final metadata
@@ -5714,6 +5727,9 @@ impl App {
                 currently_visible: self.shows_agent_toolbar(pane_id),
             });
         }
+        if selection_text.is_some() {
+            actions.push(TerminalContextAction::CopySelectionToClipboard);
+        }
         actions.extend([
             TerminalContextAction::CopyLineToClipboard,
             TerminalContextAction::CopyVisibleTerminalToClipboard,
@@ -5742,6 +5758,7 @@ impl App {
             source_line_text,
             visible_contents,
             full_history,
+            selection_text,
             area: Rect::new(column.min(max_x), row.min(max_y), width, height),
             actions,
             selected_index: 0,
@@ -5755,6 +5772,11 @@ impl App {
         menu: TerminalPaneContextMenu,
     ) {
         match action {
+            TerminalContextAction::CopySelectionToClipboard => {
+                if let Some(text) = menu.selection_text {
+                    self.copy_terminal_text_to_clipboard(text, "Selection copied to clipboard");
+                }
+            }
             TerminalContextAction::CopyLineToClipboard => self
                 .copy_terminal_text_to_clipboard(menu.source_line_text, "Line copied to clipboard"),
             TerminalContextAction::CopyVisibleTerminalToClipboard => self
@@ -7965,6 +7987,7 @@ impl App {
                         icons: &self.ui_settings.icons,
                         effort,
                         show_labels: self.ui_settings.show_toolbar_labels,
+                        selection_enabled: self.ui_settings.terminal_text_selection_enabled,
                     },
                     position,
                 );
@@ -8001,6 +8024,37 @@ impl App {
         if matches!(self.panes.get(&id), Some(PaneRuntime::Board(_))) {
             self.handle_board_pane_mouse(id, viewport.content_area, mouse, position);
             return;
+        }
+
+        // A left-button drag over a terminal pane's content is claimed for
+        // local text selection instead of being forwarded to the PTY --
+        // see `crate::terminal_selection`'s module doc for why that's the
+        // substitute for both PTY forwarding (which a plain shell prompt
+        // never asked for) and the outer terminal's own broken selection.
+        // Ctrl+click is excluded so the link-detection block below keeps
+        // first refusal on that chord regardless of whether it finds a link.
+        if self.ui_settings.terminal_text_selection_enabled
+            && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
+            && !mouse
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+        {
+            use crossterm::event::{MouseButton, MouseEventKind};
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.begin_terminal_selection(id, viewport.content_area, position);
+                    return;
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.update_terminal_selection(id, viewport.content_area, position);
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.finish_terminal_selection(id);
+                    return;
+                }
+                _ => {}
+            }
         }
 
         // The right button is the host's own affordance (copy line/screen/
@@ -8092,6 +8146,10 @@ impl App {
                         MouseEventKind::ScrollDown => view.scroll_down(TERMINAL_WHEEL_SCROLL_LINES),
                         _ => unreachable!("just matched ScrollUp/ScrollDown above"),
                     }
+                    // The screen just moved under whatever cell coordinates
+                    // an active selection was anchored to -- keeping it
+                    // would highlight (and let the user copy) the wrong text.
+                    self.clear_terminal_selection_for(id);
                     return;
                 }
             }
@@ -8107,6 +8165,92 @@ impl App {
             row,
             modifiers,
         });
+    }
+
+    /// Starts a fresh selection at the clicked cell, discarding whatever the
+    /// pane (or a different pane) had selected before -- a plain click
+    /// always replaces the previous selection, matching an ordinary
+    /// terminal emulator.
+    fn begin_terminal_selection(
+        &mut self,
+        pane_id: NodeId,
+        content_area: Rect,
+        position: Position,
+    ) {
+        let Some(point) = self.terminal_selection_point_at(pane_id, content_area, position) else {
+            return;
+        };
+        self.terminal_selection = Some(crate::terminal_selection::TerminalSelection::new(
+            pane_id, point,
+        ));
+    }
+
+    /// Extends the in-progress selection to follow the pointer. A no-op if
+    /// the drag has left the pane it started in -- see
+    /// `terminal_selection_point_at`'s doc comment.
+    fn update_terminal_selection(
+        &mut self,
+        pane_id: NodeId,
+        content_area: Rect,
+        position: Position,
+    ) {
+        if self
+            .terminal_selection
+            .is_none_or(|selection| selection.pane_id != pane_id)
+        {
+            return;
+        }
+        let Some(point) = self.terminal_selection_point_at(pane_id, content_area, position) else {
+            return;
+        };
+        if let Some(selection) = self.terminal_selection.as_mut() {
+            selection.cursor = point;
+        }
+    }
+
+    /// Ends a drag. A selection that never moved away from its anchor (a
+    /// plain click) collapses back to nothing rather than lingering as a
+    /// one-cell highlight.
+    fn finish_terminal_selection(&mut self, pane_id: NodeId) {
+        if self
+            .terminal_selection
+            .is_some_and(|selection| selection.pane_id == pane_id && selection.is_empty())
+        {
+            self.terminal_selection = None;
+        }
+    }
+
+    /// Drops `pane_id`'s selection, if it has one -- used whenever that
+    /// pane's visible screen moves out from under the selection's cell
+    /// coordinates (wheel scroll) rather than through a drag gesture.
+    pub(crate) fn clear_terminal_selection_for(&mut self, pane_id: NodeId) {
+        if self
+            .terminal_selection
+            .is_some_and(|selection| selection.pane_id == pane_id)
+        {
+            self.terminal_selection = None;
+        }
+    }
+
+    /// Maps a click/drag screen position to a cell on `pane_id`'s current
+    /// screen, clamped to its live bounds. `None` when the pane has since
+    /// vanished (closed mid-drag) or has an empty screen.
+    fn terminal_selection_point_at(
+        &self,
+        pane_id: NodeId,
+        content_area: Rect,
+        position: Position,
+    ) -> Option<crate::terminal_selection::SelectionPoint> {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+            return None;
+        };
+        let (rows, cols) = view.with_screen(|screen| screen.size());
+        if rows == 0 || cols == 0 {
+            return None;
+        }
+        let row = position.y.saturating_sub(content_area.y).min(rows - 1);
+        let column = position.x.saturating_sub(content_area.x).min(cols - 1);
+        Some(crate::terminal_selection::SelectionPoint::new(row, column))
     }
 
     pub fn confirm_terminal_link(&mut self, open: bool) {
@@ -10963,17 +11107,22 @@ mod tests {
         );
 
         assert_eq!(app.active_pane_id(), Some(second));
-        assert!(app.take_outbound_requests().iter().any(|request| {
-            matches!(
-                request,
-                ClientRequest::MouseInput {
-                    pane_id,
-                    column: 5,
-                    row: 4,
-                    ..
-                } if *pane_id == second
-            )
-        }));
+        // A plain left click over terminal content is claimed for local text
+        // selection by default (see `crate::terminal_selection`) rather than
+        // forwarded as `ClientRequest::MouseInput` -- the slot-relative
+        // coordinate math this test cares about now shows up in the
+        // selection's anchor instead.
+        assert_eq!(
+            app.terminal_selection,
+            Some(crate::terminal_selection::TerminalSelection::new(
+                second,
+                crate::terminal_selection::SelectionPoint::new(4, 5),
+            ))
+        );
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .all(|request| !matches!(request, ClientRequest::MouseInput { .. })));
     }
 
     #[test]
@@ -11112,6 +11261,204 @@ mod tests {
                 TerminalContextAction::PasteClipboard,
             ]
         );
+    }
+
+    #[test]
+    fn left_drag_over_terminal_content_creates_a_local_selection_instead_of_forwarding() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                view.feed(b"hello selection world");
+                view
+            })),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let start = Position::new(viewport.content_area.x, viewport.content_area.y);
+        let end = Position::new(viewport.content_area.x + 4, viewport.content_area.y);
+        app.take_outbound_requests();
+
+        let mouse_event = |kind, position: Position| MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_pane_mouse(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), start),
+            start,
+        );
+        app.handle_pane_mouse(
+            mouse_event(MouseEventKind::Drag(MouseButton::Left), end),
+            end,
+        );
+        app.handle_pane_mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), end), end);
+
+        let selection = app
+            .terminal_selection
+            .expect("a drag that moved the cursor should leave a selection");
+        assert_eq!(selection.pane_id, pane_id);
+        assert_eq!(
+            selection.anchor,
+            crate::terminal_selection::SelectionPoint::new(0, 0)
+        );
+        assert_eq!(
+            selection.cursor,
+            crate::terminal_selection::SelectionPoint::new(0, 4)
+        );
+        assert!(
+            app.take_outbound_requests()
+                .iter()
+                .all(|request| !matches!(request, ClientRequest::MouseInput { .. })),
+            "a claimed selection drag must not also reach the pty as raw mouse input"
+        );
+
+        // A plain click elsewhere (no drag) replaces it with nothing selected.
+        let elsewhere = Position::new(viewport.content_area.x + 8, viewport.content_area.y);
+        app.handle_pane_mouse(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), elsewhere),
+            elsewhere,
+        );
+        app.handle_pane_mouse(
+            mouse_event(MouseEventKind::Up(MouseButton::Left), elsewhere),
+            elsewhere,
+        );
+        assert!(app.terminal_selection.is_none());
+    }
+
+    #[test]
+    fn wheel_scroll_clears_an_active_terminal_selection() {
+        use crossterm::event::{MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(4, 20);
+                for line in 0..10 {
+                    view.feed(format!("line {line}\r\n").as_bytes());
+                }
+                view
+            })),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.terminal_selection = Some(crate::terminal_selection::TerminalSelection {
+            pane_id,
+            anchor: crate::terminal_selection::SelectionPoint::new(0, 0),
+            cursor: crate::terminal_selection::SelectionPoint::new(0, 3),
+        });
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(viewport.content_area.x, viewport.content_area.y);
+
+        app.handle_pane_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: position.x,
+                row: position.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            position,
+        );
+
+        assert!(
+            app.terminal_selection.is_none(),
+            "the visible screen moved, so the old selection coordinates are no longer valid"
+        );
+    }
+
+    #[test]
+    fn disabling_terminal_text_selection_drops_any_active_selection() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.terminal_selection = Some(crate::terminal_selection::TerminalSelection {
+            pane_id,
+            anchor: crate::terminal_selection::SelectionPoint::new(0, 0),
+            cursor: crate::terminal_selection::SelectionPoint::new(0, 3),
+        });
+        assert!(app.ui_settings.terminal_text_selection_enabled);
+
+        app.settings_toggle_terminal_text_selection();
+
+        assert!(!app.ui_settings.terminal_text_selection_enabled);
+        assert!(app.terminal_selection.is_none());
+    }
+
+    #[test]
+    fn right_click_menu_offers_copy_selection_only_when_the_pane_has_one() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                view.feed(b"hello selection world");
+                view
+            })),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 1);
+        let right_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_pane_mouse(right_click, position);
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("right click should open the terminal menu");
+        };
+        assert!(!menu
+            .actions
+            .contains(&TerminalContextAction::CopySelectionToClipboard));
+        assert_eq!(menu.selection_text, None);
+
+        app.terminal_selection = Some(crate::terminal_selection::TerminalSelection {
+            pane_id,
+            anchor: crate::terminal_selection::SelectionPoint::new(0, 0),
+            cursor: crate::terminal_selection::SelectionPoint::new(0, 4),
+        });
+        app.handle_pane_mouse(right_click, position);
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("right click should open the terminal menu");
+        };
+        assert_eq!(
+            menu.actions.first(),
+            Some(&TerminalContextAction::CopySelectionToClipboard),
+            "copy-selection should be the first action once the pane has one"
+        );
+        assert_eq!(menu.selection_text.as_deref(), Some("hello"));
     }
 
     #[test]

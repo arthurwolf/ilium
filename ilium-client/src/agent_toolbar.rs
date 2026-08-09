@@ -51,6 +51,10 @@ pub enum AgentToolbarAction {
     CycleEffort,
     /// Index into `models_for(provider)`.
     Model(u8),
+    /// Flips `UiSettings::terminal_text_selection_enabled`. Client-side and
+    /// universal, like `Close`/`Stop`/`CopyScreen` -- available regardless
+    /// of provider since it governs mouse behavior, not agent commands.
+    ToggleTextSelection,
 }
 
 /// A cyclable, client-local "requested reasoning effort" indicator. Nothing
@@ -203,7 +207,8 @@ pub fn command_for(
         AgentToolbarAction::Close
         | AgentToolbarAction::Stop
         | AgentToolbarAction::CopyScreen
-        | AgentToolbarAction::CycleEffort => None,
+        | AgentToolbarAction::CycleEffort
+        | AgentToolbarAction::ToggleTextSelection => None,
     }
 }
 
@@ -222,7 +227,9 @@ pub const fn action_label(action: AgentToolbarAction) -> &'static str {
         AgentToolbarAction::Config => "Config",
         AgentToolbarAction::Exit => "Exit",
         AgentToolbarAction::Fast => "Fast",
-        AgentToolbarAction::CycleEffort | AgentToolbarAction::Model(_) => "",
+        AgentToolbarAction::CycleEffort
+        | AgentToolbarAction::Model(_)
+        | AgentToolbarAction::ToggleTextSelection => "",
     }
 }
 
@@ -242,6 +249,7 @@ pub fn tooltip_for(
     action: AgentToolbarAction,
     provider: Option<BuiltinAgentProvider>,
     effort: EffortLevel,
+    selection_enabled: bool,
 ) -> String {
     match action {
         AgentToolbarAction::Close => {
@@ -267,6 +275,10 @@ pub fn tooltip_for(
             .and_then(|provider| models_for(provider).get(usize::from(index)))
             .map(|button| format!("Switch model to {}", button.label))
             .unwrap_or_default(),
+        AgentToolbarAction::ToggleTextSelection => format!(
+            "Terminal text selection: {} -- click to toggle",
+            if selection_enabled { "on" } else { "off" }
+        ),
     }
 }
 
@@ -286,6 +298,9 @@ pub struct ToolbarContext<'a> {
     pub icons: &'a IconSettings,
     pub effort: EffortLevel,
     pub show_labels: bool,
+    /// Mirrors `UiSettings::terminal_text_selection_enabled` -- drives both
+    /// the `ToggleTextSelection` button's on/off state text and its tooltip.
+    pub selection_enabled: bool,
 }
 
 /// The centered button group: universal actions available for every pane
@@ -300,6 +315,7 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         icons,
         effort,
         show_labels,
+        selection_enabled,
     } = ctx;
     let mut buttons = vec![
         Button {
@@ -316,6 +332,14 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
                 icons.glyph(IconTarget::AgentToolbarCopyScreen),
                 AgentToolbarAction::CopyScreen,
                 show_labels,
+            ),
+        },
+        Button {
+            action: AgentToolbarAction::ToggleTextSelection,
+            text: format!(
+                "{}{}",
+                icons.glyph(IconTarget::AgentToolbarSelection),
+                if selection_enabled { "on" } else { "off" }
             ),
         },
     ];
@@ -534,7 +558,12 @@ pub fn render(
     let Some(hovered_action) = hovered else {
         return;
     };
-    let tooltip = tooltip_for(hovered_action, ctx.provider, ctx.effort);
+    let tooltip = tooltip_for(
+        hovered_action,
+        ctx.provider,
+        ctx.effort,
+        ctx.selection_enabled,
+    );
     if tooltip.is_empty() {
         return;
     }
@@ -584,6 +613,7 @@ fn rendered_texts(
             icons,
             effort,
             show_labels,
+            selection_enabled: true,
         },
     )
     .into_iter()
@@ -607,6 +637,7 @@ mod tests {
             icons,
             effort,
             show_labels,
+            selection_enabled: true,
         }
     }
 
@@ -615,7 +646,7 @@ mod tests {
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 80, 1);
         let texts = rendered_texts(area, None, &icons, EffortLevel::Auto, false);
-        assert!(texts.len() >= 3); // Stop, CopyScreen, Close
+        assert!(texts.len() >= 4); // Stop, CopyScreen, ToggleTextSelection, Close
         assert_eq!(
             action_at(
                 area,
@@ -768,6 +799,50 @@ mod tests {
     }
 
     #[test]
+    fn selection_toggle_button_reflects_current_on_off_state() {
+        let icons = IconSettings::default();
+        let area = Rect::new(0, 0, 80, 1);
+        let mut on_ctx = ctx(None, &icons, EffortLevel::Auto, false);
+        on_ctx.selection_enabled = true;
+        let mut off_ctx = ctx(None, &icons, EffortLevel::Auto, false);
+        off_ctx.selection_enabled = false;
+
+        let on_rects = button_rects(area, on_ctx);
+        let off_rects = button_rects(area, off_ctx);
+        let on_text = on_rects
+            .iter()
+            .find(|(action, ..)| *action == AgentToolbarAction::ToggleTextSelection)
+            .map(|(_, _, text)| text.as_str());
+        let off_text = off_rects
+            .iter()
+            .find(|(action, ..)| *action == AgentToolbarAction::ToggleTextSelection)
+            .map(|(_, _, text)| text.as_str());
+        let glyph = icons.glyph(IconTarget::AgentToolbarSelection);
+
+        assert_eq!(on_text, Some(format!("{glyph}on")).as_deref());
+        assert_eq!(off_text, Some(format!("{glyph}off")).as_deref());
+        assert_ne!(on_text, off_text);
+    }
+
+    #[test]
+    fn selection_toggle_tooltip_names_current_state() {
+        let on = tooltip_for(
+            AgentToolbarAction::ToggleTextSelection,
+            None,
+            EffortLevel::Auto,
+            true,
+        );
+        let off = tooltip_for(
+            AgentToolbarAction::ToggleTextSelection,
+            None,
+            EffortLevel::Auto,
+            false,
+        );
+        assert!(on.contains("on"));
+        assert!(off.contains("off"));
+    }
+
+    #[test]
     fn tooltip_fits_beside_the_buttons_when_area_has_room() {
         // Regression test: `rightmost` used to be measured across every
         // button including the right-anchored Close button, which always
@@ -795,7 +870,7 @@ mod tests {
         let below_row_text: String = (0..buffer.area.width)
             .map(|x| buffer[(x, 1)].symbol())
             .collect();
-        let tooltip = tooltip_for(AgentToolbarAction::Stop, None, EffortLevel::Auto);
+        let tooltip = tooltip_for(AgentToolbarAction::Stop, None, EffortLevel::Auto, true);
         assert!(
             !below_row_text.contains(tooltip.as_str()),
             "tooltip should fit beside the buttons, not fall through to below_row"

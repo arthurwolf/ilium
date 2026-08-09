@@ -57,10 +57,11 @@ pub enum IconTarget {
     AgentToolbarModel,
     AgentToolbarExit,
     AgentToolbarFast,
+    AgentToolbarSelection,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -106,6 +107,7 @@ impl IconTarget {
         Self::AgentToolbarModel,
         Self::AgentToolbarExit,
         Self::AgentToolbarFast,
+        Self::AgentToolbarSelection,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -155,6 +157,7 @@ impl IconTarget {
             Self::AgentToolbarModel => "Agent toolbar: model",
             Self::AgentToolbarExit => "Agent toolbar: exit",
             Self::AgentToolbarFast => "Agent toolbar: fast",
+            Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
         }
     }
 
@@ -205,6 +208,7 @@ impl IconTarget {
             Self::AgentToolbarModel => "agent_toolbar_model",
             Self::AgentToolbarExit => "agent_toolbar_exit",
             Self::AgentToolbarFast => "agent_toolbar_fast",
+            Self::AgentToolbarSelection => "agent_toolbar_selection",
         }
     }
 
@@ -259,6 +263,7 @@ impl IconTarget {
             Self::AgentToolbarModel => "🧩",
             Self::AgentToolbarExit => "🚪",
             Self::AgentToolbarFast => "⚡",
+            Self::AgentToolbarSelection => "🖱️",
         }
     }
 
@@ -306,6 +311,7 @@ impl IconTarget {
             Self::AgentToolbarModel => &["🧩", "🧠", "🤖", "✦"],
             Self::AgentToolbarExit => &["🚪", "⏏️", "👋", "⛔"],
             Self::AgentToolbarFast => &["⚡", "🚀", "💨", "🏃"],
+            Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
         }
     }
 }
@@ -359,6 +365,7 @@ pub struct IconSettings {
     pub agent_toolbar_model: String,
     pub agent_toolbar_exit: String,
     pub agent_toolbar_fast: String,
+    pub agent_toolbar_selection: String,
 }
 
 impl Default for IconSettings {
@@ -415,6 +422,7 @@ impl IconSettings {
             agent_toolbar_model: value(IconTarget::AgentToolbarModel),
             agent_toolbar_exit: value(IconTarget::AgentToolbarExit),
             agent_toolbar_fast: value(IconTarget::AgentToolbarFast),
+            agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
         }
     }
 
@@ -465,6 +473,7 @@ impl IconSettings {
             IconTarget::AgentToolbarModel => &self.agent_toolbar_model,
             IconTarget::AgentToolbarExit => &self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
+            IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
         }
     }
 
@@ -515,6 +524,7 @@ impl IconSettings {
             IconTarget::AgentToolbarModel => &mut self.agent_toolbar_model,
             IconTarget::AgentToolbarExit => &mut self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &mut self.agent_toolbar_fast,
+            IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
         };
         *slot = glyph;
     }
