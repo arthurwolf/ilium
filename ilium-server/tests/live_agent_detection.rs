@@ -192,6 +192,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(100),
         idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
     };
     let mut server =
         TestServer::start_with_detection_config("focus-acknowledgement-test", detection_config)
@@ -307,6 +308,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
+        auto_answer_interstitial_prompts: true,
     };
     let sound_calls = Arc::new(Mutex::new(Vec::new()));
     let mut initially_disabled_sound = ilium_sound::SoundSettings::default();
@@ -717,6 +719,53 @@ fn write_transcript_holding_fake_agent_binary(
     script_path
 }
 
+/// Writes a fake `claude` process that renders Claude Code's real "resume
+/// full session" interstitial dialog (verified live via `claude --resume`
+/// against a large session, see `ilium-detect`'s
+/// `claude_code_resume_full_session_prompt.txt` fixture for the exact
+/// captured text) positioned in the bottom rows of a
+/// `crate::pane::DEFAULT_PANE_ROWS`-tall screen, then puts the pty in raw
+/// mode and reads exactly one byte -- mirroring the real dialog's own
+/// behavior (a bare digit commits with no Enter needed). Prints
+/// `AUTO_RESUME_OK` if that byte was `2` (the answer the detection loop is
+/// expected to auto-send) or `AUTO_RESUME_UNEXPECTED` for anything else, so
+/// the test can assert on the server's actual injected keystroke rather
+/// than merely on the dialog having appeared.
+fn write_resume_prompt_fake_claude_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = bin_dir.join("claude");
+    let script = "#!/bin/sh\n\
+                  i=0\n\
+                  while [ \"$i\" -lt 15 ]; do\n\
+                  \x20\x20printf '\\n'\n\
+                  \x20\x20i=$((i + 1))\n\
+                  done\n\
+                  printf '  This session is 3d 17h old and 470.9k tokens.\\n'\n\
+                  printf '\\n'\n\
+                  printf '  Resuming the full session will consume a substantial portion of your usage limits. We recommend resuming from a summary.\\n'\n\
+                  printf '\\n'\n\
+                  printf '  > 1. Resume from summary (recommended)\\n'\n\
+                  printf '    2. Resume full session as-is\\n'\n\
+                  printf '    3. Don'\\''t ask me again\\n'\n\
+                  printf '\\n'\n\
+                  printf '  Enter to confirm . Esc to cancel\\n'\n\
+                  stty raw -echo\n\
+                  key=$(dd bs=1 count=1 2>/dev/null)\n\
+                  stty sane\n\
+                  printf '\\033[2J\\033[H'\n\
+                  if [ \"$key\" = \"2\" ]; then\n\
+                  \x20\x20printf 'AUTO_RESUME_OK\\n'\n\
+                  else\n\
+                  \x20\x20printf 'AUTO_RESUME_UNEXPECTED\\n'\n\
+                  fi\n\
+                  sleep 60\n";
+    let mut file = std::fs::File::create(&script_path).expect("create fake claude resume script");
+    file.write_all(script.as_bytes())
+        .expect("write fake claude resume script");
+    file.set_permissions(std::fs::Permissions::from_mode(0o700))
+        .expect("chmod fake claude resume script executable");
+    script_path
+}
+
 /// Writes a Codex-shaped process that reproduces 0.144.6's `/clear`
 /// descriptor lifecycle: the old rollout stays open, `/clear` resets the
 /// conversation in place, and the next submitted prompt opens a new rollout
@@ -816,6 +865,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
+        auto_answer_interstitial_prompts: true,
     };
     let mut server =
         TestServer::start_with_detection_config("live-session-id-discovery-test", detection_config)
@@ -1116,6 +1166,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
+        auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(
         "live-codex-session-id-discovery-test",
@@ -1191,6 +1242,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
+        auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(
         "live-open-transcript-discovery-test",
@@ -1273,6 +1325,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
+        auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_agent_debug(
         "live-codex-clear-session-transition-test",
@@ -1597,5 +1650,78 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+/// End-to-end proof of the "resume full session" auto-answer feature: a
+/// real fake-`claude` process (spawned by absolute path, per this file's
+/// module docs) renders the exact captured dialog at the bottom of its
+/// screen, the real detection loop's `ilium_detect::interstitial_prompt_response`
+/// call recognizes it, and the real `runtime.session.write` path -- not a
+/// mock -- injects the single `2` keystroke into the pty. The fixture
+/// script itself, running in raw pty mode exactly like the real dialog,
+/// proves which byte actually arrived by echoing `AUTO_RESUME_OK` only if
+/// it was `2`.
+#[tokio::test]
+async fn claude_resume_full_session_prompt_is_auto_answered() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the fake claude binary");
+    let fake_claude_path = write_resume_prompt_fake_claude_binary(fake_bin_dir.path());
+
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
+    };
+    let mut server =
+        TestServer::start_with_detection_config("auto-resume-prompt-test", detection_config).await;
+    let mut client = server.connect().await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "auto-resume-prompt-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach to the auto-resume-prompt session");
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(fake_claude_path.to_string_lossy().to_string()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("start the fake claude resume-prompt process");
+
+    let confirmation = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::ScreenUpdate { bytes, .. }
+                if String::from_utf8_lossy(bytes).contains("AUTO_RESUME_OK")
+                    || String::from_utf8_lossy(bytes).contains("AUTO_RESUME_UNEXPECTED")
+        )
+    })
+    .await;
+    let ServerEvent::ScreenUpdate { bytes, .. } = confirmation else {
+        unreachable!("predicate only matches ScreenUpdate");
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("AUTO_RESUME_OK"),
+        "expected the detection loop to auto-send exactly \"2\" with no \
+         trailing Enter, matching the real dialog's own no-Enter-needed \
+         behavior verified live; fixture reported: {text}"
+    );
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop the auto-resume-prompt session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }

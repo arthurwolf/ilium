@@ -380,6 +380,11 @@ async fn run_due_panes(
         goal_evidence: Option<ilium_detect::GoalEvidence>,
         goal_evidence_line: Option<String>,
         goal_was_retained: bool,
+        /// Key to auto-send if this tick's screen shows a known one-time
+        /// interstitial dialog (see `ilium_detect::interstitial_prompt_response`),
+        /// carried through from phase 2 since `screen_snapshot.text` itself
+        /// isn't retained on `ClassifiedPane`.
+        interstitial_prompt_response: Option<&'static str>,
     }
 
     let classifications: Vec<ClassifiedPane> = identified_panes
@@ -413,6 +418,9 @@ async fn run_due_panes(
                 )
             });
             let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
+            let interstitial_prompt_response = identity.as_ref().and_then(|identity| {
+                ilium_detect::interstitial_prompt_response(&identity.class, &screen_snapshot.text)
+            });
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
                 status: classified_identity.status,
@@ -432,6 +440,7 @@ async fn run_due_panes(
                 goal_evidence: classified_identity.goal_evidence,
                 goal_evidence_line: classified_identity.goal_evidence_line,
                 goal_was_retained: classified_identity.goal_was_retained,
+                interstitial_prompt_response,
             }
         })
         .collect();
@@ -714,6 +723,41 @@ async fn run_due_panes(
                 .as_ref()
                 .map(|identity| identity.pid);
             runtime.detected_agent_class = detected_agent_class.clone();
+
+            // A different agent process than the one we last auto-answered a
+            // dialog for (new invocation in the same pane) re-arms the latch.
+            if runtime.auto_answered_interstitial_prompt_for_pid.is_some()
+                && runtime.auto_answered_interstitial_prompt_for_pid
+                    != runtime.detected_agent_process_id
+            {
+                runtime.auto_answered_interstitial_prompt_for_pid = None;
+            }
+            if state.detection_config.auto_answer_interstitial_prompts {
+                if let (Some(key_to_send), Some(agent_pid)) = (
+                    classified_pane.interstitial_prompt_response,
+                    runtime.detected_agent_process_id,
+                ) {
+                    if runtime.auto_answered_interstitial_prompt_for_pid != Some(agent_pid) {
+                        match runtime.session.write(key_to_send.as_bytes()) {
+                            Ok(()) => {
+                                runtime.auto_answered_interstitial_prompt_for_pid = Some(agent_pid);
+                                tracing::info!(
+                                    pane_id = ?pane_id,
+                                    agent_pid,
+                                    key = key_to_send,
+                                    "auto-answered interstitial prompt"
+                                );
+                            }
+                            Err(error) => tracing::warn!(
+                                pane_id = ?pane_id,
+                                %error,
+                                "detection loop: failed to auto-answer interstitial prompt"
+                            ),
+                        }
+                    }
+                }
+            }
+
             let became_fresh_agent_screen =
                 classified_pane.is_fresh_agent_screen && !runtime.is_showing_fresh_agent_screen;
             runtime.is_showing_fresh_agent_screen = classified_pane.is_fresh_agent_screen;
@@ -1662,6 +1706,7 @@ mod tests {
         DetectionConfig {
             working_poll_interval: Duration::from_secs(5),
             idle_poll_interval: Duration::from_secs(45),
+            auto_answer_interstitial_prompts: true,
         }
     }
 

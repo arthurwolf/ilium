@@ -1,0 +1,23 @@
+❯ the last time I asked you to resume it said "Resuming the full session will consume a substantial portion of your usage limits" and then had options "2. Resume full session as-is" and "Don't ask me again" -- can you explain what that dialog means?
+
+✻ Thinking…
+
+  The user is asking about a dialog they saw earlier, not currently showing
+  one. I should just explain it in plain text without treating it as a live
+  prompt.
+
+● That dialog appears when resuming an old or very large session. Option 2
+  resumes the entire transcript verbatim, which can consume a large amount
+  of your usage limits since the whole conversation gets re-sent as context.
+  Option 1 resumes from a condensed summary instead, which is cheaper.
+
+  Line 1
+  Line 2
+  Line 3
+  Line 4
+  Line 5
+  Line 6
+  Line 7
+  Line 8
+  Line 9
+  Line 10

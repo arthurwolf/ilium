@@ -135,6 +135,17 @@ pub struct TerminalPaneRuntime {
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
     pub session_process_id: Option<u32>,
+    /// OS pid of the agent process this pane already sent an auto-answer key
+    /// to for a known interstitial dialog (see
+    /// `ilium_detect::interstitial_prompt_response`). Keyed to the pid, not
+    /// to a screen/detection generation counter: the dialog can repaint
+    /// (e.g. nothing external, but any redraw bumps `screen_generation`)
+    /// while still on screen, and re-keying on generation would resend the
+    /// answer every tick -- for a numbered-choice prompt that types straight
+    /// into the next composer, repeated digits can get typed and even
+    /// submitted. At most one auto-answer per agent process, ever; cleared
+    /// only when a different pid is detected.
+    pub auto_answered_interstitial_prompt_for_pid: Option<u32>,
     /// Forwards `session.subscribe_output_bytes()` chunks to the session's
     /// broadcast channel as `ServerEvent::ScreenUpdate` frames. Owned here
     /// so closing this pane has a single, unambiguous place to cancel it
@@ -185,6 +196,7 @@ impl TerminalPaneRuntime {
             detected_agent_process_id: None,
             detected_agent_class: None,
             session_process_id: None,
+            auto_answered_interstitial_prompt_for_pid: None,
             forward_task,
             initial_prompt_task: None,
         }

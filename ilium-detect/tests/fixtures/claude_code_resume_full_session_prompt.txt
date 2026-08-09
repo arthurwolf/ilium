@@ -1,0 +1,14 @@
+✔ Goal achieved (23h · 5 turns · 787.7k tokens)
+
+✻ Worked for 3h 41m 42s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  This session is 3d 17h old and 470.9k tokens.
+
+  Resuming the full session will consume a substantial portion of your usage limits. We recommend resuming from a summary.
+
+  ❯ 1. Resume from summary (recommended)
+    2. Resume full session as-is
+    3. Don't ask me again
+
+  Enter to confirm · Esc to cancel

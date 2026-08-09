@@ -357,6 +357,7 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
         ilium_server::config::DetectionConfig {
             working_poll_interval: Duration::from_millis(100),
             idle_poll_interval: Duration::from_millis(100),
+            auto_answer_interstitial_prompts: true,
         },
     )
     .await;
@@ -447,6 +448,7 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
         ilium_server::config::DetectionConfig {
             working_poll_interval: Duration::from_millis(100),
             idle_poll_interval: Duration::from_millis(100),
+            auto_answer_interstitial_prompts: true,
         },
     )
     .await;

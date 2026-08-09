@@ -358,6 +358,69 @@ pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
         )
 }
 
+/// One known one-time interstitial dialog a first-party agent CLI shows
+/// outside its normal turn lifecycle -- distinct from
+/// `classify_activity_for_agent`'s ongoing working/idle/approval states
+/// because dialogs like this appear once, only at session (re)start, before
+/// any turn exists to classify. A new known dialog is a new entry in
+/// `INTERSTITIAL_PROMPTS`, not a new branch in an if/else chain -- same
+/// registry shape as `GENERIC_AGENT_SIGNATURES`.
+struct InterstitialPrompt {
+    class: AgentClass,
+    /// Every one of these substrings must appear in the bottom
+    /// `INTERSTITIAL_PROMPT_ANCHOR_ROWS` rows of the screen for this prompt
+    /// to match. Position, not phrasing alone, is what keeps this dialog's
+    /// own wording -- which can legitimately appear elsewhere, e.g. quoted in
+    /// an agent's transcript -- from producing a false positive.
+    anchors: &'static [&'static str],
+    /// The literal key sent to the pty to answer this prompt. No Enter
+    /// follows -- Claude Code's numbered-choice prompts commit on the digit
+    /// alone (verified live: pressing `2` with no Enter instantly resumed a
+    /// full session).
+    key_to_send: &'static str,
+}
+
+/// How many trailing screen rows are searched for interstitial-prompt
+/// anchors. Wide enough to comfortably hold the whole dialog box (currently
+/// 8 rows for the resume-session prompt) with margin for terminal-size
+/// variance, narrow enough to exclude scrolled-off transcript text that
+/// happens to quote the same wording.
+const INTERSTITIAL_PROMPT_ANCHOR_ROWS: usize = 10;
+
+const INTERSTITIAL_PROMPTS: &[InterstitialPrompt] = &[
+    // Claude Code's "resume a large/old session" dialog, shown when resuming
+    // a saved transcript that would consume a large share of usage limits.
+    // Captured live via `claude --resume` on a 470k-token session
+    // (2026-08-07); see `tests/fixtures/claude_code_resume_full_session_prompt.txt`.
+    InterstitialPrompt {
+        class: AgentClass::Claude,
+        anchors: &[
+            "Resume full session as-is",
+            "Don't ask me again",
+            "Enter to confirm",
+        ],
+        key_to_send: "2",
+    },
+];
+
+/// Returns the key to send to answer a known one-time interstitial dialog
+/// currently on screen for `class`, or `None` if no known dialog matches.
+/// Callers own actually writing the key to the pty and any one-shot/latch
+/// bookkeeping needed to send it at most once per dialog appearance -- this
+/// function is a pure screen-text query with no memory of what it answered
+/// last tick.
+pub fn interstitial_prompt_response(class: &AgentClass, screen_text: &str) -> Option<&'static str> {
+    let lines: Vec<&str> = screen_text.lines().collect();
+    let tail_start = lines.len().saturating_sub(INTERSTITIAL_PROMPT_ANCHOR_ROWS);
+    let tail = lines[tail_start..].join("\n");
+    INTERSTITIAL_PROMPTS
+        .iter()
+        .find(|prompt| {
+            prompt.class == *class && prompt.anchors.iter().all(|anchor| tail.contains(anchor))
+        })
+        .map(|prompt| prompt.key_to_send)
+}
+
 /// Current Codex releases rotate contextual placeholder text instead of
 /// retaining the older literal `Send a message` label. The stable composer
 /// contract is its leading `›` cursor; numbered modal choices are excluded so
@@ -1223,6 +1286,47 @@ mod tests {
         assert_eq!(
             classify_activity(&fixture("claude_code_awaiting_approval.txt")),
             AgentActivity::WaitingApproval
+        );
+    }
+
+    #[test]
+    fn claude_code_resume_full_session_prompt_yields_key_2() {
+        assert_eq!(
+            interstitial_prompt_response(
+                &AgentClass::Claude,
+                &fixture("claude_code_resume_full_session_prompt.txt")
+            ),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn resume_prompt_wording_quoted_in_transcript_does_not_match() {
+        assert_eq!(
+            interstitial_prompt_response(
+                &AgentClass::Claude,
+                &fixture("claude_code_resume_prompt_quoted_in_transcript.txt")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn resume_prompt_does_not_match_for_codex() {
+        assert_eq!(
+            interstitial_prompt_response(
+                &AgentClass::Codex,
+                &fixture("claude_code_resume_full_session_prompt.txt")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn plain_shell_has_no_interstitial_prompt() {
+        assert_eq!(
+            interstitial_prompt_response(&AgentClass::Claude, &fixture("plain_shell.txt")),
+            None
         );
     }
 

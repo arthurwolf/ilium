@@ -41,6 +41,14 @@ pub struct DetectionConfig {
     /// shells with no agent detected -- none of those change on their own
     /// between polls, so polling slowly is both correct and cheap.
     pub idle_poll_interval: Duration,
+    /// Whether the detection loop auto-answers known one-time interstitial
+    /// dialogs (`ilium_detect::interstitial_prompt_response`) by writing the
+    /// registered key straight into the pty -- currently just Claude Code's
+    /// "resume full session" prompt. Defaults on: the registry only contains
+    /// dialogs verified safe to answer the same way every time, and the
+    /// per-pid latch (`TerminalPaneRuntime::auto_answered_interstitial_prompt_for_pid`)
+    /// bounds it to exactly one keystroke per agent process.
+    pub auto_answer_interstitial_prompts: bool,
 }
 
 impl Default for DetectionConfig {
@@ -48,6 +56,7 @@ impl Default for DetectionConfig {
         Self {
             working_poll_interval: Duration::from_secs(5),
             idle_poll_interval: Duration::from_secs(45),
+            auto_answer_interstitial_prompts: true,
         }
     }
 }
@@ -171,6 +180,7 @@ struct RawSessionConfig {
 struct RawDetectionConfig {
     working_poll_seconds: Option<u64>,
     idle_poll_seconds: Option<u64>,
+    auto_answer_interstitial_prompts: Option<bool>,
     /// `[[detection.custom_signatures]]` -- an array of tables, each one
     /// process-name pattern plus the `AgentClass` it should resolve to.
     #[serde(default)]
@@ -254,6 +264,9 @@ impl DetectionConfig {
                 .map(Duration::from_secs)
                 .unwrap_or(defaults.idle_poll_interval)
                 .max(MINIMUM_POLL_INTERVAL),
+            auto_answer_interstitial_prompts: raw
+                .auto_answer_interstitial_prompts
+                .unwrap_or(defaults.auto_answer_interstitial_prompts),
         }
     }
 }
