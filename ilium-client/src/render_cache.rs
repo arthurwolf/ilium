@@ -469,6 +469,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.titles_loading
         .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.pending_manual_retitles
+        .retain(|pane_id| live_pane_ids.contains(pane_id));
     app.agent_debug_logs
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     // Same idea as the pane-keyed caches above, but keyed by project Group

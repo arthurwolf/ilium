@@ -4,6 +4,8 @@
 
 use std::time::Instant;
 
+use ilium_core::NodeId;
+
 use crate::app::App;
 use crate::naming_workers::{NamingWorkerEvent, NamingWorkers, TitleTrigger};
 use crate::search_workers::SearchWorkers;
@@ -34,6 +36,20 @@ pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) 
         || autosave_wrote
         || workspace_search_started
         || chatroom_changed
+}
+
+/// Re-fires a manual retitle that landed while `titles_loading` already
+/// held `pane_id`, now that whatever previously held it is done -- see
+/// `App::pending_manual_retitles`'s doc comment for why the click can't
+/// simply cancel the earlier worker instead. A no-op if no manual click is
+/// waiting. Queuing through `App::action_request_retitle` (rather than
+/// pushing a `PendingRetitleRequest` directly) re-validates the pane's
+/// current kind/session/title-source, since both may have changed while
+/// the superseded worker was running.
+fn refire_pending_manual_retitle(app: &mut App, pane_id: NodeId) {
+    if app.pending_manual_retitles.remove(&pane_id) {
+        app.action_request_retitle(pane_id);
+    }
 }
 
 /// Applies one finished background naming result to `app`, and tells
@@ -89,6 +105,7 @@ pub fn apply_naming_worker_event(
                     == title_generation
             {
                 app.titles_loading.remove(&pane_id);
+                refire_pending_manual_retitle(app, pane_id);
             } else {
                 // Both automatic and user-requested workers read one exact
                 // transcript. A `/resume` while either request is in flight
@@ -118,6 +135,13 @@ pub fn apply_naming_worker_event(
                         metadata: Default::default(),
                     },
                 );
+                // Stale doesn't necessarily mean another worker still owns
+                // `titles_loading` -- e.g. a `/resume` clears it outright in
+                // `render_cache::apply` with nothing new queued. Re-check
+                // here too, or a manual click that arrived just before that
+                // clear would wait forever for a completion event that,
+                // for this pane_id, never lands again.
+                refire_pending_manual_retitle(app, pane_id);
                 return;
             }
             match result {
@@ -226,6 +250,7 @@ pub fn apply_naming_worker_event(
         NamingWorkerEvent::TerminalTitle(pane_id, result, trigger) => {
             workers.terminal_title_worker_finished(pane_id);
             app.titles_loading.remove(&pane_id);
+            refire_pending_manual_retitle(app, pane_id);
             match result {
                 Ok(title) => {
                     tracing::info!(
@@ -367,10 +392,72 @@ fn append_title_inference_trace_fields(
 
 #[cfg(test)]
 mod tests {
-    use ilium_core::NodeId;
+    use ilium_core::{AgentActivity, AgentClass, NodeId, PaneContentKind, PaneStatus, ROOT_ID};
 
     use super::*;
+    use crate::app::PendingRetitleRequest;
     use crate::naming::DualTitle;
+
+    #[test]
+    fn fresh_session_title_completion_refires_a_queued_manual_retitle() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, "session-1".to_string());
+        app.agent_title_generations.insert(pane_id, 3);
+        // Models the manual click landing while an earlier (automatic)
+        // worker already owns this pane's `titles_loading` slot -- see
+        // `App::pending_manual_retitles`.
+        app.titles_loading.insert(pane_id);
+        app.pending_manual_retitles.insert(pane_id);
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::SessionTitle(crate::naming_workers::SessionTitleWorkerResult {
+                pane_id,
+                session_id: "session-1".to_string(),
+                title_generation: 3,
+                provider: ilium_inference::InferenceProviderKind::KiloGateway,
+                elapsed: std::time::Duration::from_millis(9),
+                rendered_prompt: None,
+                raw_response: None,
+                result: Ok(DualTitle {
+                    icon: "🛰️".to_string(),
+                    short: "Superseded".to_string(),
+                    long: "The Now-Superseded Automatic Title".to_string(),
+                }),
+                trigger: TitleTrigger::Automatic,
+            }),
+        );
+
+        assert!(
+            !app.pending_manual_retitles.contains(&pane_id),
+            "the queued click must be drained once its wait is over"
+        );
+        assert!(
+            app.titles_loading.contains(&pane_id),
+            "the re-fired manual request is itself now in flight"
+        );
+        let pending = app.take_pending_retitle_requests();
+        let [PendingRetitleRequest::Session { trigger, .. }] = pending.as_slice() else {
+            panic!("the queued manual click must re-fire as a fresh session-title request");
+        };
+        assert_eq!(*trigger, TitleTrigger::Manual);
+    }
 
     #[test]
     fn stale_manual_session_title_is_discarded_after_session_change() {

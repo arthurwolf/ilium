@@ -258,6 +258,8 @@ pub enum Mode {
     ContextMenu(ContextMenu),
     /// A pane-scoped right-click menu for copying the visible terminal text.
     TerminalPaneContextMenu(TerminalPaneContextMenu),
+    /// The agent toolbar's Codex Sol/Terra/Luna reasoning-strength submenu.
+    AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
     /// Full right-panel semantic history for one exact agent pane.
     AgentDebugLog(AgentDebugLogViewState),
     /// Destination path prompt layered over its exact debug-log view state.
@@ -969,6 +971,43 @@ pub struct TreeOrderSubmenu {
     pub selected_index: usize,
 }
 
+/// State for the Sol/Terra/Luna reasoning-strength submenu opened from the
+/// agent toolbar's `CodexModelTier` button. Modeled on `TreeOrderSubmenu` and
+/// `EditorLineContextMenu` -- a mouse- and keyboard-driven popup that owns
+/// `App::mode` until a level is picked, Escape is pressed, or the pointer
+/// clicks outside it.
+pub struct AgentToolbarModelSubmenuState {
+    pub pane_id: NodeId,
+    pub tier_index: u8,
+    pub area: Rect,
+    pub selected_index: usize,
+}
+
+/// The delay `tick::on_tick` waits between stages of a
+/// `PendingStagedKeystrokes` sequence. Confirmed live against `codex`:
+/// typing `/model` opens its slash-command autocomplete, and an Enter
+/// arriving before that popup has settled is consumed as "accept
+/// completion" rather than "submit" -- the whole line lands in the chat
+/// composer as text instead of opening the model picker. 280ms comfortably
+/// clears that popup (tested reliable at 250ms) while staying imperceptible
+/// as a menu action.
+pub(crate) const STAGED_KEYSTROKE_DELAY: Duration = Duration::from_millis(280);
+
+/// A multi-write PTY keystroke sequence in flight, drained one stage per
+/// `STAGED_KEYSTROKE_DELAY` by `tick::on_tick`. Exists because Codex's
+/// `/model` picker is an interactive, stateful TUI with no inline-argument
+/// form (see `agent_toolbar::CodexModelTier`'s doc comment) -- switching
+/// models means typing `/model`, waiting for its autocomplete to clear,
+/// pressing Enter, then navigating its nested picker screens one digit at a
+/// time. A new sequence starting while one is already in flight is ignored
+/// rather than interleaved or replacing the old one mid-picker, which could
+/// leave Codex's picker stuck on a screen the new sequence doesn't expect.
+struct PendingStagedKeystrokes {
+    pane_id: NodeId,
+    stages: std::collections::VecDeque<Vec<u8>>,
+    next_at: Instant,
+}
+
 /// State of a context menu: its tree target, screen position, and keyboard
 /// or mouse selection. The renderer only reads this state; all effects stay
 /// in `App`/`crate::keys`/`crate::mouse`.
@@ -1427,6 +1466,11 @@ pub struct App {
     /// the hover tooltip. Scoped by pane so more than one visible toolbar
     /// (a split view) can't leave a stale hover on an unrelated pane.
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
+    /// A multi-write PTY keystroke sequence still being drained by
+    /// `tick::on_tick`, one stage per tick past its own delay -- see
+    /// `PendingStagedKeystrokes`'s doc comment for why Codex's model picker
+    /// needs this instead of one immediate write.
+    pending_staged_keystrokes: Option<PendingStagedKeystrokes>,
     /// The active mouse-driven text selection over a terminal pane's
     /// content, if any -- see `crate::terminal_selection`. `None` both
     /// before a drag starts and immediately after a plain click (no
@@ -1443,6 +1487,15 @@ pub struct App {
     /// Terminal panes currently awaiting `session_naming::infer_pane_title`
     /// -- see `crate::naming_workers`.
     pub titles_loading: HashSet<NodeId>,
+    /// Panes whose manual retitle click landed while `titles_loading`
+    /// already held them (automatic retitling churns constantly on an
+    /// active pane, and one inference call can run well past a minute).
+    /// A prior worker can't be cancelled safely (see
+    /// `render_cache::apply`'s matching comment), so the click can't
+    /// preempt it -- this instead re-fires `action_request_retitle` the
+    /// moment that worker's result lands, in `crate::tick`, rather than
+    /// silently dropping the user's explicit request.
+    pub pending_manual_retitles: HashSet<NodeId>,
     /// Files this client itself just asked the server to open as a new
     /// editor pane (via `request_new_editor`), keyed by file basename --
     /// consumed by `crate::render_cache::apply_tree_snapshot` to load the
@@ -1689,6 +1742,7 @@ impl App {
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
+            pending_staged_keystrokes: None,
             terminal_selection: None,
             help_leader_pending: false,
             session_cwd,
@@ -1696,6 +1750,7 @@ impl App {
             project_icon: None,
             is_project_name_loading: false,
             titles_loading: HashSet::new(),
+            pending_manual_retitles: HashSet::new(),
             pending_editor_opens: Vec::new(),
             pending_pane_focuses: Vec::new(),
             // Deliberately the protocol-free fallback rather than a probed
@@ -7366,7 +7421,14 @@ impl App {
     /// comment for how the result is applied once the worker finishes).
     pub fn action_request_retitle(&mut self, id: NodeId) {
         if self.titles_loading.contains(&id) {
-            self.status_message = Some("Title inference already in progress".to_string());
+            // Don't drop the click: an automatic retitle already owns this
+            // pane's `titles_loading` slot and can't be cancelled safely
+            // (a single inference call has been observed running past a
+            // minute), but the request itself isn't lost -- `crate::tick`
+            // re-runs this method the moment that worker's result lands.
+            self.pending_manual_retitles.insert(id);
+            self.status_message =
+                Some("Retitle queued -- running once the current inference finishes".to_string());
             return;
         }
         match self.tree.get(id).map(|node| &node.kind) {
@@ -10172,6 +10234,39 @@ mod tests {
         assert_eq!(app.status_message, None);
         assert!(app.titles_loading.contains(&pane_id));
         assert_eq!(app.take_pending_retitle_requests().len(), 1);
+    }
+
+    #[test]
+    fn action_request_retitle_queues_the_click_instead_of_dropping_it_when_a_worker_is_busy() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, "session-1".to_string());
+        // An automatic retitle (or an earlier manual one) already owns this
+        // pane's in-flight slot.
+        app.titles_loading.insert(pane_id);
+
+        app.action_request_retitle(pane_id);
+
+        assert!(app.pending_manual_retitles.contains(&pane_id));
+        assert!(
+            app.take_pending_retitle_requests().is_empty(),
+            "must not start a second worker for the same pane while one is in flight"
+        );
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| { message.contains("queued") }));
     }
 
     #[test]
