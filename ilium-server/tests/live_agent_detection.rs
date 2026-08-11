@@ -44,15 +44,13 @@
 //! `PaneStatusChanged` broadcast) is exactly the production code path,
 //! nothing faked except the one external binary name and its output.
 
-//! Unix-only: every fixture here is a `/bin/sh` script that emits specific
-//! ANSI sequences to imitate a real agent CLI, and the server drives it through
-//! a real PTY. Porting the fixtures to `cmd`/PowerShell would test the fixture
-//! rewrite as much as the server, so Windows coverage for these paths comes
-//! from the cross-platform tests instead. See docs/TODO.md.
-#![cfg(unix)]
+//! Runs on every platform. The fixtures used to be `#!/bin/sh` scripts, which
+//! is why this whole file was `#![cfg(unix)]` and Windows had no end-to-end
+//! agent-detection coverage at all. They are now real executables built by
+//! `ilium-test-fixtures` for whatever platform the suite is running on; see
+//! that crate's docs for why each fixture's behaviour travels in a sidecar
+//! file rather than in argv.
 
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -62,6 +60,7 @@ use ilium_ipc::{
 };
 use ilium_server::config::DetectionConfig;
 use ilium_server::SoundPlayer;
+use ilium_test_fixtures::{install, FixtureBehavior};
 
 mod common;
 use common::{expect_event, TestServer};
@@ -91,44 +90,27 @@ impl SoundPlayer for RecordingSoundPlayer {
     }
 }
 
-/// Writes an executable POSIX shell script named exactly `codex` into
-/// `bin_dir` and returns its absolute path -- never the real system
-/// `PATH`, never a real Codex binary (see this file's module docs on why
-/// this is spawned by absolute path rather than added to `PATH`).
+/// Installs a fixture executable named exactly `codex` into `bin_dir` and
+/// returns its absolute path -- never the real system `PATH`, never a real
+/// Codex binary (see this file's module docs on why this is spawned by
+/// absolute path rather than added to `PATH`).
 ///
-/// The script prints a line containing the literal
-/// `ilium_detect::classify_activity` "working" marker
-/// (`"esc to interrupt"`) once a second for [`WORKING_PHASE_SECONDS`],
-/// then clears the screen (`\x1b[2J\x1b[H`) and prints something else --
-/// the screen must actually stop *containing* the marker for a real
-/// `Idle` reclassification, not merely stop *adding* new instances of
-/// it, since `vt100::Screen::contents()` reflects the current visible
-/// screen, not an ever-growing scrollback.
+/// It prints a line containing the literal `ilium_detect::classify_activity`
+/// "working" marker (`"esc to interrupt"`) once a second for
+/// [`WORKING_PHASE_SECONDS`], then clears the screen and prints something else
+/// -- the screen must actually stop *containing* the marker for a real `Idle`
+/// reclassification, not merely stop *adding* new instances of it, since
+/// `vt100::Screen::contents()` reflects the current visible screen, not an
+/// ever-growing scrollback.
 fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = bin_dir.join("codex");
-    let script = format!(
-        "#!/bin/sh\n\
-         i=0\n\
-         while [ \"$i\" -lt {WORKING_PHASE_SECONDS} ]; do\n\
-         \x20\x20printf 'gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\\n'\n\
-         \x20\x20printf 'Cogitating (esc to interrupt)\\n'\n\
-         \x20\x20i=$((i + 1))\n\
-         \x20\x20sleep 1\n\
-         done\n\
-         printf '\\033[2J\\033[H'\n\
-         printf 'Done. Ready for the next instruction.\\n'\n\
-         IFS= read -r queued_prompt\n\
-         printf 'queued:<%s>\\n' \"$queued_prompt\"\n\
-         sleep 60\n"
-    );
-    let mut file = std::fs::File::create(&script_path).expect("create fake codex script");
-    file.write_all(script.as_bytes())
-        .expect("write fake codex script");
-    // Executable for the owner is enough -- this script is only ever run
-    // by this same test process's own spawned children.
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake codex script executable");
-    script_path
+    install(
+        bin_dir,
+        "codex",
+        &FixtureBehavior::WorkingThenIdle {
+            working_seconds: WORKING_PHASE_SECONDS,
+        },
+    )
+    .path
 }
 
 /// Writes a short-lived working phase followed by an idle screen. Unlike the
@@ -147,22 +129,15 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
 fn write_finished_fake_codex_binary(
     bin_dir: &std::path::Path,
 ) -> (std::path::PathBuf, std::path::PathBuf) {
-    let script_path = bin_dir.join("codex");
     let finish_marker = bin_dir.join("finish-marker");
-    let script = format!(
-        "#!/bin/sh\n\
-         printf 'Cogitating (esc to interrupt)\\n'\n\
-         while [ ! -f '{marker}' ]; do sleep 0.1; done\n\
-         printf '\\033[2J\\033[HDone. Ready for the next instruction.\\n'\n\
-         sleep 60\n",
-        marker = finish_marker.display()
+    let installed = install(
+        bin_dir,
+        "codex",
+        &FixtureBehavior::WorkingUntilMarker {
+            marker_path: finish_marker.clone(),
+        },
     );
-    let mut file = std::fs::File::create(&script_path).expect("create finished fake codex");
-    file.write_all(script.as_bytes())
-        .expect("write finished fake codex");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("make finished fake codex executable");
-    (script_path, finish_marker)
+    (installed.path, finish_marker)
 }
 
 /// Resolves the first pane created through the root shortcut. The server
@@ -666,132 +641,81 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
-/// Writes an executable POSIX shell script named exactly `name` (same
-/// absolute-path-spawn rationale as [`write_fake_codex_binary`]) that just
-/// idles -- the argument-based session-ID-discovery tests below only care about
+/// Installs a fixture named exactly `name` (same absolute-path-spawn
+/// rationale as [`write_fake_codex_binary`]) that just idles -- the
+/// argument-based session-ID-discovery tests below only care about
 /// `ilium_server::session_id::discover_with_trace`'s second admissible source
 /// (an explicit resume argument on the command line), not activity
 /// classification, so unlike [`write_fake_codex_binary`] neither ever needs
 /// to print the "esc to interrupt" working marker.
 fn write_idle_fake_agent_binary(bin_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let script_path = bin_dir.join(name);
-    let script = "#!/bin/sh\nsleep 60\n";
-    let mut file = std::fs::File::create(&script_path).expect("create fake agent script");
-    file.write_all(script.as_bytes())
-        .expect("write fake agent script");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake agent script executable");
-    script_path
+    install(bin_dir, name, &FixtureBehavior::Idle).path
 }
 
-/// Writes a resumed-agent fixture whose exact process both exposes a resume
-/// ID in argv and keeps that same transcript open. This recreates the real
-/// transition window where `/resume` has invalidated argv but the old file
+/// A resumed-agent fixture whose exact process both exposes a resume ID in
+/// argv and keeps that same transcript open. This recreates the real
+/// transition window where `/resume` has invalidated argv but the open
 /// descriptor has not been replaced yet.
+///
+/// The transcript is argv's third argument because the caller spawns it as
+/// `<fixture> --resume <session-id> <transcript-path>`: the resume grammar the
+/// discovery phase parses has to be genuinely present, so the path the fixture
+/// holds open can only come after it.
 fn write_resumed_transcript_holding_fake_agent_binary(
     bin_dir: &std::path::Path,
     name: &str,
 ) -> std::path::PathBuf {
-    let script_path = bin_dir.join(name);
-    let script = "#!/bin/sh\nexec 3<\"$3\"\nsleep 60\n";
-    let mut file = std::fs::File::create(&script_path).expect("create fake resumed agent script");
-    file.write_all(script.as_bytes())
-        .expect("write fake resumed agent script");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake resumed agent script executable");
-    script_path
+    install(
+        bin_dir,
+        name,
+        &FixtureBehavior::HoldArgument { argument_index: 3 },
+    )
+    .path
 }
 
-/// Writes a fake agent that keeps one caller-supplied transcript open while
-/// it idles. The descriptor is inherited by `sleep`, while the script process
-/// itself also retains it as the exact PID found by agent detection.
+/// A fake agent that keeps one caller-supplied transcript open while it idles.
+/// The process holding it is the exact PID agent detection finds, which is
+/// what `session_id`'s open-descriptor phase requires.
 fn write_transcript_holding_fake_agent_binary(
     bin_dir: &std::path::Path,
     name: &str,
 ) -> std::path::PathBuf {
-    let script_path = bin_dir.join(name);
-    let script = "#!/bin/sh\nexec 3<\"$1\"\nsleep 60\n";
-    let mut file = std::fs::File::create(&script_path).expect("create fake agent script");
-    file.write_all(script.as_bytes())
-        .expect("write fake agent script");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake agent script executable");
-    script_path
+    install(
+        bin_dir,
+        name,
+        &FixtureBehavior::HoldArgument { argument_index: 1 },
+    )
+    .path
 }
 
-/// Writes a fake `claude` process that renders Claude Code's real "resume
-/// full session" interstitial dialog (verified live via `claude --resume`
-/// against a large session, see `ilium-detect`'s
-/// `claude_code_resume_full_session_prompt.txt` fixture for the exact
-/// captured text) positioned in the bottom rows of a
-/// `crate::pane::DEFAULT_PANE_ROWS`-tall screen, then puts the pty in raw
-/// mode and reads exactly one byte -- mirroring the real dialog's own
-/// behavior (a bare digit commits with no Enter needed). Prints
-/// `AUTO_RESUME_OK` if that byte was `2` (the answer the detection loop is
-/// expected to auto-send) or `AUTO_RESUME_UNEXPECTED` for anything else, so
-/// the test can assert on the server's actual injected keystroke rather
-/// than merely on the dialog having appeared.
+/// A fake `claude` process that renders Claude Code's real "resume full
+/// session" interstitial dialog (verified live via `claude --resume` against a
+/// large session, see `ilium-detect`'s
+/// `claude_code_resume_full_session_prompt.txt` fixture for the exact captured
+/// text) positioned in the bottom rows of a
+/// `crate::pane::DEFAULT_PANE_ROWS`-tall screen, then reads exactly one byte
+/// with line discipline disabled -- mirroring the real dialog's own behavior (a
+/// bare digit commits with no Enter needed). Prints `AUTO_RESUME_OK` only if
+/// that byte was `2`, so the test asserts on the server's actual injected
+/// keystroke rather than merely on the dialog having appeared.
 fn write_resume_prompt_fake_claude_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = bin_dir.join("claude");
-    let script = "#!/bin/sh\n\
-                  i=0\n\
-                  while [ \"$i\" -lt 15 ]; do\n\
-                  \x20\x20printf '\\n'\n\
-                  \x20\x20i=$((i + 1))\n\
-                  done\n\
-                  printf '  This session is 3d 17h old and 470.9k tokens.\\n'\n\
-                  printf '\\n'\n\
-                  printf '  Resuming the full session will consume a substantial portion of your usage limits. We recommend resuming from a summary.\\n'\n\
-                  printf '\\n'\n\
-                  printf '  > 1. Resume from summary (recommended)\\n'\n\
-                  printf '    2. Resume full session as-is\\n'\n\
-                  printf '    3. Don'\\''t ask me again\\n'\n\
-                  printf '\\n'\n\
-                  printf '  Enter to confirm . Esc to cancel\\n'\n\
-                  stty raw -echo\n\
-                  key=$(dd bs=1 count=1 2>/dev/null)\n\
-                  stty sane\n\
-                  printf '\\033[2J\\033[H'\n\
-                  if [ \"$key\" = \"2\" ]; then\n\
-                  \x20\x20printf 'AUTO_RESUME_OK\\n'\n\
-                  else\n\
-                  \x20\x20printf 'AUTO_RESUME_UNEXPECTED\\n'\n\
-                  fi\n\
-                  sleep 60\n";
-    let mut file = std::fs::File::create(&script_path).expect("create fake claude resume script");
-    file.write_all(script.as_bytes())
-        .expect("write fake claude resume script");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake claude resume script executable");
-    script_path
+    install(bin_dir, "claude", &FixtureBehavior::ResumePrompt).path
 }
 
-/// Writes a Codex-shaped process that reproduces 0.144.6's `/clear`
-/// descriptor lifecycle: the old rollout stays open, `/clear` resets the
-/// conversation in place, and the next submitted prompt opens a new rollout
-/// without replacing the process.
+/// A Codex-shaped process reproducing 0.144.6's `/clear` descriptor lifecycle:
+/// the old rollout (argv 1) stays open, `/clear` resets the conversation in
+/// place, and the next submitted prompt opens a new rollout (argv 2) without
+/// replacing the process.
 fn write_clear_transitioning_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = bin_dir.join("codex");
-    let script = "#!/bin/sh\n\
-                  exec 3<\"$1\"\n\
-                  cleared=0\n\
-                  printf 'Done. Ready for the next instruction.\\n'\n\
-                  while IFS= read -r submitted_line; do\n\
-                  \x20\x20if [ \"$submitted_line\" = \"/clear\" ]; then\n\
-                  \x20\x20\x20\x20cleared=1\n\
-                  \x20\x20\x20\x20printf '\\033[2J\\033[Hnew conversation started\\n'\n\
-                  \x20\x20elif [ \"$cleared\" -eq 1 ]; then\n\
-                  \x20\x20\x20\x20exec 4<\"$2\"\n\
-                  \x20\x20\x20\x20cleared=0\n\
-                  \x20\x20\x20\x20printf '23\\n'\n\
-                  \x20\x20fi\n\
-                  done\n";
-    let mut file = std::fs::File::create(&script_path).expect("create fake clearing Codex script");
-    file.write_all(script.as_bytes())
-        .expect("write fake clearing Codex script");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("chmod fake clearing Codex script executable");
-    script_path
+    install(
+        bin_dir,
+        "codex",
+        &FixtureBehavior::ClearTransition {
+            first_argument_index: 1,
+            second_argument_index: 2,
+        },
+    )
+    .path
 }
 
 fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> std::path::PathBuf {

@@ -36,4 +36,5 @@ tracing = "0.1.44"
 uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]
+ilium-test-fixtures = { version = "0.1.0", path = "../ilium-test-fixtures" }
 tempfile = "3.27.0"

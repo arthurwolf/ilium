@@ -11,15 +11,14 @@
 //! `tests/common/mod.rs`, alongside `live_agent_detection.rs`'s own use of
 //! the same `TestServer`.
 
-//! Unix-only: every fixture here is a `/bin/sh` script that emits specific
-//! ANSI sequences to imitate a real agent CLI, and the server drives it through
-//! a real PTY. Porting the fixtures to `cmd`/PowerShell would test the fixture
-//! rewrite as much as the server, so Windows coverage for these paths comes
-//! from the cross-platform tests instead. See docs/TODO.md.
-#![cfg(unix)]
+//! Runs on every platform. The fake agent CLIs and the command lines the
+//! submission tests drive used to be POSIX shell -- a `#!/bin/sh` script and
+//! inline `IFS= read -r line; printf ...` one-liners -- which is why this file
+//! was `#![cfg(unix)]` and Windows ran none of the server's integration
+//! coverage. Both are now `ilium-test-fixtures` executables, so the pane's
+//! command line is a path on every platform rather than shell syntax
+//! `cmd.exe` cannot parse.
 
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use ilium_core::{NodeId, SplitOrientation, ROOT_ID};
@@ -30,21 +29,42 @@ use ilium_ipc::{
 
 mod common;
 use common::{expect_event, TestServer};
+use ilium_test_fixtures::{install, FixtureBehavior};
+
+/// How long the delayed-composer fixture stays unreadable. One second is
+/// comfortably longer than a pty spawn and comfortably shorter than the
+/// five-second assertions that wait on it.
+const COMPOSER_DELAY_SECONDS: u32 = 1;
 
 /// Creates an absolute-path fake Codex process which has no readable composer
-/// for one second, then shows the current Codex composer cursor with one of its
-/// rotating contextual placeholders before it reads stdin. This proves initial
-/// input waits for visible readiness without depending on obsolete placeholder
-/// copy or merely racing the PTY spawn.
+/// for a moment, then shows the current Codex composer cursor before it reads
+/// stdin. This proves initial input waits for visible readiness without
+/// depending on obsolete placeholder copy or merely racing the PTY spawn.
 fn write_delayed_ready_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = bin_dir.join("codex");
-    let script = "#!/bin/sh\nprintf 'starting codex...\\n'\nsleep 1\nprintf '\\033[2J\\033[H› Explain this codebase\\n'\nIFS= read -r line\nprintf 'received-after-ready:<%s>\\n' \"$line\"\nsleep 60\n";
-    let mut file = std::fs::File::create(&script_path).expect("create delayed fake Codex");
-    file.write_all(script.as_bytes())
-        .expect("write delayed fake Codex");
-    file.set_permissions(std::fs::Permissions::from_mode(0o700))
-        .expect("make delayed fake Codex executable");
-    script_path
+    install(
+        bin_dir,
+        "codex",
+        &FixtureBehavior::DelayedComposerThenEcho {
+            delay_seconds: COMPOSER_DELAY_SECONDS,
+        },
+    )
+    .path
+}
+
+/// Creates a process that reads one line and echoes it back with `prefix`.
+///
+/// Named for what the test needs -- a real reader that cannot finish on typed
+/// text alone, so its marker proves a genuine Enter arrived -- rather than for
+/// the fixture mechanism behind it.
+fn write_line_echoing_binary(bin_dir: &std::path::Path, prefix: &str) -> std::path::PathBuf {
+    install(
+        bin_dir,
+        "line-echo",
+        &FixtureBehavior::EchoSubmittedLine {
+            prefix: prefix.to_string(),
+        },
+    )
+    .path
 }
 
 /// A fresh session always owns one launch project. Root-level shortcuts are
@@ -234,7 +254,11 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
         &mut client,
         &ClientRequest::KeyInput {
             pane_id,
-            bytes: b"printf trigger-keyboard\r".to_vec(),
+            // `echo` rather than `printf`: this assertion is only about the
+            // submission event, but a command line every platform's shell
+            // understands keeps the pane from filling with an error while the
+            // test waits.
+            bytes: b"echo trigger-keyboard\r".to_vec(),
             submission: Some(PromptSubmissionSource::Keyboard),
         },
     )
@@ -267,6 +291,8 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
 
 #[tokio::test]
 async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the line-echo fixture");
+    let echo_path = write_line_echoing_binary(fake_bin_dir.path(), "voice-enter-accepted");
     let mut server = TestServer::start("voice-submission-test").await;
     let mut client = server.connect().await;
     write_frame(
@@ -285,11 +311,10 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            // `read` cannot finish on typed text alone. Its marker therefore
-            // proves the carriage return reached the child as a real Enter.
-            kind: NewPaneKind::Command(
-                "IFS= read -r line; printf 'voice-enter-accepted:<%s>\\n' \"$line\"".to_owned(),
-            ),
+            // A blocking read cannot finish on typed text alone. Its marker
+            // therefore proves the carriage return reached the child as a real
+            // Enter.
+            kind: NewPaneKind::Command(echo_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
@@ -534,6 +559,8 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
 
 #[tokio::test]
 async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the line-echo fixture");
+    let echo_path = write_line_echoing_binary(fake_bin_dir.path(), "scheduled");
     let mut server = TestServer::start("scheduled-input-test").await;
     let mut client = server.connect().await;
     write_frame(
@@ -552,9 +579,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            kind: NewPaneKind::Command(
-                "IFS= read -r line; printf 'scheduled:<%s>\\n' \"$line\"".to_string(),
-            ),
+            kind: NewPaneKind::Command(echo_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
@@ -797,6 +822,20 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
 
 #[tokio::test]
 async fn reattached_client_receives_terminal_output_produced_before_it_connected() {
+    // The pane's own command produces the scrollback, rather than a shell loop
+    // typed into a plain shell: what this test is about is that output made
+    // before a client connected is replayed to it, and where the output came
+    // from is immaterial. A fixture keeps that independent of shell syntax.
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the replay fixture");
+    let emitter_path = install(
+        fake_bin_dir.path(),
+        "replay-emitter",
+        &FixtureBehavior::EmitNumberedLines {
+            prefix: "replay-line".to_string(),
+            count: 160,
+        },
+    )
+    .path;
     let mut server = TestServer::start("terminal-replay-test").await;
     let mut first_client = server.connect().await;
 
@@ -817,12 +856,12 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
         &mut first_client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            kind: NewPaneKind::PlainShell,
+            kind: NewPaneKind::Command(emitter_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
     .await
-    .expect("create shell pane");
+    .expect("create the output-producing pane");
     let created_tree = expect_event(
         &mut first_client,
         Duration::from_secs(5),
@@ -834,18 +873,6 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     };
     let pane_id = tree.panes().next().expect("created pane exists").id;
 
-    write_frame(
-        &mut first_client,
-        &ClientRequest::KeyInput {
-            pane_id,
-            bytes:
-                b"for number in $(seq 1 160); do printf 'replay-line-%03d\\n' \"$number\"; done\n"
-                    .to_vec(),
-            submission: None,
-        },
-    )
-    .await
-    .expect("write output-producing command");
     let _ = expect_event(&mut first_client, Duration::from_secs(5), |event| {
         matches!(
             event,
