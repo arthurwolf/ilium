@@ -2360,9 +2360,11 @@ name = "ilium-test-fixtures"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "ilium-pty",
  "serde",
  "serde_json",
  "tempfile",
+ "vt100",
 ]
 
 [[package]]

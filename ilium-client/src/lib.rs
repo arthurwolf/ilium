@@ -369,7 +369,27 @@ async fn run_inner(
     voice_input_devices: Vec<String>,
     voice_output_devices: Vec<String>,
 ) -> Result<ClientExitReason, ClientError> {
-    let backend = CrosstermBackend::new(std::io::stdout());
+    // Buffered, not bare `stdout()`. `std::io::Stdout` is a `LineWriter`: it
+    // flushes on every newline, and a rendered frame is full of them. A frame
+    // therefore reached the terminal as dozens of partial writes, and under
+    // load the terminal could be observed mid-frame -- text from the new frame
+    // interleaved with the old, producing corruptions like `Cogiaating` for
+    // `Cogitating`.
+    //
+    // Those do not heal on the next frame, which is what made them
+    // load-bearing rather than cosmetic: ratatui writes only the cells that
+    // differ from the previous buffer, and the previous buffer records what
+    // was *intended*, not what arrived. A cell corrupted in transit is
+    // therefore never rewritten, and the wrong text stays on screen
+    // indefinitely.
+    //
+    // The capacity is a whole large frame's worth of escape sequences, so an
+    // ordinary redraw reaches the terminal in one write.
+    const FRAME_BUFFER_BYTES: usize = 1 << 20;
+    let backend = CrosstermBackend::new(std::io::BufWriter::with_capacity(
+        FRAME_BUFFER_BYTES,
+        std::io::stdout(),
+    ));
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
 
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
