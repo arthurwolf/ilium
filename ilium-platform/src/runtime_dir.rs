@@ -37,10 +37,23 @@ pub const MAX_SOCKET_PATH_BYTES: usize = 100;
 /// per-session lock and marker files, so it resolves under the user's own
 /// local application data.
 pub fn session_socket_directory() -> io::Result<PathBuf> {
-    let directory = socket_directory_path();
+    let directory = std::env::var_os(SOCKET_DIR_ENV)
+        .filter(|directory| !directory.is_empty())
+        .map_or_else(socket_directory_path, PathBuf::from);
     secure_fs::create_private_directory(&directory)?;
     Ok(directory)
 }
+
+/// Environment override for the session socket directory.
+///
+/// The same lever [`DEBUG_LOG_DIR_ENV`] provides for logs, and it exists for
+/// the same reason: a test needs its sessions kept away from the real user's.
+///
+/// Honoured on *every* platform, which `XDG_RUNTIME_DIR` is not -- Windows
+/// resolves this directory from `%LOCALAPPDATA%` and never looked at the XDG
+/// variable, so a test isolating itself that way was isolated on Unix and
+/// sharing the real user's directory on Windows.
+pub const SOCKET_DIR_ENV: &str = "ILIUM_SOCKET_DIR";
 
 /// `XDG_RUNTIME_DIR` wins wherever it is set, on every Unix.
 ///

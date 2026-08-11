@@ -13,9 +13,23 @@ tracing = "0.1.44"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# `SetThreadPriority` is the Windows counterpart to POSIX niceness.
+# `SetThreadPriority` is the Windows counterpart to POSIX niceness. The `Wdk_*`
+# and `Diagnostics_Debug` features are what `process_info` needs to answer the
+# two questions Windows has no ordinary API for: which files a process holds
+# open (the system-wide handle table) and what its current directory is (read
+# out of its PEB).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_SystemInformation",
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
