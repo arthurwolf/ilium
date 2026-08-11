@@ -2078,21 +2078,14 @@ pub(crate) async fn write_key_input(
             {
                 runtime.cancel_initial_prompt_delivery();
             }
-            // Always false on Windows: ConPTY has no foreground process group,
-            // so `foreground_process_group_id` reports nothing and shell
-            // command titles stay inactive there. That is a missing capability
-            // rather than a bug -- inferring a title without knowing whether a
-            // command owns the terminal would retitle panes from keystrokes
-            // typed into a running program.
+            // A typed command only becomes a title while the shell itself owns
+            // the terminal, which is how "the user is typing at a prompt" is
+            // told apart from "a running command owns the terminal". A
+            // platform that cannot tell answers `None`, and this stays false:
+            // inferring a title without knowing who owns the terminal would
+            // retitle panes from keystrokes typed into a running program.
             let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
-                && matches!(
-                    (
-                        runtime.session.foreground_process_group_id(),
-                        runtime.session.process_id(),
-                    ),
-                    (Some(foreground_group_id), Some(shell_process_id))
-                        if foreground_group_id == shell_process_id
-                );
+                && runtime.session.shell_owns_terminal().unwrap_or(false);
             let should_track_title = is_automatic_plain_shell && is_shell_foreground;
             if let Err(error) = runtime.session.write(bytes) {
                 Some(format!("failed to write to pane {pane_id:?}: {error}"))

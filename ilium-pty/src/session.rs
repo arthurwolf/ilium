@@ -467,14 +467,14 @@ enum MasterReadMessage {
 ///   `Arc` clones -- within about one timeout interval regardless of
 ///   whether the pump thread's `read()` ever returns.
 ///
-/// This does not make the pump thread's own blocked `read()` cancellable --
-/// only a platform-native mechanism (e.g. an `OVERLAPPED` read against a
-/// ConPTY named pipe, or `WaitForMultipleObjects` against a cancellation
-/// event) can do that, and `ilium` has no Windows users today to justify
-/// the new platform-specific dependency and unsafe FFI that would require.
-/// Revisit with that primitive if Windows support is actually planned; the
-/// invariant to preserve is the one this split already restores for every
-/// other piece of per-pane state.
+/// On Windows the pump thread's own blocked `read()` *is* cancelled, by
+/// [`PumpThreadCancellation`]: `CancelSynchronousIo` aborts a synchronous
+/// `ReadFile` in progress on a named thread, which is exactly what a ConPTY
+/// read is. So the residual leak described above does not survive there --
+/// dropping this reader stops the pump thread even mid-read.
+///
+/// Any other non-unix target keeps the residual case: the split above bounds
+/// it to one OS thread and one reader handle, and nothing else.
 #[cfg(not(unix))]
 struct BlockingMasterReader {
     read_messages: std::sync::mpsc::Receiver<MasterReadMessage>,
@@ -483,6 +483,68 @@ struct BlockingMasterReader {
     /// `buf`. Keeps `read_next` correct for any `buf` length rather than
     /// assuming it always matches the pump thread's own internal read size.
     pending_bytes: Vec<u8>,
+    /// Held only so that dropping this reader stops the pump thread; nothing
+    /// reads it. See [`PumpThreadCancellation`].
+    #[cfg(windows)]
+    _pump_cancellation: PumpThreadCancellation,
+}
+
+/// Stops a pump thread that is blocked inside `read()`.
+///
+/// Two parts, both needed. `stop` is what the pump checks between reads, and
+/// handles the common case where it is not currently blocked. `CancelSynchronousIo`
+/// against the thread's own handle handles the case that flag cannot reach: a
+/// `ReadFile` already in progress, which on an idle pane is where the pump
+/// spends essentially all of its time.
+///
+/// The retry loop closes the gap between them. `CancelSynchronousIo` reports
+/// `ERROR_NOT_FOUND` when the thread has no I/O pending, which happens if it
+/// is momentarily between the flag check and the read -- and if that is all
+/// that was tried, the thread would then enter a read nothing would ever
+/// cancel. Retrying briefly means the cancel lands whichever side of that
+/// window the thread is on.
+#[cfg(windows)]
+struct PumpThreadCancellation {
+    /// Kept solely to own the thread handle `cancel` targets. Never joined:
+    /// see `spawn_pumping_from`.
+    pump_thread: std::thread::JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+    exited: Arc<AtomicBool>,
+}
+
+#[cfg(windows)]
+impl PumpThreadCancellation {
+    /// How many times to re-issue the cancel while waiting for the pump
+    /// thread to actually exit.
+    const CANCEL_ATTEMPTS: usize = 10;
+    /// Gap between attempts. Ten of these bounds pane teardown at ~100ms,
+    /// which is imperceptible next to closing a pane, while being far longer
+    /// than the microsecond-scale window it exists to cover.
+    const CANCEL_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+}
+
+#[cfg(windows)]
+impl Drop for PumpThreadCancellation {
+    fn drop(&mut self) {
+        use std::os::windows::io::AsRawHandle;
+
+        use windows_sys::Win32::System::IO::CancelSynchronousIo;
+
+        self.stop.store(true, Ordering::Release);
+        let thread_handle = self.pump_thread.as_raw_handle();
+        for _ in 0..Self::CANCEL_ATTEMPTS {
+            if self.exited.load(Ordering::Acquire) {
+                return;
+            }
+            // SAFETY: `thread_handle` is owned by `pump_thread`, which this
+            // struct owns and has not joined, so it is live for this call.
+            // Cancelling when nothing is pending is a no-op that reports
+            // `ERROR_NOT_FOUND`; the return value is deliberately unused
+            // because both outcomes are handled by looping.
+            unsafe { CancelSynchronousIo(thread_handle) };
+            std::thread::sleep(Self::CANCEL_RETRY_INTERVAL);
+        }
+    }
 }
 
 #[cfg(not(unix))]
@@ -509,24 +571,38 @@ impl BlockingMasterReader {
     /// Spawns the pump thread described in this type's doc comment and
     /// returns the `CancellableReader` side that receives from it.
     ///
-    /// The pump thread's `JoinHandle` is deliberately not kept: it may
-    /// block on `read()` forever (see the doc comment above), so joining it
-    /// from anywhere -- including `PtySession::drop` -- could block the
-    /// joiner for the rest of the process's life. Its cancellation path is
-    /// structural, not a stop flag: once `read_next`'s caller (the
-    /// background reader thread) observes `should_stop` and returns, it
-    /// drops this `BlockingMasterReader`, which drops `read_messages`: the
-    /// pump thread's next `send` then fails immediately (a `sync_channel`
-    /// send errors as soon as its receiver is dropped, even mid-block on a
-    /// full queue) and the pump thread exits on its own without ever
-    /// needing to complete another `read()`. Only a pump thread already
-    /// blocked *inside* `read()` at that moment can't observe this --
-    /// exactly the residual case this type's doc comment names.
+    /// The pump thread is never joined: on a target without
+    /// [`PumpThreadCancellation`] it may block on `read()` forever, so joining
+    /// it from anywhere -- including `PtySession::drop` -- could block the
+    /// joiner for the rest of the process's life. Windows keeps its
+    /// `JoinHandle` alive anyway, purely to own the thread handle the cancel
+    /// targets, and still never joins it.
+    ///
+    /// Its baseline cancellation path is structural rather than a stop flag:
+    /// once `read_next`'s caller (the background reader thread) observes
+    /// `should_stop` and returns, it drops this `BlockingMasterReader`, which
+    /// drops `read_messages`: the pump thread's next `send` then fails
+    /// immediately (a `sync_channel` send errors as soon as its receiver is
+    /// dropped, even mid-block on a full queue) and the pump thread exits on
+    /// its own without ever needing to complete another `read()`. A pump
+    /// thread already blocked *inside* `read()` at that moment cannot observe
+    /// that -- which is what `PumpThreadCancellation` exists to handle on
+    /// Windows.
     fn spawn_pumping_from(mut reader: Box<dyn Read + Send>) -> Self {
         let (message_sender, read_messages) = std::sync::mpsc::sync_channel(Self::CHANNEL_CAPACITY);
-        std::thread::spawn(move || {
+        let stop = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
+        let pump_stop = Arc::clone(&stop);
+        let pump_exited = Arc::clone(&exited);
+        let pump_thread = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
+                // Checked before each read so an already-stopped pump never
+                // enters another one. The read in flight when the stop is
+                // requested is handled by the cancel, not by this check.
+                if pump_stop.load(Ordering::Acquire) {
+                    break;
+                }
                 let message = match reader.read(&mut buf) {
                     Ok(0) => MasterReadMessage::Eof,
                     Ok(bytes_read) => MasterReadMessage::Data(buf[..bytes_read].to_vec()),
@@ -534,16 +610,34 @@ impl BlockingMasterReader {
                 };
                 // `Eof`/`Error` are terminal for the underlying handle --
                 // nothing meaningful can be read from it again -- so there
-                // is nothing left to pump either way once one is sent.
+                // is nothing left to pump either way once one is sent. A
+                // cancelled read arrives here as `Error`, which is correct:
+                // the handle is being torn down.
                 let is_terminal = !matches!(message, MasterReadMessage::Data(_));
                 if message_sender.send(message).is_err() || is_terminal {
                     break;
                 }
             }
+            pump_exited.store(true, Ordering::Release);
         });
+
+        // Nothing to cancel with on a non-Windows, non-unix target: the thread
+        // is detached and the two flags only ever served the cancel path.
+        #[cfg(not(windows))]
+        {
+            drop(pump_thread);
+            drop((stop, exited));
+        }
+
         Self {
             read_messages,
             pending_bytes: Vec::new(),
+            #[cfg(windows)]
+            _pump_cancellation: PumpThreadCancellation {
+                pump_thread,
+                stop,
+                exited,
+            },
         }
     }
 }
@@ -946,14 +1040,37 @@ impl PtySession {
         }
     }
 
-    pub fn foreground_process_group_id(&self) -> Option<u32> {
+    /// Whether the pane's own shell -- rather than a command it launched --
+    /// currently owns the terminal.
+    ///
+    /// Phrased as the question callers actually ask, not as the mechanism that
+    /// answers it, because the two platforms answer it differently and neither
+    /// mechanism generalises. Unix compares the terminal's foreground process
+    /// group against the shell; ConPTY has no foreground process group at all,
+    /// so Windows asks whether the shell has a live child instead.
+    ///
+    /// `None` means "cannot tell", which is not the same as `Some(false)`:
+    /// callers use this to decide whether typed text is a command worth
+    /// turning into a pane title, and inferring one without knowing who owns
+    /// the terminal would retitle panes from keystrokes typed into a running
+    /// program.
+    pub fn shell_owns_terminal(&self) -> Option<bool> {
         #[cfg(unix)]
         {
+            // Poisoned-lock panic is an invariant violation (see `spawn`).
             let process_group_id = self.master.lock().unwrap().process_group_leader()?;
-            u32::try_from(process_group_id).ok()
+            let process_group_id = u32::try_from(process_group_id).ok()?;
+            Some(process_group_id == self.process_id?)
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let shell_process_id = self.process_id?;
+            ilium_platform::process_info::has_live_child(shell_process_id)
+                .map(|has_child| !has_child)
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             None
         }

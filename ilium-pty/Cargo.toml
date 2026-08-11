@@ -9,6 +9,10 @@ repository.workspace = true
 [dependencies]
 anyhow = "1.0.103"
 crossterm = "0.29.0"
+# Only for the one OS question this crate cannot answer from the pty itself:
+# whether a shell has a live child, which is how Windows substitutes for the
+# foreground process group ConPTY does not have.
+ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
 portable-pty = "0.9.0"
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["sync"] }
@@ -16,6 +20,12 @@ vt100 = "0.16.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# `CancelSynchronousIo` is what makes a ConPTY read cancellable; without it a
+# pump thread blocked in `ReadFile` outlives the pane it belongs to. See
+# `PumpThreadCancellation`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_IO"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }

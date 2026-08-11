@@ -1,14 +1,15 @@
 //! End-to-end title tests over the real UDS and real PTYs. The server owns
 //! both the command tracker and authoritative tree, so these cover the full
 //! input -> title -> broadcast path without a client-side mock.
-//! Unix-only, because the feature is. A typed command only becomes a title
-//! while the shell itself is the terminal's foreground process group, which is
-//! how the server tells "the user is typing at a prompt" from "a running
-//! command owns the terminal". Windows has no equivalent: ConPTY exposes no
-//! foreground process group, `PtySession::foreground_process_group_id` reports
-//! nothing there, and shell-command titles are therefore inactive rather than
-//! merely untested. See docs/TODO.md.
-#![cfg(unix)]
+//! Runs on every platform. A typed command only becomes a title while the
+//! shell itself owns the terminal, which is how the server tells "the user is
+//! typing at a prompt" from "a running command owns the terminal". Unix
+//! answers that with the terminal's foreground process group; ConPTY has none,
+//! so Windows answers it by asking whether the shell has a live child. Both
+//! sit behind `PtySession::shell_owns_terminal`, so this file tests the
+//! behaviour rather than either mechanism.
+//!
+//! Every command typed here is one both `sh` and `cmd.exe` understand.
 
 use std::time::Duration;
 
