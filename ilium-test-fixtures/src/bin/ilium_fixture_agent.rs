@@ -66,7 +66,98 @@ fn main() {
             }
             linger();
         }
+        FixtureBehavior::RecordThenRunTarget {
+            marker_variable,
+            target_variable,
+            marker_text,
+        } => run_record_then_target(&marker_variable, &target_variable, &marker_text),
+        FixtureBehavior::ShellImpersonator {
+            intercepted_command,
+            replacement,
+        } => run_shell_impersonator(&intercepted_command, &replacement),
+        FixtureBehavior::RecordSubmittedPrompt { transcript_path } => {
+            run_record_submitted_prompt(&transcript_path)
+        }
     }
+}
+
+/// Records that the replacement ran, then becomes the real program.
+///
+/// On Unix this `exec`s, replacing the process image, so the pid keeps naming
+/// the same process while its executable changes -- which is what an upgrade
+/// of a running binary actually looks like, and what the caller observes.
+/// Windows has no `exec`, so there the target runs as a child and this process
+/// waits on it: the marker and the target's behaviour are identical, only the
+/// process identity differs.
+fn run_record_then_target(marker_variable: &str, target_variable: &str, marker_text: &str) {
+    let marker_path = std::env::var_os(marker_variable)
+        .unwrap_or_else(|| panic!("fixture expected ${marker_variable} to name a marker path"));
+    std::fs::write(&marker_path, marker_text)
+        .unwrap_or_else(|error| panic!("fixture writing its marker: {error}"));
+
+    let target = std::env::var_os(target_variable)
+        .unwrap_or_else(|| panic!("fixture expected ${target_variable} to name a program"));
+    let mut command = std::process::Command::new(&target);
+    command.args(std::env::args_os().skip(1));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        // Only returns on failure.
+        let error = command.exec();
+        panic!("fixture exec'ing {target:?}: {error}");
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .unwrap_or_else(|error| panic!("fixture running {target:?}: {error}"));
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+fn run_shell_impersonator(intercepted_command: &str, replacement: &std::path::Path) {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    // `-c <command line>` is how every shell ilium spawns is invoked, except
+    // `cmd.exe`; `ilium_server::pane::shell_command` picks the flag from the
+    // shell's name, and this fixture is not named `cmd`.
+    let intercepted = matches!(arguments.as_slice(), [flag, command] if flag == "-c" && command == intercepted_command);
+    let status = if intercepted {
+        std::process::Command::new(replacement).status()
+    } else {
+        let (shell, flag) = real_shell();
+        std::process::Command::new(shell)
+            .arg(flag)
+            .args(&arguments[arguments.len().min(1)..])
+            .status()
+    };
+    let status = status.unwrap_or_else(|error| panic!("fixture shell dispatching: {error}"));
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+/// The platform's own shell and its run-one-command flag, mirroring
+/// `ilium_server::pane::shell_command`'s fallbacks.
+fn real_shell() -> (String, &'static str) {
+    if cfg!(windows) {
+        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        (shell, "/C")
+    } else {
+        ("/bin/sh".to_string(), "-c")
+    }
+}
+
+fn run_record_submitted_prompt(transcript_path: &std::path::Path) {
+    std::fs::write(transcript_path, "STARTED")
+        .unwrap_or_else(|error| panic!("fixture recording its start: {error}"));
+    // The leading spaces match the composer shape `ilium-detect` looks for.
+    emit("  send a message\r\n");
+    if let Some(line) = read_submitted_line() {
+        std::fs::write(transcript_path, line)
+            .unwrap_or_else(|error| panic!("fixture recording the submitted prompt: {error}"));
+    }
+    linger();
 }
 
 /// Reads the sidecar written by `ilium_test_fixtures::install`.

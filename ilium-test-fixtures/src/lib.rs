@@ -131,6 +131,37 @@ pub enum FixtureBehavior {
     /// then lingers. Used to fill a pane's scrollback with output whose last
     /// line is unambiguous to wait for.
     EmitNumberedLines { prefix: String, count: u32 },
+
+    /// Writes `marker_text` to the path in `$marker_variable`, then runs the
+    /// program named by `$target_variable` with this process's own arguments
+    /// and exits with its status.
+    ///
+    /// Stands in for the client binary during the restart test: the marker
+    /// proves the replacement on disk was the thing that ran, and chaining to
+    /// the real target keeps the client actually working afterwards.
+    RecordThenRunTarget {
+        marker_variable: String,
+        target_variable: String,
+        marker_text: String,
+    },
+
+    /// Impersonates the user's shell. Invoked as `<this> -c <command line>`:
+    /// when the command line is exactly `intercepted_command`, runs
+    /// `replacement` instead; anything else is handed to the platform's real
+    /// shell.
+    ///
+    /// Lets a test prove which agent a UI action launched, without a real
+    /// agent CLI installed and without depending on `PATH` resolution order.
+    ShellImpersonator {
+        intercepted_command: String,
+        replacement: PathBuf,
+    },
+
+    /// A minimal agent: records that it started, shows a composer, then
+    /// records the first line submitted to it. Both go to `transcript_path`,
+    /// so a test can tell "never launched" from "launched but never received
+    /// the prompt" -- two failures that look identical from the screen alone.
+    RecordSubmittedPrompt { transcript_path: PathBuf },
 }
 
 /// A fixture executable installed on disk, ready to be spawned by absolute

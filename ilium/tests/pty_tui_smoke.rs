@@ -1750,13 +1750,56 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 }
 
+/// Writes the restart shim to `staged_path`, ready to be renamed over the
+/// running client.
+///
+/// `final_path` is where it will end up, which the Windows form needs because
+/// a fixture resolves its behaviour from its own executable path.
+#[cfg(unix)]
+fn write_restart_shim(staged_path: &Path, final_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _ = final_path;
+    std::fs::write(
+        staged_path,
+        "#!/bin/sh\nprintf 'reloaded\\n' > \"$ILIUM_RESTART_MARKER\"\nexec \"$ILIUM_RESTART_TARGET\" \"$@\"\n",
+    )
+    .expect("write replacement client shim");
+    std::fs::set_permissions(staged_path, std::fs::Permissions::from_mode(0o755))
+        .expect("make replacement client shim executable");
+}
+
+#[cfg(not(unix))]
+fn write_restart_shim(staged_path: &Path, final_path: &Path) {
+    let staged = ilium_test_fixtures::install(
+        staged_path
+            .parent()
+            .expect("the staged shim has a directory"),
+        staged_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("the staged shim has a name"),
+        &ilium_test_fixtures::FixtureBehavior::RecordThenRunTarget {
+            marker_variable: "ILIUM_RESTART_MARKER".to_string(),
+            target_variable: "ILIUM_RESTART_TARGET".to_string(),
+            marker_text: "reloaded\n".to_string(),
+        },
+    )
+    .path;
+    // The behaviour sidecar is resolved from the executable's own path, so it
+    // has to sit under the *final* name before the rename makes that name live.
+    std::fs::copy(
+        ilium_test_fixtures::behavior_file_for(&staged),
+        ilium_test_fixtures::behavior_file_for(final_path),
+    )
+    .expect("install the replacement's behaviour under its final name");
+}
+
 /// Replaces the executable path underneath a live client with a marker shim,
 /// activates Restart through the real right-click menu, and proves the same
 /// process loads the replacement before reattaching to the untouched server.
 #[tokio::test]
 async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() {
-    use std::os::unix::fs::PermissionsExt;
-
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -1849,20 +1892,23 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     // new directory entry. This shim records that the newly installed path was
     // executed, then hands control back to the real test binary with the exact
     // reconstructed project/session arguments.
-    let replacement_path_guard = tempfile::Builder::new()
-        .prefix("ilium-client-replacement-")
-        .tempfile_in(binary_directory)
-        .expect("reserve replacement client path")
-        .into_temp_path();
-    let replacement_binary = replacement_path_guard.to_path_buf();
-    std::fs::write(
-        &replacement_binary,
-        "#!/bin/sh\nprintf 'reloaded\\n' > \"$ILIUM_RESTART_MARKER\"\nexec \"$ILIUM_RESTART_TARGET\" \"$@\"\n",
-    )
-    .expect("write replacement client shim");
-    std::fs::set_permissions(&replacement_binary, std::fs::Permissions::from_mode(0o755))
-        .expect("make replacement client shim executable");
-    std::fs::rename(&replacement_binary, &restartable_binary)
+    // Installed by rename, not by writing in place: the target is the
+    // *running* client, and overwriting a running executable fails with
+    // `ExecutableFileBusy`. Unlinking the old directory entry and installing a
+    // new one is both what works and what a real GNU install-style upgrade
+    // does.
+    //
+    // The shim itself is the one fixture that stays platform-split. On Unix it
+    // is a `#!/bin/sh` script that `exec`s the target, replacing the process
+    // image so the pid keeps naming the same process with a new executable --
+    // which is precisely what the assertion below observes, and which nothing
+    // on Windows can reproduce because Windows has no `exec`. A fixture
+    // executable that spawns the target as a child records the same marker but
+    // cannot produce that observation, so using one here would have quietly
+    // weakened the Unix assertion to buy a Windows one.
+    let staged_replacement = binary_directory.join("ilium-client-replacement-stage");
+    write_restart_shim(&staged_replacement, &restartable_binary);
+    std::fs::rename(&staged_replacement, &restartable_binary)
         .expect("atomically replace running client path");
 
     let default_rows = tui.with_screen(|screen| rows_containing(screen, "default"));
@@ -1884,6 +1930,12 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
         wait_until(|| restart_marker.is_file(), WAIT_TIMEOUT).await,
         "replacement executable path was not loaded after Restart"
     );
+    // Unix-only, and genuinely so: replacing a process's own image is what
+    // `exec` does, and Windows has no equivalent. There the replacement runs
+    // the target as a child, so this pid keeps naming the replacement. Every
+    // other assertion in this test -- the marker was written, the client came
+    // back, the server was untouched -- holds on both.
+    #[cfg(unix)]
     assert!(
         wait_until(
             || {
@@ -1893,7 +1945,9 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
             WAIT_TIMEOUT,
         )
         .await,
-        "client PID should have exec'd the replacement target"
+        "client PID {client_process_id} should have exec'd the replacement target \
+         {original_binary:?}, but its executable is {:?}",
+        ilium_platform::process_info::executable_path(client_process_id)
     );
     assert_eq!(
         tui.process_id(),
@@ -2842,8 +2896,6 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 /// child process without invoking any real installed agent or network access.
 #[tokio::test]
 async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt() {
-    use std::os::unix::fs::PermissionsExt;
-
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
@@ -2858,44 +2910,43 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
 
     let fake_bin_dir = temp_root.path().join("fake-bin");
     std::fs::create_dir_all(&fake_bin_dir).expect("create fake bin dir");
-    let fake_codex_path = fake_bin_dir.join("codex");
     let fake_output_path = temp_root.path().join("fake-codex-input.txt");
-    std::fs::write(
-        &fake_codex_path,
-        format!(
-            "#!/bin/sh\nprintf 'STARTED' > '{}'\nprintf '  send a message\\n'\nIFS= read -r line\nprintf '%s' \"$line\" > '{}'\nsleep 30\n",
-            fake_output_path.display(),
-            fake_output_path.display(),
-        ),
+    let fake_codex_path = ilium_test_fixtures::install(
+        &fake_bin_dir,
+        "codex",
+        &ilium_test_fixtures::FixtureBehavior::RecordSubmittedPrompt {
+            transcript_path: fake_output_path.clone(),
+        },
     )
-    .expect("write fake codex executable");
-    let mut permissions = std::fs::metadata(&fake_codex_path)
-        .expect("stat fake codex executable")
-        .permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&fake_codex_path, permissions).expect("make fake codex executable");
-    let fake_shell_path = fake_bin_dir.join("test-shell");
-    std::fs::write(
-        &fake_shell_path,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = '-c' ] && [ \"$2\" = 'codex' ]; then exec '{}'; fi\nexec /bin/sh \"$@\"\n",
-            fake_codex_path.display()
-        ),
+    .path;
+    // A fake `$SHELL` rather than a `PATH` entry: this asserts *which* agent
+    // the menu launched, and `PATH` order could let a real `codex` on the
+    // machine answer instead.
+    let fake_shell_path = ilium_test_fixtures::install(
+        &fake_bin_dir,
+        "test-shell",
+        &ilium_test_fixtures::FixtureBehavior::ShellImpersonator {
+            intercepted_command: "codex".to_string(),
+            replacement: fake_codex_path.clone(),
+        },
     )
-    .expect("write fake shell executable");
-    let mut permissions = std::fs::metadata(&fake_shell_path)
-        .expect("stat fake shell executable")
-        .permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&fake_shell_path, permissions).expect("make fake shell executable");
+    .path;
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
         session_name: SESSION_NAME,
         already_cleaned_up: false,
     };
-    let inherited_path = std::env::var("PATH").unwrap_or_default();
-    let fake_path = format!("{}:{inherited_path}", fake_bin_dir.display());
+    // Joined by the platform's own separator: `:` on Unix, `;` on Windows.
+    // Hardcoding one turns the whole inherited `PATH` into a single
+    // nonexistent entry on the other.
+    let inherited_path = std::env::var_os("PATH").unwrap_or_default();
+    let fake_path = std::env::join_paths(
+        std::iter::once(fake_bin_dir.clone().into_os_string())
+            .chain(std::env::split_paths(&inherited_path).map(PathBuf::into_os_string)),
+    )
+    .expect("join the fake bin directory onto PATH");
+    let fake_path = fake_path.to_string_lossy().into_owned();
     let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
         .arg("--cwd")
         .arg(project_dir.to_string_lossy().to_string())
@@ -3775,8 +3826,17 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         // open, so the shell's own greeting has to be predictable. macOS ships
         // bash 3.2 as the login shell, which prints a multi-line "the default
         // interactive shell is now zsh" banner into the pane and pushes those
-        // rows out of place.
-        .env("SHELL", "/bin/sh");
+        // rows out of place. Windows has no `/bin/sh` to pin it to, and no
+        // equivalent banner to pin it away from, so the pane's default shell
+        // is left alone there.
+        .env(
+            "SHELL",
+            if cfg!(windows) {
+                std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+            } else {
+                "/bin/sh".to_string()
+            },
+        );
     let mut tui = PtySession::spawn(attach_command).expect("spawn boundary-move TUI");
 
     assert!(
@@ -4374,6 +4434,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
 
     let (process_log_path, process_log) = process_log_for_project(&xdg.debug_log_dir, &project_dir)
         .expect("find this session's process log");
+    // Only the permission assertion below reads the path, and only on Unix.
+    let _ = &process_log_path;
     // Unix-only, and genuinely so: logs hold terminal contents, so they are
     // created owner-only, but "owner-only" is a permission bit here and an ACL
     // on Windows. `ilium_platform::secure_fs` owns that difference and tests it

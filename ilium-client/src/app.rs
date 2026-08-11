@@ -7532,7 +7532,31 @@ impl App {
             }) => {
                 let Some(input) = crate::title_inference::session_title_input(self, id, true)
                 else {
-                    self.status_message = Some("No session detected yet for this pane".to_string());
+                    // Unlike every other outcome in this subsystem
+                    // (requested/succeeded/failed/discarded), this exit
+                    // used to record nothing at all -- a click that hits
+                    // it is functionally indistinguishable from a dead
+                    // button, and the only trace was a status-bar message
+                    // easy to miss and gone on the next redraw.
+                    self.record_agent_debug_event(
+                        id,
+                        ilium_ipc::AgentDebugEventDraft {
+                            severity: ilium_ipc::AgentDebugSeverity::Error,
+                            kind: ilium_ipc::AgentDebugEventKind::TitleInferenceFailed,
+                            summary: "Manual retitle could not start".to_string(),
+                            fields: vec![ilium_ipc::AgentDebugField::plain(
+                                "reason",
+                                "no agent session ID resolved yet for this pane",
+                            )],
+                            correlation_id: None,
+                            metadata: Default::default(),
+                        },
+                    );
+                    self.status_message = Some(
+                        "No agent session resolved for this pane yet -- retitle can't run \
+                         until one is detected"
+                            .to_string(),
+                    );
                     return;
                 };
                 let title_generation = self.agent_title_generations.get(&id).copied().unwrap_or(0);
@@ -7551,6 +7575,20 @@ impl App {
                 ..
             }) => {
                 let Some(input) = terminal_title_inference::terminal_title_input(self, id) else {
+                    self.record_agent_debug_event(
+                        id,
+                        ilium_ipc::AgentDebugEventDraft {
+                            severity: ilium_ipc::AgentDebugSeverity::Error,
+                            kind: ilium_ipc::AgentDebugEventKind::TitleInferenceFailed,
+                            summary: "Manual retitle could not start".to_string(),
+                            fields: vec![ilium_ipc::AgentDebugField::plain(
+                                "reason",
+                                "no terminal screen content captured yet for this pane",
+                            )],
+                            correlation_id: None,
+                            metadata: Default::default(),
+                        },
+                    );
                     self.status_message = Some("No terminal content available yet".to_string());
                     return;
                 };
@@ -10371,6 +10409,44 @@ mod tests {
             .status_message
             .as_deref()
             .is_some_and(|message| { message.contains("queued") }));
+    }
+
+    #[test]
+    fn action_request_retitle_records_a_debug_event_when_no_session_is_resolved() {
+        let mut app = app();
+        app.debug_settings.file_logging_enabled = true;
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        // Deliberately no `agent_session_ids` entry: this pane's session
+        // was never resolved (or was cleared and never re-resolved) from
+        // this client's point of view.
+
+        app.action_request_retitle(pane_id);
+
+        assert!(
+            app.take_pending_retitle_requests().is_empty(),
+            "no worker can start without a resolved session"
+        );
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::RecordAgentDebugEvent {
+                    pane_id: recorded_pane_id,
+                    event,
+                    ..
+                } if recorded_pane_id == pane_id
+                    && event.kind == ilium_ipc::AgentDebugEventKind::TitleInferenceFailed
+            )
+        }));
     }
 
     #[test]
