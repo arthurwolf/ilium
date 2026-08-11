@@ -17,9 +17,9 @@ use crate::agent_from_line::{
     AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu,
 };
 use crate::app::{
-    App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind, ContextMenu, CreateBoardState,
-    CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState, FocusTarget, Mode,
-    PaneRuntime, RightPanelTarget,
+    AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind,
+    ContextMenu, CreateBoardState, CreateGroupState, CreateSplitMembersState,
+    CreateSplitOrientationState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -150,6 +150,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings);
         }
         Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu, &app.ui_settings),
+        Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
             modal::render_text_prompt(frame, area, "Save agent debug log", state, "Save");
@@ -773,6 +774,37 @@ fn draw_editor_line_context_menu(
         Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title("Line actions")));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
+}
+
+/// Draws the Codex Sol/Terra/Luna reasoning-strength submenu -- one row per
+/// `agent_toolbar::codex_reasoning_levels(tier_index)` entry, highlighting
+/// the row under keyboard/mouse selection. Each level gets a distinct
+/// growth-progression glyph (mirroring `agent_toolbar`'s
+/// `CLAUDE_MODEL_ICONS`), since Low..Ultra is itself a progression.
+fn draw_agent_toolbar_model_submenu(frame: &mut Frame, state: &AgentToolbarModelSubmenuState) {
+    const LEVEL_ICONS: [&str; 6] = [
+        "\u{b7}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{2726}",
+    ];
+    let tier = &crate::agent_toolbar::CODEX_MODEL_TIERS[usize::from(state.tier_index)];
+    let levels = crate::agent_toolbar::codex_reasoning_levels(usize::from(state.tier_index));
+    let lines: Vec<Line> = levels
+        .iter()
+        .enumerate()
+        .map(|(index, level)| {
+            let style = if index == state.selected_index {
+                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            let icon = LEVEL_ICONS.get(index).copied().unwrap_or("\u{b7}");
+            Line::from(Span::styled(format!(" {icon} {}", level.label), style))
+        })
+        .collect();
+    let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(
+        &format!("{} {}", tier.glyph, tier.label),
+    )));
+    frame.render_widget(Clear, state.area);
+    frame.render_widget(widget, state.area);
 }
 
 /// Draws terminal copy actions without implying that a plain shell is an agent.
@@ -1444,6 +1476,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
+        Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",

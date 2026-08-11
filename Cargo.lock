@@ -2142,6 +2142,7 @@ dependencies = [
  "ilium-logging",
  "ilium-platform",
  "ilium-pty",
+ "ilium-test-fixtures",
  "ilium-transport",
  "serde_json",
  "sha2",
@@ -2305,11 +2306,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "ilium-platform",
  "libc",
  "portable-pty",
  "thiserror 2.0.18",
  "tokio",
  "vt100",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2328,6 +2331,7 @@ dependencies = [
  "ilium-platform",
  "ilium-pty",
  "ilium-sound",
+ "ilium-test-fixtures",
  "ilium-transport",
  "notify-rust",
  "serde",
@@ -2349,6 +2353,16 @@ dependencies = [
  "ilium-core",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ilium-test-fixtures"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

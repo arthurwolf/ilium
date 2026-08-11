@@ -30,6 +30,7 @@ pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) 
     let autosave_wrote = app.tick_autosave();
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.reconcile_chatroom_projects();
+    app.drain_pending_staged_keystrokes(now);
     was_animating
         || tree_transition_changed
         || terminal_activity_changed

@@ -4158,9 +4158,21 @@ impl App {
 
     /// Executes one agent-toolbar click. `Close`/`Stop`/`CopyScreen` are
     /// handled locally; every other action resolves through
-    /// `agent_toolbar::command_for` against the pane's live provider and, if
-    /// supported, is written into the PTY exactly like a hand-typed
-    /// submission (see `send_terminal_bytes`'s doc comment).
+    /// `agent_toolbar::keystroke_stages_for` against the pane's live
+    /// provider and, if supported, is written into the PTY exactly like a
+    /// hand-typed submission (see `send_terminal_bytes`'s doc comment) --
+    /// staged over multiple writes for `CodexReasoningLevel`, immediately in
+    /// one write for everything else.
+    ///
+    /// `CodexModelTier` never reaches the catch-all: opening its submenu
+    /// needs the button's own screen rect to anchor against, which this
+    /// function has no way to know, so the mouse-click site calls
+    /// `open_agent_toolbar_model_submenu` directly instead of routing
+    /// through here (mirroring how `ContextMenuAction::OrderBy` is
+    /// special-cased in `mouse::handle_context_menu_mouse` rather than
+    /// going through `execute_context_action`). The arm below is a
+    /// documented no-op, not a silent fallthrough, for any path that
+    /// reaches it anyway.
     pub fn execute_agent_toolbar_action(&mut self, pane_id: NodeId, action: AgentToolbarAction) {
         match action {
             AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
@@ -4197,22 +4209,104 @@ impl App {
                     );
                 }
             }
+            AgentToolbarAction::CodexModelTier(_) => {}
             _ => {
                 let Some(provider) = self.agent_toolbar_provider(pane_id) else {
                     return;
                 };
-                let Some(command) = crate::agent_toolbar::command_for(provider, action) else {
+                let Some(stages) = crate::agent_toolbar::keystroke_stages_for(provider, action)
+                else {
                     return;
                 };
-                let mut bytes = command.as_bytes().to_vec();
-                bytes.push(b'\r');
-                self.send_terminal_bytes(
-                    pane_id,
-                    bytes,
-                    Some(PromptSubmissionSource::ToolbarAction),
-                );
+                self.send_staged_terminal_keystrokes(pane_id, stages);
             }
         }
+    }
+
+    /// Writes a keystroke sequence to `pane_id`'s PTY, one stage at a time.
+    /// A single-stage sequence (every non-Codex toolbar action) is written
+    /// immediately, unchanged from before staging existed. A multi-stage
+    /// sequence (`CodexReasoningLevel`) writes its first stage immediately
+    /// and queues the rest onto `pending_staged_keystrokes`, drained by
+    /// `tick::on_tick` one `STAGED_KEYSTROKE_DELAY` apart -- see that
+    /// constant's doc comment for why the gap is real and not cosmetic.
+    ///
+    /// A sequence already in flight makes a new one a no-op rather than
+    /// interleaving the two into the same PTY or abandoning the old one
+    /// mid-picker (see `PendingStagedKeystrokes`'s doc comment).
+    fn send_staged_terminal_keystrokes(&mut self, pane_id: NodeId, mut stages: Vec<Vec<u8>>) {
+        if stages.is_empty() {
+            return;
+        }
+        if self.pending_staged_keystrokes.is_some() {
+            return;
+        }
+        let first_stage = stages.remove(0);
+        self.send_terminal_bytes(
+            pane_id,
+            first_stage,
+            Some(PromptSubmissionSource::ToolbarAction),
+        );
+        if stages.is_empty() {
+            return;
+        }
+        self.pending_staged_keystrokes = Some(PendingStagedKeystrokes {
+            pane_id,
+            stages: stages.into(),
+            next_at: Instant::now() + STAGED_KEYSTROKE_DELAY,
+        });
+    }
+
+    /// Drains one due stage of an in-flight `PendingStagedKeystrokes`
+    /// sequence, if `now` has reached it. Called from `tick::on_tick` every
+    /// tick; a no-op when nothing is pending or the next stage isn't due yet.
+    pub(crate) fn drain_pending_staged_keystrokes(&mut self, now: Instant) {
+        let Some(pending) = &mut self.pending_staged_keystrokes else {
+            return;
+        };
+        if now < pending.next_at {
+            return;
+        }
+        let Some(stage) = pending.stages.pop_front() else {
+            self.pending_staged_keystrokes = None;
+            return;
+        };
+        let pane_id = pending.pane_id;
+        let sequence_finished = pending.stages.is_empty();
+        pending.next_at = now + STAGED_KEYSTROKE_DELAY;
+        self.send_terminal_bytes(pane_id, stage, Some(PromptSubmissionSource::ToolbarAction));
+        if sequence_finished {
+            self.pending_staged_keystrokes = None;
+        }
+    }
+
+    /// Opens the Sol/Terra/Luna reasoning-strength submenu directly below
+    /// `anchor` (that tier button's own screen rect from
+    /// `agent_toolbar::button_rect_for`), clamped to stay on screen exactly
+    /// like `open_context_tree_order_submenu`.
+    pub fn open_agent_toolbar_model_submenu(
+        &mut self,
+        pane_id: NodeId,
+        tier_index: u8,
+        anchor: Rect,
+    ) {
+        let level_count =
+            crate::agent_toolbar::codex_reasoning_levels(usize::from(tier_index)).len();
+        let width = 30.min(self.layout.screen_area.width.max(1));
+        let height = (level_count as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let max_x = self.layout.screen_area.right().saturating_sub(width);
+        let max_y = self.layout.screen_area.bottom().saturating_sub(height);
+        self.mode = Mode::AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState {
+            pane_id,
+            tier_index,
+            area: Rect::new(
+                anchor.x.min(max_x),
+                anchor.bottom().min(max_y),
+                width,
+                height,
+            ),
+            selected_index: 0,
+        });
     }
 
     /// Updates which agent-toolbar button is under the pointer, if any.
@@ -8042,20 +8136,30 @@ impl App {
                     .get(&id)
                     .copied()
                     .unwrap_or_default();
-                let action = crate::agent_toolbar::action_at(
-                    toolbar_area,
-                    crate::agent_toolbar::ToolbarContext {
-                        provider,
-                        icons: &self.ui_settings.icons,
-                        effort,
-                        show_labels: self.ui_settings.show_toolbar_labels,
-                        selection_enabled: self.ui_settings.terminal_text_selection_enabled,
-                    },
-                    position,
-                );
+                let toolbar_ctx = crate::agent_toolbar::ToolbarContext {
+                    provider,
+                    icons: &self.ui_settings.icons,
+                    effort,
+                    show_labels: self.ui_settings.show_toolbar_labels,
+                    selection_enabled: self.ui_settings.terminal_text_selection_enabled,
+                };
+                let action = crate::agent_toolbar::action_at(toolbar_area, toolbar_ctx, position);
                 match mouse.kind {
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                        if let Some(action) = action {
+                        // `CodexModelTier` opens its reasoning-strength
+                        // submenu anchored under its own button rather than
+                        // sending a command -- see
+                        // `execute_agent_toolbar_action`'s doc comment for
+                        // why that dispatch can't happen inside it.
+                        if let Some(AgentToolbarAction::CodexModelTier(tier_index)) = action {
+                            if let Some(anchor) = crate::agent_toolbar::button_rect_for(
+                                toolbar_area,
+                                toolbar_ctx,
+                                AgentToolbarAction::CodexModelTier(tier_index),
+                            ) {
+                                self.open_agent_toolbar_model_submenu(id, tier_index, anchor);
+                            }
+                        } else if let Some(action) = action {
                             self.execute_agent_toolbar_action(id, action);
                         }
                     }
@@ -11620,6 +11724,229 @@ mod tests {
                 pane_id,
                 bytes: b"ultracode ".to_vec(),
                 submission: None,
+            }]
+        );
+    }
+
+    fn codex_pane(app: &mut App) -> NodeId {
+        let group = app.tree.add_group(ROOT_ID, "codex-work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+        app.take_outbound_requests();
+        pane_id
+    }
+
+    #[test]
+    fn codex_reasoning_level_stages_the_full_keystroke_sequence_across_ticks() {
+        let mut app = app();
+        let pane_id = codex_pane(&mut app);
+
+        // Terra (index 1) at High (index 2): "/model", Enter, "2", "3".
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CodexReasoningLevel(1, 2));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"/model".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        let start = Instant::now();
+        app.drain_pending_staged_keystrokes(start);
+        assert!(
+            app.take_outbound_requests().is_empty(),
+            "the next stage isn't due until STAGED_KEYSTROKE_DELAY has elapsed"
+        );
+
+        let mut now = start + STAGED_KEYSTROKE_DELAY;
+        app.drain_pending_staged_keystrokes(now);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"\r".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        now += STAGED_KEYSTROKE_DELAY;
+        app.drain_pending_staged_keystrokes(now);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"2".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        now += STAGED_KEYSTROKE_DELAY;
+        app.drain_pending_staged_keystrokes(now);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"3".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
+            }]
+        );
+
+        // Sequence is finished; a further drain does nothing.
+        now += STAGED_KEYSTROKE_DELAY;
+        app.drain_pending_staged_keystrokes(now);
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn codex_max_reasoning_level_adds_the_advanced_reasoning_stage() {
+        let mut app = app();
+        let pane_id = codex_pane(&mut app);
+
+        // Sol (index 0) at Max (index 4): "/model", Enter, "1", "5", "1".
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CodexReasoningLevel(0, 4));
+        app.take_outbound_requests();
+        let mut now = Instant::now();
+        let mut stages = Vec::new();
+        for _ in 0..4 {
+            now += STAGED_KEYSTROKE_DELAY;
+            app.drain_pending_staged_keystrokes(now);
+            stages.extend(app.take_outbound_requests());
+        }
+        let bytes: Vec<Vec<u8>> = stages
+            .into_iter()
+            .map(|request| match request {
+                ClientRequest::KeyInput { bytes, .. } => bytes,
+                other => panic!("expected KeyInput, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            bytes,
+            vec![b"\r".to_vec(), b"1".to_vec(), b"5".to_vec(), b"1".to_vec()]
+        );
+    }
+
+    #[test]
+    fn a_second_codex_reasoning_level_click_is_ignored_while_one_is_in_flight() {
+        let mut app = app();
+        let pane_id = codex_pane(&mut app);
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CodexReasoningLevel(0, 0));
+        app.take_outbound_requests();
+
+        // A second click before the first sequence finishes must not
+        // interleave a fresh "/model" into the middle of the in-flight one.
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CodexReasoningLevel(1, 1));
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn open_agent_toolbar_model_submenu_anchors_below_the_clicked_tier_button() {
+        let mut app = app();
+        let pane_id = codex_pane(&mut app);
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        let anchor = Rect::new(10, 5, 6, 1);
+        app.open_agent_toolbar_model_submenu(pane_id, 2, anchor);
+
+        let Mode::AgentToolbarModelSubmenu(state) = &app.mode else {
+            panic!("expected Mode::AgentToolbarModelSubmenu");
+        };
+        assert_eq!(state.pane_id, pane_id);
+        assert_eq!(state.tier_index, 2);
+        assert_eq!(state.selected_index, 0);
+        assert_eq!(state.area.x, anchor.x);
+        assert_eq!(state.area.y, anchor.bottom());
+        // Luna (index 2) has 5 levels -- height is levels + 2 for the border.
+        assert_eq!(state.area.height, 7);
+    }
+
+    #[test]
+    fn clicking_a_codex_tier_button_opens_its_submenu_then_a_level_click_sends_the_first_stage() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let pane_id = codex_pane(&mut app);
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.agent_toolbar_latched_panes.insert(pane_id);
+        app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        app.take_outbound_requests();
+
+        let toolbar_area = app.pane_viewport(pane_id).unwrap().toolbar_area.unwrap();
+        let toolbar_ctx = crate::agent_toolbar::ToolbarContext {
+            provider: app.agent_toolbar_provider(pane_id),
+            icons: &app.ui_settings.icons,
+            effort: EffortLevel::Auto,
+            show_labels: app.ui_settings.show_toolbar_labels,
+            selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+        };
+        let sol_rect = crate::agent_toolbar::button_rect_for(
+            toolbar_area,
+            toolbar_ctx,
+            AgentToolbarAction::CodexModelTier(0),
+        )
+        .expect("Sol tier button should be in the toolbar");
+
+        // Both clicks go through the real top-level dispatcher, not
+        // `handle_pane_mouse` directly -- only that dispatcher checks
+        // `app.mode` first and routes a click while the submenu is open to
+        // `handle_agent_toolbar_model_submenu_mouse` instead of back into
+        // ordinary pane-click handling.
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: sol_rect.x,
+                row: sol_rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        let submenu_area = match &app.mode {
+            Mode::AgentToolbarModelSubmenu(state) => {
+                assert_eq!(state.tier_index, 0);
+                assert_eq!(state.pane_id, pane_id);
+                state.area
+            }
+            _ => panic!("clicking the Sol tier button should open its submenu"),
+        };
+        assert!(app.take_outbound_requests().is_empty());
+
+        // Row 2 inside Sol's submenu (Low, Medium, High, ...) is "High".
+        let level_row = submenu_area.y + 1 + 2;
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: submenu_area.x + 1,
+                row: level_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "picking a level should close the submenu"
+        );
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::KeyInput {
+                pane_id,
+                bytes: b"/model".to_vec(),
+                submission: Some(PromptSubmissionSource::ToolbarAction),
             }]
         );
     }

@@ -49,12 +49,130 @@ pub enum AgentToolbarAction {
     Exit,
     Fast,
     CycleEffort,
-    /// Index into `models_for(provider)`.
+    /// Index into `models_for(provider)`. Claude and Antigravity only --
+    /// Codex's model buttons open `CodexModelTier` instead (see that
+    /// variant's doc comment for why a flat one-shot command doesn't work
+    /// for Codex).
     Model(u8),
     /// Flips `UiSettings::terminal_text_selection_enabled`. Client-side and
     /// universal, like `Close`/`Stop`/`CopyScreen` -- available regardless
     /// of provider since it governs mouse behavior, not agent commands.
     ToggleTextSelection,
+    /// Opens the reasoning-strength submenu for `CODEX_MODEL_TIERS[index]`
+    /// (Sol/Terra/Luna). Codex-only: unlike Claude's `/model <name>`, Codex's
+    /// `/model` command has no inline argument form -- typing one is read as
+    /// a chat prompt, not a command (confirmed against a live `codex`
+    /// session) -- so picking a model is an interactive picker requiring
+    /// this menu rather than a single sent command.
+    CodexModelTier(u8),
+    /// Sends the full staged keystroke sequence that selects
+    /// `CODEX_MODEL_TIERS[tier_index]` at `codex_reasoning_levels(tier_index)[level_index]`.
+    /// Only reachable by clicking an entry inside the `CodexModelTier` submenu.
+    CodexReasoningLevel(u8, u8),
+}
+
+/// One selectable Codex model tier: Sol, Terra, or Luna. `model_digit` is
+/// positional against Codex's `/model` root picker list (1=Sol, 2=Terra,
+/// 3=Luna) -- if OpenAI ever reorders that list, the wrong model gets
+/// selected silently, so keep this table in the exact order Codex renders.
+pub struct CodexModelTier {
+    pub glyph: &'static str,
+    pub label: &'static str,
+    model_digit: u8,
+}
+
+/// Sol/Terra/Luna in Codex's own `/model` picker order, each with the sun,
+/// earth, and moon glyphs the top-level menu is built around.
+pub const CODEX_MODEL_TIERS: [CodexModelTier; 3] = [
+    CodexModelTier {
+        glyph: "\u{2600}\u{fe0f}",
+        label: "Sol",
+        model_digit: b'1',
+    },
+    CodexModelTier {
+        glyph: "\u{1f30d}",
+        label: "Terra",
+        model_digit: b'2',
+    },
+    CodexModelTier {
+        glyph: "\u{1f319}",
+        label: "Luna",
+        model_digit: b'3',
+    },
+];
+
+/// One reasoning-effort strength inside a Codex model tier's submenu.
+/// `digits` are the keys pressed after the model digit, one PTY write per
+/// digit (see `codex_model_keystroke_stages`'s doc comment for why each
+/// digit is its own write): Low/Medium/High/Extra high are one digit inside
+/// Codex's "Select Reasoning Level" screen; Max/Ultra are two, since Codex
+/// nests them behind that screen's "More reasoning..." entry (its own
+/// "Advanced Reasoning" screen).
+pub struct CodexReasoningLevel {
+    pub label: &'static str,
+    digits: &'static [u8],
+}
+
+const CODEX_REASONING_LEVELS: [CodexReasoningLevel; 6] = [
+    CodexReasoningLevel {
+        label: "Low",
+        digits: b"1",
+    },
+    CodexReasoningLevel {
+        label: "Medium",
+        digits: b"2",
+    },
+    CodexReasoningLevel {
+        label: "High",
+        digits: b"3",
+    },
+    CodexReasoningLevel {
+        label: "Extra high",
+        digits: b"4",
+    },
+    CodexReasoningLevel {
+        label: "Max",
+        digits: b"51",
+    },
+    CodexReasoningLevel {
+        label: "Ultra",
+        digits: b"52",
+    },
+];
+
+/// The reasoning levels offered for `CODEX_MODEL_TIERS[tier_index]`. Every
+/// tier but Luna offers all six; Luna's "Advanced Reasoning" screen has no
+/// Ultra entry (confirmed live -- Codex only lists "1. Max" there for Luna),
+/// so its submenu stops at five.
+pub fn codex_reasoning_levels(tier_index: usize) -> &'static [CodexReasoningLevel] {
+    const LUNA_INDEX: usize = 2;
+    if tier_index == LUNA_INDEX {
+        &CODEX_REASONING_LEVELS[..5]
+    } else {
+        &CODEX_REASONING_LEVELS
+    }
+}
+
+/// Builds the full staged keystroke sequence that switches Codex to `tier`
+/// at `level`. Each returned element is one PTY write; the caller must send
+/// them as separate writes with a real gap between at least the first two,
+/// never concatenated into one buffer.
+///
+/// Confirmed against a live `codex` session: typing `/model` opens its
+/// slash-command autocomplete, and an Enter that arrives before that popup
+/// has settled is consumed as "accept completion" instead of "submit" --
+/// the whole `/model gpt-5.6-terra` line lands in the chat composer as text
+/// (and gets sent to the agent as a prompt) rather than opening the picker.
+/// Once the picker is actually open, digit-to-digit navigation between its
+/// nested screens (model -> reasoning level -> advanced reasoning) is
+/// synchronous and needs no gap.
+pub fn codex_model_keystroke_stages(
+    tier: &CodexModelTier,
+    level: &CodexReasoningLevel,
+) -> Vec<Vec<u8>> {
+    let mut stages = vec![b"/model".to_vec(), b"\r".to_vec(), vec![tier.model_digit]];
+    stages.extend(level.digits.iter().map(|&digit| vec![digit]));
+    stages
 }
 
 /// A cyclable, client-local "requested reasoning effort" indicator. Nothing
@@ -133,7 +251,10 @@ pub struct ModelButton {
     pub command: &'static str,
 }
 
-/// The model buttons offered for `provider`, in display order.
+/// The model buttons offered for `provider`, in display order. Empty for
+/// Codex -- its model selection is the `CodexModelTier`/`CodexReasoningLevel`
+/// submenu built from `CODEX_MODEL_TIERS` instead, since Codex's `/model`
+/// command has no inline argument form a flat `ModelButton` could send.
 pub fn models_for(provider: BuiltinAgentProvider) -> &'static [ModelButton] {
     match provider {
         BuiltinAgentProvider::Claude => &[
@@ -154,16 +275,7 @@ pub fn models_for(provider: BuiltinAgentProvider) -> &'static [ModelButton] {
                 command: "/model fable",
             },
         ],
-        BuiltinAgentProvider::Codex => &[
-            ModelButton {
-                label: "Codex",
-                command: "/model gpt-5.1-codex",
-            },
-            ModelButton {
-                label: "Codex Max",
-                command: "/model gpt-5.1-codex-max",
-            },
-        ],
+        BuiltinAgentProvider::Codex => &[],
         BuiltinAgentProvider::Antigravity => &[
             ModelButton {
                 label: "Gemini Pro",
@@ -208,8 +320,38 @@ pub fn command_for(
         | AgentToolbarAction::Stop
         | AgentToolbarAction::CopyScreen
         | AgentToolbarAction::CycleEffort
-        | AgentToolbarAction::ToggleTextSelection => None,
+        | AgentToolbarAction::ToggleTextSelection
+        | AgentToolbarAction::CodexModelTier(_)
+        | AgentToolbarAction::CodexReasoningLevel(_, _) => None,
     }
+}
+
+/// The full write sequence for one toolbar action: a single write for every
+/// action `command_for` already covers (its command text plus a trailing
+/// Enter, matching how a hand-typed submission reaches the PTY), or the
+/// multi-write `codex_model_keystroke_stages` sequence for
+/// `CodexReasoningLevel`, which `command_for` cannot express as one string.
+/// `None` for an action with no PTY effect (`Close`, `Stop`,
+/// `ToggleTextSelection`, `CycleEffort`, `CopyScreen`, `CodexModelTier`,
+/// which only opens its submenu) or one `provider` doesn't support.
+pub fn keystroke_stages_for(
+    provider: BuiltinAgentProvider,
+    action: AgentToolbarAction,
+) -> Option<Vec<Vec<u8>>> {
+    if let AgentToolbarAction::CodexReasoningLevel(tier_index, level_index) = action {
+        if provider != BuiltinAgentProvider::Codex {
+            return None;
+        }
+        let tier = CODEX_MODEL_TIERS.get(usize::from(tier_index))?;
+        let level =
+            codex_reasoning_levels(usize::from(tier_index)).get(usize::from(level_index))?;
+        return Some(codex_model_keystroke_stages(tier, level));
+    }
+    command_for(provider, action).map(|command| {
+        let mut bytes = command.as_bytes().to_vec();
+        bytes.push(b'\r');
+        vec![bytes]
+    })
 }
 
 /// Short label shown to the right of the icon when the toolbar's "show
@@ -229,7 +371,9 @@ pub const fn action_label(action: AgentToolbarAction) -> &'static str {
         AgentToolbarAction::Fast => "Fast",
         AgentToolbarAction::CycleEffort
         | AgentToolbarAction::Model(_)
-        | AgentToolbarAction::ToggleTextSelection => "",
+        | AgentToolbarAction::ToggleTextSelection
+        | AgentToolbarAction::CodexModelTier(_)
+        | AgentToolbarAction::CodexReasoningLevel(_, _) => "",
     }
 }
 
@@ -279,6 +423,15 @@ pub fn tooltip_for(
             "Terminal text selection: {} -- click to toggle",
             if selection_enabled { "on" } else { "off" }
         ),
+        AgentToolbarAction::CodexModelTier(index) => CODEX_MODEL_TIERS
+            .get(usize::from(index))
+            .map(|tier| format!("Choose a reasoning strength for {}", tier.label))
+            .unwrap_or_default(),
+        AgentToolbarAction::CodexReasoningLevel(tier_index, level_index) => CODEX_MODEL_TIERS
+            .get(usize::from(tier_index))
+            .zip(codex_reasoning_levels(usize::from(tier_index)).get(usize::from(level_index)))
+            .map(|(tier, level)| format!("Switch model to {} ({})", tier.label, level.label))
+            .unwrap_or_default(),
     }
 }
 
@@ -388,26 +541,37 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         icons.glyph(IconTarget::AgentToolbarConfig),
         show_labels,
     );
-    // Claude's four models get a distinct size/power-progression glyph each
-    // (small dot -> hollow -> filled -> large filled) rather than sharing one
-    // generic model icon, since Haiku/Sonnet/Opus/Fable is itself a
-    // progression and the shared puzzle-piece glyph didn't communicate that.
-    // Other providers keep the single configurable `AgentToolbarModel` glyph.
-    const CLAUDE_MODEL_ICONS: [&str; 4] = ["\u{b7}", "\u{25cb}", "\u{25cf}", "\u{2b24}"];
-    let model_glyph = icons.glyph(IconTarget::AgentToolbarModel);
-    for (index, model) in models_for(provider).iter().enumerate() {
-        let glyph = if provider == BuiltinAgentProvider::Claude {
-            CLAUDE_MODEL_ICONS
-                .get(index)
-                .copied()
-                .unwrap_or(model_glyph)
-        } else {
-            model_glyph
-        };
-        buttons.push(Button {
-            action: AgentToolbarAction::Model(index as u8),
-            text: format!("{glyph}{}", model.label),
-        });
+    if provider == BuiltinAgentProvider::Codex {
+        // Sol/Terra/Luna each open their own reasoning-strength submenu
+        // rather than sending a command directly -- see `CodexModelTier`'s
+        // doc comment for why Codex's model buttons can't be flat like
+        // Claude's or Antigravity's.
+        for (index, tier) in CODEX_MODEL_TIERS.iter().enumerate() {
+            buttons.push(Button {
+                action: AgentToolbarAction::CodexModelTier(index as u8),
+                text: format!("{}{}", tier.glyph, tier.label),
+            });
+        }
+    } else {
+        // Every displayed Claude-model glyph gets its own persisted role so
+        // the strength progression never bypasses the user-configurable icon
+        // registry. Other providers retain the shared model role.
+        for (index, model) in models_for(provider).iter().enumerate() {
+            let glyph = if provider == BuiltinAgentProvider::Claude {
+                match index {
+                    0 => icons.glyph(IconTarget::AgentToolbarClaudeHaiku),
+                    1 => icons.glyph(IconTarget::AgentToolbarClaudeSonnet),
+                    2 => icons.glyph(IconTarget::AgentToolbarClaudeOpus),
+                    _ => icons.glyph(IconTarget::AgentToolbarClaudeFable),
+                }
+            } else {
+                icons.glyph(IconTarget::AgentToolbarModel)
+            };
+            buttons.push(Button {
+                action: AgentToolbarAction::Model(index as u8),
+                text: format!("{glyph}{}", model.label),
+            });
+        }
     }
     if command_for(provider, AgentToolbarAction::Fast).is_some() {
         buttons.push(Button {
@@ -496,6 +660,22 @@ fn group_width(buttons: &[Button]) -> u16 {
     }
     let icons_width: u16 = buttons.iter().map(|button| cell_width(&button.text)).sum();
     icons_width + BUTTON_GAP * (buttons.len() as u16 - 1)
+}
+
+/// The exact screen rect drawn for `action`, if it's currently visible.
+/// Shared by the Codex model submenu's opener with `action_at`'s reverse
+/// lookup (both key off `button_rects`), so the submenu always anchors flush
+/// against the button that opened it, even after buttons get dropped for a
+/// narrow pane.
+pub fn button_rect_for(
+    area: Rect,
+    ctx: ToolbarContext,
+    action: AgentToolbarAction,
+) -> Option<Rect> {
+    button_rects(area, ctx)
+        .into_iter()
+        .find(|(button_action, ..)| *button_action == action)
+        .map(|(_, rect, _)| rect)
 }
 
 /// Returns the toolbar action at a terminal coordinate, if any.
@@ -674,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_models_get_distinct_progression_icons() {
+    fn claude_models_use_their_individually_configurable_icons() {
         let provider = BuiltinAgentProvider::Claude;
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 200, 1);
@@ -685,12 +865,25 @@ mod tests {
             .map(|(_, _, text)| text.as_str())
             .collect();
         assert_eq!(model_texts.len(), 4);
-        let unique: std::collections::HashSet<&str> = model_texts.iter().copied().collect();
-        assert_eq!(unique.len(), 4, "each model button must render distinctly");
-        // Doesn't fall back to the shared generic model glyph.
-        assert!(model_texts
-            .iter()
-            .all(|text| !text.starts_with(icons.glyph(IconTarget::AgentToolbarModel))));
+        assert_eq!(model_texts, vec!["🐁Haiku", "🐈Sonnet", "🦁Opus", "⬤Fable"]);
+
+        let mut configured_icons = icons.clone();
+        configured_icons.set(IconTarget::AgentToolbarClaudeHaiku, "•".to_string());
+        configured_icons.set(IconTarget::AgentToolbarClaudeSonnet, "◉".to_string());
+        configured_icons.set(IconTarget::AgentToolbarClaudeOpus, "◆".to_string());
+        configured_icons.set(IconTarget::AgentToolbarClaudeFable, "✦".to_string());
+        let configured_texts: Vec<String> = button_rects(
+            area,
+            ctx(Some(provider), &configured_icons, EffortLevel::Auto, false),
+        )
+        .into_iter()
+        .filter(|(action, ..)| matches!(action, AgentToolbarAction::Model(_)))
+        .map(|(_, _, text)| text)
+        .collect();
+        assert_eq!(
+            configured_texts,
+            vec!["•Haiku", "◉Sonnet", "◆Opus", "✦Fable"]
+        );
     }
 
     #[test]
@@ -707,6 +900,99 @@ mod tests {
         assert!(!rects
             .iter()
             .any(|(action, ..)| *action == AgentToolbarAction::Fast));
+    }
+
+    #[test]
+    fn codex_toolbar_exposes_sol_terra_luna_tiers_not_flat_models() {
+        let provider = BuiltinAgentProvider::Codex;
+        assert!(models_for(provider).is_empty());
+        let icons = IconSettings::default();
+        let area = Rect::new(0, 0, 200, 1);
+        let rects = button_rects(area, ctx(Some(provider), &icons, EffortLevel::Auto, false));
+        let tier_labels: Vec<&str> = rects
+            .iter()
+            .filter_map(|(action, _, text)| {
+                matches!(action, AgentToolbarAction::CodexModelTier(_)).then_some(text.as_str())
+            })
+            .collect();
+        assert_eq!(
+            tier_labels,
+            vec!["\u{2600}\u{fe0f}Sol", "\u{1f30d}Terra", "\u{1f319}Luna"]
+        );
+        assert!(!rects
+            .iter()
+            .any(|(action, ..)| matches!(action, AgentToolbarAction::Model(_))));
+    }
+
+    #[test]
+    fn luna_reasoning_levels_omit_ultra() {
+        let sol_levels: Vec<&str> = codex_reasoning_levels(0).iter().map(|l| l.label).collect();
+        let terra_levels: Vec<&str> = codex_reasoning_levels(1).iter().map(|l| l.label).collect();
+        let luna_levels: Vec<&str> = codex_reasoning_levels(2).iter().map(|l| l.label).collect();
+        assert_eq!(
+            sol_levels,
+            vec!["Low", "Medium", "High", "Extra high", "Max", "Ultra"]
+        );
+        assert_eq!(sol_levels, terra_levels);
+        assert_eq!(
+            luna_levels,
+            vec!["Low", "Medium", "High", "Extra high", "Max"]
+        );
+    }
+
+    #[test]
+    fn codex_keystroke_stages_open_picker_then_pick_model_then_level() {
+        let terra = &CODEX_MODEL_TIERS[1];
+        let high = &codex_reasoning_levels(1)[2];
+        let stages = codex_model_keystroke_stages(terra, high);
+        assert_eq!(
+            stages,
+            vec![b"/model".to_vec(), b"\r".to_vec(), vec![b'2'], vec![b'3']]
+        );
+    }
+
+    #[test]
+    fn codex_max_and_ultra_add_an_advanced_reasoning_stage() {
+        let sol = &CODEX_MODEL_TIERS[0];
+        let levels = codex_reasoning_levels(0);
+        let max = levels.iter().find(|l| l.label == "Max").unwrap();
+        let ultra = levels.iter().find(|l| l.label == "Ultra").unwrap();
+        assert_eq!(
+            codex_model_keystroke_stages(sol, max),
+            vec![
+                b"/model".to_vec(),
+                b"\r".to_vec(),
+                vec![b'1'],
+                vec![b'5'],
+                vec![b'1']
+            ]
+        );
+        assert_eq!(
+            codex_model_keystroke_stages(sol, ultra),
+            vec![
+                b"/model".to_vec(),
+                b"\r".to_vec(),
+                vec![b'1'],
+                vec![b'5'],
+                vec![b'2']
+            ]
+        );
+    }
+
+    #[test]
+    fn keystroke_stages_for_rejects_codex_reasoning_level_on_other_providers() {
+        assert!(keystroke_stages_for(
+            BuiltinAgentProvider::Claude,
+            AgentToolbarAction::CodexReasoningLevel(1, 2)
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn keystroke_stages_for_single_command_actions_matches_command_for_plus_enter() {
+        let provider = BuiltinAgentProvider::Claude;
+        let stages = keystroke_stages_for(provider, AgentToolbarAction::Clear).unwrap();
+        assert_eq!(stages, vec![b"/clear\r".to_vec()]);
     }
 
     #[test]

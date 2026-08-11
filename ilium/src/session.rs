@@ -92,15 +92,7 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
         source,
     })?;
     let socket_dir = runtime_socket_dir()?;
-    // The readable slug is decoration; the digest and the session name carry
-    // identity. So the slug takes whatever the *actual* directory leaves over
-    // rather than a fixed cap, which is what made macOS fail: its per-session
-    // temporary directory alone consumed most of `sun_path`.
-    let socket_key = socket_key(
-        &project_root,
-        session_name,
-        slug_budget(&socket_dir, session_name),
-    );
+    let socket_key = socket_key_in(&socket_dir, &project_root, session_name);
     let socket_path = socket_dir.join(format!("{socket_key}.sock"));
     if socket_path.as_os_str().len() >= MAX_SOCKET_PATH_BYTES {
         // Only reachable when the digest, the session name, and `.sock` alone
@@ -182,6 +174,39 @@ fn runtime_socket_dir() -> Result<PathBuf, CliError> {
         path: PathBuf::from("session socket directory"),
         source,
     })
+}
+
+/// The endpoint identity a project's session resolves to inside `socket_dir`.
+///
+/// Split out and made public so a caller that already knows the directory --
+/// notably the integration tests, which point one session at a directory of
+/// their own -- can name the same endpoint the CLI just resolved without
+/// re-deriving it. Re-deriving is the failure mode worth designing against: a
+/// second implementation of the slug, digest and length budget would agree
+/// with this one only until one of them changed.
+///
+/// The readable slug is decoration; the digest and the session name carry
+/// identity. So the slug takes whatever the *actual* directory leaves over
+/// rather than a fixed cap, which is what made macOS fail: its per-session
+/// temporary directory alone consumed most of `sun_path`.
+pub fn socket_key_in(socket_dir: &Path, project_root: &Path, session_name: &str) -> String {
+    socket_key(
+        project_root,
+        session_name,
+        slug_budget(socket_dir, session_name),
+    )
+}
+
+/// The full endpoint path a project's session resolves to inside `socket_dir`.
+///
+/// `project_root` must already be canonical: identity is derived from the
+/// canonical path, so passing an uncanonicalised one silently names a
+/// different session.
+pub fn socket_path_in(socket_dir: &Path, project_root: &Path, session_name: &str) -> PathBuf {
+    socket_dir.join(format!(
+        "{}.sock",
+        socket_key_in(socket_dir, project_root, session_name)
+    ))
 }
 
 /// How many bytes the readable slug may occupy so the finished socket path

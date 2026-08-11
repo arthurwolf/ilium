@@ -20,8 +20,7 @@
 //! (`sysinfo`, `crossterm`, `tracing-subscriber`, ...) into what's meant to
 //! be this workspace's thinnest crate.
 
-mod error;
-mod session;
+use ilium::session;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -30,7 +29,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 
-use crate::error::CliError;
+use ilium::error::CliError;
 
 /// How long the `new-pane`/`kill-session` one-shot subcommands wait for
 /// the server to confirm a request before giving up and reporting failure.

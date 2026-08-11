@@ -12,9 +12,9 @@ use ilium_ipc::ClientRequest;
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
-    App, AppearanceRow, BoardRenameTarget, BoardStorageKind, ClientExitReason, CreateBoardState,
-    FocusTarget, KanbanBoardRow, Mode, ProjectFolderSelection, SettingsState, SettingsTab,
-    SoundRow,
+    AgentToolbarModelSubmenuState, App, AppearanceRow, BoardRenameTarget, BoardStorageKind,
+    ClientExitReason, CreateBoardState, FocusTarget, KanbanBoardRow, Mode, ProjectFolderSelection,
+    SettingsState, SettingsTab, SoundRow,
 };
 use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action};
@@ -91,6 +91,9 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
+        }
+        Mode::AgentToolbarModelSubmenu(state) => {
+            handle_agent_toolbar_model_submenu_event(app, state, &event)
         }
         Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
@@ -1282,6 +1285,45 @@ fn handle_editor_line_context_menu_event(
             app.execute_editor_line_context_action(action, menu.source);
         }
         _ => app.mode = Mode::EditorLineContextMenu(menu),
+    }
+}
+
+/// The Codex Sol/Terra/Luna reasoning-strength submenu uses the same
+/// keyboard contract as the tree and source-line menus.
+fn handle_agent_toolbar_model_submenu_event(
+    app: &mut App,
+    mut state: AgentToolbarModelSubmenuState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentToolbarModelSubmenu(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentToolbarModelSubmenu(state);
+        return;
+    }
+    let level_count =
+        crate::agent_toolbar::codex_reasoning_levels(usize::from(state.tier_index)).len();
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.selected_index = state.selected_index.saturating_sub(1);
+            app.mode = Mode::AgentToolbarModelSubmenu(state);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.selected_index = (state.selected_index + 1).min(level_count.saturating_sub(1));
+            app.mode = Mode::AgentToolbarModelSubmenu(state);
+        }
+        KeyCode::Enter => {
+            let pane_id = state.pane_id;
+            let action = crate::agent_toolbar::AgentToolbarAction::CodexReasoningLevel(
+                state.tier_index,
+                state.selected_index as u8,
+            );
+            app.execute_agent_toolbar_action(pane_id, action);
+        }
+        _ => app.mode = Mode::AgentToolbarModelSubmenu(state),
     }
 }
 

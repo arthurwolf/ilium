@@ -14,7 +14,10 @@ use ilium_core::{AgentProvider, NodeId, NodeKind, Tree, ROOT_ID};
 use ratatui::layout::{Position, Rect};
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
-use crate::app::{App, ContextMenu, CreateGroupState, Mode, RightPanelTarget};
+use crate::agent_toolbar::AgentToolbarAction;
+use crate::app::{
+    AgentToolbarModelSubmenuState, App, ContextMenu, CreateGroupState, Mode, RightPanelTarget,
+};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
@@ -178,6 +181,14 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::EditorLineContextMenu above");
         };
         handle_editor_line_context_menu_mouse(app, menu, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::AgentToolbarModelSubmenu(_)) {
+        let Mode::AgentToolbarModelSubmenu(state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::AgentToolbarModelSubmenu above");
+        };
+        handle_agent_toolbar_model_submenu_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::CreateAgentFromLine(_)) {
@@ -945,6 +956,42 @@ fn handle_editor_line_context_menu_mouse(
     menu.selected_index = item_row;
     let action = menu.actions[item_row].clone();
     app.execute_editor_line_context_action(action, menu.source);
+}
+
+/// Handles a click inside (or outside) the Codex Sol/Terra/Luna
+/// reasoning-strength submenu, mirroring
+/// `handle_editor_line_context_menu_mouse`'s outside-click/border/row
+/// structure exactly.
+fn handle_agent_toolbar_model_submenu_mouse(
+    app: &mut App,
+    mut state: AgentToolbarModelSubmenuState,
+    mouse: MouseEvent,
+) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::AgentToolbarModelSubmenu(state);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    if !state.area.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    let content_top = state.area.y.saturating_add(1);
+    if position.y < content_top {
+        app.mode = Mode::AgentToolbarModelSubmenu(state);
+        return;
+    }
+    let item_row = usize::from(position.y - content_top);
+    let level_count =
+        crate::agent_toolbar::codex_reasoning_levels(usize::from(state.tier_index)).len();
+    if item_row >= level_count {
+        app.mode = Mode::AgentToolbarModelSubmenu(state);
+        return;
+    }
+    state.selected_index = item_row;
+    let pane_id = state.pane_id;
+    let action = AgentToolbarAction::CodexReasoningLevel(state.tier_index, item_row as u8);
+    app.execute_agent_toolbar_action(pane_id, action);
 }
 
 /// Handles direct manipulation of the agent selector, textarea, and explicit
