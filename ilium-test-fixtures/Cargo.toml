@@ -1,0 +1,24 @@
+[package]
+name = "ilium-test-fixtures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Test-support only. Nothing in the shipped binary depends on this crate; it
+# exists so the fake agent CLIs the integration tests spawn are real
+# executables that build for whatever platform the suite is running on,
+# instead of `#!/bin/sh` scripts that confine those tests to Unix.
+
+[dependencies]
+crossterm = "0.29.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[[bin]]
+name = "ilium-fixture-agent"
+path = "src/bin/ilium_fixture_agent.rs"
