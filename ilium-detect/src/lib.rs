@@ -900,35 +900,60 @@ pub fn identify_agent_with_extra(
     children_index: &ProcessChildrenIndex,
     extra_signatures: &[AgentSignature],
 ) -> Option<AgentIdentity> {
-    // Tracks the best match found so far as (depth, pid) plus its class --
-    // the CLI process is closer to the pane shell than its internal helper
-    // processes (for example Codex's code-mode host), so lower depth (and,
-    // tie-broken, lower pid) wins, matching the old `min_by_key((depth,
-    // pid))` semantics exactly.
-    let mut best: Option<((usize, u32), Pid, String, AgentProcessMatch)> = None;
+    // Tracks the best match found so far as (is_interpreted, depth, pid)
+    // plus its class -- the CLI process is closer to the pane shell than
+    // its internal helper processes (for example Codex's code-mode host),
+    // so lower depth (and, tie-broken, lower pid) wins among matches of the
+    // same provenance, matching the old `min_by_key((depth, pid))`
+    // semantics exactly.
+    //
+    // `is_interpreted` breaks that tie the other way for one specific
+    // shape: some installs (e.g. Bun's global bin shim,
+    // `node /home/.../bin/codex`) put a JS *launcher* directly on the
+    // pane's shell -- matched only by unwrapping its argv (see
+    // `identifying_process_names`), never by its own kernel name -- which
+    // then spawns the real native CLI binary as a further child instead of
+    // exec-replacing itself. That binary's kernel name matches the
+    // signature directly and is the process actually holding the
+    // transcript file open, so a same-signature *native* match found one
+    // level past an interpreted one wins regardless of depth: the launcher
+    // was never the CLI, just its spawner. The search only extends past an
+    // interpreted match's own depth, never past a native one, so this
+    // cannot turn into an unbounded deep search for an unrelated process
+    // that happens to share a name.
+    let mut best: Option<((bool, usize, u32), Pid, String, AgentProcessMatch)> = None;
     let mut queue: VecDeque<(Pid, usize)> = VecDeque::new();
     let mut visited: HashSet<Pid> = HashSet::new();
     queue.push_back((shell_pid, 0));
     visited.insert(shell_pid);
 
     while let Some((pid, depth)) = queue.pop_front() {
-        if let Some(((best_depth, _), _, _, _)) = &best {
-            if depth > *best_depth {
+        if let Some(((best_is_interpreted, best_depth, _), _, _, _)) = &best {
+            let search_limit = if *best_is_interpreted {
+                best_depth + 1
+            } else {
+                *best_depth
+            };
+            if depth > search_limit {
                 break;
             }
         }
         if let Some(process) = system.process(pid) {
             // Lowercased once per process, avoiding repeated allocation per
             // classification attempt. See `identifying_process_names` for why
-            // more than the kernel name has to be considered.
+            // more than the kernel name has to be considered. Candidate index
+            // 0 is always the process's own kernel name (see that function);
+            // anything matched further down the list was only inferred from
+            // an interpreter's argv.
             let matched = identifying_process_names(process)
                 .into_iter()
-                .find_map(|candidate| {
+                .enumerate()
+                .find_map(|(index, candidate)| {
                     match_process_name_with_extra(&candidate, extra_signatures)
-                        .map(|process_match| (candidate, process_match))
+                        .map(|process_match| (index > 0, candidate, process_match))
                 });
-            if let Some((matched_name, process_match)) = matched {
-                let key = (depth, pid.as_u32());
+            if let Some((is_interpreted, matched_name, process_match)) = matched {
+                let key = (is_interpreted, depth, pid.as_u32());
                 let is_better = match &best {
                     None => true,
                     Some((existing_key, _, _, _)) => key < *existing_key,
@@ -949,7 +974,7 @@ pub fn identify_agent_with_extra(
     }
 
     best.map(
-        |((depth, _), pid, process_name, process_match)| AgentIdentity {
+        |((_, depth, _), pid, process_name, process_match)| AgentIdentity {
             pid: pid.as_u32(),
             class: process_match.class,
             process_name,

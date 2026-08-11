@@ -237,8 +237,12 @@ fn read_submitted_line() -> Option<String> {
 
 fn run_working_then_idle(working_seconds: u32) {
     for _ in 0..working_seconds {
-        emit("gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\r\n");
-        emit("Cogitating (esc to interrupt)\r\n");
+        // Both rows in one write, so no observer can see the goal line
+        // without the activity line -- see `run_change_only`.
+        emit(
+            "gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\r\n\
+             Cogitating (esc to interrupt)\r\n",
+        );
         std::thread::sleep(Duration::from_secs(1));
     }
     clear_screen();
@@ -357,11 +361,14 @@ fn run_delayed_composer_then_echo(delay_seconds: u32) {
 fn run_change_only() {
     let mut counter: u64 = 1;
     loop {
+        // Built as one string rather than two `emit` calls. Note this is not
+        // yet a single syscall: Rust's stdout is a `LineWriter`, so it still
+        // flushes at the embedded newline. It narrows the window rather than
+        // closing it, and did not fix the torn-frame failures it was aimed at
+        // -- see docs/TODO.md.
         emit(&format!(
-            "\x1b[Hmodel · workspace · Working · Pursuing goal ({counter}m)\x1b[K\r\n"
-        ));
-        emit(&format!(
-            "Cogitating (esc to interrupt) · {counter}s · {counter} tokens\x1b[K"
+            "\x1b[Hmodel · workspace · Working · Pursuing goal ({counter}m)\x1b[K\r\n\
+             Cogitating (esc to interrupt) · {counter}s · {counter} tokens\x1b[K"
         ));
         counter += 1;
         std::thread::sleep(Duration::from_secs(1));
