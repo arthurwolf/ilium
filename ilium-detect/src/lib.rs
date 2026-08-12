@@ -894,41 +894,72 @@ pub fn identify_agent(system: &System, shell_pid: Pid) -> Option<AgentIdentity> 
 /// `system.processes()` table -- so this call's cost scales with how many
 /// processes actually descend from this one pane's shell, not with how
 /// many processes are running on the machine as a whole.
+/// Ranking key plus payload for the best candidate seen so far in
+/// [`identify_agent_with_extra`]'s walk: `(is_interpreted, depth, pid)` is
+/// compared lexicographically, then the matched process's pid, its matched
+/// name, and the registry match that recognized it.
+type BestAgentMatch = ((bool, usize, u32), Pid, String, AgentProcessMatch);
+
 pub fn identify_agent_with_extra(
     system: &System,
     shell_pid: Pid,
     children_index: &ProcessChildrenIndex,
     extra_signatures: &[AgentSignature],
 ) -> Option<AgentIdentity> {
-    // Tracks the best match found so far as (depth, pid) plus its class --
-    // the CLI process is closer to the pane shell than its internal helper
-    // processes (for example Codex's code-mode host), so lower depth (and,
-    // tie-broken, lower pid) wins, matching the old `min_by_key((depth,
-    // pid))` semantics exactly.
-    let mut best: Option<((usize, u32), Pid, String, AgentProcessMatch)> = None;
+    // Tracks the best match found so far as (is_interpreted, depth, pid)
+    // plus its class -- the CLI process is closer to the pane shell than
+    // its internal helper processes (for example Codex's code-mode host),
+    // so lower depth (and, tie-broken, lower pid) wins among matches of the
+    // same provenance, matching the old `min_by_key((depth, pid))`
+    // semantics exactly.
+    //
+    // `is_interpreted` breaks that tie the other way for one specific
+    // shape: some installs (e.g. Bun's global bin shim,
+    // `node /home/.../bin/codex`) put a JS *launcher* directly on the
+    // pane's shell -- matched only by unwrapping its argv (see
+    // `identifying_process_names`), never by its own kernel name -- which
+    // then spawns the real native CLI binary as a further child instead of
+    // exec-replacing itself. That binary's kernel name matches the
+    // signature directly and is the process actually holding the
+    // transcript file open, so a same-signature *native* match found one
+    // level past an interpreted one wins regardless of depth: the launcher
+    // was never the CLI, just its spawner. The search only extends past an
+    // interpreted match's own depth, never past a native one, so this
+    // cannot turn into an unbounded deep search for an unrelated process
+    // that happens to share a name.
+    let mut best: Option<BestAgentMatch> = None;
     let mut queue: VecDeque<(Pid, usize)> = VecDeque::new();
     let mut visited: HashSet<Pid> = HashSet::new();
     queue.push_back((shell_pid, 0));
     visited.insert(shell_pid);
 
     while let Some((pid, depth)) = queue.pop_front() {
-        if let Some(((best_depth, _), _, _, _)) = &best {
-            if depth > *best_depth {
+        if let Some(((best_is_interpreted, best_depth, _), _, _, _)) = &best {
+            let search_limit = if *best_is_interpreted {
+                best_depth + 1
+            } else {
+                *best_depth
+            };
+            if depth > search_limit {
                 break;
             }
         }
         if let Some(process) = system.process(pid) {
             // Lowercased once per process, avoiding repeated allocation per
             // classification attempt. See `identifying_process_names` for why
-            // more than the kernel name has to be considered.
+            // more than the kernel name has to be considered. Candidate index
+            // 0 is always the process's own kernel name (see that function);
+            // anything matched further down the list was only inferred from
+            // an interpreter's argv.
             let matched = identifying_process_names(process)
                 .into_iter()
-                .find_map(|candidate| {
+                .enumerate()
+                .find_map(|(index, candidate)| {
                     match_process_name_with_extra(&candidate, extra_signatures)
-                        .map(|process_match| (candidate, process_match))
+                        .map(|process_match| (index > 0, candidate, process_match))
                 });
-            if let Some((matched_name, process_match)) = matched {
-                let key = (depth, pid.as_u32());
+            if let Some((is_interpreted, matched_name, process_match)) = matched {
+                let key = (is_interpreted, depth, pid.as_u32());
                 let is_better = match &best {
                     None => true,
                     Some((existing_key, _, _, _)) => key < *existing_key,
@@ -949,7 +980,7 @@ pub fn identify_agent_with_extra(
     }
 
     best.map(
-        |((depth, _), pid, process_name, process_match)| AgentIdentity {
+        |((_, depth, _), pid, process_name, process_match)| AgentIdentity {
             pid: pid.as_u32(),
             class: process_match.class,
             process_name,
@@ -1705,15 +1736,84 @@ mod tests {
     /// `identify_agent` walks a *real* process tree (sysinfo has no fake
     /// backend to inject a synthetic one), so the meaningful thing this
     /// integration-style test can assert without a real agent CLI
-    /// installed is the negative case: the current test process's own
-    /// pid has no `claude`/`codex`/etc. descendant, so it must return
-    /// `None` rather than panicking or false-matching.
+    /// installed is the negative case: a plain child with no
+    /// `claude`/`codex`/etc. descendant of its own returns `None` rather
+    /// than panicking or false-matching.
+    ///
+    /// Deliberately scoped to a controlled child's own pid rather than
+    /// `std::process::id()` -- the *test binary's* pid is shared ambient
+    /// state every test in this module runs under, and cargo's default
+    /// parallel test execution means another test's own spawned
+    /// subprocess (e.g. the wrapper/native pair below) can be alive as a
+    /// descendant of the test binary at the same moment this assertion
+    /// runs, which would make this test flaky through no fault of its own.
     #[test]
     fn identify_agent_returns_none_when_no_agent_descendant_exists() {
+        let mut plain_child = std::process::Command::new("sleep")
+            .arg("2")
+            .spawn()
+            .expect("spawn plain child");
+
         let mut system = System::new_all();
         system.refresh_all();
-        let current_pid = Pid::from_u32(std::process::id());
-        assert_eq!(identify_agent(&system, current_pid), None);
+        assert_eq!(
+            identify_agent(&system, Pid::from_u32(plain_child.id())),
+            None
+        );
+
+        let _ = plain_child.kill();
+        let _ = plain_child.wait();
+    }
+
+    /// Reproduces a real installer shape (Bun's global bin shim): a launcher
+    /// invoked as `node <path-ending-in-codex>` sits directly on the pane's
+    /// shell, matched only by unwrapping its argv (`identifying_process_names`),
+    /// and it *spawns* the real native CLI as a further child rather than
+    /// exec-replacing itself. The launcher's own kernel name is "node" -- it
+    /// never held a transcript file open, so picking it left every later
+    /// session-ID discovery permanently empty. The native child, one level
+    /// deeper, must win even though it's not the shallowest match.
+    #[test]
+    fn identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let node_path = tmp.path().join("node");
+        let native_path = tmp.path().join("codex-native");
+        std::fs::write(&native_path, "#!/bin/sh\nsleep 5\n").expect("write native script");
+        std::fs::write(
+            &node_path,
+            format!("#!/bin/sh\n\"{}\" &\nwait\n", native_path.display()),
+        )
+        .expect("write wrapper script");
+        std::fs::set_permissions(&node_path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod wrapper");
+        std::fs::set_permissions(&native_path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod native");
+
+        // The argument is never executed -- it only needs a file name
+        // containing "codex" so the wrapper matches via
+        // `interpreted_program_name`, exactly like Bun's shim being handed
+        // its own script path as `node`'s argument.
+        let mut wrapper = std::process::Command::new(&node_path)
+            .arg(tmp.path().join("codex-shim"))
+            .spawn()
+            .expect("spawn wrapper");
+
+        // Give the wrapper's own shell body time to actually fork its child
+        // before the process table is sampled.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let mut system = System::new_all();
+        system.refresh_all();
+        let identity = identify_agent(&system, Pid::from_u32(wrapper.id()))
+            .expect("the native child must be found as a codex-matching descendant");
+
+        assert_eq!(identity.class, AgentClass::Codex);
+        assert_eq!(identity.process_name, "codex-native");
+
+        let _ = wrapper.kill();
+        let _ = wrapper.wait();
     }
 
     /// A name that matches no built-in signature is only classified once a

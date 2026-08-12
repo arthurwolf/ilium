@@ -917,7 +917,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 
     // A freshly attached client starts with every group collapsed and
-    // focus on the (empty) pane panel, so phase 1's "cat" pane isn't
+    // focus on the (empty) pane panel, so phase 1's idle pane isn't
     // actually listed yet -- expand it to also prove out tree navigation
     // (`ilium_client::app::App::handle_tree_key`), not just leader-key
     // dispatch: `Ctrl+B then t` (`Action::FocusTree`) moves focus to the
@@ -1816,7 +1816,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     // Start the detached server with a durable terminal fixture before the
     // copied client attaches. The copied binary therefore never needs a
     // sibling `ilium-server` executable in its temporary directory.
-    let new_pane_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
     assert!(
         new_pane_output.status.success(),
         "creating the client-restart fixture failed: stdout={:?} stderr={:?}",
@@ -1979,7 +1979,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     tui.write(b"\x02t\x1b[B\x1b[C")
         .expect("focus tree and expand restored group");
     assert!(
-        wait_until(|| tui.screen_text().contains("cat"), WAIT_TIMEOUT).await,
+        wait_until(|| tui.screen_text().contains(IDLE_PANE_LABEL), WAIT_TIMEOUT).await,
         "expected the server-owned cat pane after client restart, got: {:?}",
         tui.screen_text()
     );
@@ -2013,7 +2013,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     };
 
     for pane_number in 1..=2 {
-        let output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+        let output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
         assert!(
             output.status.success(),
             "creating split fixture pane {pane_number} failed: stdout={:?} stderr={:?}",
@@ -2046,7 +2046,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     tui.write(b"\x01t").expect("focus tree");
     tui.write(b"\x1b[B").expect("select default group");
     let both_fixture_panes = wait_until(
-        || tui.screen_text().matches("cat").count() >= 2,
+        || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
         WAIT_TIMEOUT,
     )
     .await;
@@ -2095,7 +2095,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     tui.write(b"\x1b[B").expect("select split view");
     tui.write(b"\r").expect("display split view");
     let both_viewports = wait_until(
-        || tui.screen_text().matches("cat").count() >= 2,
+        || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
         WAIT_TIMEOUT,
     )
     .await;
@@ -2111,7 +2111,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     // while split presentation continues rendering every member.
     tui.write(b"\x1b[C").expect("expand selected split view");
     let split_children_visible = wait_until(
-        || tui.screen_text().matches("cat").count() >= 2,
+        || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
         WAIT_TIMEOUT,
     )
     .await;
@@ -3663,7 +3663,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
 
     // Create a deterministic terminal whose stdin is echoed back to its
     // viewport, then attach the real TUI to the same isolated session.
-    let new_pane_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
     assert!(
         new_pane_output.status.success(),
         "creating scheduled-input fixture pane failed: stdout={:?} stderr={:?}",
@@ -3754,7 +3754,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("4s") && screen.contains("cat")
+                screen.contains("4s") && screen.contains(IDLE_PANE_LABEL)
             },
             WAIT_TIMEOUT,
         )
@@ -3804,7 +3804,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         already_cleaned_up: false,
     };
 
-    let fixture_output = run_one_shot(&xdg, &project_dir, &["new-pane", "--", "cat"]).await;
+    let fixture_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
     assert!(
         fixture_output.status.success(),
         "creating boundary-move fixture failed: stdout={:?} stderr={:?}",
