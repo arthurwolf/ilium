@@ -2234,6 +2234,8 @@ name = "ilium-detect"
 version = "0.1.0"
 dependencies = [
  "ilium-core",
+ "ilium-platform",
+ "ilium-test-fixtures",
  "sysinfo",
  "tempfile",
 ]

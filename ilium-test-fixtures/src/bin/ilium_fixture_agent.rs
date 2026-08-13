@@ -78,7 +78,25 @@ fn main() {
         FixtureBehavior::RecordSubmittedPrompt { transcript_path } => {
             run_record_submitted_prompt(&transcript_path)
         }
+        FixtureBehavior::SpawnChild { child_path } => run_spawn_child(&child_path),
     }
+}
+
+/// Spawns `child_path` as this process's own child, then lingers.
+///
+/// The child is reaped on its own thread rather than this one: this process
+/// still needs to linger (so a caller has time to walk the process tree and
+/// find the child), but blocking here on `Child::wait` would defeat that --
+/// the reaping thread outlives `linger()`'s own duration, so the child never
+/// sits as a zombie in the meantime either.
+fn run_spawn_child(child_path: &std::path::Path) {
+    let mut child = std::process::Command::new(child_path)
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn child fixture {}: {error}", child_path.display()));
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    linger();
 }
 
 /// Records that the replacement ran, then becomes the real program.

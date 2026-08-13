@@ -162,6 +162,21 @@ pub enum FixtureBehavior {
     /// so a test can tell "never launched" from "launched but never received
     /// the prompt" -- two failures that look identical from the screen alone.
     RecordSubmittedPrompt { transcript_path: PathBuf },
+
+    /// Spawns `child_path` as its own child process, then lingers.
+    ///
+    /// Reproduces an interpreter-launcher install shape (e.g. Bun's global
+    /// bin shim: `node <path-ending-in-codex>`) where the process sitting
+    /// directly on the pane's shell never becomes the real agent CLI --
+    /// it *spawns* the real native binary as a further child rather than
+    /// exec-replacing itself. Install this behavior under a name
+    /// `ilium_detect::identify_agent`'s interpreter list recognises (e.g.
+    /// `node`), pass `child_path` a second fixture installed under an
+    /// agent-matching name, and pass the spawned process an argument whose
+    /// file name also matches that agent (see `identifying_process_names`'s
+    /// argv-unwrapping fallback) to reproduce the ambiguity: two plausible
+    /// matches at different tree depths, only one of which is real.
+    SpawnChild { child_path: PathBuf },
 }
 
 /// A fixture executable installed on disk, ready to be spawned by absolute

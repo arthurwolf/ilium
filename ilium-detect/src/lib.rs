@@ -1773,7 +1773,14 @@ mod tests {
     /// never held a transcript file open, so picking it left every later
     /// session-ID discovery permanently empty. The native child, one level
     /// deeper, must win even though it's not the shallowest match.
+    ///
+    /// Unix-only: the wrapper and native binaries here are `#!/bin/sh`
+    /// scripts made executable via `PermissionsExt::from_mode`, which
+    /// Windows has no equivalent of -- same justification as
+    /// `ilium-detect/tests/script_agent_identity.rs`'s file-level
+    /// `#![cfg(unix)]`.
     #[test]
+    #[cfg(unix)]
     fn identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
         use std::os::unix::fs::PermissionsExt;
 
