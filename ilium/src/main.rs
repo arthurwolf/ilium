@@ -30,6 +30,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 
 use ilium::error::CliError;
+use ilium_platform::paths;
 
 /// How long the `new-pane`/`kill-session` one-shot subcommands wait for
 /// the server to confirm a request before giving up and reporting failure.
@@ -153,9 +154,10 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
 }
 
 fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
-    let cwd = cwd
-        .canonicalize()
-        .map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
+    // `paths::canonicalize` strips Windows' extended-length `\\?\` prefix:
+    // this value is printed straight to the user below ("chatroom ready at
+    // ...") and written into `CHATROOM.md`, neither of which should show it.
+    let cwd = paths::canonicalize(cwd).map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
     if !cwd.is_dir() {
         return Err(CliError::InvalidCwd(cwd.to_path_buf()));
     }

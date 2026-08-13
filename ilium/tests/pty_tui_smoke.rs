@@ -1882,9 +1882,16 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     let client_process_id = tui.process_id().expect("client PTY should report a PID");
     // Asks `ilium_platform` rather than reading `/proc` directly: procfs does
     // not exist on macOS, where this assertion used to fail with NotFound.
+    // Re-canonicalized rather than compared raw: Windows' process-query APIs
+    // return a plain drive-letter path, while `restartable_binary` inherited
+    // `std::fs::canonicalize`'s `\\?\` verbatim-path prefix from
+    // `original_binary` above, so the two never compared equal there.
     assert_eq!(
-        ilium_platform::process_info::executable_path(client_process_id)
-            .expect("read initial client executable"),
+        std::fs::canonicalize(
+            ilium_platform::process_info::executable_path(client_process_id)
+                .expect("read initial client executable")
+        )
+        .expect("canonicalize initial client executable path"),
         restartable_binary
     );
 

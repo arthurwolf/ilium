@@ -21,7 +21,7 @@ Like tmux, ilium keeps your terminals alive in a background server you can detac
 
 **Early. Expect rough edges.** ilium is usable day to day but has not been through a public release cycle, and the version is `0.1.0` for a reason.
 
-**Linux is the tested platform.** macOS and Windows have compile-time fallbacks for the platform-specific pieces (process-tree walks, runtime directories, system sounds) but are not tested — reports and fixes welcome.
+**Linux is the primary, fully-green platform.** macOS and Windows build and run in CI on their own platform-specific code paths (process-tree walks, runtime directories, system sounds); macOS passes but for one known intermittent timing test, and Windows has a small set of known behavioural/timing test failures — reports and fixes welcome.
 
 ## What it gives you over tmux
 

@@ -22,6 +22,7 @@ use ilium_core::{
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
 };
+use ilium_platform::paths;
 use ilium_pty::PtyError;
 use tokio::sync::mpsc;
 
@@ -945,8 +946,11 @@ async fn handle_change_project_folder(
 }
 
 fn canonical_project_directory(path: std::path::PathBuf) -> Result<std::path::PathBuf, String> {
-    let canonical = path
-        .canonicalize()
+    // `paths::canonicalize`, not `std::fs::canonicalize`: this becomes the new
+    // project node's stored path and a future pane's spawn directory, so a raw
+    // Windows extended-length prefix would both show up in the tree and break
+    // `cmd.exe`, which rejects it as a working directory.
+    let canonical = paths::canonicalize(&path)
         .map_err(|error| format!("project folder is unavailable: {error}"))?;
     if !canonical.is_dir() {
         return Err("project folder must be a directory".to_string());

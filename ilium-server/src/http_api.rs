@@ -15,6 +15,7 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use ilium_core::BuiltinAgentProvider;
+use ilium_platform::paths;
 use serde::{Deserialize, Serialize};
 
 use crate::config::HttpApiConfig;
@@ -151,8 +152,10 @@ fn resolve_project_path(state: &ServerState, project: &str) -> Result<PathBuf, S
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
-    let canonical = path
-        .canonicalize()
+    // `paths::canonicalize`, not `std::fs::canonicalize`: the result becomes
+    // the spawned agent's working directory, and a raw Windows
+    // extended-length prefix (`\\?\C:\...`) breaks `cmd.exe` there.
+    let canonical = paths::canonicalize(path)
         .map_err(|error| format!("project directory is unavailable: {error}"))?;
     if !canonical.is_dir() {
         return Err("project must identify a directory".to_string());
@@ -197,7 +200,7 @@ mod tests {
 
         assert_eq!(
             project_name_candidates(directory.path(), "ilium"),
-            vec![target.canonicalize().unwrap()]
+            vec![ilium_platform::paths::canonicalize(&target).unwrap()]
         );
     }
 }

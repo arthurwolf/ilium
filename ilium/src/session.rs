@@ -15,7 +15,7 @@ use chrono::Local;
 use ilium_ipc::{write_frame, ClientRequest};
 use ilium_platform::file_lock::ExclusiveFileLock;
 use ilium_platform::runtime_dir::{self, MAX_SOCKET_PATH_BYTES};
-use ilium_platform::{detached, process_control, secure_fs};
+use ilium_platform::{detached, paths, process_control, secure_fs};
 use ilium_transport::{Liveness, SessionEndpoint};
 use sha2::{Digest, Sha256};
 
@@ -78,9 +78,13 @@ struct ActiveLogMetadata {
 /// convention. A digest of the unmodified canonical path prevents collisions
 /// such as `/work/a.b` and `/work/a-b`, and bounds the socket length.
 pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<ProjectSession, CliError> {
-    let project_root = cwd
-        .canonicalize()
-        .map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
+    // `paths::canonicalize`, not `std::fs::canonicalize`: this project root
+    // becomes the spawned server's `--session-cwd` and `current_dir` below, so
+    // a raw Windows extended-length path (`\\?\C:\...`) would reach `cmd.exe`
+    // as a pane's working directory, which rejects it and falls back to
+    // `C:\Windows` -- see `ilium-platform/src/paths.rs`'s module doc.
+    let project_root =
+        paths::canonicalize(cwd).map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
     if !project_root.is_dir() {
         return Err(CliError::InvalidCwd(cwd.to_path_buf()));
     }
@@ -294,9 +298,8 @@ pub fn is_session_live(socket_path: &Path) -> bool {
 /// directory. A snapshot remains listed after its server exits so it can be
 /// deliberately reopened.
 pub fn list_sessions(cwd: &Path) -> Result<Vec<SessionListing>, CliError> {
-    let project_root = cwd
-        .canonicalize()
-        .map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
+    let project_root =
+        paths::canonicalize(cwd).map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
     let snapshot_dir = project_root.join(".ilium").join("sessions");
     if !snapshot_dir.is_dir() {
         return Ok(Vec::new());
