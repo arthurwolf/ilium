@@ -504,9 +504,13 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
     tokio::fs::create_dir_all(parent)
         .await
         .map_err(|source| to_snapshot_io_error("create directory for", source))?;
-    #[cfg(unix)]
-    tokio::fs::set_permissions(parent, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-        .await
+    // Owner-only, cross-platform: `ilium_platform::secure_fs` is the single
+    // place that knows what "private" means per platform (Unix mode bits vs.
+    // Windows' inherited profile ACL), matching every other private
+    // file/directory this codebase writes (debug logs, agent-debug exports,
+    // the ready-log marker). A snapshot holds the workspace tree and pane
+    // titles, which belongs in that same guarantee.
+    ilium_platform::secure_fs::restrict_directory_to_owner(parent)
         .map_err(|source| to_snapshot_io_error("secure directory for", source))?;
     let temp_path = parent.join(format!(
         ".{}.tmp-{}",
@@ -516,23 +520,18 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         std::process::id()
     ));
     let _ = tokio::fs::remove_file(&temp_path).await;
-    #[cfg(unix)]
-    let open_result = {
-        tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temp_path)
-            .await
-    };
-    #[cfg(not(unix))]
-    let open_result = tokio::fs::OpenOptions::new()
+    // `private_open_options()` also refuses a pre-planted symlink at
+    // `temp_path` (`O_NOFOLLOW`) and keeps the descriptor out of any spawned
+    // agent CLI (`O_CLOEXEC`) on Unix -- guarantees the old ad hoc
+    // `.mode(0o600)` open here didn't have. The temp path already carries
+    // this process's pid, so `create_new` still can't collide with a
+    // concurrent writer.
+    let open_result = ilium_platform::secure_fs::private_open_options()
         .write(true)
         .create_new(true)
-        .open(&temp_path)
-        .await;
+        .open(&temp_path);
     let mut temp_file = match open_result {
-        Ok(file) => file,
+        Ok(file) => tokio::fs::File::from_std(file),
         Err(error) => return Err(to_snapshot_io_error("create", error)),
     };
     if let Err(error) = temp_file.write_all(&json).await {
@@ -556,9 +555,7 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         let _ = tokio::fs::remove_file(&temp_path).await;
         return Err(to_snapshot_io_error("rename", error));
     }
-    #[cfg(unix)]
-    tokio::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-        .await
+    ilium_platform::secure_fs::restrict_file_to_owner(path)
         .map_err(|source| to_snapshot_io_error("secure", source))?;
     Ok(())
 }
