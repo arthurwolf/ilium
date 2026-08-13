@@ -3202,11 +3202,19 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         .expect("navigate back to the first context-board column");
     assert!(
         wait_until(
-            || tui.screen_text().contains("Context column"),
+            || {
+                let screen = tui.screen_text();
+                // The column header reflows before its card content does, so
+                // waiting on the header alone races the next line, which
+                // indexes the card row unconditionally: an empty result
+                // panics on `[0]` instead of retrying (the Windows CI
+                // failure this fixed, see docs/TODO.md).
+                screen.contains("Context column") && screen.contains("[\u{a0}] Context task")
+            },
             WAIT_TIMEOUT
         )
         .await,
-        "first column should scroll back into view, got: {:?}",
+        "first column and its card content should scroll back into view, got: {:?}",
         tui.screen_text()
     );
 
