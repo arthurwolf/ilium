@@ -118,6 +118,7 @@ pub enum ActivityEvidence {
     ClaudeLiveStatus,
     CodexLiveStatus,
     BackgroundWait,
+    BackgroundShellWait,
     ConfirmationPrompt,
     SelectionPrompt,
     NoActiveMarker,
@@ -149,9 +150,16 @@ const WORKING_MARKER: &str = "esc to interrupt";
 /// Precedence: a "working" signal is checked first because a confirmation
 /// prompt never coexists with it in practice, but checking it first keeps
 /// the rule unambiguous either way. Next, a background-wait line (see
-/// `looks_like_background_wait_line`) means the agent dispatched
-/// subagents/background tasks and is waiting on them, not actively
-/// streaming foreground output. Absent both, either a y/n-style
+/// `looks_like_background_wait_line` and `looks_like_background_shell_wait_line`)
+/// means the agent dispatched subagents/background tasks -- or a background
+/// shell command via its own bash tool -- and is waiting on them, not
+/// actively streaming foreground output. This matters because Claude Code's
+/// completed-turn summary line (e.g. "Cogitated for 3m 11s") reads as
+/// finished/idle on its own, but the same line grows a
+/// "· 1 shell still running" suffix while a background shell it started is
+/// still executing -- without this check that pane would misreport as
+/// finished (and the server's `promote_to_done` would mark it `Done`) while
+/// real work is still in flight. Absent both, either a y/n-style
 /// confirmation box or a general multiple-choice/question prompt (see
 /// `looks_like_confirmation_prompt` and `looks_like_selection_prompt`)
 /// means the agent is blocked waiting on the user. Anything else is
@@ -169,6 +177,11 @@ pub fn classify_activity_detailed(screen_text: &str) -> ActivityClassification {
         (
             AgentActivity::WaitingBackground,
             ActivityEvidence::BackgroundWait,
+        )
+    } else if looks_like_background_shell_wait_line(screen_text) {
+        (
+            AgentActivity::WaitingBackground,
+            ActivityEvidence::BackgroundShellWait,
         )
     } else if looks_like_confirmation_prompt(screen_text) {
         (
@@ -216,6 +229,11 @@ pub fn classify_activity_for_agent_detailed(
             AgentActivity::WaitingBackground,
             ActivityEvidence::BackgroundWait,
         )
+    } else if looks_like_background_shell_wait_line(screen_text) {
+        (
+            AgentActivity::WaitingBackground,
+            ActivityEvidence::BackgroundShellWait,
+        )
     } else if looks_like_confirmation_prompt(screen_text) {
         (
             AgentActivity::WaitingApproval,
@@ -257,6 +275,9 @@ fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Opti
                 && lower.contains("background")
                 && (lower.contains("agent") || lower.contains("task"))
         }),
+        ActivityEvidence::BackgroundShellWait => screen_text
+            .lines()
+            .find(|line| looks_like_background_shell_wait_line(line)),
         ActivityEvidence::ConfirmationPrompt => screen_text
             .lines()
             .find(|line| looks_like_confirmation_prompt(line)),
@@ -637,6 +658,31 @@ fn looks_like_background_wait_line(screen_text: &str) -> bool {
         lower.contains("waiting for")
             && lower.contains("background")
             && (lower.contains("agent") || lower.contains("task"))
+    })
+}
+
+/// True if a line reads as Claude Code's own "N background shell(s) still
+/// executing" indicator -- e.g. `"✻ Cogitated for 3m 11s · 1 shell still
+/// running"`. Claude Code appends this suffix to its completed-turn summary
+/// line when a background shell command (its own `run_in_background` bash
+/// tool) is still executing after the foreground turn ended; that summary
+/// line otherwise reads as finished/idle (see `looks_like_live_status_line`'s
+/// doc comment on the same "Cogitated for Ns" shape). Without this check a
+/// pane with real work still in flight would misreport as idle, and the
+/// server's `promote_to_done` would mark it `Done` -- exactly the "shows
+/// finished in the sidebar while still running" report this exists to fix.
+///
+/// Requires the literal phrase "still running" together with "shell"
+/// (singular or plural via substring) rather than either word alone, since
+/// each word alone appears constantly in ordinary agent prose. The
+/// combination could in principle appear in an agent's own unrelated prose
+/// (e.g. "the old shell is still running the migration"), same residual
+/// risk already accepted by `looks_like_background_wait_line` for its own
+/// word combination.
+fn looks_like_background_shell_wait_line(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("still running") && lower.contains("shell")
     })
 }
 
@@ -1366,6 +1412,31 @@ mod tests {
         assert_eq!(
             classify_activity(&fixture("claude_code_waiting_background.txt")),
             AgentActivity::WaitingBackground
+        );
+    }
+
+    #[test]
+    fn claude_code_completed_turn_with_shell_still_running_is_waiting_background() {
+        let fixture_text = fixture("claude_code_shell_still_running.txt");
+        assert_eq!(
+            classify_activity(&fixture_text),
+            AgentActivity::WaitingBackground
+        );
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, &fixture_text),
+            AgentActivity::WaitingBackground
+        );
+    }
+
+    #[test]
+    fn prose_mentioning_shell_or_running_alone_is_idle_not_waiting_background() {
+        assert_eq!(
+            classify_activity("I opened a new shell for the migration."),
+            AgentActivity::Idle
+        );
+        assert_eq!(
+            classify_activity("The dev server is running now."),
+            AgentActivity::Idle
         );
     }
 
