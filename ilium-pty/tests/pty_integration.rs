@@ -67,6 +67,77 @@ fn spawned_command_output_appears_on_screen() {
 mod unix_only {
     use super::*;
 
+    /// Every marker below can make a nested application infer capabilities
+    /// from Ilium's outer terminal rather than from Ilium's own PTY emulator.
+    const OUTER_TERMINAL_IDENTITY_ENVIRONMENT_VARIABLES: &[&str] = &[
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "WEZTERM_EXECUTABLE",
+        "WEZTERM_EXECUTABLE_DIR",
+        "WEZTERM_CONFIG_DIR",
+        "WEZTERM_CONFIG_FILE",
+        "WEZTERM_PANE",
+        "WEZTERM_UNIX_SOCKET",
+        "WEZTERM_VERSION",
+        "KITTY_WINDOW_ID",
+        "KITTY_PID",
+        "KITTY_LISTEN_ON",
+        "KITTY_PUBLIC_KEY",
+        "TMUX",
+        "TMUX_PANE",
+        "TMUX_PLUGIN_MANAGER_PATH",
+        "TMUX_TMPDIR",
+        "ZELLIJ",
+        "ZELLIJ_SESSION_NAME",
+        "ZELLIJ_VERSION",
+        "ZELLIJ_PANE_ID",
+    ];
+
+    #[test]
+    fn spawned_child_receives_only_the_emulated_terminal_identity() {
+        // Set every forbidden variable on the command itself rather than
+        // mutating this test process's environment, which keeps the test safe
+        // under Cargo's parallel test runner.
+        let mut command = PtyCommand::new("sh", std::env::temp_dir(), 24, 100)
+            .arg("-c")
+            .arg(
+                "for variable in TERM_PROGRAM TERM_PROGRAM_VERSION WEZTERM_EXECUTABLE \
+                 WEZTERM_EXECUTABLE_DIR WEZTERM_CONFIG_DIR WEZTERM_CONFIG_FILE WEZTERM_PANE \
+                 WEZTERM_UNIX_SOCKET WEZTERM_VERSION KITTY_WINDOW_ID KITTY_PID KITTY_LISTEN_ON \
+                 KITTY_PUBLIC_KEY TMUX TMUX_PANE TMUX_PLUGIN_MANAGER_PATH TMUX_TMPDIR ZELLIJ \
+                 ZELLIJ_SESSION_NAME ZELLIJ_VERSION ZELLIJ_PANE_ID; do \
+                     printenv \"$variable\" >/dev/null && printf 'LEAK:%s\\n' \"$variable\"; \
+                 done; \
+                 printf 'TERM:%s\\nENVIRONMENT-CHECK-COMPLETE\\n' \"$TERM\"",
+            );
+        for variable in OUTER_TERMINAL_IDENTITY_ENVIRONMENT_VARIABLES {
+            command = command.env(*variable, "must-not-reach-child");
+        }
+        // A caller-supplied `TERM` must lose to the same authoritative
+        // contract as inherited terminal identity variables.
+        command = command.env("TERM", "xterm-kitty");
+
+        let session = PtySession::spawn(command).expect("spawning environment fixture");
+        let completed = wait_until(
+            || session.screen_text().contains("ENVIRONMENT-CHECK-COMPLETE"),
+            Duration::from_secs(5),
+        );
+        let screen_text = session.screen_text();
+
+        assert!(
+            completed,
+            "environment fixture did not finish: {screen_text:?}"
+        );
+        assert!(
+            screen_text.contains("TERM:xterm-256color"),
+            "child must receive Ilium's actual terminal type: {screen_text:?}"
+        );
+        assert!(
+            !screen_text.contains("LEAK:"),
+            "outer terminal identity reached the child: {screen_text:?}"
+        );
+    }
+
     #[test]
     fn input_written_to_cat_is_echoed_back_on_screen() {
         let command = PtyCommand::new("cat", std::env::temp_dir(), 24, 80);

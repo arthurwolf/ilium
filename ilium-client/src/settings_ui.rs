@@ -2463,7 +2463,7 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Show the LLM-provided UTF-8 icon before short and long inferred titles in the left panel."
         }
         AppearanceRow::AgentDebugMenu => {
-            "Show a detected-agent right-click history action and persist prompts, detection evidence, session phases, LLM work, and errors in this project's private session snapshot."
+            "Show a detected-agent right-click history action and persist prompts, detection evidence, session phases, LLM work, and errors in this project's private session snapshot. Enable only while investigating: it forces fresh detection snapshots and materially increases CPU, memory, and disk use in busy sessions."
         }
         AppearanceRow::ContextMenuIcons => {
             "Show the configurable semantic icon beside every tree, terminal, editor-line, and file right-click action."
@@ -2664,7 +2664,7 @@ fn debug_lines(settings: &DebugSettings, selected: usize) -> Vec<Line<'static>> 
         &[(
             "File logging",
             on_off(settings.file_logging_enabled),
-            "Write major actions, every instrumented error, and full text LLM requests/responses to this session's timestamped debug log. Credential headers/URL parameters are redacted; binary audio is summarized.",
+            "Write major actions, every instrumented error, and full text LLM requests/responses to this session's timestamped debug log. Credential headers/URL parameters are redacted; binary audio is summarized. Enable only while investigating: it forces fresh detection snapshots and materially increases CPU, memory, and disk use in busy sessions.",
         )],
         selected,
     )
@@ -3859,6 +3859,8 @@ mod tests {
         assert!(rendered.contains("Off (normal icons)"));
         assert!(rendered.contains("Agent debug menu"));
         assert!(rendered.contains("persist prompts, detection evidence, session phases"));
+        assert!(rendered.contains("forces fresh detection snapshots"));
+        assert!(rendered.contains("materially increases CPU, memory, and disk use"));
     }
 
     #[test]
@@ -4434,6 +4436,8 @@ mod tests {
         assert!(rendered.contains("LLM requests/responses"));
         assert!(rendered.contains("Credential headers/URL parameters are redacted"));
         assert!(rendered.contains("binary audio is summarized"));
+        assert!(rendered.contains("forces fresh detection snapshots"));
+        assert!(rendered.contains("materially increases CPU, memory, and disk use"));
     }
 
     #[test]

@@ -103,6 +103,9 @@ pub mod ui;
 pub mod voice_settings;
 pub mod workspace_file;
 
+#[cfg(test)]
+mod performance_tests;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -168,9 +171,9 @@ const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// frames forever.
 const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
 /// Terminal output is visual state, not input acknowledgement. Capping its
-/// redraw cadence at 60 Hz leaves CPU for parsing and input while every
+/// redraw cadence at 30 Hz leaves CPU for parsing and input while every
 /// keyboard/pointer-driven change still bypasses this limit immediately.
-const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
 /// Remaining delay before output-only damage may trigger another draw.
 fn output_redraw_delay(now: Instant, last_draw_at: Instant) -> Duration {
@@ -228,19 +231,93 @@ fn status_message_is_failure(message: &str) -> bool {
 /// traffic. Settings includes its active tab so Debug/Inference/Voice visits
 /// remain visible while typing and pointer motion stay out of the major-action
 /// trail.
-fn record_client_surface_change(app: &App, last_recorded_surface: &mut Option<String>) {
-    let surface = match &app.mode {
-        crate::app::Mode::Settings(settings) => format!(
-            "{}:{}",
-            crate::control::mode_label(&app.mode),
-            settings.tab.label()
-        ),
-        _ => crate::control::mode_label(&app.mode).to_owned(),
-    };
-    if last_recorded_surface.as_deref() == Some(surface.as_str()) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ClientSurfaceKey {
+    mode_label: &'static str,
+    settings_tab_label: Option<&'static str>,
+}
+
+/// Damage produced by one bounded server-event batch. Terminal bytes always
+/// update their parser cache, but only visible panes damage terminal cells.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ServerEventDamage {
+    needs_redraw: bool,
+    needs_immediate_redraw: bool,
+}
+
+/// Classifies whether one non-output server event can change pixels in the
+/// current client. Most semantic events remain immediate; high-frequency
+/// activity revisions and debug-log appends are narrowed to their actual
+/// visible edge so background panes cannot force redundant full draws.
+fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEventDamage {
+    use ilium_ipc::ServerEvent;
+
+    match event {
+        ServerEvent::NodeActivityChanged {
+            node_id,
+            activity_revision,
+        } => {
+            let becomes_unread = app.tree.get(*node_id).is_some_and(|node| {
+                *activity_revision > node.activity_revision
+                    && !node.has_activity_since_focus()
+                    && !app.is_pane_displayed(*node_id)
+            });
+            ServerEventDamage {
+                needs_redraw: becomes_unread,
+                needs_immediate_redraw: false,
+            }
+        }
+        ServerEvent::NodeFocusCheckpointChanged { node_id, .. } => {
+            let clears_unread = app.tree.get(*node_id).is_some_and(|node| {
+                node.has_activity_since_focus() && !app.is_pane_displayed(*node_id)
+            });
+            ServerEventDamage {
+                needs_redraw: clears_unread,
+                needs_immediate_redraw: false,
+            }
+        }
+        ServerEvent::PaneDebugLogSnapshot { pane_id, .. }
+        | ServerEvent::PaneDebugEntryAppended { pane_id, .. } => {
+            let is_visible = matches!(
+                &app.mode,
+                crate::app::Mode::AgentDebugLog(state) if state.pane_id == *pane_id
+            );
+            ServerEventDamage {
+                needs_redraw: is_visible,
+                needs_immediate_redraw: is_visible,
+            }
+        }
+        ServerEvent::TerminalReplay { pane_id, .. } => ServerEventDamage {
+            needs_redraw: app.is_pane_displayed(*pane_id),
+            needs_immediate_redraw: false,
+        },
+        _ => ServerEventDamage {
+            needs_redraw: true,
+            needs_immediate_redraw: true,
+        },
+    }
+}
+
+fn client_surface_key(app: &App) -> ClientSurfaceKey {
+    ClientSurfaceKey {
+        mode_label: crate::control::mode_label(&app.mode),
+        settings_tab_label: match &app.mode {
+            crate::app::Mode::Settings(settings) => Some(settings.tab.label()),
+            _ => None,
+        },
+    }
+}
+
+fn record_client_surface_change(app: &App, last_recorded_surface: &mut Option<ClientSurfaceKey>) {
+    let surface = client_surface_key(app);
+    if *last_recorded_surface == Some(surface) {
         return;
     }
-    tracing::info!(client_surface = %surface, "client surface changed");
+    let surface_label = match surface.settings_tab_label {
+        Some(settings_tab_label) => format!("{}:{settings_tab_label}", surface.mode_label),
+        None => surface.mode_label.to_owned(),
+    };
+    tracing::info!(client_surface = %surface_label, "client surface changed");
     *last_recorded_surface = Some(surface);
 }
 
@@ -493,11 +570,13 @@ async fn run_inner(
     let mut last_draw_at = Instant::now();
     let mut last_recorded_status_message = None;
     let mut last_recorded_surface = None;
+    let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
         let now = Instant::now();
         let mut voice_tool_outputs = Vec::new();
-        let mut tick_delay = app.next_maintenance_delay(now);
+        let maintenance_schedule = app.maintenance_schedule(now);
+        let mut tick_delay = maintenance_schedule.delay;
         if needs_redraw && !needs_immediate_redraw {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
         }
@@ -532,7 +611,7 @@ async fn run_inner(
             server_event = connection.events.recv() => {
                 match server_event {
                     Some(event) => {
-                        if apply_server_events(
+                        let damage = apply_server_events(
                             &mut app,
                             &mut connection.events,
                             event,
@@ -540,10 +619,9 @@ async fn run_inner(
                             &mut icon_search_workers,
                             &mut trigger_execution_lease,
                             home_dir.as_deref(),
-                        ) {
-                            needs_immediate_redraw = true;
-                        }
-                        needs_redraw = true;
+                        );
+                        needs_immediate_redraw |= damage.needs_immediate_redraw;
+                        needs_redraw |= damage.needs_redraw;
                     }
                     // The reader task ended -- the server is gone or the
                     // connection dropped; nothing left to attach to.
@@ -601,7 +679,12 @@ async fn run_inner(
                 needs_immediate_redraw = true;
             }
             () = tokio::time::sleep(tick_delay) => {
-                if crate::tick::on_tick(&mut app, Instant::now(), &mut search_workers) {
+                if crate::tick::on_tick(
+                    &mut app,
+                    Instant::now(),
+                    maintenance_schedule.was_animating,
+                    &mut search_workers,
+                ) {
                     needs_redraw = true;
                 }
             }
@@ -637,6 +720,19 @@ async fn run_inner(
             )
             .await;
             deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+        }
+
+        // Raw terminal output is useful only for panes occupying this
+        // client's right panel. Compare the bounded inline representation on
+        // every turn, but allocate/send a protocol vector only on an actual
+        // pane or split transition. The server journal repairs a newly
+        // visible pane before its live stream resumes.
+        let streamed_pane_slots = app.displayed_pane_slots();
+        if last_streamed_pane_slots != Some(streamed_pane_slots) {
+            app.queue_request(ilium_ipc::ClientRequest::SetVisiblePanes {
+                pane_ids: streamed_pane_slots.into_iter().flatten().collect(),
+            });
+            last_streamed_pane_slots = Some(streamed_pane_slots);
         }
 
         let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
@@ -1010,12 +1106,12 @@ fn apply_server_events(
     icon_search_workers: &mut IconSearchWorkers,
     trigger_execution_lease: &mut TriggerExecutionLease,
     home_dir: Option<&std::path::Path>,
-) -> bool {
+) -> ServerEventDamage {
     use ilium_ipc::ServerEvent;
 
     let mut pending_screen_update: Option<(ilium_core::NodeId, u64, u64, Vec<u8>)> = None;
     let mut next = Some(first);
-    let mut observed_non_screen_event = false;
+    let mut damage = ServerEventDamage::default();
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
         let event = match next.take() {
             Some(event) => event,
@@ -1044,7 +1140,8 @@ fn apply_server_events(
                     *pending_sequence = incoming_sequence;
                 }
                 _ => {
-                    flush_pending_screen_update(app, &mut pending_screen_update);
+                    damage.needs_redraw |=
+                        flush_pending_screen_update(app, &mut pending_screen_update);
                     pending_screen_update = Some((
                         incoming_pane_id,
                         incoming_first_sequence,
@@ -1054,14 +1151,21 @@ fn apply_server_events(
                 }
             },
             ServerEvent::DebugLoggingChanged { enabled } => {
-                observed_non_screen_event = true;
-                flush_pending_screen_update(app, &mut pending_screen_update);
+                damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
+                damage.needs_redraw = true;
+                damage.needs_immediate_redraw = true;
                 synchronize_debug_logging_from_server(app, enabled);
             }
             other => {
-                observed_non_screen_event = true;
-                flush_pending_screen_update(app, &mut pending_screen_update);
+                damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
+                let event_damage = server_event_damage(app, &other);
+                damage.needs_redraw |= event_damage.needs_redraw;
+                damage.needs_immediate_redraw |= event_damage.needs_immediate_redraw;
                 if let Some(occurrence) = crate::render_cache::apply(app, other) {
+                    // Trigger routing may synchronously queue user-visible
+                    // work independent of the event's own render-cache edge.
+                    damage.needs_redraw = true;
+                    damage.needs_immediate_redraw = true;
                     if trigger_execution_lease.claim() {
                         app.handle_trigger_occurrence(occurrence);
                     }
@@ -1069,9 +1173,9 @@ fn apply_server_events(
             }
         }
     }
-    flush_pending_screen_update(app, &mut pending_screen_update);
+    damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
     dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
-    observed_non_screen_event
+    damage
 }
 
 /// Applies the server-accepted state to this client's writer and UI without
@@ -1174,8 +1278,9 @@ fn for_each_ready_input_event(
 fn flush_pending_screen_update(
     app: &mut App,
     pending: &mut Option<(ilium_core::NodeId, u64, u64, Vec<u8>)>,
-) {
+) -> bool {
     if let Some((pane_id, first_sequence, sequence, bytes)) = pending.take() {
+        let is_displayed = app.is_pane_displayed(pane_id);
         crate::render_cache::apply(
             app,
             ilium_ipc::ServerEvent::ScreenUpdate {
@@ -1185,7 +1290,9 @@ fn flush_pending_screen_update(
                 bytes,
             },
         );
+        return is_displayed;
     }
+    false
 }
 
 /// Dispatches one crossterm input event, then drains and actually spawns
@@ -1369,7 +1476,7 @@ mod responsiveness_tests {
         let early = last_draw_at + Duration::from_millis(5);
         assert_eq!(
             output_redraw_delay(early, last_draw_at),
-            Duration::from_millis(11)
+            Duration::from_millis(28)
         );
         assert!(!output_redraw_is_due(false, early, last_draw_at));
         assert!(output_redraw_is_due(true, early, last_draw_at));
@@ -1378,6 +1485,90 @@ mod responsiveness_tests {
             last_draw_at + OUTPUT_FRAME_INTERVAL,
             last_draw_at,
         ));
+    }
+
+    #[test]
+    fn hidden_screen_updates_advance_the_cache_without_damaging_the_frame() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "hidden-output-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        let group_id = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let visible_pane_id = app
+            .tree
+            .add_pane(group_id, "visible", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let hidden_pane_id = app
+            .tree
+            .add_pane(group_id, "hidden", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            visible_pane_id,
+            crate::app::PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(
+                24, 80,
+            ))),
+        );
+        app.panes.insert(
+            hidden_pane_id,
+            crate::app::PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(
+                24, 80,
+            ))),
+        );
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.focus_pane(visible_pane_id);
+        let mut hidden_update = Some((hidden_pane_id, 1, 1, b"hidden output".to_vec()));
+
+        assert!(!flush_pending_screen_update(&mut app, &mut hidden_update));
+        let crate::app::PaneRuntime::Terminal(hidden_view) = &app.panes[&hidden_pane_id] else {
+            panic!("hidden pane must remain a terminal");
+        };
+        assert!(hidden_view.with_screen(|screen| screen.contents().contains("hidden output")));
+
+        let mut visible_update = Some((visible_pane_id, 1, 1, b"visible output".to_vec()));
+        assert!(flush_pending_screen_update(&mut app, &mut visible_update));
+    }
+
+    #[test]
+    fn repeated_activity_and_hidden_debug_events_do_not_damage_frames() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "event-damage-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        let group_id = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let visible_pane_id = app
+            .tree
+            .add_pane(group_id, "visible", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let hidden_pane_id = app
+            .tree
+            .add_pane(group_id, "hidden", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.tree.mark_node_focused(hidden_pane_id).unwrap();
+        app.focus_pane(visible_pane_id);
+
+        let first_activity = ilium_ipc::ServerEvent::NodeActivityChanged {
+            node_id: hidden_pane_id,
+            activity_revision: 1,
+        };
+        assert!(server_event_damage(&app, &first_activity).needs_redraw);
+        app.apply_node_activity(hidden_pane_id, 1);
+
+        let repeated_activity = ilium_ipc::ServerEvent::NodeActivityChanged {
+            node_id: hidden_pane_id,
+            activity_revision: 2,
+        };
+        assert!(!server_event_damage(&app, &repeated_activity).needs_redraw);
+
+        let hidden_debug_snapshot = ilium_ipc::ServerEvent::PaneDebugLogSnapshot {
+            pane_id: hidden_pane_id,
+            through_sequence: 0,
+            retained_from_sequence: 1,
+            dropped_entry_count: 0,
+            entries: Vec::new(),
+        };
+        assert!(!server_event_damage(&app, &hidden_debug_snapshot).needs_redraw);
     }
 
     #[test]
@@ -1391,6 +1582,37 @@ mod responsiveness_tests {
         ));
         assert!(!status_message_is_failure("Testing inference provider…"));
         assert!(!status_message_is_failure("Card saved"));
+    }
+
+    #[test]
+    fn client_surface_key_distinguishes_settings_tabs_without_owned_text() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "surface-key-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+
+        assert_eq!(
+            client_surface_key(&app),
+            ClientSurfaceKey {
+                mode_label: "normal",
+                settings_tab_label: None,
+            }
+        );
+
+        app.action_open_settings();
+        let crate::app::Mode::Settings(settings) = &mut app.mode else {
+            panic!("settings action must open settings mode");
+        };
+        settings.tab = crate::app::SettingsTab::Debug;
+
+        assert_eq!(
+            client_surface_key(&app),
+            ClientSurfaceKey {
+                mode_label: "settings",
+                settings_tab_label: Some("Debug"),
+            }
+        );
     }
 
     #[test]

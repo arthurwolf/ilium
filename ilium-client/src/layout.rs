@@ -24,8 +24,10 @@ pub const MAXIMUM_TERMINAL_WIDTH: u16 = 500;
 /// A short transition keeps the panel responsive while still making the
 /// change legible instead of snapping across thirty-two terminal cells.
 pub const TREE_WIDTH_ANIMATION_DURATION: Duration = Duration::from_millis(180);
-/// The event loop temporarily uses this cadence while the transition is live.
-pub const TREE_WIDTH_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// The event loop temporarily uses this 30 Hz cadence while the transition
+/// is live. Spatial movement remains smooth at terminal-cell granularity
+/// without competing with input or terminal-output processing every 16 ms.
+pub const TREE_WIDTH_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
 /// A bordered pane needs two border cells plus at least one content cell.
 const MINIMUM_PANE_WIDTH: u16 = 3;

@@ -31,6 +31,33 @@ use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::ServerState;
 
+/// Caps activity-revision mutations during one continuous PTY output burst.
+struct OutputActivityGate {
+    next_record_at: Option<std::time::Instant>,
+}
+
+impl OutputActivityGate {
+    /// The first chunk after an idle gap records immediately. During a
+    /// continuous stream, two revisions per second are sufficient to fence
+    /// multi-second restructure inference while avoiding 20 tree-lock and
+    /// IPC-broadcast cycles per pane per second.
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+    fn new() -> Self {
+        Self {
+            next_record_at: None,
+        }
+    }
+
+    fn should_record(&mut self, now: std::time::Instant) -> bool {
+        if self.next_record_at.is_some_and(|deadline| now < deadline) {
+            return false;
+        }
+        self.next_record_at = Some(now + Self::INTERVAL);
+        true
+    }
+}
+
 /// Immutable forensic facts captured before an input-driven transition clears
 /// the runtime's current owner fields. The debug event is emitted only after
 /// releasing the pane lock, so it must not reconstruct these facts afterward.
@@ -55,7 +82,19 @@ pub async fn handle_request(
 ) -> bool {
     match request {
         ClientRequest::Attach { session } => {
-            handle_attach(state, &session, direct_tx).await;
+            handle_attach(state, &session, direct_tx, true).await;
+            false
+        }
+        ClientRequest::AttachInteractive { session } => {
+            handle_attach(state, &session, direct_tx, false).await;
+            false
+        }
+        ClientRequest::SetVisiblePanes { .. } => {
+            // Per-connection stream selection is intercepted by
+            // `ipc::connection` before generic request dispatch. Reaching
+            // this fallback is harmless for direct handler tests and future
+            // non-streaming transports, but no session-global state exists
+            // to mutate here.
             false
         }
         ClientRequest::ResolveSessionRecovery { restore } => {
@@ -523,6 +562,28 @@ pub(crate) async fn record_node_activity(
     Ok(update.activity_revision)
 }
 
+/// Advances output activity without broadcasting revisions a hidden pane's
+/// clients cannot render. The first unread/unrestructured edge is always
+/// published; a later visible-pane subscription explicitly synchronizes the
+/// newest revision before recovering terminal bytes.
+async fn record_terminal_output_activity(
+    state: &ServerState,
+    node_id: NodeId,
+) -> Result<u64, String> {
+    let update = {
+        let mut tree = state.tree.write().await;
+        tree.record_node_activity(node_id)
+            .map_err(|error| format!("could not record activity for {node_id:?}: {error}"))?
+    };
+    if state.has_terminal_subscribers(node_id)
+        || update.became_unrestructured
+        || update.became_unread_since_focus
+    {
+        publish_node_activity_update(state, node_id, update);
+    }
+    Ok(update.activity_revision)
+}
+
 /// Publishes one already-committed core activity transition. Detection owns a
 /// larger tree/pane transaction and therefore records inside that transaction;
 /// ordinary input/output callers use [`record_node_activity`] above.
@@ -694,7 +755,12 @@ async fn handle_clear_prompt_queue(
     .await;
 }
 
-async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sender<ServerEvent>) {
+async fn handle_attach(
+    state: &ServerState,
+    session: &str,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+    include_terminal_output: bool,
+) {
     if session != state.session_name {
         send_direct_error(
             direct_tx,
@@ -723,14 +789,18 @@ async fn handle_attach(state: &ServerState, session: &str, direct_tx: &mpsc::Sen
         return;
     }
 
-    send_initial_state(state, direct_tx).await;
+    send_initial_state(state, direct_tx, include_terminal_output).await;
 }
 
 /// Sends one ordered, complete client render-cache seed. Both normal attach
 /// and post-recovery resolution use this exact path so the startup trigger
 /// always observes the same state boundary.
-async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<ServerEvent>) {
-    for event in initial_state_events(state, true).await {
+async fn send_initial_state(
+    state: &ServerState,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+    include_terminal_output: bool,
+) {
+    for event in initial_state_events(state, true, include_terminal_output).await {
         send_direct(direct_tx, event).await;
     }
 }
@@ -740,6 +810,7 @@ async fn send_initial_state(state: &ServerState, direct_tx: &mpsc::Sender<Server
 /// deltas while retained, falling back to replay only past the journal window.
 enum TerminalOutputSynchronization<'a> {
     All,
+    None,
     RecoverAfter(&'a HashMap<NodeId, u64>),
 }
 
@@ -748,6 +819,7 @@ impl TerminalOutputSynchronization<'_> {
     fn event_for(&self, pane_id: NodeId, session: &ilium_pty::PtySession) -> Option<ServerEvent> {
         match self {
             Self::All => Some(terminal_replay_event(pane_id, session.output_replay())),
+            Self::None => None,
             Self::RecoverAfter(delivered_sequences) => {
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
@@ -759,7 +831,7 @@ impl TerminalOutputSynchronization<'_> {
                             pane_id,
                             first_sequence: after_sequence.saturating_add(1),
                             sequence: chunk.sequence,
-                            bytes: chunk.bytes,
+                            bytes: chunk.bytes.to_vec(),
                         })
                     }
                     Some(ilium_pty::PtyOutputRecovery::Replay(replay)) => {
@@ -777,10 +849,15 @@ impl TerminalOutputSynchronization<'_> {
 pub(crate) async fn initial_state_events(
     state: &ServerState,
     include_initial_sync_complete: bool,
+    include_terminal_output: bool,
 ) -> Vec<ServerEvent> {
     state_synchronization_events(
         state,
-        TerminalOutputSynchronization::All,
+        if include_terminal_output {
+            TerminalOutputSynchronization::All
+        } else {
+            TerminalOutputSynchronization::None
+        },
         include_initial_sync_complete,
     )
     .await
@@ -885,7 +962,7 @@ async fn handle_session_recovery_resolution(
             .await;
         }
     }
-    send_initial_state(state, direct_tx).await;
+    send_initial_state(state, direct_tx, true).await;
 }
 
 /// Shared plumbing for the two tree-only mutations (`MoveNode`,
@@ -1771,64 +1848,166 @@ async fn forward_output_bytes(
     pane_id: NodeId,
     mut receiver: tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
 ) {
+    let mut activity_gate = OutputActivityGate::new();
+    let mut subscription_cache = TerminalSubscriptionCache::new();
     loop {
         match receiver.recv().await {
             Ok(first_chunk) => {
-                if let Err(error) = record_node_activity(&state, pane_id).await {
-                    tracing::warn!("{error}");
-                }
-                // A bursty PTY reader commonly splits one visual update into
-                // many tiny chunks.  Merge only already-queued chunks: this
-                // adds no deliberate latency, while avoiding one broadcast,
-                // one frame encode, and one client event per tiny read.
-                const MAX_MERGED_CHUNKS: usize = 32;
-                // Keep one forwarded frame below two PTY reader buffers so
-                // a single chatty pane cannot monopolize a client turn even
-                // after batching.
-                const MAX_MERGED_BYTES: usize = 16 * 1024;
-                let first_sequence = first_chunk.sequence;
-                let mut sequence = first_sequence;
-                let mut bytes = first_chunk.bytes;
-                let mut replay_required = false;
-                for _ in 1..MAX_MERGED_CHUNKS {
-                    if bytes.len() >= MAX_MERGED_BYTES {
-                        break;
-                    }
-                    match receiver.try_recv() {
-                        Ok(mut chunk) => {
-                            sequence = chunk.sequence;
-                            bytes.append(&mut chunk.bytes);
-                        }
-                        Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
-                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
-                            tracing::warn!(
-                                "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
-                            );
-                            replay_required = true;
-                            break;
-                        }
-                        Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+                if activity_gate.should_record(std::time::Instant::now()) {
+                    if let Err(error) = record_terminal_output_activity(&state, pane_id).await {
+                        tracing::warn!("{error}");
                     }
                 }
-                if replay_required {
-                    broadcast_terminal_replay(&state, pane_id).await;
+                // The PTY reader already parsed and journaled these bytes.
+                // When no attached right panel displays this pane, consume
+                // the ready broadcast-channel entries without allocating a
+                // merged frame, arming the 750 us coalescing timer, cloning
+                // IPC payloads, or waking every connection writer. A later
+                // subscription recovers the exact missing journal tail.
+                if !subscription_cache.has_subscribers(&state, pane_id) {
+                    drain_unsubscribed_output(&mut receiver);
+                    // Close the only race between the demand check and the
+                    // non-awaiting drain. If a subscription appeared in that
+                    // interval, publish one authoritative replay; otherwise a
+                    // control arriving later performs its own journal repair.
+                    if subscription_cache.has_subscribers(&state, pane_id) {
+                        broadcast_terminal_replay(&state, pane_id).await;
+                    }
                     continue;
                 }
-                state.broadcast(ServerEvent::ScreenUpdate {
-                    pane_id,
-                    first_sequence,
-                    sequence,
-                    bytes,
-                });
+                match collect_output_burst(first_chunk, &mut receiver).await {
+                    OutputBurst::Merged {
+                        first_sequence,
+                        sequence,
+                        bytes,
+                    } => state.broadcast(ServerEvent::ScreenUpdate {
+                        pane_id,
+                        first_sequence,
+                        sequence,
+                        bytes,
+                    }),
+                    OutputBurst::ReplayRequired { skipped } => {
+                        tracing::warn!(
+                            "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
+                        );
+                        broadcast_terminal_replay(&state, pane_id).await;
+                    }
+                }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::warn!(
                     "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                 );
-                broadcast_terminal_replay(&state, pane_id).await;
+                // Hidden panes deliberately need no live stream: their
+                // journal is repaired only if they become visible. Avoid a
+                // potentially 32 MiB replay allocation and an irrelevant IPC
+                // broadcast merely because a hidden forwarder fell behind.
+                if subscription_cache.has_subscribers(&state, pane_id) {
+                    broadcast_terminal_replay(&state, pane_id).await;
+                }
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
+    }
+}
+
+/// Per-forwarder cache of the session-wide terminal-demand index. The output
+/// path is intentionally lock-free while attachments and visible panes are
+/// unchanged; connection transitions invalidate every cache through one
+/// monotonic atomic revision.
+struct TerminalSubscriptionCache {
+    observed_revision: u64,
+    has_subscribers: bool,
+}
+
+impl TerminalSubscriptionCache {
+    fn new() -> Self {
+        Self {
+            observed_revision: u64::MAX,
+            has_subscribers: false,
+        }
+    }
+
+    fn has_subscribers(&mut self, state: &ServerState, pane_id: NodeId) -> bool {
+        let current_revision = state.terminal_subscription_revision();
+        if current_revision != self.observed_revision {
+            self.has_subscribers = state.has_terminal_subscribers(pane_id);
+            self.observed_revision = current_revision;
+        }
+        self.has_subscribers
+    }
+}
+
+/// Drops only output already queued for an undisplayed pane. It never waits:
+/// a future chunk will wake the forwarder again, at which point current
+/// subscription demand is checked afresh.
+fn drain_unsubscribed_output(
+    receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+) {
+    while let Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) =
+        receiver.try_recv()
+    {}
+}
+
+enum OutputBurst {
+    Merged {
+        first_sequence: u64,
+        sequence: u64,
+        bytes: Vec<u8>,
+    },
+    ReplayRequired {
+        skipped: u64,
+    },
+}
+
+/// Merges already-ready chunks plus one immediately-following PTY read.
+async fn collect_output_burst(
+    first_chunk: ilium_pty::PtyOutputChunk,
+    receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+) -> OutputBurst {
+    const MAX_MERGED_CHUNKS: usize = 32;
+    const MAX_MERGED_BYTES: usize = 16 * 1024;
+    const FOLLOWUP_WINDOW: std::time::Duration = std::time::Duration::from_micros(750);
+
+    let first_sequence = first_chunk.sequence;
+    let mut sequence = first_sequence;
+    let mut bytes = first_chunk.bytes.to_vec();
+    let mut merged_chunks = 1;
+    let mut waited_for_followup = false;
+    while merged_chunks < MAX_MERGED_CHUNKS && bytes.len() < MAX_MERGED_BYTES {
+        let next = match receiver.try_recv() {
+            Ok(chunk) => Some(Ok(chunk)),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty) if !waited_for_followup => {
+                waited_for_followup = true;
+                tokio::time::timeout(FOLLOWUP_WINDOW, receiver.recv())
+                    .await
+                    .ok()
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => None,
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
+                return OutputBurst::ReplayRequired { skipped };
+            }
+        };
+        let Some(next) = next else {
+            break;
+        };
+        match next {
+            Ok(chunk) => {
+                sequence = chunk.sequence;
+                bytes.extend_from_slice(&chunk.bytes);
+                merged_chunks += 1;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                return OutputBurst::ReplayRequired { skipped };
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+    OutputBurst::Merged {
+        first_sequence,
+        sequence,
+        bytes,
     }
 }
 
@@ -1845,6 +2024,31 @@ async fn broadcast_terminal_replay(state: &ServerState, pane_id: NodeId) {
         terminal_replay_event(pane_id, runtime.session.output_replay())
     };
     state.broadcast(replay_event);
+}
+
+/// Builds the smallest terminal event needed when one connection makes a
+/// previously hidden pane visible. Hidden output remains in the PTY-owned
+/// journal; no session-global parser or subscription state is duplicated.
+pub(crate) async fn terminal_recovery_event(
+    state: &ServerState,
+    pane_id: NodeId,
+    after_sequence: u64,
+) -> Option<ServerEvent> {
+    let panes = state.panes.read().await;
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
+    };
+    match runtime.session.output_recovery_after(after_sequence)? {
+        ilium_pty::PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
+            pane_id,
+            first_sequence: after_sequence.saturating_add(1),
+            sequence: chunk.sequence,
+            bytes: chunk.bytes.to_vec(),
+        }),
+        ilium_pty::PtyOutputRecovery::Replay(replay) => {
+            Some(terminal_replay_event(pane_id, replay))
+        }
+    }
 }
 
 /// Converts one atomically captured PTY journal snapshot into the protocol
@@ -2552,6 +2756,131 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 #[cfg(test)]
 mod tests {
 
+    #[tokio::test]
+    async fn output_burst_collects_an_immediately_following_reader_chunk() {
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
+        sender
+            .send(ilium_pty::PtyOutputChunk {
+                sequence: 1,
+                bytes: b"first".to_vec().into(),
+            })
+            .unwrap();
+        let first = receiver.recv().await.unwrap();
+        let producer = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            sender
+                .send(ilium_pty::PtyOutputChunk {
+                    sequence: 2,
+                    bytes: b"second".to_vec().into(),
+                })
+                .unwrap();
+        });
+
+        let OutputBurst::Merged {
+            first_sequence,
+            sequence,
+            bytes,
+        } = collect_output_burst(first, &mut receiver).await
+        else {
+            panic!("contiguous output must not require replay");
+        };
+        producer.await.unwrap();
+        assert_eq!((first_sequence, sequence), (1, 2));
+        assert_eq!(bytes, b"firstsecond");
+    }
+
+    #[tokio::test]
+    #[ignore = "manual performance benchmark"]
+    async fn benchmark_output_subframe_coalescing() {
+        const CHUNKS: u64 = 32;
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(64);
+        sender
+            .send(ilium_pty::PtyOutputChunk {
+                sequence: 1,
+                bytes: vec![b'x'; 64].into(),
+            })
+            .unwrap();
+        let first = receiver.recv().await.unwrap();
+        let producer = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            for sequence in 2..=CHUNKS {
+                sender
+                    .send(ilium_pty::PtyOutputChunk {
+                        sequence,
+                        bytes: vec![b'x'; 64].into(),
+                    })
+                    .unwrap();
+            }
+        });
+        let started_at = std::time::Instant::now();
+        let burst = collect_output_burst(first, &mut receiver).await;
+        let elapsed = started_at.elapsed();
+        producer.await.unwrap();
+        let OutputBurst::Merged {
+            sequence, bytes, ..
+        } = burst
+        else {
+            panic!("benchmark burst must remain contiguous");
+        };
+        println!(
+            "PERF server.output_coalescing baseline_frames={CHUNKS} merged_frames=1 elapsed_ns={} merged_bytes={} through_sequence={sequence}",
+            elapsed.as_nanos(),
+            bytes.len(),
+        );
+    }
+
+    #[test]
+    fn output_activity_gate_records_first_and_periodic_burst_activity() {
+        let started_at = std::time::Instant::now();
+        let mut gate = OutputActivityGate::new();
+
+        assert!(gate.should_record(started_at));
+        assert!(!gate.should_record(started_at + std::time::Duration::from_millis(499)));
+        assert!(gate.should_record(started_at + std::time::Duration::from_millis(500)));
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_output_activity_debounce() {
+        const CHUNKS: usize = 10_000;
+        let mut baseline_tree = Tree::new();
+        let baseline_group = baseline_tree
+            .add_group(ilium_core::ROOT_ID, "work")
+            .unwrap();
+        let baseline_pane = baseline_tree
+            .add_pane(baseline_group, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let baseline_started_at = std::time::Instant::now();
+        for _chunk in 0..CHUNKS {
+            std::hint::black_box(baseline_tree.record_node_activity(baseline_pane).unwrap());
+        }
+        let baseline_elapsed = baseline_started_at.elapsed();
+
+        let mut debounced_tree = Tree::new();
+        let debounced_group = debounced_tree
+            .add_group(ilium_core::ROOT_ID, "work")
+            .unwrap();
+        let debounced_pane = debounced_tree
+            .add_pane(debounced_group, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let now = std::time::Instant::now();
+        let mut gate = OutputActivityGate::new();
+        let debounced_started_at = std::time::Instant::now();
+        let mut recorded = 0;
+        for _chunk in 0..CHUNKS {
+            if gate.should_record(now) {
+                recorded += 1;
+                std::hint::black_box(debounced_tree.record_node_activity(debounced_pane).unwrap());
+            }
+        }
+        let debounced_elapsed = debounced_started_at.elapsed();
+        println!(
+            "PERF server.output_activity baseline_ns={} debounced_ns={} recorded={recorded}",
+            baseline_elapsed.as_nanos(),
+            debounced_elapsed.as_nanos(),
+        );
+    }
+
     /// A command that reads standard input and stays alive, spelled per platform.
     ///
     /// These fixtures need a pane whose process keeps running until the test kills
@@ -2794,6 +3123,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hidden_terminal_output_publishes_only_the_first_unread_revision() {
+        let directory = tempfile::tempdir().expect("create hidden activity directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "hidden-terminal-activity".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory
+                .path()
+                .join("hidden-terminal-activity.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            let pane_id = tree
+                .add_pane(project_id, "hidden", PaneContentKind::Terminal)
+                .expect("project accepts a terminal");
+            tree.mark_node_focused(pane_id)
+                .expect("initial focus checkpoints the terminal");
+            pane_id
+        };
+        let mut events = state.events.subscribe();
+
+        let first_revision = record_terminal_output_activity(&state, pane_id)
+            .await
+            .expect("first hidden output is accepted");
+        assert!(matches!(
+            events.recv().await,
+            Ok(ServerEvent::NodeActivityChanged { node_id, activity_revision })
+                if node_id == pane_id && activity_revision == first_revision
+        ));
+
+        let second_revision = record_terminal_output_activity(&state, pane_id)
+            .await
+            .expect("later hidden output is accepted");
+        assert_eq!(second_revision, first_revision + 1);
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .unwrap()
+                .activity_revision,
+            second_revision,
+            "suppressed broadcasts must not weaken authoritative revision fencing"
+        );
+
+        sound_task.abort();
+    }
+
+    #[tokio::test]
     async fn accepted_terminal_input_and_output_each_advance_activity() {
         let directory = tempfile::tempdir().expect("create terminal activity directory");
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
@@ -2822,6 +3210,12 @@ mod tests {
         )
         .await
         .expect("spawn terminal activity fixture");
+        state.replace_terminal_subscriptions(
+            false,
+            &std::collections::HashSet::new(),
+            false,
+            &std::collections::HashSet::from([pane_id]),
+        );
         let mut events = state.events.subscribe();
 
         write_key_input(&state, pane_id, b"x", None)

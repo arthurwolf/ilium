@@ -190,6 +190,9 @@ impl TerminalPaneRuntime {
                 client_focused: false,
                 last_forced: None,
                 request_generation: 0,
+                identity_system_generation: None,
+                cached_identity: None,
+                cached_screen_classification: None,
             },
             session_id: None,
             session_agent_class: None,
@@ -309,6 +312,10 @@ pub struct DetectionSchedule {
     /// coalesced by the debounce window. A detection pass captures this value
     /// and cannot overwrite a newer request with its stale deadline/status.
     pub request_generation: u64,
+    /// Process identity result associated with one refreshed `System` table.
+    pub identity_system_generation: Option<u64>,
+    pub cached_identity: Option<ilium_detect::AgentIdentity>,
+    pub cached_screen_classification: Option<crate::detection::ScreenClassificationCache>,
 }
 
 /// What a pane resource should be built from -- either a terminal to spawn

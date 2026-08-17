@@ -413,6 +413,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     let selection_reconciliation = selection_reconciliation(app, &tree);
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
+    app.request_chatroom_reconcile();
     app.restore_expanded_groups();
     app.reconcile_selected_tree_path();
     app.bump_tree_version();

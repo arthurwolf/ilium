@@ -24,26 +24,114 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
 
-/// Serializes `value` with bincode and writes it as one length-prefixed
-/// frame, flushing so the peer can read it without waiting on more data.
+/// A connection-owned encoder that retains its serialization allocation.
+pub struct FrameWriter<W> {
+    writer: W,
+}
+
+impl<W> FrameWriter<W>
+where
+    W: AsyncWrite + Unpin,
+{
+    /// Wraps a stream half with an initially empty reusable frame buffer.
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    /// Serializes and submits one complete frame with a single write path.
+    pub async fn write<T>(&mut self, value: &T) -> Result<(), IpcError>
+    where
+        T: Serialize,
+    {
+        let payload = bincode::serialize(value)?;
+        let length: u32 = payload
+            .len()
+            .try_into()
+            .map_err(|_| IpcError::frame_too_large(payload.len()))?;
+        if length > MAX_FRAME_LEN {
+            return Err(IpcError::frame_too_large(payload.len()));
+        }
+
+        let length_header = length.to_le_bytes();
+        let buffers = [
+            std::io::IoSlice::new(&length_header),
+            std::io::IoSlice::new(&payload),
+        ];
+        let first_write = self.writer.write_vectored(&buffers).await?;
+        if first_write == 0 {
+            return Err(IpcError::Io(std::io::Error::from(
+                std::io::ErrorKind::WriteZero,
+            )));
+        }
+
+        let frame_len = LENGTH_HEADER_BYTES.saturating_add(payload.len());
+        if first_write < LENGTH_HEADER_BYTES {
+            self.writer.write_all(&length_header[first_write..]).await?;
+            self.writer.write_all(&payload).await?;
+        } else if first_write < frame_len {
+            self.writer
+                .write_all(&payload[first_write - LENGTH_HEADER_BYTES..])
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+/// A connection-owned decoder that retains its payload allocation.
+pub struct FrameReader<R> {
+    reader: R,
+    payload: Vec<u8>,
+}
+
+impl<R> FrameReader<R>
+where
+    R: AsyncRead + Unpin,
+{
+    /// Wraps a stream half with an initially empty reusable payload buffer.
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+            payload: Vec::new(),
+        }
+    }
+
+    /// Reads and decodes one frame, retaining payload capacity for the next.
+    pub async fn read<T>(&mut self) -> Result<T, IpcError>
+    where
+        T: DeserializeOwned,
+    {
+        let mut length_bytes = [0u8; LENGTH_HEADER_BYTES];
+        self.reader.read_exact(&mut length_bytes).await?;
+        let length = u32::from_le_bytes(length_bytes);
+        if length > MAX_FRAME_LEN {
+            return Err(IpcError::bad_length_prefix(length));
+        }
+
+        self.payload.resize(length as usize, 0);
+        match self.reader.read_exact(&mut self.payload).await {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Err(IpcError::TruncatedFrame { expected: length });
+            }
+            Err(error) => return Err(IpcError::Io(error)),
+        }
+
+        Ok(bincode::deserialize(&self.payload)?)
+    }
+}
+
+/// Serializes `value` and writes it as one length-prefixed frame.
+///
+/// Long-lived connections should use [`FrameWriter`] directly so its
+/// allocation survives across frames. This convenience function preserves
+/// the simple one-shot API used by CLI control requests and tests.
 pub async fn write_frame<T, W>(writer: &mut W, value: &T) -> Result<(), IpcError>
 where
     T: Serialize,
     W: AsyncWrite + Unpin,
 {
-    let payload = bincode::serialize(value)?;
-    let length: u32 = payload
-        .len()
-        .try_into()
-        .map_err(|_| IpcError::frame_too_large(payload.len()))?;
-    if length > MAX_FRAME_LEN {
-        return Err(IpcError::frame_too_large(payload.len()));
-    }
-
-    writer.write_all(&length.to_le_bytes()).await?;
-    writer.write_all(&payload).await?;
-    writer.flush().await?;
-    Ok(())
+    let mut frame_writer = FrameWriter::new(writer);
+    frame_writer.write(value).await
 }
 
 /// Reads one length-prefixed frame and decodes it as `T`. Returns `Err`
@@ -62,35 +150,115 @@ where
     T: DeserializeOwned,
     R: AsyncRead + Unpin,
 {
-    let mut length_bytes = [0u8; LENGTH_HEADER_BYTES];
-    // A failure here (including EOF) means no frame was started at all --
-    // propagated as-is via `#[from] io::Error` so the caller can tell it
-    // apart from a frame that started but didn't finish.
-    reader.read_exact(&mut length_bytes).await?;
-    let length = u32::from_le_bytes(length_bytes);
-    if length > MAX_FRAME_LEN {
-        return Err(IpcError::bad_length_prefix(length));
-    }
-
-    let mut payload = vec![0u8; length as usize];
-    match reader.read_exact(&mut payload).await {
-        Ok(_) => {}
-        // The header promised `length` bytes but the stream ended first --
-        // this is a genuinely truncated frame, not a clean end-of-stream.
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-            return Err(IpcError::TruncatedFrame { expected: length });
-        }
-        Err(e) => return Err(IpcError::Io(e)),
-    }
-
-    let value = bincode::deserialize(&payload)?;
-    Ok(value)
+    let mut frame_reader = FrameReader::new(reader);
+    frame_reader.read().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    /// Counts framing-layer write and flush calls while accepting every byte.
+    #[derive(Default)]
+    struct CountingWriter {
+        write_calls: usize,
+        flush_calls: usize,
+    }
+
+    impl AsyncWrite for CountingWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.write_calls += 1;
+            Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn poll_write_vectored(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            buffers: &[std::io::IoSlice<'_>],
+        ) -> Poll<std::io::Result<usize>> {
+            self.write_calls += 1;
+            Poll::Ready(Ok(buffers.iter().map(|buffer| buffer.len()).sum()))
+        }
+
+        fn is_write_vectored(&self) -> bool {
+            true
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            self.flush_calls += 1;
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "manual performance benchmark"]
+    async fn benchmark_frame_write() {
+        const ITERATIONS: usize = 20_000;
+        let value = "x".repeat(256);
+        let mut writer = CountingWriter::default();
+        let started_at = std::time::Instant::now();
+        for _iteration in 0..ITERATIONS {
+            write_frame(&mut writer, &value).await.unwrap();
+        }
+        let elapsed = started_at.elapsed();
+        println!(
+            "PERF ipc.frame_write median_equivalent_ns={} write_calls_per_frame={} flush_calls_per_frame={}",
+            elapsed.as_nanos() / ITERATIONS as u128,
+            writer.write_calls / ITERATIONS,
+            writer.flush_calls / ITERATIONS,
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "manual performance benchmark"]
+    async fn benchmark_frame_read_buffer_reuse() {
+        const ITERATIONS: usize = 20_000;
+        let value = "x".repeat(256);
+        let payload = bincode::serialize(&value).unwrap();
+        let mut encoded = Vec::with_capacity((payload.len() + LENGTH_HEADER_BYTES) * ITERATIONS);
+        for _iteration in 0..ITERATIONS {
+            encoded.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(&payload);
+        }
+
+        let mut allocating_cursor = Cursor::new(encoded.clone());
+        let allocating_started_at = std::time::Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let decoded: String = read_frame(&mut allocating_cursor).await.unwrap();
+            std::hint::black_box(decoded);
+        }
+        let allocating_elapsed = allocating_started_at.elapsed();
+
+        let mut frame_reader = FrameReader::new(Cursor::new(encoded));
+        let reused_started_at = std::time::Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let decoded: String = frame_reader.read().await.unwrap();
+            std::hint::black_box(decoded);
+        }
+        let reused_elapsed = reused_started_at.elapsed();
+        println!(
+            "PERF ipc.frame_read allocating_ns={} reused_ns={}",
+            allocating_elapsed.as_nanos() / ITERATIONS as u128,
+            reused_elapsed.as_nanos() / ITERATIONS as u128,
+        );
+    }
 
     #[tokio::test]
     async fn round_trips_a_simple_value_through_a_cursor() {

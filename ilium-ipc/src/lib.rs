@@ -15,7 +15,7 @@ mod framing;
 mod protocol;
 
 pub use error::IpcError;
-pub use framing::{read_frame, write_frame, MAX_FRAME_LEN};
+pub use framing::{read_frame, write_frame, FrameReader, FrameWriter, MAX_FRAME_LEN};
 pub use ilium_agent_debug::{
     AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,

@@ -31,29 +31,42 @@ pub fn flatten<'text, Identifier>(
 where
     Identifier: Clone + PartialEq + Eq + core::hash::Hash,
 {
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(items.len());
+    let mut identifier = Vec::with_capacity(current.len().saturating_add(1));
+    identifier.extend_from_slice(current);
+    flatten_into(open_identifiers, items, &mut identifier, &mut result);
+    result
+}
+
+/// Appends one visible subtree into a shared output allocation. The previous
+/// recursive implementation allocated a temporary result `Vec` for every
+/// expanded container and repeatedly appended those vectors into their
+/// parents; one accumulator keeps traversal linear while retaining one owned
+/// identifier path per visible row.
+fn flatten_into<'text, Identifier>(
+    open_identifiers: &HashSet<Vec<Identifier>>,
+    items: &'text [TreeItem<'text, Identifier>],
+    current: &mut Vec<Identifier>,
+    result: &mut Vec<Flattened<'text, Identifier>>,
+) where
+    Identifier: Clone + PartialEq + Eq + core::hash::Hash,
+{
+    // Each item in this visible sibling slice contributes at least one row.
+    // Reserving at recursive entry lets a wide opened group grow the shared
+    // accumulator once instead of following `Vec`'s 1/2/4/... capacity ladder.
+    result.reserve(items.len());
     for item in items {
-        // Reserve the exact capacity up front so pushing the child's own
-        // identifier never forces a reallocation/copy on top of the clone
-        // `to_vec()` already performed.
-        let mut child_identifier = Vec::with_capacity(current.len() + 1);
-        child_identifier.extend_from_slice(current);
-        child_identifier.push(item.identifier.clone());
-
-        let child_result = open_identifiers
-            .contains(&child_identifier)
-            .then(|| flatten(open_identifiers, &item.children, &child_identifier));
-
+        current.push(item.identifier.clone());
+        let is_open = open_identifiers.contains(current);
         result.push(Flattened {
-            identifier: child_identifier,
+            identifier: current.clone(),
             item,
         });
-
-        if let Some(mut child_result) = child_result {
-            result.append(&mut child_result);
+        if is_open {
+            flatten_into(open_identifiers, &item.children, current, result);
         }
+        current.pop();
     }
-    result
 }
 
 #[test]

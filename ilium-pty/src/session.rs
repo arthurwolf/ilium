@@ -43,20 +43,82 @@
 //! spawned child inherited the pty's slave fd and is still holding it open.
 
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::ffi::OsStr;
+#[cfg(not(unix))]
+use std::io::Read;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crossterm::event::MouseEvent;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd};
 use tokio::sync::{broadcast, watch};
 
 use crate::error::PtyError;
 use crate::mouse::encode_mouse_event;
 use crate::query::TerminalQueryResponder;
+
+/// Terminal identity exported to every application running behind Ilium's
+/// `vt100` emulator. This must describe the emulator, not the terminal that
+/// happens to display the outer Ilium client.
+const EMULATED_TERMINAL_TYPE: &str = "xterm-256color";
+
+/// Outer-terminal identity and multiplexer markers that would make a child
+/// infer capabilities Ilium does not implement. In particular, Codex treats
+/// `TERM_PROGRAM=WezTerm`, `WEZTERM_VERSION`, or `KITTY_WINDOW_ID` as proof
+/// that Kitty graphics are available and then writes Base64 image payloads
+/// into a PTY whose `vt100` emulator cannot render them.
+const OUTER_TERMINAL_IDENTITY_ENVIRONMENT_PREFIXES: &[&str] =
+    &["WEZTERM_", "KITTY_", "TMUX_", "ZELLIJ_"];
+
+/// Returns whether an environment key describes an outer terminal or
+/// multiplexer rather than Ilium's direct `vt100` emulation boundary.
+fn is_outer_terminal_identity_environment_variable(key: &OsStr) -> bool {
+    // Environment names are conventionally ASCII, while normalizing here
+    // also covers Windows' case-insensitive environment semantics.
+    let normalized_key = key.to_string_lossy().to_ascii_uppercase();
+
+    if matches!(
+        normalized_key.as_str(),
+        "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "TMUX" | "ZELLIJ"
+    ) {
+        return true;
+    }
+
+    OUTER_TERMINAL_IDENTITY_ENVIRONMENT_PREFIXES
+        .iter()
+        .any(|prefix| normalized_key.starts_with(prefix))
+}
+
+/// Applies the terminal-emulation contract after every caller-supplied
+/// environment entry, so a pane cannot accidentally or explicitly advertise
+/// outer-emulator capabilities that are absent at this PTY boundary.
+fn configure_emulated_terminal_environment(
+    command: &mut CommandBuilder,
+    caller_environment: &[(String, String)],
+) {
+    // Rebuild the environment instead of maintaining an inevitably
+    // incomplete list of vendor-specific variable names. This preserves the
+    // user's ordinary environment while filtering whole terminal families,
+    // including variables introduced by future emulator versions.
+    command.env_clear();
+    for (key, value) in std::env::vars_os() {
+        if key != "NO_COLOR" && !is_outer_terminal_identity_environment_variable(&key) {
+            command.env(key, value);
+        }
+    }
+
+    // Caller overrides remain supported for normal variables, but cannot
+    // contradict the terminal capability contract at this boundary.
+    for (key, value) in caller_environment {
+        if key != "NO_COLOR" && !is_outer_terminal_identity_environment_variable(key.as_ref()) {
+            command.env(key, value);
+        }
+    }
+
+    command.env("TERM", EMULATED_TERMINAL_TYPE);
+}
 
 /// Describes a command to spawn behind a pty: the program, its arguments,
 /// starting working directory, and initial screen size.
@@ -158,7 +220,7 @@ pub struct PtySession {
     output_journal: Arc<Mutex<OutputJournal>>,
     /// Cancellation flag for the background reader thread, set by `Drop`.
     /// The thread checks this between *and during* its waits for pty
-    /// output -- on unix via a bounded `poll()` (`PollableMasterReader`),
+    /// output -- on unix via a wake pipe (`PollableMasterReader`),
     /// and on every other target via a bounded channel receive against a
     /// decoupled pump thread (`BlockingMasterReader`) -- so it can exit,
     /// and release its `Arc` clones of `parser`/`output_journal`/`child`
@@ -166,6 +228,10 @@ pub struct PtySession {
     /// the pty's slave fd open and would otherwise keep a plain blocking
     /// `read()` stuck forever. See `CancellableReader`.
     reader_should_stop: Arc<AtomicBool>,
+    /// Owner-side wake handle paired with the background reader. Unix uses
+    /// a pipe-backed interrupt; other platforms retain their existing
+    /// bounded/cancellable reader implementation behind the same contract.
+    reader_cancellation: ReaderCancellation,
 }
 
 /// One ordered piece of raw output from a PTY. The sequence belongs to the
@@ -174,7 +240,10 @@ pub struct PtySession {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtyOutputChunk {
     pub sequence: u64,
-    pub bytes: Vec<u8>,
+    /// Shared by the replay journal and every live subscriber. The reader
+    /// allocates each PTY chunk once; cloning a journal/broadcast entry only
+    /// advances a reference count instead of copying up to 8 KiB.
+    pub bytes: Arc<[u8]>,
 }
 
 /// One internally-consistent visible-screen read. Detection carries the
@@ -226,7 +295,7 @@ impl OutputJournal {
         self.next_sequence = self.next_sequence.saturating_add(1);
         let chunk = PtyOutputChunk {
             sequence: self.next_sequence,
-            bytes,
+            bytes: Arc::from(bytes),
         };
         self.retained_bytes = self.retained_bytes.saturating_add(chunk.bytes.len());
         self.chunks.push_back(chunk.clone());
@@ -295,7 +364,7 @@ impl OutputJournal {
         }
         Some(PtyOutputRecovery::Delta(PtyOutputChunk {
             sequence: self.next_sequence,
-            bytes,
+            bytes: Arc::from(bytes),
         }))
     }
 }
@@ -334,48 +403,27 @@ trait CancellableReader: Send {
     fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome;
 }
 
-/// Unix `CancellableReader`: an owned, `CLOEXEC` duplicate of the pty
-/// master's fd, polled with a short timeout so the reader thread's loop
-/// wakes up regularly to re-check `should_stop` instead of only ever waking
-/// on incoming bytes.
+/// Unix `CancellableReader`: an owned duplicate of the pty master plus an
+/// explicit wake pipe. The platform adapter blocks indefinitely on both,
+/// eliminating periodic idle wakeups while preserving prompt cancellation.
 #[cfg(unix)]
 struct PollableMasterReader {
-    file: std::fs::File,
+    reader: ilium_platform::interruptible_reader::InterruptibleReader,
 }
 
 #[cfg(unix)]
 impl PollableMasterReader {
-    /// How long a single `poll()` call waits before returning control to
-    /// the caller to re-check `should_stop`. Short enough that cancellation
-    /// (pane close) is never noticeably delayed; long enough to avoid
-    /// spinning the thread on an idle pane.
-    const POLL_TIMEOUT_MILLIS: libc::c_int = 200;
-
-    /// Duplicates `master`'s raw fd (via `F_DUPFD_CLOEXEC`, matching
-    /// `portable_pty`'s own `cloexec()` treatment of the master fd it
-    /// hands out elsewhere) into a `std::fs::File` this struct owns
-    /// outright, so it can be polled independently of `portable_pty`'s own
-    /// `try_clone_reader`, which only ever exposes a plain blocking
-    /// `Box<dyn Read + Send>`.
-    fn duplicate_from(master: &(dyn MasterPty + Send)) -> Result<Self, PtyError> {
+    fn duplicate_from(
+        master: &(dyn MasterPty + Send),
+    ) -> Result<(Self, ilium_platform::interruptible_reader::ReaderInterrupt), PtyError> {
         let master_fd = master
             .as_raw_fd()
             .ok_or_else(|| PtyError::Io(anyhow::anyhow!("pty master exposed no raw fd")))?;
-        // SAFETY: `master_fd` is a valid, currently-open fd owned by
-        // `master` for the duration of this call; `fcntl(F_DUPFD_CLOEXEC)`
-        // only reads it to create an independent duplicate, it does not
-        // consume or close it.
-        let duplicated_fd = unsafe { libc::fcntl(master_fd, libc::F_DUPFD_CLOEXEC, 0) };
-        if duplicated_fd < 0 {
-            return Err(PtyError::Io(anyhow::Error::from(
-                std::io::Error::last_os_error(),
-            )));
-        }
-        // SAFETY: `duplicated_fd` was just returned by a successful
-        // `fcntl(F_DUPFD_CLOEXEC)` above, so it is a fresh, valid,
-        // exclusively-owned fd -- nothing else holds or will close it.
-        let file = unsafe { std::fs::File::from_raw_fd(duplicated_fd) };
-        Ok(Self { file })
+        let (reader, interrupt) =
+            ilium_platform::interruptible_reader::InterruptibleReader::duplicate(master_fd)
+                .map_err(anyhow::Error::from)
+                .map_err(PtyError::Io)?;
+        Ok((Self { reader }, interrupt))
     }
 }
 
@@ -386,43 +434,33 @@ impl CancellableReader for PollableMasterReader {
             if should_stop.load(Ordering::Acquire) {
                 return ReadOutcome::Stopped;
             }
-            let mut poll_fd = libc::pollfd {
-                fd: self.file.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            // SAFETY: `poll_fd` is a single, valid, stack-local `pollfd`
-            // entry and `1` matches its own length; `poll` only reads/
-            // writes through the pointer for the duration of this call.
-            let poll_result = unsafe { libc::poll(&mut poll_fd, 1, Self::POLL_TIMEOUT_MILLIS) };
-            if poll_result < 0 {
-                let error = std::io::Error::last_os_error();
-                if error.kind() == std::io::ErrorKind::Interrupted {
-                    continue;
+            match self.reader.read(buf) {
+                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Data(bytes_read)) => {
+                    return ReadOutcome::Data(bytes_read);
                 }
-                return ReadOutcome::Error;
-            }
-            if poll_result == 0 {
-                // Timed out with nothing readable -- loop back around to
-                // re-check `should_stop` rather than polling forever.
-                continue;
-            }
-            // `revents` may report `POLLHUP`/`POLLERR` instead of (or
-            // alongside) `POLLIN` once the slave side closes; reading
-            // either yields the real answer (`Ok(0)`/`EIO` below) without
-            // needing to interpret the bitmask ourselves.
-            match self.file.read(buf) {
-                Ok(0) => return ReadOutcome::Eof,
-                Ok(bytes_read) => return ReadOutcome::Data(bytes_read),
-                // `portable_pty`'s own reader translates EIO (raised once
-                // the slave is fully closed) to a clean EOF -- see
-                // `PtyFd::read` in `portable-pty`'s `unix.rs`. Match that
-                // behavior here since this bypasses that wrapper.
-                Err(error) if error.raw_os_error() == Some(libc::EIO) => return ReadOutcome::Eof,
+                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Eof) => {
+                    return ReadOutcome::Eof;
+                }
+                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Interrupted) => {
+                    return ReadOutcome::Stopped;
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => return ReadOutcome::Error,
             }
         }
+    }
+}
+
+/// Owner-side cancellation path corresponding to one `CancellableReader`.
+struct ReaderCancellation {
+    #[cfg(unix)]
+    interrupt: ilium_platform::interruptible_reader::ReaderInterrupt,
+}
+
+impl ReaderCancellation {
+    fn interrupt(&self) {
+        #[cfg(unix)]
+        self.interrupt.interrupt();
     }
 }
 
@@ -442,7 +480,7 @@ enum MasterReadMessage {
 
 /// Non-unix `CancellableReader`. There is no portable equivalent of
 /// `poll()` available here, so a single thread cannot both block on
-/// `Read::read` and re-check `should_stop` on a bounded interval the way
+/// `Read::read` and receive an owner wakeup through the same poll set the way
 /// `PollableMasterReader` does on unix. Splitting the work across two
 /// threads recovers that invariant for the state that actually matters:
 ///
@@ -551,9 +589,8 @@ impl Drop for PumpThreadCancellation {
 impl BlockingMasterReader {
     /// How long a single channel receive waits before returning control to
     /// the caller to re-check `should_stop`. Mirrors
-    /// `PollableMasterReader::POLL_TIMEOUT_MILLIS` on unix: short enough
-    /// that cancellation (pane close) is never noticeably delayed, long
-    /// enough to avoid spinning the thread on an idle pane.
+    /// the former Unix timeout: short enough that cancellation (pane close)
+    /// is never noticeably delayed on non-Unix targets.
     const RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
 
     /// Bound on in-flight, not-yet-consumed read messages. Without a bound
@@ -717,37 +754,16 @@ impl PtySession {
             cmd.arg(arg);
         }
         cmd.cwd(&command.cwd);
-        // Codex itself is commonly launched with `NO_COLOR=1`, but that
-        // policy applies to its parent process's logs, not to terminals
-        // ilium emulates. Leaving it inherited makes every child shell,
-        // Claude, Codex, and color-aware CLI deliberately monochrome even
-        // though this PTY advertises full xterm-256color support.
-        cmd.env_remove("NO_COLOR");
-        for (key, value) in &command.env {
-            cmd.env(key, value);
-        }
-        // The spawning process's own `TERM` is inherited from whatever
-        // terminal launched it -- often `tmux-256color`/`screen-256color`,
-        // since ilium is routinely run inside tmux itself. Left alone, the
-        // *child* shell would inherit that same value and believe it's
-        // talking to a real tmux/screen, which understands nonstandard
-        // private escapes such as tmux's own `ESC k <title> ESC \`
-        // window-title sequence (shell prompt themes emit it via
-        // `preexec` to show the running command in the pane title). The
-        // `vt100`-based emulator behind this pty doesn't implement that
-        // tmux-specific protocol -- it just falls out of escape parsing
-        // after the lone `ESC k` and prints the title text (the command
-        // name) as literal characters, i.e. "the command name gets echoed
-        // again on the next line". Advertising a plain, widely-supported
-        // terminal type here makes the child (and anything it runs)
-        // query/report only capabilities this emulator actually has. This
-        // is applied last and unconditionally of `command.env` -- deliberately
-        // *after* the loop above, so a caller-supplied `TERM` (via
-        // `PtyCommand::env`) can never win the `CommandBuilder`'s
-        // last-write-wins map merge and leak tmux/screen-specific escapes
-        // into this `vt100` emulator. This is a correctness fix for every
-        // pty this crate spawns, not a per-command choice.
-        cmd.env("TERM", "xterm-256color");
+        // The spawning process's terminal identity is inherited from whatever
+        // displays Ilium -- commonly WezTerm or tmux. Left intact, a child
+        // mistakes that outer program for its direct terminal and emits
+        // private protocols this `vt100` boundary cannot render. Apply the
+        // authoritative nested-terminal contract last so neither inheritance
+        // nor `PtyCommand::env` can override it.
+        // `NO_COLOR` is filtered at the same boundary: a policy inherited by
+        // the Ilium process must not make its fully color-capable child PTYs
+        // monochrome.
+        configure_emulated_terminal_environment(&mut cmd, &command.env);
 
         let mut child = pair.slave.spawn_command(cmd).map_err(PtyError::Spawn)?;
         // Drop our end of the slave once the child has it; keeping it open
@@ -762,7 +778,7 @@ impl PtySession {
         // *and reap* the child explicitly before returning `Err`, or it
         // leaks as a zombie: `child` is a plain `std::process::Child` under
         // the hood, which neither terminates nor reaps its process on drop.
-        let mut reader = match Self::open_cancellable_reader(&*pair.master) {
+        let (mut reader, reader_cancellation) = match Self::open_cancellable_reader(&*pair.master) {
             Ok(reader) => reader,
             Err(err) => {
                 let _ = child.kill();
@@ -820,7 +836,7 @@ impl PtySession {
             // Not keeping the `JoinHandle` around, but this thread is not
             // fire-and-forget: `reader_should_stop` (set by `Drop` below) is
             // its cancellation path, checked by `CancellableReader::read_next`
-            // between -- and *during*, via a bounded `poll()` on unix or a
+            // between -- and *during*, via a wake pipe on unix or a
             // bounded channel receive against a decoupled pump thread on
             // every other target (see `PollableMasterReader`/
             // `BlockingMasterReader`) -- waits for more pty output. That is
@@ -830,11 +846,14 @@ impl PtySession {
             // slave fd open, which killing only the direct child (see the
             // `child` field doc comment) cannot by itself unblock a plain
             // blocking `read()` from. Not joining the handle is deliberate
-            // too: joining from `Drop` could block the caller for up to one
-            // wait interval (`POLL_TIMEOUT_MILLIS`/`RECV_TIMEOUT`), which
-            // callers tearing down a pane synchronously should not pay.
+            // too: non-Unix callers can still block for up to
+            // `RECV_TIMEOUT`, which synchronous pane teardown should not pay.
             std::thread::spawn(move || {
-                let mut buf = [0u8; 8192];
+                // A larger reusable buffer lets the Unix interruptible reader
+                // drain one already-ready PTY burst into a single parser,
+                // journal, watch, and broadcast operation. It is allocated
+                // once per pane reader thread, never once per chunk.
+                let mut buf = [0u8; 64 * 1024];
                 while let ReadOutcome::Data(bytes_read) =
                     reader.read_next(&mut buf, &reader_should_stop)
                 {
@@ -908,6 +927,7 @@ impl PtySession {
             output_bytes: output_bytes_tx,
             reader_should_stop,
             output_journal,
+            reader_cancellation,
         })
     }
 
@@ -918,16 +938,20 @@ impl PtySession {
     #[cfg(unix)]
     fn open_cancellable_reader(
         master: &(dyn MasterPty + Send),
-    ) -> Result<Box<dyn CancellableReader>, PtyError> {
-        Ok(Box::new(PollableMasterReader::duplicate_from(master)?))
+    ) -> Result<(Box<dyn CancellableReader>, ReaderCancellation), PtyError> {
+        let (reader, interrupt) = PollableMasterReader::duplicate_from(master)?;
+        Ok((Box::new(reader), ReaderCancellation { interrupt }))
     }
 
     #[cfg(not(unix))]
     fn open_cancellable_reader(
         master: &(dyn MasterPty + Send),
-    ) -> Result<Box<dyn CancellableReader>, PtyError> {
+    ) -> Result<(Box<dyn CancellableReader>, ReaderCancellation), PtyError> {
         let reader = master.try_clone_reader().map_err(PtyError::Io)?;
-        Ok(Box::new(BlockingMasterReader::spawn_pumping_from(reader)))
+        Ok((
+            Box::new(BlockingMasterReader::spawn_pumping_from(reader)),
+            ReaderCancellation {},
+        ))
     }
 
     /// Writes raw bytes (already-encoded key input) to the pty.
@@ -1175,12 +1199,11 @@ impl Drop for PtySession {
     /// slave fd (some daemonizing code does this without also redirecting
     /// stdio away) -- that fd can stay open indefinitely. For exactly that
     /// remaining case, `CancellableReader::read_next` re-checks
-    /// `reader_should_stop` on a bounded interval -- via `poll()` on unix
+    /// `reader_should_stop` through an explicit wake pipe on unix
     /// (`PollableMasterReader`), or via a bounded receive against a
     /// decoupled pump thread everywhere else (`BlockingMasterReader`) --
     /// instead of only ever waking on incoming bytes, so the reader thread
-    /// exits within about one wait interval regardless of what any
-    /// descendant does. That descendant itself is
+    /// exits promptly regardless of what any descendant does. That descendant itself is
     /// not signaled -- `kill()`/`Drop` only ever reach the directly-spawned
     /// child, the same limitation every terminal multiplexer has -- but its
     /// orphaned output no longer has anywhere in this process left to
@@ -1197,6 +1220,7 @@ impl Drop for PtySession {
             let _ = self.child.lock().unwrap().kill();
         }
         self.reader_should_stop.store(true, Ordering::Release);
+        self.reader_cancellation.interrupt();
     }
 }
 
@@ -1214,6 +1238,31 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_shared_output_chunk_clone() {
+        const CLONES: usize = 100_000;
+        let owned_bytes = vec![b'x'; 8192];
+        let owned_started_at = std::time::Instant::now();
+        for _ in 0..CLONES {
+            std::hint::black_box(owned_bytes.clone());
+        }
+        let owned_elapsed = owned_started_at.elapsed();
+
+        let shared_bytes: Arc<[u8]> = Arc::from(owned_bytes);
+        let shared_started_at = std::time::Instant::now();
+        for _ in 0..CLONES {
+            std::hint::black_box(Arc::clone(&shared_bytes));
+        }
+        let shared_elapsed = shared_started_at.elapsed();
+
+        println!(
+            "PERF pty.output_chunk_clone owned_ns={} shared_ns={} clones={CLONES}",
+            owned_elapsed.as_nanos(),
+            shared_elapsed.as_nanos(),
+        );
+    }
+
+    #[test]
     fn output_recovery_returns_only_the_contiguous_missing_tail() {
         let mut journal = journal();
         journal.append(b"first".to_vec());
@@ -1224,7 +1273,7 @@ mod tests {
             journal.recovery_after(1),
             Some(PtyOutputRecovery::Delta(PtyOutputChunk {
                 sequence: 3,
-                bytes: b"-second-third".to_vec(),
+                bytes: Arc::from(b"-second-third".as_slice()),
             }))
         );
         assert_eq!(journal.recovery_after(3), None);

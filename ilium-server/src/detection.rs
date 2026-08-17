@@ -43,6 +43,11 @@ const FORCE_CHECK_DEBOUNCE: Duration = Duration::from_secs(5);
 /// Focused panes retain the previous one-second classification cadence, while
 /// the scheduler itself now sleeps to exact deadlines instead of polling.
 const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// Maximum age of a process-table snapshot while all due panes still have a
+/// live, cached identity and no user-triggered recheck is pending. Visible
+/// screen classification remains one-second responsive; only the expensive
+/// whole-host discovery scan is reused between those ticks.
+const MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE: Duration = Duration::from_secs(5);
 
 /// Spawns the detection loop as a single tracked task and returns its
 /// handle. The loop runs until aborted (session shutdown) -- it has no
@@ -84,6 +89,9 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
 
 async fn run_loop(state: std::sync::Arc<ServerState>) {
     let mut system = System::new();
+    let mut children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+    let mut last_system_refresh_at = None;
+    let mut system_generation = 0_u64;
 
     loop {
         // Sleep to the exact nearest pane deadline. New panes and debounced
@@ -101,6 +109,17 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
                 state.detection_schedule_changed.notified().await;
                 continue;
             }
+        }
+
+        if !crate::agent_debug::is_any_debug_sink_enabled(&state)
+            && !system_refresh_required(&state, last_system_refresh_at, Instant::now()).await
+        {
+            if let Err(error) =
+                run_due_panes(&state, &mut system, &children_index, system_generation).await
+            {
+                tracing::error!("detection loop: tick failed: {error}");
+            }
+            continue;
         }
 
         // The refresh is the syscall-heavy part (`/proc` reads for every
@@ -125,7 +144,12 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         })
         .await;
         match refreshed {
-            Ok(refreshed_system) => system = refreshed_system,
+            Ok(refreshed_system) => {
+                system = refreshed_system;
+                children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+                system_generation = system_generation.saturating_add(1);
+                last_system_refresh_at = Some(Instant::now());
+            }
             Err(join_error) => {
                 // The blocking task panicked, taking the `System` it owned
                 // with it -- there is no way to recover that value, so
@@ -150,10 +174,71 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
             }
         }
 
-        if let Err(error) = run_due_panes(&state, &mut system).await {
+        if let Err(error) =
+            run_due_panes(&state, &mut system, &children_index, system_generation).await
+        {
             tracing::error!("detection loop: tick failed: {error}");
         }
     }
+}
+
+/// Decides whether a due batch needs a fresh whole-host process snapshot.
+///
+/// A stable agent process does not need to be rediscovered merely because its
+/// terminal repainted. The cheap cross-platform liveness probe catches exits;
+/// user-triggered checks catch a newly launched command immediately; and the
+/// age ceiling still catches an in-place `exec` or unusual process-tree change
+/// that preserves the cached PID.
+async fn system_refresh_required(
+    state: &ServerState,
+    last_refresh_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if system_snapshot_age_requires_refresh(last_refresh_at, now) {
+        return true;
+    }
+
+    let panes = state.panes.read().await;
+    panes.values().any(|resource| {
+        let PaneResource::Terminal(runtime) = resource else {
+            return false;
+        };
+        if runtime.detection_schedule.next_due > now {
+            return false;
+        }
+        let schedule = &runtime.detection_schedule;
+        if schedule.identity_system_generation.is_none() {
+            return true;
+        }
+        if schedule
+            .cached_screen_classification
+            .as_ref()
+            .is_none_or(|cache| cache.request_generation != schedule.request_generation)
+        {
+            return true;
+        }
+        schedule
+            .cached_identity
+            .as_ref()
+            .is_some_and(|identity| !ilium_platform::process_control::is_running(identity.pid))
+    })
+}
+
+fn system_snapshot_age_requires_refresh(last_refresh_at: Option<Instant>, now: Instant) -> bool {
+    last_refresh_at.is_none_or(|last_refresh_at| {
+        now.saturating_duration_since(last_refresh_at) >= MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE
+    })
+}
+
+/// Returns a cached identity conclusion only when it belongs to this exact
+/// process-table generation. The outer `Option` distinguishes a cached
+/// `PlainShell` conclusion from a cache miss.
+fn cached_identity_for_generation(
+    cached_generation: Option<u64>,
+    current_generation: u64,
+    cached_identity: &Option<ilium_detect::AgentIdentity>,
+) -> Option<Option<ilium_detect::AgentIdentity>> {
+    (cached_generation == Some(current_generation)).then(|| cached_identity.clone())
 }
 
 /// Returns the exact wait until the nearest terminal detection deadline.
@@ -240,6 +325,8 @@ fn partition_session_claims(
 async fn run_due_panes(
     state: &ServerState,
     system: &mut System,
+    children_index: &ilium_detect::ProcessChildrenIndex,
+    system_generation: u64,
 ) -> Result<(), crate::error::ServerError> {
     let now = Instant::now();
 
@@ -258,6 +345,9 @@ async fn run_due_panes(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         pending_generated_session_id: Option<String>,
+        identity_system_generation: Option<u64>,
+        cached_identity: Option<ilium_detect::AgentIdentity>,
+        cached_screen_classification: Option<ScreenClassificationCache>,
     }
 
     // Phase 1: snapshot inputs under a read lock only. Also collects every
@@ -284,30 +374,34 @@ async fn run_due_panes(
                     PaneResource::Terminal(_) | PaneResource::Editor { .. } => None,
                 }
             }));
-        let due_panes = panes
-            .iter()
-            .filter_map(|(pane_id, resource)| {
-                let PaneResource::Terminal(runtime) = resource else {
-                    return None;
-                };
-                if runtime.detection_schedule.next_due > now {
-                    return None;
-                }
-                Some(DuePane {
-                    pane_id: *pane_id,
-                    shell_pid: runtime.session.process_id(),
-                    screen_generation: runtime.session.screen_generation(),
-                    request_generation: runtime.detection_schedule.request_generation,
-                    confirmed_goal_owner: runtime.confirmed_goal_owner.clone(),
-                    session_id: runtime.session_id.clone(),
-                    session_agent_class: runtime.session_agent_class.clone(),
-                    is_session_identity_invalidated: runtime.is_session_identity_invalidated,
-                    invalidated_session_id: runtime.invalidated_session_id.clone(),
-                    session_process_id: runtime.session_process_id,
-                    pending_generated_session_id: runtime.pending_generated_session_id.clone(),
-                })
-            })
-            .collect();
+        let mut due_panes = Vec::with_capacity(panes.len());
+        for (pane_id, resource) in panes.iter() {
+            let PaneResource::Terminal(runtime) = resource else {
+                continue;
+            };
+            if runtime.detection_schedule.next_due > now {
+                continue;
+            }
+            due_panes.push(DuePane {
+                pane_id: *pane_id,
+                shell_pid: runtime.session.process_id(),
+                screen_generation: runtime.session.screen_generation(),
+                request_generation: runtime.detection_schedule.request_generation,
+                confirmed_goal_owner: runtime.confirmed_goal_owner.clone(),
+                session_id: runtime.session_id.clone(),
+                session_agent_class: runtime.session_agent_class.clone(),
+                is_session_identity_invalidated: runtime.is_session_identity_invalidated,
+                invalidated_session_id: runtime.invalidated_session_id.clone(),
+                session_process_id: runtime.session_process_id,
+                pending_generated_session_id: runtime.pending_generated_session_id.clone(),
+                identity_system_generation: runtime.detection_schedule.identity_system_generation,
+                cached_identity: runtime.detection_schedule.cached_identity.clone(),
+                cached_screen_classification: runtime
+                    .detection_schedule
+                    .cached_screen_classification
+                    .clone(),
+            });
+        }
         (due_panes, claimed_session_ids, ambiguous_session_ids)
     };
 
@@ -318,47 +412,62 @@ async fn run_due_panes(
     // Phase 2a: identify process trees with no lock held. Screen contents
     // are not captured until identity succeeds, so ordinary shell panes do
     // not allocate a full vt100 text snapshot on every slow-tier check.
-    let children_index = ilium_detect::ProcessChildrenIndex::build(system);
     struct IdentifiedPane {
         due: DuePane,
         identity: Option<ilium_detect::AgentIdentity>,
+        cached_screen_classification: Option<ScreenClassificationCache>,
     }
     let identified_panes: Vec<IdentifiedPane> = due_panes
         .into_iter()
         .map(|due| {
-            let identity = due.shell_pid.and_then(|shell_pid| {
-                ilium_detect::identify_agent_with_extra(
-                    system,
-                    Pid::from_u32(shell_pid),
-                    &children_index,
-                    &state.custom_signatures,
-                )
+            let identity = cached_identity_for_generation(
+                due.identity_system_generation,
+                system_generation,
+                &due.cached_identity,
+            )
+            .unwrap_or_else(|| {
+                due.shell_pid.and_then(|shell_pid| {
+                    ilium_detect::identify_agent_with_extra(
+                        system,
+                        Pid::from_u32(shell_pid),
+                        children_index,
+                        &state.custom_signatures,
+                    )
+                })
             });
-            IdentifiedPane { due, identity }
+            let cached_screen_classification =
+                (!crate::agent_debug::is_any_debug_sink_enabled(state))
+                    .then(|| {
+                        reusable_screen_classification(
+                            due.cached_screen_classification.as_ref(),
+                            due.screen_generation,
+                            due.request_generation,
+                            identity.as_ref(),
+                            due.confirmed_goal_owner.as_ref(),
+                        )
+                    })
+                    .flatten();
+            IdentifiedPane {
+                due,
+                identity,
+                cached_screen_classification,
+            }
         })
         .collect();
 
-    let identified_ids: std::collections::HashSet<NodeId> = identified_panes
-        .iter()
-        .filter(|pane| pane.identity.is_some())
-        .map(|pane| pane.due.pane_id)
-        .collect();
     let screen_snapshots: std::collections::HashMap<NodeId, ilium_pty::ScreenSnapshot> = {
         let panes = state.panes.read().await;
-        panes
-            .iter()
-            .filter_map(|(pane_id, resource)| {
-                if !identified_ids.contains(pane_id) {
-                    return None;
-                }
-                match resource {
-                    PaneResource::Terminal(runtime) => {
-                        Some((*pane_id, runtime.session.screen_snapshot()))
-                    }
-                    PaneResource::Editor { .. } => None,
-                }
-            })
-            .collect()
+        let mut snapshots = std::collections::HashMap::with_capacity(identified_panes.len());
+        for pane in &identified_panes {
+            if pane.identity.is_none() || pane.cached_screen_classification.is_some() {
+                continue;
+            }
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane.due.pane_id) else {
+                continue;
+            };
+            snapshots.insert(pane.due.pane_id, runtime.session.screen_snapshot());
+        }
+        snapshots
     };
 
     struct ClassifiedPane {
@@ -385,6 +494,7 @@ async fn run_due_panes(
         /// carried through from phase 2 since `screen_snapshot.text` itself
         /// isn't retained on `ClassifiedPane`.
         interstitial_prompt_response: Option<&'static str>,
+        screen_classification_cache: ScreenClassificationCache,
     }
 
     let classifications: Vec<ClassifiedPane> = identified_panes
@@ -392,21 +502,59 @@ async fn run_due_panes(
         .map(|identified| {
             let due_pane = identified.due;
             let identity = identified.identity;
-            let screen_snapshot = screen_snapshots
-                .get(&due_pane.pane_id)
-                .cloned()
-                .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
-                    generation: due_pane.screen_generation,
-                    text: String::new(),
+            let (
+                screen_generation,
+                classified_identity,
+                is_fresh_agent_screen,
+                interstitial_prompt_response,
+                screen_classification_cache,
+            ) = if let Some(cache) = identified.cached_screen_classification {
+                (
+                    cache.screen_generation,
+                    cache.classification.clone(),
+                    cache.is_fresh_agent_screen,
+                    cache.interstitial_prompt_response,
+                    cache,
+                )
+            } else {
+                let screen_snapshot = screen_snapshots
+                    .get(&due_pane.pane_id)
+                    .cloned()
+                    .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
+                        generation: due_pane.screen_generation,
+                        text: String::new(),
+                    });
+                let classification = classify_identity(
+                    identity.as_ref(),
+                    &screen_snapshot.text,
+                    due_pane.confirmed_goal_owner.as_ref(),
+                );
+                let is_fresh = identity.as_ref().is_some_and(|identity| {
+                    ilium_detect::is_fresh_agent_screen(&identity.class, &screen_snapshot.text)
                 });
-            let classified_identity = classify_identity(
-                identity.as_ref(),
-                &screen_snapshot.text,
-                due_pane.confirmed_goal_owner.as_ref(),
-            );
-            let is_fresh_agent_screen = identity.as_ref().is_some_and(|identity| {
-                ilium_detect::is_fresh_agent_screen(&identity.class, &screen_snapshot.text)
-            });
+                let interstitial = identity.as_ref().and_then(|identity| {
+                    ilium_detect::interstitial_prompt_response(
+                        &identity.class,
+                        &screen_snapshot.text,
+                    )
+                });
+                let cache = ScreenClassificationCache {
+                    screen_generation: screen_snapshot.generation,
+                    request_generation: due_pane.request_generation,
+                    identity: identity_key(identity.as_ref()),
+                    input_goal_owner: due_pane.confirmed_goal_owner.clone(),
+                    classification: classification.clone(),
+                    is_fresh_agent_screen: is_fresh,
+                    interstitial_prompt_response: interstitial,
+                };
+                (
+                    screen_snapshot.generation,
+                    classification,
+                    is_fresh,
+                    interstitial,
+                    cache,
+                )
+            };
             let has_stable_session_owner = identity.as_ref().is_some_and(|identity| {
                 session_owner_is_stable(
                     due_pane.session_id.as_deref(),
@@ -418,14 +566,11 @@ async fn run_due_panes(
                 )
             });
             let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
-            let interstitial_prompt_response = identity.as_ref().and_then(|identity| {
-                ilium_detect::interstitial_prompt_response(&identity.class, &screen_snapshot.text)
-            });
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
                 status: classified_identity.status,
                 identity,
-                screen_generation: screen_snapshot.generation,
+                screen_generation,
                 request_generation: due_pane.request_generation,
                 confirmed_goal_owner: classified_identity.confirmed_goal_owner,
                 is_fresh_agent_screen,
@@ -441,6 +586,7 @@ async fn run_due_panes(
                 goal_evidence_line: classified_identity.goal_evidence_line,
                 goal_was_retained: classified_identity.goal_was_retained,
                 interstitial_prompt_response,
+                screen_classification_cache,
             }
         })
         .collect();
@@ -679,6 +825,10 @@ async fn run_due_panes(
                 && runtime.session.screen_generation() != classified_pane.screen_generation;
 
             runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
+            runtime.detection_schedule.identity_system_generation = Some(system_generation);
+            runtime.detection_schedule.cached_identity = classified_pane.identity.clone();
+            runtime.detection_schedule.cached_screen_classification =
+                Some(classified_pane.screen_classification_cache.clone());
 
             let previous_status = tree.get(pane_id).and_then(|node| match &node.kind {
                 ilium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
@@ -1323,6 +1473,9 @@ fn explain_activity_decision(
         Some(ilium_detect::ActivityEvidence::BackgroundWait) => {
             "the visible terminal says the agent is waiting for background agents or tasks"
         }
+        Some(ilium_detect::ActivityEvidence::BackgroundShellWait) => {
+            "the visible terminal shows a background shell command is still running"
+        }
         Some(ilium_detect::ActivityEvidence::ConfirmationPrompt) => {
             "the visible terminal contains a yes/no confirmation question"
         }
@@ -1537,7 +1690,8 @@ pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) 
 
 /// One pure identity/screen reduction result. Goal ownership stays separate
 /// from `PaneStatus` so the caller can persist it across inconclusive frames.
-struct IdentityClassification {
+#[derive(Clone)]
+pub(crate) struct IdentityClassification {
     status: PaneStatus,
     confirmed_goal_owner: Option<ConfirmedGoalOwner>,
     activity_evidence: Option<ilium_detect::ActivityEvidence>,
@@ -1545,6 +1699,40 @@ struct IdentityClassification {
     goal_evidence: Option<ilium_detect::GoalEvidence>,
     goal_evidence_line: Option<String>,
     goal_was_retained: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct ScreenClassificationCache {
+    screen_generation: u64,
+    request_generation: u64,
+    identity: Option<(u32, ilium_core::AgentClass)>,
+    input_goal_owner: Option<ConfirmedGoalOwner>,
+    classification: IdentityClassification,
+    is_fresh_agent_screen: bool,
+    interstitial_prompt_response: Option<&'static str>,
+}
+
+fn identity_key(
+    identity: Option<&ilium_detect::AgentIdentity>,
+) -> Option<(u32, ilium_core::AgentClass)> {
+    identity.map(|identity| (identity.pid, identity.class.clone()))
+}
+
+fn reusable_screen_classification(
+    cache: Option<&ScreenClassificationCache>,
+    screen_generation: u64,
+    request_generation: u64,
+    identity: Option<&ilium_detect::AgentIdentity>,
+    goal_owner: Option<&ConfirmedGoalOwner>,
+) -> Option<ScreenClassificationCache> {
+    cache
+        .filter(|cache| {
+            cache.screen_generation == screen_generation
+                && cache.request_generation == request_generation
+                && cache.identity == identity_key(identity)
+                && cache.input_goal_owner.as_ref() == goal_owner
+        })
+        .cloned()
 }
 
 /// Combines an already-resolved process identity with the screen snapshot
@@ -1954,6 +2142,9 @@ mod tests {
             client_focused: false,
             last_forced: None,
             request_generation: 0,
+            identity_system_generation: None,
+            cached_identity: None,
+            cached_screen_classification: None,
         };
         let t0 = Instant::now();
         assert!(force_check(&mut schedule, t0));
@@ -2081,5 +2272,217 @@ mod tests {
         assert!(!session_identity_is_stale(
             false, false, false, false, false
         ));
+    }
+
+    #[test]
+    fn stable_system_snapshots_are_reused_until_the_age_ceiling() {
+        let now = Instant::now();
+        assert!(system_snapshot_age_requires_refresh(None, now));
+        assert!(!system_snapshot_age_requires_refresh(
+            Some(now),
+            now + MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE - Duration::from_millis(1),
+        ));
+        assert!(system_snapshot_age_requires_refresh(
+            Some(now),
+            now + MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE,
+        ));
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_system_refresh_coalescing() {
+        const TICKS: usize = 10_000;
+        let started_at = Instant::now();
+        let mut last_refresh_at = None;
+        let mut refreshes = 0;
+        let benchmark_started_at = Instant::now();
+        for tick in 0..TICKS {
+            let now = started_at + Duration::from_millis(tick as u64);
+            if system_snapshot_age_requires_refresh(last_refresh_at, now) {
+                refreshes += 1;
+                last_refresh_at = Some(now);
+            }
+        }
+        println!(
+            "PERF server.system_refresh_gate elapsed_ns={} baseline_refreshes={TICKS} coalesced_refreshes={refreshes}",
+            benchmark_started_at.elapsed().as_nanos(),
+        );
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_process_children_index_reuse() {
+        const TICKS: usize = 100;
+        let mut system = System::new();
+        ilium_detect::refresh(&mut system);
+
+        let rebuilt_started_at = Instant::now();
+        for _tick in 0..TICKS {
+            std::hint::black_box(ilium_detect::ProcessChildrenIndex::build(&system));
+        }
+        let rebuilt_elapsed = rebuilt_started_at.elapsed();
+
+        let reused_index = ilium_detect::ProcessChildrenIndex::build(&system);
+        let reused_started_at = Instant::now();
+        for _tick in 0..TICKS {
+            std::hint::black_box(&reused_index);
+        }
+        let reused_elapsed = reused_started_at.elapsed();
+        println!(
+            "PERF server.children_index rebuilt_ns={} reused_ns={}",
+            rebuilt_elapsed.as_nanos() / TICKS as u128,
+            reused_elapsed.as_nanos() / TICKS as u128,
+        );
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_process_identity_cache_hit() {
+        const PANES: usize = 49;
+        const TICKS: usize = 10_000;
+        let identity = Some(ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 42,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 2,
+        });
+        let started_at = Instant::now();
+        for _tick in 0..TICKS {
+            for _pane in 0..PANES {
+                std::hint::black_box(cached_identity_for_generation(Some(7), 7, &identity));
+            }
+        }
+        println!(
+            "PERF server.identity_cache hit_ns={} process_tree_walks_per_cached_tick=0 baseline_walks_per_tick={PANES}",
+            started_at.elapsed().as_nanos() / (TICKS * PANES) as u128,
+        );
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_unchanged_screen_classification_cache() {
+        const ITERATIONS: usize = 10_000;
+        let identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 42,
+            process_name: "codex".to_string(),
+            matched_signature: "codex".to_string(),
+            process_tree_depth: 2,
+        };
+        let screen = format!(
+            "{}\n› Continue implementation\nWorking (12m 30s) (esc to interrupt)",
+            "representative transcript row with terminal content\n".repeat(60),
+        );
+
+        let baseline_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            std::hint::black_box(classify_identity(Some(&identity), &screen, None));
+            std::hint::black_box(ilium_detect::is_fresh_agent_screen(
+                &identity.class,
+                &screen,
+            ));
+            std::hint::black_box(ilium_detect::interstitial_prompt_response(
+                &identity.class,
+                &screen,
+            ));
+        }
+        let baseline_elapsed = baseline_started_at.elapsed();
+
+        let classification = classify_identity(Some(&identity), &screen, None);
+        let cache = ScreenClassificationCache {
+            screen_generation: 7,
+            request_generation: 0,
+            identity: identity_key(Some(&identity)),
+            input_goal_owner: None,
+            classification,
+            is_fresh_agent_screen: false,
+            interstitial_prompt_response: None,
+        };
+        let cached_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            std::hint::black_box(reusable_screen_classification(
+                Some(&cache),
+                7,
+                0,
+                Some(&identity),
+                None,
+            ));
+        }
+        let cached_elapsed = cached_started_at.elapsed();
+        println!(
+            "PERF server.screen_classification baseline_ns={} cached_ns={}",
+            baseline_elapsed.as_nanos() / ITERATIONS as u128,
+            cached_elapsed.as_nanos() / ITERATIONS as u128,
+        );
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_due_pane_collection_and_direct_snapshot_lookup() {
+        const ITERATIONS: usize = 10_000;
+        const PANES: usize = 49;
+        let registry = (0_u64..PANES as u64)
+            .map(|pane_id| (NodeId(pane_id), pane_id))
+            .collect::<std::collections::HashMap<_, _>>();
+        let due_ids = (0_u64..PANES as u64)
+            .filter(|pane_id| pane_id % 5 == 0)
+            .map(NodeId)
+            .collect::<Vec<_>>();
+
+        let baseline_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let due_set = due_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            let selected = registry
+                .iter()
+                .filter(|(pane_id, _)| due_set.contains(pane_id))
+                .map(|(pane_id, value)| (*pane_id, *value))
+                .collect::<std::collections::HashMap<_, _>>();
+            std::hint::black_box(selected);
+        }
+        let baseline_elapsed = baseline_started_at.elapsed();
+
+        let direct_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let mut selected = std::collections::HashMap::with_capacity(due_ids.len());
+            for pane_id in &due_ids {
+                if let Some(value) = registry.get(pane_id) {
+                    selected.insert(*pane_id, *value);
+                }
+            }
+            std::hint::black_box(selected);
+        }
+        let direct_elapsed = direct_started_at.elapsed();
+
+        let unreserved_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let mut due = Vec::new();
+            for pane_id in 0_u64..PANES as u64 {
+                due.push(NodeId(pane_id));
+            }
+            std::hint::black_box(due);
+        }
+        let unreserved_elapsed = unreserved_started_at.elapsed();
+
+        let reserved_started_at = Instant::now();
+        for _iteration in 0..ITERATIONS {
+            let mut due = Vec::with_capacity(PANES);
+            for pane_id in 0_u64..PANES as u64 {
+                due.push(NodeId(pane_id));
+            }
+            std::hint::black_box(due);
+        }
+        let reserved_elapsed = reserved_started_at.elapsed();
+
+        println!(
+            "PERF server.screen_snapshot_selection baseline_ns={} direct_ns={} due_unreserved_ns={} due_reserved_ns={}",
+            baseline_elapsed.as_nanos() / ITERATIONS as u128,
+            direct_elapsed.as_nanos() / ITERATIONS as u128,
+            unreserved_elapsed.as_nanos() / ITERATIONS as u128,
+            reserved_elapsed.as_nanos() / ITERATIONS as u128,
+        );
     }
 }

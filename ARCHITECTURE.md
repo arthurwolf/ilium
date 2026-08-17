@@ -123,7 +123,7 @@ Text-scraping a banner is what most "detect the AI tool" hacks do, and it breaks
 
 "A few times a minute" per pane, but adaptive rather than fixed:
 
-- Panes currently `Working` or `WaitingApproval` poll fast (~5s) — for `Working` you want the state flip to `Done` to show up promptly; for `WaitingApproval` you want a quick answer (or a classification that only matched one transient screen) to resolve promptly too, rather than leaving a stale "needs input" badge up for a full slow-tier interval.
+- Panes currently `Working` or `WaitingApproval` poll every ~10s — for `Working` this still makes the state flip to `Done` prompt while avoiding needless process-tree and screen scans across a large fleet; for `WaitingApproval` it also corrects transient matches without leaving a stale "needs input" badge for a full slow-tier interval.
 - `Done` is an unread completed-turn alert: both the tree and right-panel title prepend `« [done] »` until the user opens that pane, submits new terminal input, or detection observes renewed non-idle agent activity. Opening the pane clears the bell and marker for every attached client.
 - Panes `Idle`/`Done`/`PlainShell` poll slow (~30–60s) — none of those change on their own between polls, no reason to burn CPU reading their screen buffer.
 - All intervals configurable in `~/.config/ilium/config.toml`.

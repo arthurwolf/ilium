@@ -471,6 +471,31 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_event_file_writes() {
+        const ITERATIONS: usize = 10_000;
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("benchmark.log");
+        let state = Arc::new(LoggerState::new(path));
+        state.set_enabled(true).expect("enable");
+
+        let started_at = std::time::Instant::now();
+        for event_number in 0..ITERATIONS {
+            let mut writer = DynamicFileWriter {
+                state: Arc::clone(&state),
+                event_buffer: Vec::new(),
+            };
+            writeln!(writer, "event {event_number}: diagnostic payload").expect("event");
+        }
+        state.set_enabled(false).expect("disable and flush");
+        let elapsed = started_at.elapsed();
+        println!(
+            "PERF logging.event_write average_ns={}",
+            elapsed.as_nanos() / ITERATIONS as u128,
+        );
+    }
+
+    #[test]
     fn disabled_state_does_not_create_a_file_until_enabled() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("debug.txt");

@@ -5,6 +5,7 @@
 //! without mutating it. Only normal groups are sorted: split-view child order
 //! also determines right-panel placement and must remain structural.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 #[cfg(test)]
@@ -16,19 +17,19 @@ use crate::config::TreeOrder;
 /// Returns `parent`'s children in the requested presentation order.
 /// Missing/non-container parents fail soft to an empty list, matching the
 /// tree renderer's existing recursive-walk contract.
-pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> Vec<NodeId> {
+pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> Cow<'_, [NodeId]> {
     let Ok(children) = tree.children_of(parent) else {
-        return Vec::new();
+        return Cow::Borrowed(&[]);
     };
-    let mut ordered = children.to_vec();
 
     // Split views retain their explicit layout order in every mode.
     if !tree.get(parent).is_some_and(Node::is_group) || tree_order == TreeOrder::Manual {
-        return ordered;
+        return Cow::Borrowed(children);
     }
 
+    let mut ordered = children.to_vec();
     ordered.sort_by(|left_id, right_id| compare_nodes(tree, *left_id, *right_id, tree_order));
-    ordered
+    Cow::Owned(ordered)
 }
 
 /// Total comparator for two valid siblings. A missing node sorts last rather

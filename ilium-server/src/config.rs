@@ -54,7 +54,7 @@ pub struct DetectionConfig {
 impl Default for DetectionConfig {
     fn default() -> Self {
         Self {
-            working_poll_interval: Duration::from_secs(5),
+            working_poll_interval: Duration::from_secs(10),
             idle_poll_interval: Duration::from_secs(45),
             auto_answer_interstitial_prompts: true,
         }
@@ -392,6 +392,10 @@ mod tests {
         assert!(!config.debug.file_logging_enabled);
         assert_eq!(config.http_api, HttpApiConfig::default());
         assert!(!config.agent_debug_menu_enabled);
+        assert_eq!(
+            config.detection.working_poll_interval,
+            Duration::from_secs(10)
+        );
     }
 
     #[test]

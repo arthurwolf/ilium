@@ -35,6 +35,8 @@
 
 pub mod detached;
 pub mod file_lock;
+#[cfg(unix)]
+pub mod interruptible_reader;
 pub mod open_external;
 pub mod paths;
 pub mod process_control;

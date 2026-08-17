@@ -6,7 +6,6 @@
 //! search independent from PTY ownership and IPC transport details.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::NodeId;
@@ -88,8 +87,8 @@ pub struct SearchResult {
 }
 
 /// One immutable source handed from the UI thread to the search worker.
-/// Terminal histories share their retained byte buffer through `Arc`; local
-/// buffers are copied only when a debounced scan is actually due.
+/// Terminal histories share immutable segments; local buffers are copied only
+/// when a debounced scan is actually due.
 #[derive(Debug, Clone)]
 pub struct WorkspaceSearchSource {
     pub pane_id: NodeId,
@@ -104,7 +103,7 @@ pub struct WorkspaceSearchSource {
 /// Searchable content owned by one source snapshot.
 #[derive(Debug, Clone)]
 pub enum WorkspaceSearchContent {
-    Terminal(Arc<Vec<u8>>),
+    Terminal(crate::terminal_view::TerminalHistorySnapshot),
     Text(Vec<WorkspaceSearchText>),
 }
 
@@ -280,11 +279,12 @@ pub fn search_workspace(
                 // the last-command lookup and the match scan below both walk
                 // the same stripped text/offset-map instead of each running
                 // its own full-history strip over a multi-megabyte journal.
-                let searchable = strip_terminal_controls(history);
+                let history_bytes = history.to_vec();
+                let searchable = strip_terminal_controls(&history_bytes);
                 let last_command = last_command_from_text(&searchable.text);
                 find_terminal_results(
                     &searchable,
-                    history.len(),
+                    history_bytes.len(),
                     &request.query,
                     |before, matched, after, history_end_byte| {
                         result_from_source(

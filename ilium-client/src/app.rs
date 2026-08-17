@@ -50,7 +50,9 @@ use crate::search_ui::{
 };
 use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
-use crate::terminal_activity::{TerminalActivityTracker, TERMINAL_ACTIVITY_SLOW_FRAME_MS};
+use crate::terminal_activity::{
+    TerminalActivityTracker, TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+};
 use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
 use crate::terminal_title_inference;
 use crate::terminal_view::{self, TerminalView};
@@ -66,6 +68,10 @@ use ilium_inference::InferenceSettings;
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
 /// amount elsewhere in this crate.
 const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
+
+/// File-backed chatrooms need eventual observation of external agent writes,
+/// but filesystem repair and parsing do not belong on animation cadences.
+const CHATROOM_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Collapses lexical `.` and `..` components without requiring the target to
 /// exist. Board creation needs a stable absolute identity before it creates a
@@ -1339,6 +1345,9 @@ pub struct App {
     /// Last observed room availability. This is only used to invalidate the
     /// sidebar hit-test cache when another process creates/removes a room.
     chatroom_projects: HashSet<NodeId>,
+    /// Explicit filesystem-poll deadline shared by visible message refresh and
+    /// provider integration repair.
+    next_chatroom_reconcile_at: Option<Instant>,
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
@@ -1650,6 +1659,30 @@ fn elapsed_frame_delay(elapsed_millis: u128, frame_millis: u64) -> Duration {
     Duration::from_millis(delay_millis)
 }
 
+/// Adds one deadline candidate without duplicating the `Option` minimum
+/// bookkeeping across the animation scheduler's independent clocks.
+fn retain_minimum_delay(current: &mut Option<Duration>, candidate: Duration) {
+    *current = Some(current.map_or(candidate, |delay| delay.min(candidate)));
+}
+
+/// One event-loop decision derived from the current animation and maintenance
+/// clocks. Keeping the wake-up and redraw decision together lets the timer
+/// branch reuse the same state observation instead of walking every pane a
+/// second time after the sleep completes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MaintenanceSchedule {
+    pub delay: Duration,
+    pub was_animating: bool,
+}
+
+/// Internal clock requirements gathered in one pass over terminal panes.
+#[derive(Default)]
+struct AnimationRequirements {
+    next_semantic_delay: Option<Duration>,
+    next_ordinary_delay: Option<Duration>,
+    is_active: bool,
+}
+
 impl App {
     /// Asks the terminal which image protocol it supports, upgrading markdown
     /// image rendering from the half-block fallback when it answers.
@@ -1680,6 +1713,9 @@ impl App {
             panes: HashMap::new(),
             chatrooms: HashMap::new(),
             chatroom_projects: HashSet::new(),
+            // The first authoritative tree snapshot installs this deadline.
+            // Until then an empty client has no project to inspect.
+            next_chatroom_reconcile_at: None,
             agent_debug_logs: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
@@ -2036,20 +2072,46 @@ impl App {
     }
 
     pub fn displayed_pane_ids(&self) -> Vec<NodeId> {
+        self.displayed_pane_slots().into_iter().flatten().collect()
+    }
+
+    /// Returns the right panel's bounded terminal set without allocating.
+    /// Split views have a domain-enforced maximum of four children, so this
+    /// fixed representation also serves the event loop's hot subscription
+    /// comparison without a heap allocation on every output turn.
+    pub(crate) fn displayed_pane_slots(&self) -> [Option<NodeId>; 4] {
         match self.right_panel_target {
-            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => Vec::new(),
-            RightPanelTarget::Pane { pane_id } => vec![pane_id],
-            RightPanelTarget::SplitView { split_id, .. } => self
-                .tree
-                .children_of(split_id)
-                .map(|children| {
+            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => [None; 4],
+            RightPanelTarget::Pane { pane_id } => [Some(pane_id), None, None, None],
+            RightPanelTarget::SplitView { split_id, .. } => {
+                let mut pane_slots = [None; 4];
+                let Ok(children) = self.tree.children_of(split_id) else {
+                    return pane_slots;
+                };
+                for (slot, pane_id) in pane_slots.iter_mut().zip(
                     children
                         .iter()
                         .copied()
-                        .filter(|pane_id| self.tree.get(*pane_id).is_some_and(Node::is_pane))
-                        .collect()
-                })
-                .unwrap_or_default(),
+                        .filter(|pane_id| self.tree.get(*pane_id).is_some_and(Node::is_pane)),
+                ) {
+                    *slot = Some(pane_id);
+                }
+                pane_slots
+            }
+        }
+    }
+
+    /// Whether one pane currently owns cells in the right panel. This avoids
+    /// allocating the complete displayed-pane list on every PTY output event.
+    pub(crate) fn is_pane_displayed(&self, pane_id: NodeId) -> bool {
+        match self.right_panel_target {
+            RightPanelTarget::Pane {
+                pane_id: displayed_pane_id,
+            } => displayed_pane_id == pane_id,
+            RightPanelTarget::SplitView { split_id, .. } => {
+                self.tree.parent_of(pane_id) == Some(split_id)
+            }
+            RightPanelTarget::Empty | RightPanelTarget::Chatroom { .. } => false,
         }
     }
 
@@ -2527,6 +2589,27 @@ impl App {
         self.chatroom_projects = available;
         self.bump_tree_version();
         true
+    }
+
+    /// Makes a structural project snapshot eligible for immediate chatroom
+    /// discovery without coupling status-only tree version bumps to file I/O.
+    pub(crate) fn request_chatroom_reconcile(&mut self) {
+        self.next_chatroom_reconcile_at = Some(Instant::now());
+    }
+
+    /// Reconciles chatroom files only when their independent deadline is due.
+    /// External writers remain visible within one second while high-frequency
+    /// spinner ticks stay entirely in memory.
+    pub fn tick_chatroom_projects(&mut self, now: Instant) -> bool {
+        let Some(next_reconcile_at) = self.next_chatroom_reconcile_at else {
+            return false;
+        };
+        if now < next_reconcile_at {
+            return false;
+        }
+        let has_changed = self.reconcile_chatroom_projects();
+        self.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
+        has_changed
     }
 
     /// Handles text entry directly in the room's composer. The user is the
@@ -3858,7 +3941,7 @@ impl App {
     }
 
     /// Captures all searchable client-owned state. The terminal half is an
-    /// O(1) `Arc` snapshot of server-replayed history; editor and board text
+    /// O(1) immutable-segment snapshot of server-replayed history; editor and board text
     /// is copied only after the debounce has elapsed and on a background scan.
     fn workspace_search_sources(&self) -> Vec<WorkspaceSearchSource> {
         let mut sources = Vec::new();
@@ -4512,7 +4595,7 @@ impl App {
         self.tree_width_animation.is_animating()
     }
 
-    /// Whether a transition benefits from the event loop's 16 ms cadence.
+    /// Whether a transition benefits from the event loop's 30 Hz cadence.
     /// Spinners and pulses intentionally remain on the ordinary 50 ms tick;
     /// spatial movement needs finer frames to read as motion rather than jumps.
     pub fn is_spatial_animation_active(&self) -> bool {
@@ -4546,86 +4629,117 @@ impl App {
     /// `ServerEvent`, a finished naming worker) already marks the frame dirty
     /// on its own.
     pub fn has_active_animation(&self) -> bool {
-        let elapsed_ms = self.started_at.elapsed().as_millis();
-
-        self.has_fast_animation()
-            || self.terminal_activity.has_slow_activity(elapsed_ms)
-            || self.tree.panes().any(|node| {
-                matches!(
-                    node.kind,
-                    NodeKind::Pane {
-                        scheduled_input: Some(_),
-                        ..
-                    }
-                )
-            })
+        self.is_spatial_animation_active() || self.animation_requirements(Instant::now()).is_active
     }
 
-    /// Animations that genuinely need the generic 50 ms semantic cadence.
-    /// Scheduled-input clocks have their own 220 ms boundary calculation in
-    /// `next_scheduled_input_frame_delay` and are deliberately excluded.
-    fn has_fast_animation(&self) -> bool {
-        if self.is_layout_animating() {
-            return true;
-        }
+    /// Gathers every non-spatial animation clock, including scheduled-input
+    /// countdowns, while visiting the pane tree exactly once.
+    fn animation_requirements(&self, now: Instant) -> AnimationRequirements {
+        const SCHEDULED_INPUT_FRAME_MILLIS: u64 = 220;
+
+        let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
+        let mut requirements = AnimationRequirements::default();
+
         if self.is_project_name_loading
             || !self.titles_loading.is_empty()
             || self.structure_loading
             || self.model_discovery.is_loading()
             || self.inference_test_state.is_loading()
         {
-            return true;
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                elapsed_frame_delay(elapsed_ms, tree_ui::SPINNER_FRAME_MS as u64),
+            );
         }
-        let elapsed_ms = self.started_at.elapsed().as_millis();
-        if self.tree_transitions.is_active(elapsed_ms) {
-            return true;
-        }
-        if tree_ui::any_recently_created_within_window(&self.recently_created, elapsed_ms) {
-            return true;
-        }
+
         if self.terminal_activity.has_fast_activity(elapsed_ms) {
-            return true;
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_FAST_FRAME_MS),
+            );
+            if let Some(delay) = self.terminal_activity.next_fast_expiry_delay(elapsed_ms) {
+                retain_minimum_delay(&mut requirements.next_semantic_delay, delay);
+            }
         }
-        self.tree.panes().any(|node| {
-            matches!(
-                node.kind,
-                NodeKind::Pane {
-                    status: PaneStatus::Agent(
-                        _,
-                        AgentActivity::Working
-                            | AgentActivity::WaitingBackground
-                            | AgentActivity::Done
-                    ) | PaneStatus::AgentWithGoal(
-                        _,
-                        AgentActivity::Working
-                            | AgentActivity::WaitingBackground
-                            | AgentActivity::Done
-                    ),
-                    ..
+
+        if self.terminal_activity.has_slow_activity(elapsed_ms) {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_ordinary_delay,
+                elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
+            );
+            if let Some(delay) = self.terminal_activity.next_slow_expiry_delay(elapsed_ms) {
+                retain_minimum_delay(&mut requirements.next_ordinary_delay, delay);
+            }
+        }
+
+        let scheduled_input_now = crate::scheduled_input::unix_millis_now();
+        for node in self.tree.panes() {
+            let NodeKind::Pane {
+                status,
+                scheduled_input,
+                ..
+            } = &node.kind
+            else {
+                continue;
+            };
+
+            if let Some(scheduled_input) = scheduled_input {
+                requirements.is_active = true;
+                let remaining = scheduled_input
+                    .execute_at_unix_millis
+                    .saturating_sub(scheduled_input_now);
+                retain_minimum_delay(
+                    &mut requirements.next_ordinary_delay,
+                    scheduled_input_frame_delay(remaining, SCHEDULED_INPUT_FRAME_MILLIS),
+                );
+            }
+
+            let frame_millis = match status {
+                PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity) => {
+                    match activity {
+                        AgentActivity::Working => Some(tree_ui::SPINNER_FRAME_MS as u64),
+                        AgentActivity::WaitingBackground => {
+                            Some(tree_ui::BACKGROUND_FRAME_MS as u64)
+                        }
+                        AgentActivity::Done => Some(tree_ui::DONE_PULSE_MS as u64),
+                        AgentActivity::Idle | AgentActivity::WaitingApproval => None,
+                    }
                 }
-            )
-        })
+                PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
+            };
+            if let Some(frame_millis) = frame_millis {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_semantic_delay,
+                    elapsed_frame_delay(elapsed_ms, frame_millis),
+                );
+            }
+        }
+
+        for created_offset_ms in self.recently_created.values() {
+            let age_ms = elapsed_ms.saturating_sub(*created_offset_ms);
+            if age_ms >= tree_ui::RECENTLY_CREATED_PULSE_MS {
+                continue;
+            }
+            requirements.is_active = true;
+            let phase_delay_ms = tree_ui::RECENTLY_CREATED_PULSE_PHASE_MS
+                - age_ms % tree_ui::RECENTLY_CREATED_PULSE_PHASE_MS;
+            let expiry_delay_ms = tree_ui::RECENTLY_CREATED_PULSE_MS - age_ms;
+            let delay = Duration::from_millis(phase_delay_ms.min(expiry_delay_ms) as u64);
+            retain_minimum_delay(&mut requirements.next_semantic_delay, delay);
+        }
+
+        requirements
     }
 
-    /// Wait until the next reverse-clock frame boundary of any scheduled
-    /// pane input. The renderer indexes frames from remaining milliseconds,
-    /// so the modulo is the exact point its visible clock can next change.
-    fn next_scheduled_input_frame_delay(&self) -> Option<Duration> {
-        const FRAME_MILLIS: u64 = 220;
-        let now = crate::scheduled_input::unix_millis_now();
-        self.tree
-            .panes()
-            .filter_map(|node| match &node.kind {
-                NodeKind::Pane {
-                    scheduled_input: Some(scheduled_input),
-                    ..
-                } => {
-                    let remaining = scheduled_input.execute_at_unix_millis.saturating_sub(now);
-                    Some(scheduled_input_frame_delay(remaining, FRAME_MILLIS))
-                }
-                _ => None,
-            })
-            .min()
+    /// Returns the next instant at which a semantic animation can visibly
+    /// change. Kept as a narrow query for phase-boundary regression tests.
+    #[cfg(test)]
+    fn next_semantic_animation_frame_delay(&self, now: Instant) -> Option<Duration> {
+        self.animation_requirements(now).next_semantic_delay
     }
 
     /// Resizes only the terminal panes currently visible in the right panel,
@@ -6908,14 +7022,21 @@ impl App {
     /// immediately, so an idle client does not need a 20 Hz polling loop.
     /// Exact search/autosave deadlines retain their existing debounce
     /// responsiveness; active animations retain their frame cadence.
-    pub fn next_maintenance_delay(&self, now: Instant) -> Duration {
+    pub fn maintenance_schedule(&self, now: Instant) -> MaintenanceSchedule {
         const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(1);
 
         if self.is_spatial_animation_active() {
-            return crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL;
+            return MaintenanceSchedule {
+                delay: crate::layout::TREE_WIDTH_ANIMATION_FRAME_INTERVAL,
+                was_animating: true,
+            };
         }
-        if self.has_fast_animation() {
-            return Duration::from_millis(50);
+        let animation_requirements = self.animation_requirements(now);
+        if let Some(animation_delay) = animation_requirements.next_semantic_delay {
+            return MaintenanceSchedule {
+                delay: animation_delay,
+                was_animating: animation_requirements.is_active,
+            };
         }
 
         let autosave_deadline = self
@@ -6932,34 +7053,29 @@ impl App {
                 Mode::Search(search) => search.next_due_search_at(),
                 _ => None,
             })
+            .chain(self.next_chatroom_reconcile_at)
             .min();
 
         let ordinary_delay = next_deadline
             .map(|deadline| deadline.saturating_duration_since(now))
             .unwrap_or(IDLE_MAINTENANCE_INTERVAL);
-        let terminal_activity_elapsed_ms =
-            now.saturating_duration_since(self.started_at).as_millis();
-        let ordinary_delay = if self
-            .terminal_activity
-            .has_slow_activity(terminal_activity_elapsed_ms)
-        {
-            let next_frame_delay = elapsed_frame_delay(
-                terminal_activity_elapsed_ms,
-                TERMINAL_ACTIVITY_SLOW_FRAME_MS,
-            );
-            let next_expiry_delay = self
-                .terminal_activity
-                .next_slow_expiry_delay(terminal_activity_elapsed_ms)
-                .unwrap_or(next_frame_delay);
+        let delay = animation_requirements
+            .next_ordinary_delay
+            .map_or(ordinary_delay, |animation_delay| {
+                ordinary_delay.min(animation_delay)
+            });
 
-            ordinary_delay.min(next_frame_delay.min(next_expiry_delay))
-        } else {
-            ordinary_delay
-        };
+        MaintenanceSchedule {
+            delay,
+            was_animating: animation_requirements.is_active,
+        }
+    }
 
-        self.next_scheduled_input_frame_delay()
-            .map(|scheduled_delay| ordinary_delay.min(scheduled_delay))
-            .unwrap_or(ordinary_delay)
+    /// Compatibility query for callers and tests that only need the delay.
+    /// The production event loop retains the complete schedule so the timer
+    /// tick can reuse its `was_animating` observation.
+    pub fn next_maintenance_delay(&self, now: Instant) -> Duration {
+        self.maintenance_schedule(now).delay
     }
 
     /// Starts a possible tree drag. A press alone is intentionally not a
@@ -10108,6 +10224,54 @@ mod tests {
     }
 
     #[test]
+    fn agent_animations_wake_at_their_exact_visible_phase_boundaries() {
+        let mut app = app();
+        let group_id = app.tree.add_group(ROOT_ID, "agents").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let now = Instant::now();
+        app.started_at = now - Duration::from_millis(6_250);
+
+        for (activity, expected_delay) in [
+            (AgentActivity::Working, Duration::from_millis(50)),
+            (AgentActivity::WaitingBackground, Duration::from_millis(130)),
+            (AgentActivity::Done, Duration::from_millis(50)),
+        ] {
+            app.tree
+                .set_pane_status(pane_id, PaneStatus::Agent(AgentClass::Codex, activity))
+                .unwrap();
+
+            assert_eq!(
+                app.next_semantic_animation_frame_delay(now),
+                Some(expected_delay),
+                "unexpected boundary for {activity:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recently_created_pulse_uses_phase_or_expiry_whichever_arrives_first() {
+        let mut app = app();
+        let pane_id = NodeId(88);
+        let now = Instant::now();
+        app.started_at = now - Duration::from_millis(1_375);
+        app.recently_created.insert(pane_id, 0);
+
+        assert_eq!(
+            app.next_semantic_animation_frame_delay(now),
+            Some(Duration::from_millis(25))
+        );
+
+        app.started_at = now - Duration::from_millis(524);
+        assert_eq!(
+            app.next_semantic_animation_frame_delay(now),
+            Some(Duration::from_millis(1))
+        );
+    }
+
+    #[test]
     fn request_new_markdown_board_preserves_the_existing_file_as_its_storage() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -10741,7 +10905,7 @@ mod tests {
         app.started_at = now;
         app.terminal_activity.record(pane_id, 0);
 
-        assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(50));
+        assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(90));
 
         app.started_at = now - Duration::from_millis(6_250);
         assert_eq!(app.next_maintenance_delay(now), Duration::from_millis(250));
@@ -13372,5 +13536,27 @@ mod tests {
         let followed_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
         assert_eq!(followed_metrics.top, followed_metrics.maximum_top);
         assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
+    }
+
+    #[test]
+    fn chatroom_reconciliation_uses_an_independent_one_second_deadline() {
+        let mut app = app();
+        let now = Instant::now();
+        app.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
+
+        assert!(!app.tick_chatroom_projects(now));
+        assert_eq!(
+            app.next_chatroom_reconcile_at.unwrap(),
+            now + CHATROOM_RECONCILE_INTERVAL
+        );
+
+        assert!(!app.tick_chatroom_projects(now + CHATROOM_RECONCILE_INTERVAL));
+        assert_eq!(
+            app.next_chatroom_reconcile_at.unwrap(),
+            now + CHATROOM_RECONCILE_INTERVAL * 2
+        );
+
+        app.request_chatroom_reconcile();
+        assert!(app.next_chatroom_reconcile_at.unwrap() <= Instant::now());
     }
 }

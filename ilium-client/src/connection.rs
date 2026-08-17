@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use ilium_ipc::{ClientRequest, IpcError, ServerEvent};
+use ilium_ipc::{ClientRequest, FrameReader, FrameWriter, IpcError, ServerEvent};
 use ilium_transport::{SessionEndpoint, SessionReadHalf, SessionWriteHalf};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -47,9 +47,10 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Connects to `socket_path` and immediately queues `ClientRequest::Attach`
-    /// for `session` -- the very first frame the server will read on this
-    /// connection (see `ilium_server::ipc::handlers::handle_attach`).
+    /// Connects to `socket_path` and immediately queues the metadata-only
+    /// interactive attach for `session`. The main loop follows with its
+    /// current right-panel pane set, allowing the server to replay and stream
+    /// only terminals this client can actually display.
     pub async fn connect(socket_path: &Path, session: String) -> Result<Self, ConnectionError> {
         let stream = SessionEndpoint::from_path(socket_path)
             .connect()
@@ -64,7 +65,7 @@ impl Connection {
         let (request_tx, request_rx) = mpsc::channel::<ClientRequest>(CHANNEL_CAPACITY);
 
         request_tx
-            .send(ClientRequest::Attach { session })
+            .send(ClientRequest::AttachInteractive { session })
             .await
             // The receiver can only be closed if `writer_task` already
             // panicked before this line, which can't happen -- it hasn't
@@ -110,9 +111,10 @@ impl Drop for Connection {
 /// forwarding frames, so awaiting here never risks stalling anything else
 /// (unlike the main loop itself, which must never block on a full channel
 /// -- see `crate::run`'s outbound-request send).
-async fn read_loop(mut read_half: SessionReadHalf, event_tx: mpsc::Sender<ServerEvent>) {
+async fn read_loop(read_half: SessionReadHalf, event_tx: mpsc::Sender<ServerEvent>) {
+    let mut frame_reader = FrameReader::new(read_half);
     loop {
-        let event: ServerEvent = match ilium_ipc::read_frame(&mut read_half).await {
+        let event: ServerEvent = match frame_reader.read().await {
             Ok(event) => event,
             Err(IpcError::Io(io_error)) if io_error.kind() == std::io::ErrorKind::UnexpectedEof => {
                 tracing::info!("server closed the connection");
@@ -134,12 +136,10 @@ async fn read_loop(mut read_half: SessionReadHalf, event_tx: mpsc::Sender<Server
 /// Encodes and sends every `ClientRequest` received on `request_rx`, until
 /// the sender side is dropped (session shutdown) or a write fails (server
 /// gone).
-async fn write_loop(
-    mut write_half: SessionWriteHalf,
-    mut request_rx: mpsc::Receiver<ClientRequest>,
-) {
+async fn write_loop(write_half: SessionWriteHalf, mut request_rx: mpsc::Receiver<ClientRequest>) {
+    let mut frame_writer = FrameWriter::new(write_half);
     while let Some(request) = request_rx.recv().await {
-        if let Err(error) = ilium_ipc::write_frame(&mut write_half, &request).await {
+        if let Err(error) = frame_writer.write(&request).await {
             tracing::warn!("connection write failed, closing: {error}");
             break;
         }

@@ -280,10 +280,16 @@ async fn publish_recorded(
         .append(pane_id, source, context, draft)
         .await;
     if let Some(entry) = &entry {
-        state.broadcast(ServerEvent::PaneDebugEntryAppended {
-            pane_id,
-            entry: entry.clone(),
-        });
+        // Hidden panes recover their retained debug journal through
+        // `GetPaneDebugLog` when opened. Avoid cloning and broadcasting every
+        // background detector entry when no attached right panel can consume
+        // it; a displayed pane still receives live appends immediately.
+        if state.has_terminal_subscribers(pane_id) {
+            state.broadcast(ServerEvent::PaneDebugEntryAppended {
+                pane_id,
+                entry: entry.clone(),
+            });
+        }
         state.request_snapshot_save();
     }
     PublishResult {
@@ -292,7 +298,7 @@ async fn publish_recorded(
     }
 }
 
-fn is_any_debug_sink_enabled(state: &ServerState) -> bool {
+pub(crate) fn is_any_debug_sink_enabled(state: &ServerState) -> bool {
     state.agent_debug.is_enabled() || ilium_logging::is_enabled()
 }
 

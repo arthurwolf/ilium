@@ -358,24 +358,29 @@ fn shell_quote(value: &str) -> String {
 /// the `tree` read lock before `panes`, per `ServerState`'s documented
 /// lock ordering.
 async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
-    let tree = state.tree.read().await;
-    let panes = state.panes.read().await;
-    let pane_snapshots = panes
-        .iter()
-        .map(|(node_id, resource)| PaneSnapshot {
-            node_id: *node_id,
-            kind: match resource {
-                PaneResource::Terminal(runtime) => {
-                    PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
-                }
-                PaneResource::Editor { path } => PaneSnapshotKind::Editor { path: path.clone() },
-            },
-        })
-        .collect();
+    let (tree, pane_snapshots) = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        let pane_snapshots = panes
+            .iter()
+            .map(|(node_id, resource)| PaneSnapshot {
+                node_id: *node_id,
+                kind: match resource {
+                    PaneResource::Terminal(runtime) => {
+                        PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
+                    }
+                    PaneResource::Editor { path } => {
+                        PaneSnapshotKind::Editor { path: path.clone() }
+                    }
+                },
+            })
+            .collect();
+        (tree.clone(), pane_snapshots)
+    };
     let agent_debug_logs = state.agent_debug.snapshot().await;
     SessionSnapshot {
         version: CURRENT_SNAPSHOT_VERSION,
-        tree: tree.clone(),
+        tree,
         panes: pane_snapshots,
         agent_debug_logs,
     }
@@ -486,7 +491,7 @@ pub async fn flush_pending_snapshot(state: &ServerState) {
 /// always either the previous complete snapshot or the new one, mirroring
 /// `workspace_file::save`'s identical reasoning).
 async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<(), ServerError> {
-    let json = serde_json::to_vec_pretty(snapshot).map_err(|source| ServerError::Snapshot {
+    let json = serde_json::to_vec(snapshot).map_err(|source| ServerError::Snapshot {
         operation: "serialize",
         path: path.to_path_buf(),
         source: SnapshotError::Json(source),
@@ -663,6 +668,78 @@ mod tests {
             ],
             agent_debug_logs: Vec::new(),
         }
+    }
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn benchmark_compact_snapshot_serialization() {
+        const ITERATIONS: usize = 200;
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        let mut log = PaneDebugLog::default();
+        for sequence in 0..1_000 {
+            let _ = log.append(
+                1_700_000_000_000 + sequence,
+                AgentDebugSource::Pty,
+                AgentDebugContext::default(),
+                AgentDebugEventDraft::information(
+                    AgentDebugEventKind::PromptSubmitted,
+                    format!("diagnostic event {sequence} with representative payload"),
+                ),
+            );
+        }
+        snapshot
+            .agent_debug_logs
+            .push(PaneDebugLogSnapshot { pane_id, log });
+
+        let pretty_started_at = std::time::Instant::now();
+        let mut pretty_len = 0;
+        for _iteration in 0..ITERATIONS {
+            pretty_len = serde_json::to_vec_pretty(&snapshot).unwrap().len();
+        }
+        let pretty_elapsed = pretty_started_at.elapsed();
+
+        let compact_started_at = std::time::Instant::now();
+        let mut compact_len = 0;
+        for _iteration in 0..ITERATIONS {
+            compact_len = serde_json::to_vec(&snapshot).unwrap().len();
+        }
+        let compact_elapsed = compact_started_at.elapsed();
+        println!(
+            "PERF server.snapshot_json pretty_ns={} compact_ns={} pretty_bytes={} compact_bytes={}",
+            pretty_elapsed.as_nanos() / ITERATIONS as u128,
+            compact_elapsed.as_nanos() / ITERATIONS as u128,
+            pretty_len,
+            compact_len,
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "manual performance benchmark"]
+    async fn benchmark_debug_snapshot_removed_from_tree_lock() {
+        let recorder = crate::agent_debug::AgentDebugRecorder::new(true);
+        for sequence in 0..5_000 {
+            let _ = recorder
+                .append(
+                    NodeId(7),
+                    AgentDebugSource::Pty,
+                    AgentDebugContext::default(),
+                    AgentDebugEventDraft::information(
+                        AgentDebugEventKind::PromptSubmitted,
+                        format!("diagnostic event {sequence} with representative payload"),
+                    ),
+                )
+                .await;
+        }
+
+        let started_at = std::time::Instant::now();
+        let snapshot = recorder.snapshot().await;
+        let elapsed = started_at.elapsed();
+        std::hint::black_box(snapshot);
+        println!(
+            "PERF server.snapshot_debug_clone removed_lock_hold_ns={}",
+            elapsed.as_nanos(),
+        );
     }
 
     #[tokio::test]

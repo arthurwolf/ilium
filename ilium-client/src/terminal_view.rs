@@ -20,10 +20,14 @@
 //! scrolled parser with that live redraw splices old rows into the replay
 //! while continuously increasing the distance back to the tail.
 
-use std::collections::hash_map::DefaultHasher;
+use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
+use tui_term::widget::PseudoTerminal;
 
 /// Starting geometry for a freshly created pane, before the first real
 /// `ResizePane` request (sent once the client knows the pane's actual
@@ -37,26 +41,45 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// Hashes only the visible character contents of each terminal cell.
+/// Hashes only the visible character contents of each terminal cell with a
+/// compact FNV-1a stream. Terminal text is untrusted but this is change
+/// detection, not a security boundary; avoiding SipHash's keyed rounds is the
+/// important property on the per-output hot path.
 ///
 /// Cursor movement, color/style changes, terminal modes, and scrollback do
 /// not affect this value. Iterating cells avoids allocating `Screen::contents`
 /// for every already-coalesced live output batch.
 fn visible_text_fingerprint(screen: &vt100::Screen) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    const CELL_BOUNDARY: u8 = 0xff;
+
+    let mut fingerprint = FNV_OFFSET_BASIS;
     let (rows, columns) = screen.size();
+
+    for dimension_byte in rows.to_le_bytes().into_iter().chain(columns.to_le_bytes()) {
+        fingerprint ^= u64::from(dimension_byte);
+        fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+    }
 
     for row in 0..rows {
         for column in 0..columns {
-            screen
+            let contents = screen
                 .cell(row, column)
                 .map(vt100::Cell::contents)
-                .unwrap_or_default()
-                .hash(&mut hasher);
+                .unwrap_or_default();
+            for byte in contents.bytes() {
+                fingerprint ^= u64::from(byte);
+                fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+            }
+            // UTF-8 never contains 0xff, so cell boundaries cannot be
+            // confused with a byte from visible text.
+            fingerprint ^= u64::from(CELL_BOUNDARY);
+            fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
         }
     }
 
-    hasher.finish()
+    fingerprint
 }
 
 /// Returns the offset before, and width of, a BEL or ST OSC terminator.
@@ -97,9 +120,51 @@ struct HistoricalViewport {
     scrollback_total: usize,
 }
 
+/// Ratatui cells derived from one visible vt100 screen generation and area.
+/// Sidebar animation can copy these cells without reinterpreting every vt100
+/// cell's symbol, color, and modifier on each frame.
+struct TerminalRenderCache {
+    revision: u64,
+    area: Rect,
+    buffer: Buffer,
+}
+
+#[derive(Debug)]
+struct HistorySegment {
+    bytes: Arc<Vec<u8>>,
+    start: usize,
+}
+
+/// Immutable segmented history handed to a search worker. A live append
+/// detects the shared newest segment and starts a fresh one, so it never
+/// clones the complete retained journal while this snapshot is alive.
+#[derive(Clone, Debug)]
+pub struct TerminalHistorySnapshot {
+    segments: Vec<(Arc<Vec<u8>>, usize)>,
+    retained_len: usize,
+}
+
+impl TerminalHistorySnapshot {
+    pub fn len(&self) -> usize {
+        self.retained_len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.retained_len == 0
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.retained_len);
+        for (segment, start) in &self.segments {
+            bytes.extend_from_slice(&segment[*start..]);
+        }
+        bytes
+    }
+}
+
 /// Computes the raw-history retention cap in bytes for a given MiB budget.
 /// Unlike the render parser's row cap above, this figure is exact -- the
-/// journal it governs (`TerminalView::history_bytes`) stores raw output
+/// journal it governs (`TerminalView::history_segments`) stores raw output
 /// bytes directly, with no per-cell/per-row estimation involved, so "N MiB"
 /// here means exactly N MiB retained. Floored at 1 MiB so a pathological
 /// caller-supplied `budget_mib` of `0` doesn't collapse search history to
@@ -138,10 +203,11 @@ pub struct TerminalView {
     /// the settings UI's "Scrollback budget (MiB)" knob promises -- unlike
     /// the render parser's fixed `RENDER_SCROLLBACK_ROWS` cap, this journal
     /// is raw bytes with no per-row estimation, so the cap is exact.
-    history_bytes: Arc<Vec<u8>>,
+    history_segments: VecDeque<HistorySegment>,
+    history_retained_len: usize,
     /// Current raw-history retention cap in bytes, derived from the
     /// configured MiB budget via `history_budget_bytes`. Stored so
-    /// `set_scrollback_budget_mib` can re-trim `history_bytes` in place
+    /// `set_scrollback_budget_mib` can re-trim retained segments in place
     /// without touching the (budget-independent) render parser.
     history_budget_bytes: usize,
     /// Recent OSC-8 label/target pairs observed in the byte stream. vt100
@@ -155,6 +221,11 @@ pub struct TerminalView {
     /// live PTY event into an O(screen cells), allocation-free text-change
     /// decision without any timer-driven screen scan.
     visible_text_fingerprint: u64,
+    /// Changes only when the screen visible to the user changes.
+    render_revision: u64,
+    /// Presentation cache uses interior mutability because drawing is a
+    /// logically read-only operation on terminal state.
+    render_cache: RefCell<Option<TerminalRenderCache>>,
 }
 
 impl TerminalView {
@@ -175,16 +246,22 @@ impl TerminalView {
             scrollback_total: 0,
             historical_viewport: None,
             last_output_sequence: 0,
-            history_bytes: Arc::new(Vec::new()),
+            history_segments: VecDeque::from([HistorySegment {
+                bytes: Arc::new(Vec::new()),
+                start: 0,
+            }]),
+            history_retained_len: 0,
             history_budget_bytes: history_budget_bytes(budget_mib),
             osc8_links: VecDeque::new(),
             osc8_stream: Vec::new(),
             visible_text_fingerprint,
+            render_revision: 0,
+            render_cache: RefCell::new(None),
         }
     }
 
     /// Re-caps the raw-history journal under a new MiB budget and
-    /// immediately trims `history_bytes` down to it if the budget shrank.
+    /// immediately trims retained history down to it if the budget shrank.
     /// The render parser is untouched -- its `RENDER_SCROLLBACK_ROWS` cap is
     /// fixed and independent of this budget (see that constant's doc
     /// comment), so there is nothing to rebuild here.
@@ -201,6 +278,7 @@ impl TerminalView {
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
         self.parser.process(bytes);
+        self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
         self.refresh_visible_text_fingerprint();
     }
@@ -215,7 +293,12 @@ impl TerminalView {
         }
 
         let (rows, cols) = self.parser.screen().size();
-        Arc::make_mut(&mut self.history_bytes).clear();
+        self.history_segments.clear();
+        self.history_segments.push_back(HistorySegment {
+            bytes: Arc::new(Vec::new()),
+            start: 0,
+        });
+        self.history_retained_len = 0;
         self.osc8_links.clear();
         self.osc8_stream.clear();
         self.observe_osc8_links(bytes);
@@ -225,6 +308,7 @@ impl TerminalView {
         self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         self.scrollback_total = 0;
         self.parser.process(bytes);
+        self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
         self.refresh_visible_text_fingerprint();
     }
@@ -258,6 +342,7 @@ impl TerminalView {
         self.append_history(bytes);
         self.observe_osc8_links(bytes);
         self.parser.process(bytes);
+        self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
         self.last_output_sequence = sequence;
 
@@ -311,7 +396,8 @@ impl TerminalView {
         const OPEN: &[u8] = b"\x1b]8;";
         const CLOSE: &[u8] = b"\x1b]8;;";
         loop {
-            let Some(open_start) = find_bytes(&self.osc8_stream, OPEN) else {
+            let pending = &self.osc8_stream[..];
+            let Some(open_start) = find_bytes(pending, OPEN) else {
                 // No opener anywhere in the buffer. Keep only the longest
                 // tail that is itself a genuine prefix of `OPEN` -- that's
                 // the part that can still complete once the next chunk
@@ -320,39 +406,39 @@ impl TerminalView {
                 // this cross-chunk parse depends on.
                 let partial_opener_len = (1..OPEN.len())
                     .rev()
-                    .find(|length| self.osc8_stream.ends_with(&OPEN[..*length]))
+                    .find(|length| pending.ends_with(&OPEN[..*length]))
                     .unwrap_or(0);
-                let drop_through = self.osc8_stream.len().saturating_sub(partial_opener_len);
+                let drop_through = pending.len().saturating_sub(partial_opener_len);
                 self.osc8_stream.drain(..drop_through);
                 return;
             };
             if open_start > 0 {
                 self.osc8_stream.drain(..open_start);
             }
+            let pending = &self.osc8_stream[..];
             let Some((header_end, header_terminator_width)) =
-                osc_terminator(&self.osc8_stream[OPEN.len()..])
+                osc_terminator(&pending[OPEN.len()..])
             else {
                 return;
             };
             let header_end = OPEN.len() + header_end;
-            let target = String::from_utf8_lossy(&self.osc8_stream[OPEN.len()..header_end])
+            let target = String::from_utf8_lossy(&pending[OPEN.len()..header_end])
                 .rsplit(';')
                 .next()
                 .unwrap_or_default()
                 .to_string();
             let label_start = header_end + header_terminator_width;
-            let Some(close_start) = find_bytes(&self.osc8_stream[label_start..], CLOSE)
-                .map(|offset| label_start + offset)
+            let Some(close_start) =
+                find_bytes(&pending[label_start..], CLOSE).map(|offset| label_start + offset)
             else {
                 return;
             };
             let close_after = close_start + CLOSE.len();
-            let Some((close_end, close_terminator_width)) =
-                osc_terminator(&self.osc8_stream[close_after..])
+            let Some((close_end, close_terminator_width)) = osc_terminator(&pending[close_after..])
             else {
                 return;
             };
-            let label = String::from_utf8_lossy(&self.osc8_stream[label_start..close_start])
+            let label = String::from_utf8_lossy(&pending[label_start..close_start])
                 .replace(['\r', '\n'], "");
             self.osc8_stream
                 .drain(..close_after + close_end + close_terminator_width);
@@ -365,6 +451,11 @@ impl TerminalView {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn observe_osc8_for_benchmark(&mut self, bytes: &[u8]) {
+        self.observe_osc8_links(bytes);
+    }
+
     /// Resizes the authoritative live screen to match a `ResizePane` request
     /// just sent to the server, so the client's own rendering never waits on
     /// a round trip before reflowing. An active historical viewport retains
@@ -373,6 +464,7 @@ impl TerminalView {
     /// corrupting that frozen view.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.parser.screen_mut().set_size(rows, cols);
+        self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
         self.refresh_visible_text_fingerprint();
     }
@@ -384,6 +476,50 @@ impl TerminalView {
             Some(viewport) => f(&viewport.screen),
             None => f(self.parser.screen()),
         }
+    }
+
+    /// Copies cached terminal cells into the frame, rebuilding the cache only
+    /// after visible terminal state or geometry changes.
+    pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        let mut render_cache = self.render_cache.borrow_mut();
+        let needs_rebuild = render_cache
+            .as_ref()
+            .is_none_or(|cache| cache.revision != self.render_revision || cache.area != area);
+        if needs_rebuild {
+            let mut buffer = Buffer::empty(area);
+            self.with_screen(|screen| PseudoTerminal::new(screen).render(area, &mut buffer));
+            *render_cache = Some(TerminalRenderCache {
+                revision: self.render_revision,
+                area,
+                buffer,
+            });
+        }
+        let Some(cache) = render_cache.as_ref() else {
+            return;
+        };
+        for row in area.y..area.bottom() {
+            let source_start = cache.buffer.index_of(area.x, row);
+            let destination_start = destination.index_of(area.x, row);
+            let width = usize::from(area.width);
+            destination.content[destination_start..destination_start + width]
+                .clone_from_slice(&cache.buffer.content[source_start..source_start + width]);
+        }
+    }
+
+    /// Invalidates the live-screen cache without disturbing a frozen
+    /// historical viewport that remains visibly unchanged behind new output.
+    fn invalidate_live_render_if_visible(&mut self) {
+        if self.historical_viewport.is_none() {
+            self.render_revision = self.render_revision.wrapping_add(1);
+        }
+    }
+
+    /// Invalidates presentation after an explicit historical-view movement.
+    fn invalidate_render(&mut self) {
+        self.render_revision = self.render_revision.wrapping_add(1);
     }
 
     /// Freezes the current live screen on first use, then scrolls that
@@ -411,6 +547,7 @@ impl TerminalView {
         viewport
             .screen
             .set_scrollback(current.saturating_add(usize::from(lines)));
+        self.invalidate_render();
     }
 
     /// Scrolls the frozen historical viewport toward its captured tail.
@@ -428,6 +565,7 @@ impl TerminalView {
         if viewport.screen.scrollback() == 0 {
             self.historical_viewport = None;
         }
+        self.invalidate_render();
     }
 
     /// Jumps back to the live tail -- called whenever the pane sends fresh
@@ -436,6 +574,7 @@ impl TerminalView {
     pub fn scroll_to_bottom(&mut self) {
         self.historical_viewport = None;
         self.parser.screen_mut().set_scrollback(0);
+        self.invalidate_render();
     }
 
     /// `true` once the view has scrolled away from the live tail.
@@ -468,8 +607,8 @@ impl TerminalView {
 
     /// Returns all output retained for workspace search, including bytes the
     /// visible parser has already rotated out of its render scrollback.
-    pub fn searchable_history(&self) -> &[u8] {
-        self.history_bytes.as_slice()
+    pub fn searchable_history(&self) -> Vec<u8> {
+        self.collect_retained_history()
     }
 
     /// Returns all retained terminal output as clipboard-safe plain text.
@@ -477,15 +616,23 @@ impl TerminalView {
     /// user-visible history, so copying them would leak cursor and color
     /// commands into the destination application.
     pub fn copyable_history(&self) -> String {
-        String::from_utf8_lossy(&strip_ansi_escapes::strip(self.history_bytes.as_slice()))
-            .into_owned()
+        let retained_history = self.collect_retained_history();
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(&retained_history)).into_owned()
     }
 
     /// Produces an O(1) immutable view of retained output for the search
     /// worker. Later PTY output uses `Arc::make_mut`, so a worker can scan a
     /// stable history snapshot without blocking the interactive event loop.
-    pub fn searchable_history_snapshot(&self) -> Arc<Vec<u8>> {
-        Arc::clone(&self.history_bytes)
+    pub fn searchable_history_snapshot(&self) -> TerminalHistorySnapshot {
+        TerminalHistorySnapshot {
+            segments: self
+                .history_segments
+                .iter()
+                .filter(|segment| segment.start < segment.bytes.len())
+                .map(|segment| (Arc::clone(&segment.bytes), segment.start))
+                .collect(),
+            retained_len: self.history_retained_len,
+        }
     }
 
     /// Builds a historical terminal around one raw-output offset found by
@@ -496,14 +643,23 @@ impl TerminalView {
     /// the bottom.
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
-        let end_byte = end_byte.min(self.history_bytes.len());
+        let mut remaining_bytes = end_byte.min(self.history_retained_len);
         let mut historical_parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
-        historical_parser.process(&self.history_bytes[..end_byte]);
+        for segment in &self.history_segments {
+            if remaining_bytes == 0 {
+                break;
+            }
+            let retained_segment = &segment.bytes[segment.start..];
+            let consumed_bytes = remaining_bytes.min(retained_segment.len());
+            historical_parser.process(&retained_segment[..consumed_bytes]);
+            remaining_bytes -= consumed_bytes;
+        }
         let scrollback_total = Self::measure_scrollback_total(historical_parser.screen_mut());
         self.historical_viewport = Some(HistoricalViewport {
             screen: historical_parser.screen().clone(),
             scrollback_total,
         });
+        self.invalidate_render();
     }
 
     #[cfg(test)]
@@ -551,19 +707,70 @@ impl TerminalView {
     }
 
     fn append_history(&mut self, bytes: &[u8]) {
-        Arc::make_mut(&mut self.history_bytes).extend_from_slice(bytes);
+        let needs_fresh_segment = self
+            .history_segments
+            .back()
+            .is_some_and(|segment| Arc::strong_count(&segment.bytes) > 1);
+        if needs_fresh_segment {
+            self.history_segments.push_back(HistorySegment {
+                bytes: Arc::new(Vec::new()),
+                start: 0,
+            });
+        }
+        let active_segment = self
+            .history_segments
+            .back_mut()
+            .expect("history always owns an active segment");
+        Arc::make_mut(&mut active_segment.bytes).extend_from_slice(bytes);
+        self.history_retained_len = self.history_retained_len.saturating_add(bytes.len());
         self.trim_history_to_budget();
+    }
+
+    fn collect_retained_history(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.history_retained_len);
+        for segment in &self.history_segments {
+            bytes.extend_from_slice(&segment.bytes[segment.start..]);
+        }
+        bytes
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append_history_for_benchmark(&mut self, bytes: &[u8]) {
+        self.append_history(bytes);
     }
 
     /// Drops the oldest retained bytes past `history_budget_bytes`. Called
     /// after every append and whenever the budget itself shrinks.
     fn trim_history_to_budget(&mut self) {
-        let excess = self
-            .history_bytes
-            .len()
+        let mut excess = self
+            .history_retained_len
             .saturating_sub(self.history_budget_bytes);
-        if excess > 0 {
-            Arc::make_mut(&mut self.history_bytes).drain(..excess);
+        while excess > 0 {
+            let Some(oldest_segment) = self.history_segments.front_mut() else {
+                break;
+            };
+            let segment_len = oldest_segment
+                .bytes
+                .len()
+                .saturating_sub(oldest_segment.start);
+            let removed = excess.min(segment_len);
+            oldest_segment.start = oldest_segment.start.saturating_add(removed);
+            self.history_retained_len = self.history_retained_len.saturating_sub(removed);
+            excess -= removed;
+            if oldest_segment.start == oldest_segment.bytes.len() && self.history_segments.len() > 1
+            {
+                self.history_segments.pop_front();
+            }
+        }
+
+        let compaction_threshold = (self.history_budget_bytes / 2).max(64 * 1024);
+        if let Some(oldest_segment) = self.history_segments.front_mut() {
+            if oldest_segment.start >= compaction_threshold
+                && Arc::strong_count(&oldest_segment.bytes) == 1
+            {
+                Arc::make_mut(&mut oldest_segment.bytes).drain(..oldest_segment.start);
+                oldest_segment.start = 0;
+            }
         }
     }
 }
@@ -629,11 +836,86 @@ mod tests {
     }
 
     #[test]
+    fn rendered_cell_cache_reuses_and_invalidates_the_visible_generation() {
+        let mut view = TerminalView::new(3, 20);
+        let area = Rect::new(0, 0, 20, 3);
+        view.feed(b"first");
+        let mut first_frame = Buffer::empty(area);
+        view.render_screen(area, &mut first_frame);
+        let cached_revision = view
+            .render_cache
+            .borrow()
+            .as_ref()
+            .expect("first render populates cache")
+            .revision;
+
+        let mut repeated_frame = Buffer::empty(area);
+        view.render_screen(area, &mut repeated_frame);
+        assert_eq!(repeated_frame, first_frame);
+        assert_eq!(view.render_revision, cached_revision);
+
+        view.feed(b"\rsecond");
+        assert_ne!(view.render_revision, cached_revision);
+        let mut changed_frame = Buffer::empty(area);
+        view.render_screen(area, &mut changed_frame);
+        assert_ne!(changed_frame, first_frame);
+        assert_eq!(
+            view.render_cache
+                .borrow()
+                .as_ref()
+                .expect("changed render refreshes cache")
+                .revision,
+            view.render_revision
+        );
+    }
+
+    #[test]
     fn copyable_history_omits_terminal_escape_sequences() {
         let mut view = TerminalView::new(4, 20);
         view.feed(b"\x1b[32mgreen\x1b[0m\r\nplain");
 
         assert_eq!(view.copyable_history(), "green\nplain");
+    }
+
+    #[test]
+    fn logical_history_head_preserves_the_exact_bounded_tail_across_compaction() {
+        let mut view = TerminalView::with_scrollback_budget_mib(4, 20, 1);
+        let budget_bytes = 1024 * 1024;
+        let chunk = vec![b'a'; 4096];
+        let mut expected = Vec::new();
+
+        for chunk_number in 0..400_u16 {
+            let mut numbered_chunk = chunk.clone();
+            numbered_chunk[0..2].copy_from_slice(&chunk_number.to_le_bytes());
+            view.append_history(&numbered_chunk);
+            expected.extend_from_slice(&numbered_chunk);
+            let excess = expected.len().saturating_sub(budget_bytes);
+            if excess > 0 {
+                expected.drain(..excess);
+            }
+        }
+
+        assert_eq!(view.searchable_history(), expected);
+        assert_eq!(view.searchable_history().len(), budget_bytes);
+        assert!(view
+            .history_segments
+            .front()
+            .is_some_and(|segment| segment.start < view.history_budget_bytes / 2));
+    }
+
+    #[test]
+    fn search_snapshot_remains_stable_while_live_history_rotates_segments() {
+        let mut view = TerminalView::with_scrollback_budget_mib(4, 20, 1);
+        let retained = vec![b'a'; 1024 * 1024];
+        view.append_history(&retained);
+        let snapshot = view.searchable_history_snapshot();
+
+        view.append_history(&vec![b'b'; 4096]);
+
+        assert_eq!(snapshot.to_vec(), retained);
+        assert_eq!(snapshot.len(), 1024 * 1024);
+        assert_eq!(view.history_segments.len(), 2);
+        assert!(view.searchable_history().ends_with(&vec![b'b'; 4096]));
     }
 
     #[test]
@@ -917,12 +1199,12 @@ mod tests {
     fn non_contiguous_live_output_cannot_corrupt_terminal_history() {
         let mut view = TerminalView::new(4, 30);
         view.apply_replay(b"authoritative replay\r\n", 10, true);
-        let history_before_gap = view.history_bytes.as_ref().clone();
+        let history_before_gap = view.searchable_history();
 
         view.apply_live_output(12, 12, b"output after a gap\r\n", true);
 
         assert_eq!(view.last_output_sequence(), 10);
-        assert_eq!(view.history_bytes.as_ref(), &history_before_gap);
+        assert_eq!(view.searchable_history(), history_before_gap);
         assert!(!view
             .with_screen(|screen| screen.contents())
             .contains("output after a gap"));

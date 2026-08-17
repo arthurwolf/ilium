@@ -19,7 +19,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
-use tui_tree_widget::{Flattened, Tree as TreeWidget, TreeItem, TreeState};
+use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
@@ -50,13 +50,13 @@ const BACKGROUND_CLOCK_FRAMES: &[char] = &[
     '🕛', '🕧', '🕐', '🕜', '🕑', '🕝', '🕒', '🕞', '🕓', '🕟', '🕔', '🕠', '🕕', '🕡', '🕖', '🕢',
     '🕗', '🕣', '🕘', '🕤', '🕙', '🕥', '🕚', '🕦',
 ];
-const BACKGROUND_FRAME_MS: u128 = 220;
+pub(crate) const BACKGROUND_FRAME_MS: u128 = 220;
 
 /// How long each half-cycle of the `Done` bell pulse lasts. Same glyph
 /// every frame (a bell), only its boldness pulses -- reads as "ringing"
 /// without any change in rendered width or color, so the tree row never
 /// jitters and every agent status still shares one base text color.
-const DONE_PULSE_MS: u128 = 450;
+pub(crate) const DONE_PULSE_MS: u128 = 450;
 
 /// How long a freshly created node (a new shell/agent/editor pane, or a new
 /// group) visually flashes after this client first observes it, so a click
@@ -66,7 +66,7 @@ const DONE_PULSE_MS: u128 = 450;
 pub(crate) const RECENTLY_CREATED_PULSE_MS: u128 = 1400;
 /// Half-cycle of the on/off flash within the pulse window (~4 flashes
 /// total), the same wall-clock-driven-frame approach as `DONE_PULSE_MS`.
-const RECENTLY_CREATED_PULSE_PHASE_MS: u128 = 175;
+pub(crate) const RECENTLY_CREATED_PULSE_PHASE_MS: u128 = 175;
 
 /// Fallback identifier for agent classes without their own configurable icon.
 #[cfg(test)]
@@ -498,34 +498,51 @@ pub(crate) fn visible_tree_node_ids(
     state: &TreeState<NodeId>,
     tree_order: TreeOrder,
 ) -> Vec<NodeId> {
-    let opened_paths = HashSet::new();
-    let items = build_tree_items(
+    let mut visible_node_ids = Vec::with_capacity(tree.all_ids().count());
+    collect_visible_tree_node_ids(
         tree,
-        TreeItemBuildContext {
-            elapsed_ms: 0,
-            terminal_activity_elapsed_ms: 0,
-            current_unix_millis: 0,
-            titles_loading: &HashSet::new(),
-            recently_created: &HashMap::new(),
-            terminal_activity: &TerminalActivityTracker::default(),
-            focused_pane_id: None,
-            agent_identifiers: &AgentIdentifierSettings::default(),
-            icons: &IconSettings::default(),
-            tree_order,
-            sidebar_density: SidebarDensity::default(),
-            show_inferred_title_icons: false,
-            panel_width: 0,
-            opened_paths: &opened_paths,
-            panes: &HashMap::new(),
-        },
+        ROOT_ID,
+        state.opened(),
+        tree_order,
+        &mut Vec::new(),
+        &mut visible_node_ids,
     );
+    visible_node_ids
+}
 
-    state
-        .flatten(&items)
-        .into_iter()
-        .filter_map(|flattened| flattened.identifier.last().copied())
-        .filter(|node_id| tree.get(*node_id).is_some())
-        .collect()
+/// Walks only authoritative nodes along currently expanded paths. Virtual
+/// folder/chatroom rows are not durable nodes and therefore never enter this
+/// result; constructing their labels or reading directories would be wasted
+/// work for close/restructure operations that only consume real [`NodeId`]s.
+fn collect_visible_tree_node_ids(
+    tree: &Tree,
+    parent: NodeId,
+    opened_paths: &HashSet<Vec<NodeId>>,
+    tree_order: TreeOrder,
+    identifier_path: &mut Vec<NodeId>,
+    visible_node_ids: &mut Vec<NodeId>,
+) {
+    for child_id in tree_ordering::ordered_children(tree, parent, tree_order)
+        .iter()
+        .copied()
+    {
+        let Some(node) = tree.get(child_id) else {
+            continue;
+        };
+        identifier_path.push(child_id);
+        visible_node_ids.push(child_id);
+        if matches!(node.kind, NodeKind::Container(_)) && opened_paths.contains(identifier_path) {
+            collect_visible_tree_node_ids(
+                tree,
+                child_id,
+                opened_paths,
+                tree_order,
+                identifier_path,
+                visible_node_ids,
+            );
+        }
+        identifier_path.pop();
+    }
 }
 
 /// Recursively builds `TreeItem`s for every child of `parent`.
@@ -536,15 +553,17 @@ fn build_children(
     ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
     let children = tree_ordering::ordered_children(tree, parent, context.tree_order);
-    children
-        .into_iter()
-        .filter_map(|child_id| {
-            let mut identifier_path = ancestor_path.to_vec();
-            identifier_path.push(child_id);
-            tree.get(child_id)
-                .map(|node| build_item(tree, node, context, &identifier_path))
-        })
-        .collect()
+    let mut items = Vec::with_capacity(children.len());
+    let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
+    identifier_path.extend_from_slice(ancestor_path);
+    for child_id in children.iter().copied() {
+        identifier_path.push(child_id);
+        if let Some(node) = tree.get(child_id) {
+            items.push(build_item(tree, node, context, &identifier_path));
+        }
+        identifier_path.pop();
+    }
+    items
 }
 
 /// Builds one `TreeItem` (recursing into children for a Group).
@@ -776,14 +795,17 @@ mod inferred_title_icon_tests {
 /// tree structure or mouse-row geometry. Tree rows remain one terminal cell
 /// high; density controls the deliberate horizontal breathing room around
 /// each label, preserving accessible hit targets.
-fn apply_sidebar_density(mut label: Line<'static>, density: SidebarDensity) -> Line<'static> {
+pub(crate) fn apply_sidebar_density(
+    mut label: Line<'static>,
+    density: SidebarDensity,
+) -> Line<'static> {
     let padding = match density {
-        SidebarDensity::Compact => 0,
-        SidebarDensity::Standard => 1,
-        SidebarDensity::Comfortable => 2,
+        SidebarDensity::Compact => "",
+        SidebarDensity::Standard => " ",
+        SidebarDensity::Comfortable => "  ",
     };
-    if padding > 0 {
-        label.spans.insert(0, Span::raw(" ".repeat(padding)));
+    if !padding.is_empty() {
+        label.spans.insert(0, Span::raw(padding));
     }
     label
 }
@@ -840,6 +862,8 @@ fn folder_children(
             .then_with(|| left.file_name().cmp(&right.file_name()))
     });
     let mut children = Vec::with_capacity(entries.len());
+    let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
+    identifier_path.extend_from_slice(ancestor_path);
     for entry in entries {
         let path = entry.path();
         let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
@@ -849,7 +873,6 @@ fn folder_children(
             Span::raw(entry.file_name().to_string_lossy().into_owned()),
         );
         let id = virtual_folder_node_id(root, &path);
-        let mut identifier_path = ancestor_path.to_vec();
         identifier_path.push(id);
         let item = if is_dir {
             let children = if context.opened_paths.contains(&identifier_path) {
@@ -867,6 +890,7 @@ fn folder_children(
             TreeItem::new_leaf(id, apply_sidebar_density(label, context.sidebar_density))
         };
         children.push(item);
+        identifier_path.pop();
     }
     children
 }
@@ -1740,13 +1764,11 @@ impl TreeItemCache {
     }
 }
 
-/// Whether any entry in `recently_created` is still inside its flash
-/// window at `elapsed_ms` -- used by `App::has_active_animation` to decide
-/// whether a periodic tick still needs to force a redraw for the flash
-/// animation, without duplicating `is_recently_created_flash_on`'s
-/// half-cycle phase logic (which only matters for rendering, not for "is
-/// anything still animating at all").
-pub(crate) fn any_recently_created_within_window(
+/// Test-only predicate for the recently-created flash's complete lifetime.
+/// Production scheduling now gathers this state together with exact phase
+/// boundaries in `App::animation_requirements`.
+#[cfg(test)]
+fn any_recently_created_within_window(
     recently_created: &HashMap<NodeId, u128>,
     elapsed_ms: u128,
 ) -> bool {
@@ -1802,7 +1824,7 @@ pub fn render(
         .expect("top-level items have unique identifiers")
         .highlight_style(theme::selected_style());
     frame.render_stateful_widget(widget, list, state);
-    let flattened_items = state.flatten(&items);
+    let visible_item_count = state.visible_identifiers().len();
 
     if let Some(presentation_tree) = options.transitions.presentation_tree(options.elapsed_ms) {
         let presentation_items = build_tree_items(
@@ -1831,11 +1853,10 @@ pub fn render(
             .expect("top-level presentation items have unique identifiers")
             .highlight_style(theme::selected_style());
         frame.render_stateful_widget(presentation_widget, list, &mut presentation_state);
-        let flattened_presentation_items = presentation_state.flatten(&presentation_items);
         apply_row_motions(
             frame,
             list,
-            &flattened_presentation_items,
+            presentation_state.visible_identifiers(),
             &presentation_state,
             options.transitions,
             options.elapsed_ms,
@@ -1851,14 +1872,14 @@ pub fn render(
         paint_selected_row(
             frame,
             list,
-            &flattened_presentation_items,
+            presentation_state.visible_identifiers(),
             &presentation_state,
         );
     } else {
         apply_row_motions(
             frame,
             list,
-            &flattened_items,
+            state.visible_identifiers(),
             state,
             options.transitions,
             options.elapsed_ms,
@@ -1868,10 +1889,10 @@ pub fn render(
         // that path, but this final cell-level pass also protects the row
         // during width changes the tree widget's own highlight pass doesn't
         // fully repaint (see the function's own doc comment).
-        paint_selected_row(frame, list, &flattened_items, state);
+        paint_selected_row(frame, list, state.visible_identifiers(), state);
     }
 
-    draw_scrollbar(frame, area, flattened_items.len(), state);
+    draw_scrollbar(frame, area, visible_item_count, state);
 
     if let Some(hit) = options.hover.node {
         if options
@@ -1902,14 +1923,14 @@ pub fn render(
 fn paint_selected_row(
     frame: &mut Frame,
     list: Rect,
-    visible_items: &[Flattened<'_, NodeId>],
+    visible_identifiers: &[Vec<NodeId>],
     state: &TreeState<NodeId>,
 ) {
     let Some(selected_node_id) = state.selected().last().copied() else {
         return;
     };
-    let Some(selected_index) = visible_items.iter().position(|item| {
-        item.identifier
+    let Some(selected_index) = visible_identifiers.iter().position(|identifier| {
+        identifier
             .last()
             .is_some_and(|node_id| *node_id == selected_node_id)
     }) else {
@@ -1970,19 +1991,19 @@ fn copy_tree_state_for_presentation(state: &TreeState<NodeId>) -> TreeState<Node
 fn apply_row_motions(
     frame: &mut Frame,
     list: Rect,
-    visible_items: &[Flattened<'_, NodeId>],
+    visible_identifiers: &[Vec<NodeId>],
     state: &TreeState<NodeId>,
     transitions: &TreeTransitions,
     elapsed_ms: u128,
 ) {
     let mut row_cells = Vec::with_capacity(usize::from(list.width));
-    for (visible_row, item) in visible_items
+    for (visible_row, identifier) in visible_identifiers
         .iter()
         .skip(state.get_offset())
         .take(usize::from(list.height))
         .enumerate()
     {
-        let Some(node_id) = item.identifier.last().copied() else {
+        let Some(node_id) = identifier.last().copied() else {
             continue;
         };
         let Some(motion) = transitions.row_motion(node_id, elapsed_ms) else {

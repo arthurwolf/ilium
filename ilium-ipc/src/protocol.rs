@@ -346,6 +346,18 @@ pub enum ClientRequest {
     /// Reports a successful client-owned editor or board content mutation.
     /// Terminal input/output is recorded directly by the server instead.
     RecordNodeActivity { node_id: NodeId },
+    /// Attaches an interactive client without replaying every terminal's
+    /// retained byte journal. The client follows this with
+    /// [`Self::SetVisiblePanes`]; newly visible panes recover exactly the
+    /// missing journal tail before their live stream resumes. Keeping the
+    /// original [`Self::Attach`] variant preserves the complete-replay
+    /// contract for diagnostics and older one-shot consumers.
+    AttachInteractive { session: String },
+    /// Replaces this connection's terminal-output subscription. Only panes
+    /// occupying the right panel need live raw bytes; hidden panes remain
+    /// authoritative in the server journal and recover on the next request
+    /// that makes them visible. A split view supplies up to four pane ids.
+    SetVisiblePanes { pane_ids: Vec<NodeId> },
 }
 
 impl ClientRequest {
@@ -391,6 +403,8 @@ impl ClientRequest {
             Self::RecordAgentDebugEvent { .. } => "record_agent_debug_event",
             Self::SetNodeBookmarked { .. } => "set_node_bookmarked",
             Self::RecordNodeActivity { .. } => "record_node_activity",
+            Self::AttachInteractive { .. } => "attach_interactive",
+            Self::SetVisiblePanes { .. } => "set_visible_panes",
         }
     }
 
@@ -408,6 +422,7 @@ impl ClientRequest {
                 | Self::MouseInput { .. }
                 | Self::SetPaneFocus { .. }
                 | Self::RecordNodeActivity { .. }
+                | Self::SetVisiblePanes { .. }
         )
     }
 }

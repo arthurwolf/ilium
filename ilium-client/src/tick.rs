@@ -16,20 +16,26 @@ use crate::search_workers::SearchWorkers;
 /// otherwise-silent tick still needs to force a redraw (a "Working"
 /// spinner, a "Done" pulse, a recently-created flash, and the tree-width
 /// hover animation are all wall-clock-driven and keep animating with no
-/// new event at all -- see `App::has_active_animation`).
-pub fn on_tick(app: &mut App, now: Instant, search_workers: &mut SearchWorkers) -> bool {
+/// new event at all. `was_animating` reuses the schedule observation made
+/// before the timer sleep, preserving the final-frame contract without a
+/// second pane traversal.
+pub fn on_tick(
+    app: &mut App,
+    now: Instant,
+    was_animating: bool,
+    search_workers: &mut SearchWorkers,
+) -> bool {
     // Read *before* advancing the animation so the tick that finishes an
     // in-progress transition still reports "was animating" and forces its
     // own final redraw -- `tick_layout_animation` and the animation
     // spinners/pulses below share this same "still active as of the start
     // of this tick" contract.
-    let was_animating = app.has_active_animation();
     app.tick_layout_animation(now);
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
-    let chatroom_changed = app.reconcile_chatroom_projects();
+    let chatroom_changed = app.tick_chatroom_projects(now);
     app.drain_pending_staged_keystrokes(now);
     was_animating
         || tree_transition_changed

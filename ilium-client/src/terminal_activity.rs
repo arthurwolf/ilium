@@ -99,6 +99,24 @@ impl TerminalActivityTracker {
             .min()
     }
 
+    /// Time until the earliest fast indicator changes to its slow phase.
+    /// The renderer's glyph clock is global, but this per-pane boundary is
+    /// independent and can arrive before the next 90 ms glyph frame.
+    pub fn next_fast_expiry_delay(&self, elapsed_ms: u128) -> Option<Duration> {
+        self.last_activity_ms
+            .values()
+            .filter_map(|last_activity_ms| {
+                let age_ms = elapsed_ms.saturating_sub(*last_activity_ms);
+                if age_ms >= TERMINAL_ACTIVITY_FAST_WINDOW_MS {
+                    return None;
+                }
+
+                let remaining_ms = (TERMINAL_ACTIVITY_FAST_WINDOW_MS - age_ms) as u64;
+                Some(Duration::from_millis(remaining_ms))
+            })
+            .min()
+    }
+
     /// Drops expired windows and reports whether visible activity state ended.
     pub fn prune_expired(&mut self, elapsed_ms: u128) -> bool {
         let previous_count = self.last_activity_ms.len();
@@ -193,5 +211,22 @@ mod tests {
             Some(Duration::from_millis(250))
         );
         assert_eq!(tracker.next_slow_expiry_delay(60_250), None);
+    }
+
+    #[test]
+    fn fast_expiry_delay_tracks_the_earliest_phase_change() {
+        let mut tracker = TerminalActivityTracker::default();
+        tracker.record(NodeId(1), 0);
+        tracker.record(NodeId(2), 250);
+
+        assert_eq!(
+            tracker.next_fast_expiry_delay(4_900),
+            Some(Duration::from_millis(100))
+        );
+        assert_eq!(
+            tracker.next_fast_expiry_delay(5_000),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(tracker.next_fast_expiry_delay(5_250), None);
     }
 }

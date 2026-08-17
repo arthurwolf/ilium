@@ -10,7 +10,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
-use tui_term::widget::PseudoTerminal;
 use unicode_width::UnicodeWidthStr;
 
 use crate::agent_from_line::{
@@ -1123,64 +1122,21 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
 
     match runtime {
         PaneRuntime::Terminal(term) => {
-            if let Some(action) = completed_agent_close_action {
-                let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
-                frame.render_widget(block, viewport.outer_area);
-                term.with_screen(|screen| {
-                    frame.render_widget(PseudoTerminal::new(screen), action.terminal_area);
-                    draw_terminal_selection(
-                        app,
-                        frame,
-                        viewport.pane_id,
-                        viewport.content_area,
-                        screen,
-                    );
-                });
-                // `action.terminal_area` is already inset inside the block's
-                // border (it's carved out of `viewport.content_area` to leave
-                // room for the close-agent button row), so a scrollbar drawn
-                // against it would land one column inside the border, on top
-                // of real terminal text, instead of merging into the border
-                // like the ordinary (non-completed) branch below does --
-                // `viewport.outer_area` is the area that actually lines up
-                // with the border column.
-                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
-            } else if viewport.toolbar_area.is_some() {
-                // Same reasoning as the completed-agent branch above: once
-                // `content_area` has been shrunk by one row for the toolbar
-                // (see `PaneViewport::with_agent_toolbar_reserved`), the
-                // block and the terminal content must be rendered separately
-                // rather than through `.block(...)`, which would otherwise
-                // carve its own inner area straight from `outer_area` and
-                // draw terminal content underneath the reserved toolbar row.
-                let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
-                frame.render_widget(block, viewport.outer_area);
-                term.with_screen(|screen| {
-                    frame.render_widget(PseudoTerminal::new(screen), viewport.content_area);
-                    draw_terminal_selection(
-                        app,
-                        frame,
-                        viewport.pane_id,
-                        viewport.content_area,
-                        screen,
-                    );
-                });
-                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
-            } else {
-                term.with_screen(|screen| {
-                    let widget = PseudoTerminal::new(screen)
-                        .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
-                    frame.render_widget(widget, viewport.outer_area);
-                    draw_terminal_selection(
-                        app,
-                        frame,
-                        viewport.pane_id,
-                        viewport.content_area,
-                        screen,
-                    );
-                });
-                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
-            }
+            let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
+            frame.render_widget(block, viewport.outer_area);
+            let terminal_area = completed_agent_close_action
+                .map_or(viewport.content_area, |action| action.terminal_area);
+            term.render_screen(terminal_area, frame.buffer_mut());
+            term.with_screen(|screen| {
+                draw_terminal_selection(
+                    app,
+                    frame,
+                    viewport.pane_id,
+                    viewport.content_area,
+                    screen,
+                );
+            });
+            draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
         }
         PaneRuntime::Editor(editor) => {
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));

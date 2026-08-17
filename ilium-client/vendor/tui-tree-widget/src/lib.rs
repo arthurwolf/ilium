@@ -259,7 +259,12 @@ where
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
         #[expect(clippy::cast_possible_truncation)]
-        for flattened in visible.iter().skip(state.offset).take(end - start) {
+        for (visible_index, flattened) in visible
+            .iter()
+            .enumerate()
+            .skip(state.offset)
+            .take(end - start)
+        {
             let Flattened { identifier, item } = flattened;
 
             let x = area.x;
@@ -334,7 +339,7 @@ where
 
             state
                 .last_rendered_identifiers
-                .push((area.y, identifier.clone()));
+                .push((area.y, visible_index));
         }
         // Reuse the existing Vec's allocation across renders (this runs every
         // frame in a TUI redraw loop) instead of dropping it and collecting

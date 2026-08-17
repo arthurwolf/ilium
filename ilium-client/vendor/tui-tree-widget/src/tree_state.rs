@@ -30,8 +30,8 @@ pub struct TreeState<Identifier> {
     pub(super) last_biggest_index: usize,
     /// All identifiers open on last render
     pub(super) last_identifiers: Vec<Vec<Identifier>>,
-    /// Identifier rendered at `y` on last render
-    pub(super) last_rendered_identifiers: Vec<(u16, Vec<Identifier>)>,
+    /// Index in `last_identifiers` rendered at `y` on the last render.
+    pub(super) last_rendered_identifiers: Vec<(u16, usize)>,
 }
 
 impl<Identifier> Default for TreeState<Identifier> {
@@ -73,6 +73,15 @@ where
     #[must_use]
     pub fn selected(&self) -> &[Identifier] {
         &self.selected
+    }
+
+    /// Identifiers from the widget's most recent complete flattening, in
+    /// visible tree order. Consumers that perform post-render cell effects
+    /// can reuse this list instead of recursively flattening the same items a
+    /// second time.
+    #[must_use]
+    pub fn visible_identifiers(&self) -> &[Vec<Identifier>] {
+        &self.last_identifiers
     }
 
     /// Get a flat list of all currently viewable (including by scrolling) [`TreeItem`]s with this `TreeState`.
@@ -280,7 +289,8 @@ where
             .iter()
             .rev()
             .find(|(y, _)| position.y >= *y)
-            .map(|(_, identifier)| identifier.as_ref())
+            .and_then(|(_, index)| self.last_identifiers.get(*index))
+            .map(Vec::as_slice)
     }
 
     /// Select what was rendered at the given position on last render.

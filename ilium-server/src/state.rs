@@ -36,6 +36,12 @@ const EVENT_CHANNEL_CAPACITY: usize = 1024;
 
 pub type PaneRegistry = HashMap<NodeId, PaneResource>;
 
+#[derive(Default)]
+struct TerminalSubscriptionCounts {
+    all_panes: usize,
+    panes: HashMap<NodeId, usize>,
+}
+
 /// Construction-time values for one project-session server. Keeping this as
 /// one explicit contract prevents positional path/config arguments from being
 /// swapped as the state gains another project-scoped dependency.
@@ -120,6 +126,18 @@ pub struct ServerState {
     /// hold their own `subscribe()`d receiver; this crate never reads from
     /// this sender's own channel, only sends into it.
     pub events: broadcast::Sender<ServerEvent>,
+    /// Aggregate of connection-local right-panel subscriptions. PTY
+    /// forwarders consult this before building and broadcasting a raw-output
+    /// frame; the PTY journal remains authoritative when no client displays a
+    /// pane. A synchronous mutex is appropriate because updates are tiny,
+    /// infrequent focus transitions and the read check never awaits.
+    terminal_subscription_counts: std::sync::Mutex<TerminalSubscriptionCounts>,
+    /// Monotonic invalidation token for PTY forwarders' connection-demand
+    /// caches. Output is orders of magnitude more frequent than focus or
+    /// attachment changes, so forwarders pay one relaxed-sized atomic load
+    /// per chunk and consult `terminal_subscription_counts` only after this
+    /// revision changes.
+    terminal_subscription_revision: std::sync::atomic::AtomicU64,
     /// Signaled by the `KillSession` handler; `run`'s top-level select
     /// loop treats this as "stop accepting connections and exit."
     pub shutdown: Notify,
@@ -165,6 +183,10 @@ impl ServerState {
             scheduled_input_changed: Notify::new(),
             detection_schedule_changed: Notify::new(),
             events,
+            terminal_subscription_counts: std::sync::Mutex::new(
+                TerminalSubscriptionCounts::default(),
+            ),
+            terminal_subscription_revision: std::sync::atomic::AtomicU64::new(0),
             shutdown: Notify::new(),
             connection_tasks: std::sync::Mutex::new(Vec::new()),
         }
@@ -214,6 +236,60 @@ impl ServerState {
     /// terminal attached right now), not a failure worth logging.
     pub fn broadcast(&self, event: ServerEvent) {
         let _ = self.events.send(event);
+    }
+
+    /// Atomically replaces one connection's contribution to the aggregate
+    /// terminal subscription counts.
+    pub(crate) fn replace_terminal_subscriptions(
+        &self,
+        previous_all: bool,
+        previous_panes: &std::collections::HashSet<NodeId>,
+        next_all: bool,
+        next_panes: &std::collections::HashSet<NodeId>,
+    ) {
+        let mut counts = self.terminal_subscription_counts.lock().unwrap();
+        if previous_all {
+            counts.all_panes = counts.all_panes.saturating_sub(1);
+        }
+        for pane_id in previous_panes {
+            let should_remove = if let Some(count) = counts.panes.get_mut(pane_id) {
+                *count = count.saturating_sub(1);
+                *count == 0
+            } else {
+                false
+            };
+            if should_remove {
+                counts.panes.remove(pane_id);
+            }
+        }
+        if next_all {
+            counts.all_panes = counts.all_panes.saturating_add(1);
+        }
+        for pane_id in next_panes {
+            counts
+                .panes
+                .entry(*pane_id)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
+        }
+        drop(counts);
+        self.terminal_subscription_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Returns the invalidation token used by each PTY forwarder's local
+    /// demand cache. Acquire pairs with the release increment after a
+    /// connection changes the authoritative counts.
+    pub(crate) fn terminal_subscription_revision(&self) -> u64 {
+        self.terminal_subscription_revision
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Whether at least one attached connection currently displays this pane
+    /// or is a legacy full-stream consumer.
+    pub(crate) fn has_terminal_subscribers(&self, pane_id: NodeId) -> bool {
+        let counts = self.terminal_subscription_counts.lock().unwrap();
+        counts.all_panes > 0 || counts.panes.contains_key(&pane_id)
     }
 
     /// Marks the crash-recovery snapshot dirty and wakes the background
@@ -385,6 +461,33 @@ mod tests {
             !state.take_pending_snapshot(),
             "and the background writer must find no work for a killed session"
         );
+    }
+
+    #[tokio::test]
+    async fn terminal_subscription_counts_follow_multi_client_replacement() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let state = test_state(&directory);
+        let first = NodeId(11);
+        let second = NodeId(12);
+        let none = std::collections::HashSet::new();
+        let first_only = std::collections::HashSet::from([first]);
+        let both = std::collections::HashSet::from([first, second]);
+
+        state.replace_terminal_subscriptions(false, &none, false, &first_only);
+        state.replace_terminal_subscriptions(false, &none, false, &both);
+        assert!(state.has_terminal_subscribers(first));
+        assert!(state.has_terminal_subscribers(second));
+
+        state.replace_terminal_subscriptions(false, &first_only, false, &none);
+        assert!(state.has_terminal_subscribers(first));
+        state.replace_terminal_subscriptions(false, &both, false, &none);
+        assert!(!state.has_terminal_subscribers(first));
+        assert!(!state.has_terminal_subscribers(second));
+
+        state.replace_terminal_subscriptions(false, &none, true, &none);
+        assert!(state.has_terminal_subscribers(NodeId(999)));
+        state.replace_terminal_subscriptions(true, &none, false, &none);
+        assert!(!state.has_terminal_subscribers(NodeId(999)));
     }
 
     // The concurrent request-versus-kill stress lives with the state machine
