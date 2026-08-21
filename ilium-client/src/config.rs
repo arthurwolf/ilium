@@ -14,9 +14,11 @@
 //! and the help screen read (see `keymap`'s module doc).
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::Path;
 
 use ilium_inference::InferenceSettings;
+use ilium_platform::secure_fs;
 use ilium_sound::SoundSettings;
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use ratatui::style::Color;
@@ -914,9 +916,11 @@ pub enum ConfigLoadError {
     /// arrow/page keys supported after the leader.
     #[error("keybindings.{action:?} = {value:?} must be one printable key, up, down, page_up, or page_down")]
     InvalidBinding { action: String, value: String },
-    /// `[keyboard].shortcut_base` is not exactly one ASCII letter.
-    #[error("keyboard.shortcut_base = {0:?} must be exactly one letter from A to Z")]
-    InvalidShortcutBase(String),
+    /// A `[keyboard]` prefix (`shortcut_base` or `navigation_shortcut_base`)
+    /// is not exactly one ASCII letter. Carrying the field name keeps the
+    /// error pointing at the actual key the user got wrong.
+    #[error("keyboard.{field} = {value:?} must be exactly one letter from A to Z")]
+    InvalidShortcutBase { field: &'static str, value: String },
     /// Two actions ended up bound to the same key after applying every
     /// override -- `action_for_table` can only ever dispatch one of them, so
     /// this is rejected rather than silently picking whichever comes first
@@ -1092,13 +1096,21 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
 /// defaults.
 fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoadError> {
     let shortcut_base = match raw.shortcut_base {
-        Some(value) => ShortcutBase::parse(&value)
-            .ok_or_else(|| ConfigLoadError::InvalidShortcutBase(value.clone()))?,
+        Some(value) => {
+            ShortcutBase::parse(&value).ok_or_else(|| ConfigLoadError::InvalidShortcutBase {
+                field: "shortcut_base",
+                value: value.clone(),
+            })?
+        }
         None => ShortcutBase::default(),
     };
     let navigation_shortcut_base = match raw.navigation_shortcut_base {
-        Some(value) => ShortcutBase::parse(&value)
-            .ok_or_else(|| ConfigLoadError::InvalidShortcutBase(value.clone()))?,
+        Some(value) => {
+            ShortcutBase::parse(&value).ok_or_else(|| ConfigLoadError::InvalidShortcutBase {
+                field: "navigation_shortcut_base",
+                value: value.clone(),
+            })?
+        }
         None => DEFAULT_NAVIGATION_SHORTCUT_BASE,
     };
     Ok(KeyboardSettings {
@@ -1846,6 +1858,15 @@ fn read_toml_document(path: &Path) -> Result<toml::Value, ClientError> {
 }
 
 /// Serializes and writes a merged config document.
+///
+/// `config.toml` holds authentication secrets (`[voice].api_key`, the
+/// `[inference]` provider keys), so the write goes through
+/// `ilium_platform::secure_fs` -- the temp file is created owner-only with
+/// symlink refusal, exactly like `workspace_file::save`'s snapshot write,
+/// rather than `std::fs::write`'s umask-default (typically world-readable)
+/// mode. The rename preserves the temp file's `0o600` mode, and the final
+/// `restrict_file_to_owner` also tightens a pre-existing `config.toml` a
+/// user or older build may have left broader.
 fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), ClientError> {
     let serialized =
         toml::to_string_pretty(document).map_err(|source| ClientError::ConfigSave {
@@ -1859,17 +1880,28 @@ fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), Client
         })?;
     }
     let temporary_path = path.with_extension(format!("toml.tmp-{}", std::process::id()));
-    std::fs::write(&temporary_path, serialized).map_err(|source| {
-        // A partial write must not leave a stray `*.toml.tmp-<pid>` file
-        // behind in the config directory -- best-effort cleanup mirrors the
-        // rename failure branch below.
+
+    // Written as an inner closure so any failure after the temp file was
+    // created -- a failed write, sync, rename, or permission fix-up -- still
+    // cleans up the stray `*.toml.tmp-<pid>` file below rather than leaving
+    // it behind in the config directory forever.
+    let result = (|| -> std::io::Result<()> {
+        // A recycled pid can leave a dead process's temp file at this exact
+        // path; clear it (best-effort) so `create_new` only refuses a
+        // genuine live collision instead of a corpse.
         let _ = std::fs::remove_file(&temporary_path);
-        ClientError::ConfigSave {
-            path: path.to_path_buf(),
-            source: Box::new(ConfigSaveError::Write(source)),
-        }
-    })?;
-    std::fs::rename(&temporary_path, path).map_err(|source| {
+        let mut file = secure_fs::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)?;
+        file.write_all(serialized.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary_path, path)?;
+        secure_fs::restrict_file_to_owner(path)?;
+        Ok(())
+    })();
+
+    result.map_err(|source| {
         let _ = std::fs::remove_file(&temporary_path);
         ClientError::ConfigSave {
             path: path.to_path_buf(),
@@ -2288,7 +2320,10 @@ mod tests {
         assert!(matches!(
             load(&dir),
             Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::InvalidShortcutBase(_),
+                source: ConfigLoadError::InvalidShortcutBase {
+                    field: "shortcut_base",
+                    ..
+                },
                 ..
             })
         ));
@@ -3067,6 +3102,28 @@ mod tests {
 
         assert!(base.pause_media_while_active);
         assert!(base.has_same_runtime_configuration(&policy_changed));
+    }
+
+    /// `config.toml` carries API keys, so every settings save must leave it
+    /// owner-only -- including when it replaces a pre-existing file a user or
+    /// older build created with broader permissions.
+    #[cfg(unix)]
+    #[test]
+    fn saving_settings_writes_an_owner_only_config_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_dir();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[notifications]\nenabled = false\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        save_voice_settings(&dir, &VoiceSettings::default()).expect("voice settings should save");
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "config.toml must be readable only by its owner"
+        );
     }
 
     #[test]

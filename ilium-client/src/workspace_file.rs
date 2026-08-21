@@ -17,6 +17,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use ilium_platform::secure_fs;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever the shape of `WorkspaceFile` changes incompatibly. Not
@@ -120,7 +121,12 @@ pub fn save(cwd: &Path, workspace: &WorkspaceFile) -> anyhow::Result<()> {
     let Some(parent) = path.parent() else {
         anyhow::bail!("save path {path:?} has no parent directory");
     };
-    std::fs::create_dir_all(parent)?;
+    // `.ilium/sessions.yml` is user-private data (the workspace tree, pane
+    // titles, and resumable agent session ids) -- `ilium_platform::secure_fs`
+    // is the single place that knows what "private" means per platform, and
+    // its own module doc names this exact file as one of the three kinds of
+    // data covered by that guarantee.
+    secure_fs::create_private_directory(parent)?;
 
     let yaml = serde_norway::to_string(workspace)?;
     // Process id alone is not enough to make this path unique: two calls
@@ -145,10 +151,25 @@ pub fn save(cwd: &Path, workspace: &WorkspaceFile) -> anyhow::Result<()> {
     // still clean up the stray temp file below, rather than leaving a
     // partial `.sessions.yml.tmp-<pid>` behind forever on an error path.
     let result = (|| -> anyhow::Result<()> {
-        let mut file = std::fs::File::create(&temp_path)?;
+        // A pid can be recycled: a process that was SIGKILLed between this
+        // open and the rename below -- the exact crash scenario this
+        // module exists to survive -- can leave a stray temp file at this
+        // exact pid+call-id path with nothing left alive to clean it up.
+        // Clear that leftover (best-effort; a legitimate racing call can
+        // never collide here, the atomic counter above already rules that
+        // out) so `create_new` only ever refuses a genuine, reportable
+        // collision rather than a dead process's corpse.
+        let _ = std::fs::remove_file(&temp_path);
+        let mut file = secure_fs::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
         file.write_all(yaml.as_bytes())?;
         file.sync_all()?;
         std::fs::rename(&temp_path, &path)?;
+        // The rename target didn't exist at open time, so it couldn't be
+        // opened privately -- restrict it now that it does.
+        secure_fs::restrict_file_to_owner(&path)?;
         Ok(())
     })();
 

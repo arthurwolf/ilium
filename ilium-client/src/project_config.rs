@@ -75,7 +75,18 @@ pub fn save(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
     std::fs::create_dir_all(parent)?;
 
     let yaml = serde_norway::to_string(config)?;
-    let temporary_path = parent.join(format!(".config.yaml.tmp-{}", std::process::id()));
+    // Process id alone is not enough to make this path unique: two calls to
+    // `save` for the same `cwd` racing within the same process would both
+    // target the identical temp file, and since `File::create` truncates
+    // rather than failing on an existing file, their writes could interleave
+    // and corrupt the temp file's contents before either side gets to
+    // rename it -- defeating the atomicity this write-then-rename dance
+    // exists for. A process-wide counter (matching `workspace_file::save`'s
+    // fix for the identical bug) makes every call's temp path distinct
+    // regardless of which thread or task it runs on.
+    static SAVE_CALL_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let call_id = SAVE_CALL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary_path = parent.join(format!(".config.yaml.tmp-{}-{call_id}", std::process::id()));
     // Written in a closure so a failure partway through (create/write/sync)
     // falls through to the cleanup below instead of leaking the temp file
     // in `.ilium/` forever.
