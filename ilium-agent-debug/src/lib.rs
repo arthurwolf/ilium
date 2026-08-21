@@ -383,6 +383,14 @@ impl PaneDebugLog {
     /// receive a new entry.
     pub fn normalize_after_restore(&mut self) {
         self.schema_version = AGENT_DEBUG_SCHEMA_VERSION;
+        // Every field here is `pub` for (de)serialization, so a hand-edited or
+        // corrupted snapshot on disk could carry entries out of sequence
+        // order. `merge_synced_entry`'s binary search, `enforce_retention`'s
+        // `remove(0)` eviction of the "oldest" entry, and
+        // `retained_from_sequence`'s use of `entries.first()` as the
+        // authoritative floor sent to clients all depend on ascending order,
+        // so restore that invariant before anything else here relies on it.
+        self.entries.sort_by_key(|entry| entry.sequence);
         self.next_sequence = self
             .entries
             .last()

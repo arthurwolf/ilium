@@ -78,8 +78,12 @@ impl TranscriptLocator {
         if !self.path_is_in_expected_store(class, path) {
             return None;
         }
-        if matches!(class, AgentClass::Antigravity) && self.antigravity_history_matches(&session_id)
-        {
+        // Antigravity ownership is proven solely by `history.jsonl`; the `.db`
+        // file is binary SQLite and must never be opened as line metadata.
+        if matches!(class, AgentClass::Antigravity) {
+            if !self.antigravity_history_matches(&session_id) {
+                return None;
+            }
             return Some(VerifiedTranscript {
                 session_id,
                 path: path.to_path_buf(),
