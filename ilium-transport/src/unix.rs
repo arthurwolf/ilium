@@ -35,8 +35,13 @@ pub(crate) async fn accept(listener: &mut Listener) -> io::Result<Stream> {
 pub(crate) fn probe_liveness(identity: &Path) -> Liveness {
     use std::os::unix::fs::FileTypeExt;
 
-    let Ok(metadata) = std::fs::symlink_metadata(identity) else {
-        return Liveness::Absent;
+    let metadata = match std::fs::symlink_metadata(identity) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Liveness::Absent,
+        // Any other stat failure -- EACCES on a parent component, ELOOP --
+        // says nothing about whether a server holds this session, and
+        // `Absent` would send the caller off to start a second one.
+        Err(_) => return Liveness::Unreachable,
     };
     // An entry that is not a socket at all cannot have a listener behind it,
     // whatever `connect` would say about it. Deciding this by file type rather

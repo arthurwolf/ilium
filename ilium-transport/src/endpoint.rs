@@ -48,6 +48,16 @@ pub enum TransportError {
         #[source]
         source: io::Error,
     },
+    /// Clearing a dead server's debris failed before the bind was attempted.
+    /// Kept distinct from [`Bind`](TransportError::Bind) so a failed `unlink`
+    /// (permissions, read-only filesystem) is not reported as a failure of the
+    /// bind syscall itself, which would send diagnosis down the wrong path.
+    #[error("failed to clear the stale session endpoint {endpoint} before binding: {source}")]
+    ClearStale {
+        endpoint: String,
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// Where one session's server listens and its clients connect.
@@ -88,7 +98,15 @@ impl SessionEndpoint {
     /// nothing is actually listening, so this can never displace a live server.
     pub async fn bind(&self) -> Result<SessionListener, TransportError> {
         if self.probe_liveness() == Liveness::StaleListener {
-            let _ = self.remove_stale();
+            // A failure here (permissions, a read-only filesystem) must not be
+            // swallowed: silently falling through to `imp::bind` would leave
+            // the debris in place and surface a misleading `EADDRINUSE`-style
+            // bind error instead of the real cause.
+            self.remove_stale()
+                .map_err(|source| TransportError::ClearStale {
+                    endpoint: self.display(),
+                    source,
+                })?;
         }
         imp::bind(&self.identity)
             .await

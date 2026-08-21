@@ -123,7 +123,26 @@ pub(crate) async fn bind(identity: &Path) -> io::Result<Listener> {
 }
 
 pub(crate) async fn accept(listener: &mut Listener) -> io::Result<Stream> {
-    listener.next_instance.connect().await?;
+    if let Err(connect_error) = listener.next_instance.connect().await {
+        // A client that connected and closed before this accept ran leaves the
+        // instance in a client-closed state: `ConnectNamedPipe` fails with
+        // `ERROR_NO_DATA` (surfaced as `BrokenPipe`, which
+        // [`is_transient_accept_error`] deliberately treats as retryable) and
+        // keeps failing that way until `DisconnectNamedPipe` resets the
+        // instance. Without the reset, the caller's retry would spin forever
+        // on the same wedged instance while every client is turned away with
+        // `ERROR_PIPE_BUSY` -- the liveness probe's connect-and-drop makes
+        // this an everyday occurrence, not a corner case. If even the reset
+        // fails, the instance is abandoned for a freshly created one; if that
+        // also fails, the original error is still returned and the caller's
+        // non-transient path shuts the session down rather than spinning.
+        if listener.next_instance.disconnect().is_err() {
+            if let Ok(replacement) = ServerOptions::new().create(&listener.pipe_name) {
+                listener.next_instance = replacement;
+            }
+        }
+        return Err(connect_error);
+    }
     // Create the replacement *before* yielding the connected instance, so no
     // client can arrive in a window where the pipe exists but has no free
     // instance and be rejected with ERROR_PIPE_BUSY.
@@ -158,7 +177,18 @@ pub(crate) async fn connect(identity: &Path) -> io::Result<Stream> {
 
 pub(crate) fn probe_liveness(identity: &Path) -> Liveness {
     let pipe_name = pipe_name(identity);
-    match ClientOptions::new().open(&pipe_name) {
+    // `std::fs::OpenOptions` rather than `ClientOptions::open`: the latter
+    // registers the handle with Tokio's I/O driver and panics outside a
+    // runtime, but this probe is called before a runtime exists (the same
+    // reason the Unix side uses a blocking `std::os::unix::net::UnixStream`
+    // here instead of `tokio::net::UnixStream`). `CreateFileW` -- what both
+    // paths compile down to on Windows -- opens a named pipe exactly like a
+    // file, so the plain, runtime-free API is enough.
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&pipe_name)
+    {
         // Connecting proves a server is there. The connection is dropped
         // immediately; the server accepts it and sees an instant EOF, exactly
         // as the Unix probe behaves.

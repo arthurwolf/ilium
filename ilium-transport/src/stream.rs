@@ -64,6 +64,21 @@ impl AsyncWrite for SessionStream {
         Pin::new(&mut self.inner).poll_write(context, buffer)
     }
 
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffers: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write_vectored(context, buffers)
+    }
+
+    // Without this forward the trait default reports `false`, and the frame
+    // writer's single vectored header+payload write silently degrades into
+    // two syscalls per frame on a stream that supports vectored I/O.
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
     fn poll_flush(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.inner).poll_flush(context)
     }
