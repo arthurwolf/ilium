@@ -25,15 +25,23 @@
 //! own task now cancels every child task it owns too, the same way RAII
 //! already guarantees for any other resource this crate holds.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use tokio::task::JoinHandle;
 
 /// Owns a spawned task's [`JoinHandle`] and aborts it on drop, in addition
 /// to (not instead of) any explicit `.abort()` call already on a normal
 /// shutdown path -- `JoinHandle::abort` is a harmless no-op on a task that
 /// is already finished or already aborted, so the two never conflict.
-/// The handle is optional only so [`AbortOnDropHandle::join`] can take it
-/// out: awaiting a task the guard still owns would abort it on drop the moment
-/// the await completed.
+/// The handle stays in an `Option` purely so [`Drop`] can share the field
+/// with the [`Future`] impl below without an extra indirection; nothing
+/// ever actually takes the handle out of a live guard, so `Drop` always
+/// still finds it and can still abort it -- including if
+/// [`AbortOnDropHandle::join`]'s own `.await` is itself the thing that gets
+/// cancelled (raced out of a `select!`, or the awaiting task aborted from
+/// the outside), which is exactly the case this guard exists to cover.
 pub struct AbortOnDropHandle<T>(Option<JoinHandle<T>>);
 
 impl<T> AbortOnDropHandle<T> {
@@ -50,12 +58,23 @@ impl<T> AbortOnDropHandle<T> {
     }
 
     /// Waits for the task to finish, reporting how it ended. Consumes the
-    /// guard, because a joined handle has nothing left to abort.
-    pub async fn join(mut self) -> Result<T, tokio::task::JoinError> {
-        let Some(handle) = self.0.take() else {
-            unreachable!("the handle is only taken here, and this consumes the guard");
-        };
-        handle.await
+    /// guard, because a joined handle has nothing left to abort once this
+    /// resolves -- but until it does, `self` (and therefore `Drop`) still
+    /// owns the handle, so cancelling this `.await` still aborts the task.
+    pub async fn join(self) -> Result<T, tokio::task::JoinError> {
+        self.await
+    }
+}
+
+impl<T> Future for AbortOnDropHandle<T> {
+    type Output = Result<T, tokio::task::JoinError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let handle = self
+            .0
+            .as_mut()
+            .expect("AbortOnDropHandle polled again after already returning Poll::Ready");
+        Pin::new(handle).poll(cx)
     }
 }
 

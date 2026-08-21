@@ -262,8 +262,24 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
             ),
         })?;
     let contents = format!("pid={}\nlog_path={log_path}\n", std::process::id());
-    let write_result = std::fs::write(&temporary_path, contents)
-        .and_then(|()| secure_fs::restrict_file_to_owner(&temporary_path))
+    // Mirrors `persistence::save_snapshot`'s atomic-write convention: a stale
+    // temp file left by a crashed predecessor that happened to reuse this pid
+    // is cleared so `create_new` can succeed, and the temp file is created
+    // owner-only from the start (`private_open_options`: mode 0600 plus
+    // `O_NOFOLLOW`/`O_CLOEXEC` on Unix). The previous write-then-chmod
+    // sequence here left a window where the file was world-readable and would
+    // have written through a symlink pre-planted at this predictable path.
+    let _ = std::fs::remove_file(&temporary_path);
+    let write_result = secure_fs::private_open_options()
+        .write(true)
+        .create_new(true)
+        .open(&temporary_path)
+        // The file handle is dropped inside this closure, before the rename
+        // below runs -- required on Windows, where renaming a still-open file
+        // fails.
+        .and_then(|mut temporary_file| {
+            std::io::Write::write_all(&mut temporary_file, contents.as_bytes())
+        })
         .and_then(|()| std::fs::rename(&temporary_path, &metadata.active_log_path_file));
     if let Err(source) = write_result {
         let _ = std::fs::remove_file(&temporary_path);
@@ -747,10 +763,14 @@ mod restore_tests {
         write_frame(&mut client, &ClientRequest::KillSession)
             .await
             .expect("write KillSession request");
-        let _ = tokio::time::timeout(Duration::from_secs(5), server_task)
+        let result = tokio::time::timeout(Duration::from_secs(5), server_task)
             .await
             .expect("server did not exit after KillSession")
             .expect("server task panicked");
+        assert!(
+            result.is_ok(),
+            "server should shut down cleanly after KillSession: {result:?}"
+        );
     }
 
     /// Reproduces the `AskBeforeRestore` orphan-leak scenario directly

@@ -104,6 +104,17 @@ fn spawn_config_watcher_with_interval(
     poll_interval: Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
+        // The config directory never changes for the lifetime of the watcher,
+        // so derive it once. A path with no parent cannot be reloaded at all;
+        // silently polling forever would hide that misconfiguration, so log
+        // once and end the task instead.
+        let Some(config_dir) = config_path.parent().map(Path::to_path_buf) else {
+            tracing::warn!(
+                "config watcher disabled: config path {:?} has no parent directory",
+                config_path
+            );
+            return;
+        };
         let mut observed_fingerprint = poll_config_blocking(&config_path).await;
         let mut interval = tokio::time::interval(poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -124,10 +135,7 @@ fn spawn_config_watcher_with_interval(
             let Some(current_fingerprint) = fingerprint else {
                 continue;
             };
-            let Some(config_dir) = config_path.parent().map(Path::to_path_buf) else {
-                continue;
-            };
-            match load_config_blocking(config_dir).await {
+            match load_config_blocking(config_dir.clone()).await {
                 Ok(config) => {
                     *state.sound_settings.write().await = config.sound;
                     observed_fingerprint = Some(current_fingerprint);
@@ -150,9 +158,13 @@ fn spawn_config_watcher_with_interval(
 /// down the watcher loop.
 async fn poll_config_blocking(config_path: &Path) -> Option<u64> {
     let config_path = config_path.to_path_buf();
-    tokio::task::spawn_blocking(move || file_fingerprint(&config_path))
-        .await
-        .unwrap_or(None)
+    match tokio::task::spawn_blocking(move || file_fingerprint(&config_path)).await {
+        Ok(fingerprint) => fingerprint,
+        Err(join_error) => {
+            tracing::warn!("config fingerprint task panicked, retrying next tick: {join_error}");
+            None
+        }
+    }
 }
 
 /// Parses the config file on a blocking thread for the same reason as

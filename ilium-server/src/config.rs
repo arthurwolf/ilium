@@ -305,13 +305,24 @@ fn parse_session_recovery_policy(value: &str) -> Result<SessionRecoveryConfig, C
 /// optional config file.
 pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
     let path = config_dir.join("config.toml");
-    if !path.exists() {
-        return Ok(ServerConfig::default());
-    }
-    let contents = std::fs::read_to_string(&path).map_err(|source| ServerError::ConfigLoad {
-        path: path.clone(),
-        source: ConfigLoadError::Read(source),
-    })?;
+    // A single `read_to_string` (rather than an `exists()` check followed by
+    // a separate read) avoids two failure modes a split check/read has: the
+    // TOCTOU window where the file is removed between the two calls, and
+    // `exists()` folding every stat error -- including a permission problem
+    // on the file or a parent directory -- into "missing," which would boot
+    // silently on defaults instead of surfacing a real `ConfigLoadError::Read`.
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ServerConfig::default());
+        }
+        Err(source) => {
+            return Err(ServerError::ConfigLoad {
+                path,
+                source: ConfigLoadError::Read(source),
+            });
+        }
+    };
     let raw: RawConfig = toml::from_str(&contents).map_err(|source| ServerError::ConfigLoad {
         path: path.clone(),
         source: ConfigLoadError::Parse(source),

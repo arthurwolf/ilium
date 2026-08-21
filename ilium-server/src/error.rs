@@ -2,18 +2,22 @@
 //!
 //! Two very different failure classes live in this crate: startup failures
 //! (bad config, can't bind the session socket) that should abort the
-//! process before it does anything, and per-request/per-pane failures that
-//! must never do that -- a single pane's detection hiccup or a malformed
-//! client request must not take the rest of the session down (see
-//! `CLAUDE.md`'s top-level-error-boundary rule). [`ServerError`] covers
-//! both; callers on the "must keep running" side (the detection loop, the
-//! per-connection request handler) are expected to log an `Err` and
-//! continue rather than propagate it further, not to treat every variant
-//! as fatal.
+//! process before it does anything, and runtime best-effort failures that
+//! must never do that -- a detection-loop hiccup, a snapshot write, or a
+//! legacy-workspace migration going wrong must not take the rest of the
+//! session down (see `CLAUDE.md`'s top-level-error-boundary rule).
+//! [`ServerError`] covers both; callers on the "must keep running" side
+//! (the detection loop, snapshot persistence) are expected to log an `Err`
+//! and continue rather than propagate it further, not to treat every
+//! variant as fatal. Per-client-request failures are deliberately *not*
+//! represented here: the request handlers in `crate::ipc::handlers` report
+//! them straight back to the requesting client as
+//! `ilium_ipc::ServerEvent::Error` strings (or handler-local error enums)
+//! without ever constructing a [`ServerError`].
 
 use std::path::PathBuf;
 
-use ilium_core::{NodeId, TreeError};
+use ilium_core::TreeError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
@@ -44,23 +48,6 @@ pub enum ServerError {
         source: std::io::Error,
     },
 
-    /// The resolved session socket path (whether under
-    /// `$XDG_RUNTIME_DIR/ilium` or, lacking that, `<data_dir>`) is at or
-    /// over the ~108-byte `sockaddr_un.sun_path` limit the OS enforces for
-    /// Unix domain socket paths. The project-session resolver catches this
-    /// before `bind()` is ever attempted, so the user gets a specific error
-    /// instead of a raw, opaque `std::io::Error`.
-    #[error(
-        "session socket path {path:?} is {byte_length} bytes, at or over the \
-         {max_byte_length}-byte limit this OS allows for a Unix domain socket path; shorten \
-         XDG_RUNTIME_DIR (or, if that is unset, XDG_DATA_HOME) or use a shorter session name"
-    )]
-    SocketPathTooLong {
-        path: PathBuf,
-        byte_length: usize,
-        max_byte_length: usize,
-    },
-
     /// Reading or parsing `~/.config/ilium/config.toml` failed. Not fatal
     /// on its own -- callers fall back to defaults and log a warning --
     /// kept as a typed variant so that fallback decision is explicit
@@ -72,35 +59,15 @@ pub enum ServerError {
         source: ConfigLoadError,
     },
 
-    /// A tree-structural request (`NewPane`, `ClosePane`, `MoveNode`,
-    /// `RenameNode`) referenced a node the tree rejected -- most commonly
-    /// a stale `NodeId` a client is still holding after the node was
-    /// already removed. Reported back to the requesting client as an
-    /// `ilium_ipc::ServerEvent::Error`, never propagated up to crash the
-    /// connection or the server.
+    /// Rebuilding the session tree from persisted state (a crash-recovery
+    /// snapshot restore, or a legacy workspace-file migration) hit an
+    /// operation the tree rejected. Client-originated tree requests do
+    /// *not* surface here -- the request handlers report `TreeError`
+    /// straight back to the requesting client as an
+    /// `ilium_ipc::ServerEvent::Error` string without ever wrapping it in
+    /// [`ServerError`].
     #[error("tree operation failed: {0}")]
     Tree(#[from] TreeError),
-
-    /// Spawning, resizing, writing to, or killing a pane's pty failed.
-    /// Reported back to the requesting client; the pane is torn down
-    /// (removed from the tree and the pane registry) rather than left in
-    /// an inconsistent half-alive state.
-    #[error("pty operation on pane {pane_id:?} failed: {source}")]
-    Pty {
-        pane_id: NodeId,
-        #[source]
-        source: ilium_pty::PtyError,
-    },
-
-    /// A request referenced a `NodeId` with no matching entry in the pane
-    /// registry (e.g. `KeyInput` targeting a group, or a pane id from a
-    /// different session).
-    #[error("no pane found for node {0:?}")]
-    PaneNotFound(NodeId),
-
-    /// The IPC wire layer failed to (de)serialize or frame a message.
-    #[error("ipc framing error: {0}")]
-    Ipc(#[from] ilium_ipc::IpcError),
 
     /// Reading/writing the crash-recovery snapshot file failed. Never
     /// fatal -- the snapshot is a best-effort convenience, not the source
@@ -143,7 +110,8 @@ pub enum ConfigLoadError {
     Parse(#[from] toml::de::Error),
     /// A `[[detection.custom_signatures]]` entry parsed as valid TOML but
     /// failed semantic validation (empty `process_name`, or an
-    /// `agent_class` other than `"claude"`/`"codex"`/`"antigravity"`/`"other"`). Kept
+    /// `agent_class` other than `"claude"`/`"codex"`/`"antigravity"` (alias
+    /// `"antimatter"`)/`"other"`). Kept
     /// distinct from `Parse` -- the file *is* well-formed TOML, just not a
     /// signature this crate knows how to build.
     #[error("invalid detection.custom_signatures entry: {0}")]

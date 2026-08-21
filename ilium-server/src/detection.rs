@@ -170,6 +170,16 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
                 // succeeds.
                 tracing::error!("detection loop: sysinfo refresh task panicked: {join_error}");
                 system = System::new();
+                // `last_system_refresh_at` must not keep claiming the old
+                // (now-discarded) snapshot is still fresh -- otherwise a
+                // later tick whose due panes all still carry a live cached
+                // identity can skip `system_refresh_required` entirely and
+                // run `run_due_panes` straight against this empty `system`,
+                // which is exactly the "misreport every agent pane as
+                // PlainShell" outcome the comment above says this branch
+                // avoids. Clearing it forces the very next tick's snapshot
+                // check to require a real refresh unconditionally.
+                last_system_refresh_at = None;
                 continue;
             }
         }
@@ -859,7 +869,14 @@ async fn run_due_panes(
                 &state.detection_config,
             );
             runtime.detection_schedule.next_due = if screen_changed_after_snapshot {
-                now + FOCUSED_POLL_INTERVAL
+                // Bounded catch-up, not a flat 1s reschedule: a pane whose
+                // configured `working_poll_interval` is already below
+                // `FOCUSED_POLL_INTERVAL` (the minimum is 500ms, see
+                // `config::MINIMUM_POLL_INTERVAL`) must keep polling at its
+                // own faster tier, not get slowed down by this branch --
+                // the whole point of which is to never push a pane to a
+                // slower tier than it would otherwise get.
+                now + FOCUSED_POLL_INTERVAL.min(runtime.detection_schedule.current_interval)
             } else {
                 now + runtime.detection_schedule.current_interval
             };

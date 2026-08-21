@@ -381,9 +381,15 @@ fn terminal_launch_plan(origin: &TerminalOrigin) -> TerminalLaunchPlan {
             session_id: None,
         },
         TerminalOrigin::Command(command_line) if command_line == "claude" => {
+            // Unquoted deliberately: this command line is later fed whole to
+            // `$SHELL -c` on Unix but to `cmd.exe /C` on Windows (see
+            // `shell_command`), and single quotes are not a quote character
+            // to `cmd.exe` -- they would reach `claude` as literal characters
+            // in the id. A v4 UUID is only hex digits and hyphens, so it
+            // never needs quoting on either shell.
             let session_id = uuid::Uuid::new_v4().to_string();
             TerminalLaunchPlan {
-                command_line: Some(format!("claude --session-id '{session_id}'")),
+                command_line: Some(format!("claude --session-id {session_id}")),
                 session_id: Some(session_id),
             }
         }
@@ -408,12 +414,15 @@ fn shell_command() -> (String, &'static str) {
             .or_else(|_| std::env::var("COMSPEC"))
             .unwrap_or_else(|_| "cmd.exe".to_string());
         // A `SHELL` pointing at a POSIX shell (Git Bash, MSYS) still takes
-        // `-c`; only the `cmd.exe` family uses `/C`.
-        let flag = if shell.to_lowercase().contains("cmd") {
-            "/C"
-        } else {
-            "-c"
-        };
+        // `-c`; only the `cmd.exe` family uses `/C`. Decide from the
+        // executable's file stem, not the whole path -- a POSIX shell that
+        // merely lives under a directory containing "cmd" (e.g.
+        // `C:\cmder\...\bash.exe`) must still get `-c`.
+        let is_cmd_family = Path::new(&shell)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("cmd"));
+        let flag = if is_cmd_family { "/C" } else { "-c" };
         (shell, flag)
     } else {
         (
@@ -453,7 +462,7 @@ mod tests {
         assert!(uuid::Uuid::parse_str(&session_id).is_ok());
         assert_eq!(
             plan.command_line,
-            Some(format!("claude --session-id '{session_id}'"))
+            Some(format!("claude --session-id {session_id}"))
         );
     }
 

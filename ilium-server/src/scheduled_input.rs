@@ -164,6 +164,8 @@ async fn is_current_schedule(
     expected: &ScheduledPaneInput,
 ) -> bool {
     let tree = state.tree.read().await;
+    // Bound to a local first: the iterator temporary borrows `tree`, and a
+    // tail expression's temporaries would outlive the guard's drop otherwise.
     let is_current = tree
         .scheduled_pane_inputs()
         .any(|(candidate_id, candidate)| candidate_id == pane_id && candidate == expected);

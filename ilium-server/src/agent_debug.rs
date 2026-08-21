@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ilium_agent_debug::{
-    AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField,
-    AgentDebugSeverity, AgentDebugSource, PaneDebugLog,
+    AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
+    AgentDebugEventMetadata, AgentDebugField, AgentDebugSeverity, AgentDebugSource, PaneDebugLog,
 };
 use ilium_core::{NodeId, NodeKind, PaneStatus};
 use ilium_ipc::ServerEvent;
@@ -49,6 +49,7 @@ struct AgentDebugObservation {
     summary: String,
     fields: Vec<ilium_agent_debug::AgentDebugField>,
     correlation_id: Option<String>,
+    metadata: AgentDebugEventMetadata,
 }
 
 impl AgentDebugObservation {
@@ -64,6 +65,7 @@ impl AgentDebugObservation {
             summary: draft.summary.clone(),
             fields: draft.fields.clone(),
             correlation_id: draft.correlation_id.clone(),
+            metadata: draft.metadata.clone(),
         }
     }
 }
@@ -99,10 +101,14 @@ impl AgentDebugRecorder {
             return None;
         }
 
-        // A clock read failure (system time before the Unix epoch) must not
-        // silently fabricate a `0` timestamp in the durable journal -- log it
-        // and drop this one entry, mirroring `scheduled_input.rs`'s handling
-        // of the same failure mode.
+        // The clock is read under the journal write lock so a concurrent
+        // producer can never receive a later sequence with an earlier
+        // timestamp -- this module's whole contract is that sequence and
+        // timestamp order agree. A clock read failure (system time before the
+        // Unix epoch) must not silently fabricate a `0` timestamp in the
+        // durable journal -- log it and drop this one entry, mirroring
+        // `scheduled_input.rs`'s handling of the same failure mode.
+        let mut logs = self.logs.write().await;
         let occurred_at_unix_millis = match current_unix_millis() {
             Ok(millis) => millis,
             Err(message) => {
@@ -110,8 +116,6 @@ impl AgentDebugRecorder {
                 return None;
             }
         };
-
-        let mut logs = self.logs.write().await;
         logs.entry(pane_id)
             .or_default()
             .append(occurred_at_unix_millis, source, context, draft)

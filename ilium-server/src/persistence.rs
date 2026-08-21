@@ -138,9 +138,14 @@ pub async fn load_snapshot_or_migrate(
         snapshot
             .tree
             .ensure_launch_project(session_cwd.to_path_buf())?;
-        if snapshot.tree != original_tree
-            || normalize_agent_resumes(&mut snapshot, home, session_cwd)
-        {
+        let tree_changed_by_launch_project = snapshot.tree != original_tree;
+        // Both sides must always run: `||` short-circuits and would skip
+        // `normalize_agent_resumes`'s mutations (repairing invalid resume
+        // bindings, fixing their titles) whenever `ensure_launch_project`
+        // alone already changed the tree, silently leaving a corrupted or
+        // duplicate resume binding in the snapshot this function returns.
+        let resume_bindings_changed = normalize_agent_resumes(&mut snapshot, home, session_cwd);
+        if tree_changed_by_launch_project || resume_bindings_changed {
             write_snapshot_to(snapshot_path, &snapshot).await?;
         }
         return Ok(Some(snapshot));
@@ -572,24 +577,23 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
 /// from "something to warn about."
 pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, ServerError> {
     let path_buf = path.to_path_buf();
-    let exists = tokio::fs::try_exists(path)
-        .await
-        .map_err(|source| ServerError::Snapshot {
-            operation: "check existence of",
-            path: path_buf.clone(),
-            source: SnapshotError::Io(source),
-        })?;
-    if !exists {
-        return Ok(None);
-    }
-
-    let contents = tokio::fs::read(path)
-        .await
-        .map_err(|source| ServerError::Snapshot {
-            operation: "read",
-            path: path_buf.clone(),
-            source: SnapshotError::Io(source),
-        })?;
+    // One read, with `NotFound` mapped to "no snapshot yet", instead of a
+    // separate existence probe followed by the read: the probe-then-read
+    // pair had a TOCTOU window in which a snapshot removed between the two
+    // calls surfaced as a spurious read `Err` rather than the documented
+    // `Ok(None)`, and the read itself already answers the existence
+    // question.
+    let contents = match tokio::fs::read(path).await {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ServerError::Snapshot {
+                operation: "read",
+                path: path_buf,
+                source: SnapshotError::Io(source),
+            });
+        }
+    };
     let snapshot: SessionSnapshot =
         serde_json::from_slice(&contents).map_err(|source| ServerError::Snapshot {
             operation: "parse",
