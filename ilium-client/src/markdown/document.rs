@@ -17,6 +17,7 @@ use std::sync::Arc;
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// One renderable piece of a parsed document, in source order.
 #[derive(Debug, Clone)]
@@ -542,11 +543,25 @@ impl<'a> Builder<'a> {
                 self.flush_line();
             }
             TagEnd::Heading(level) => {
-                let text: String = self
-                    .spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect();
+                // A hard break inside a multi-line setext heading routes
+                // through `start_line_with_prefix`, which flushes the
+                // heading's earlier text into `self.lines`. `Tag::Heading`
+                // emptied `self.lines` when the heading started, so every
+                // line accumulated since then belongs to this heading --
+                // drain them (joined by a space, since a heading block
+                // renders as a single line) ahead of the in-progress spans,
+                // or the pre-break text would leak out later as a stray
+                // `Block::Text` ordered after the heading.
+                let mut text = String::new();
+                for heading_line in self.lines.drain(..) {
+                    for span in &heading_line.spans {
+                        text.push_str(span.content.as_ref());
+                    }
+                    text.push(' ');
+                }
+                for span in &self.spans {
+                    text.push_str(span.content.as_ref());
+                }
                 self.spans.clear();
                 self.blocks.push(Block::Heading {
                     text,
@@ -700,10 +715,13 @@ fn render_table(table: &TableBuilder) -> Vec<Line<'static>> {
     let mut widths = vec![0usize; column_count];
     for row in std::iter::once(&table.header).chain(table.rows.iter()) {
         for (index, cell) in row.iter().enumerate() {
-            // `format!("{:>width$}")` below pads by `char` count, not byte
-            // count -- using byte length here would over-count any
-            // multi-byte UTF-8 cell and misalign the whole column.
-            widths[index] = widths[index].max(cell.trim().chars().count()).min(40);
+            // Column width is measured and later padded in terminal
+            // display columns, not `char` count -- a CJK character or
+            // emoji occupies two columns, so char-counting would
+            // under-pad those cells and misalign the whole column.
+            widths[index] = widths[index]
+                .max(UnicodeWidthStr::width(cell.trim()))
+                .min(40);
         }
     }
 
@@ -729,14 +747,23 @@ fn render_table(table: &TableBuilder) -> Vec<Line<'static>> {
     lines
 }
 
-/// Truncates `text` to at most `max_chars` Unicode scalar values. Operates
-/// on `chars()` rather than byte slicing so a cut never lands inside a
-/// multi-byte UTF-8 sequence.
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
+/// Truncates `text` to at most `max_width` terminal display columns (not
+/// `char` count -- a CJK character or emoji occupies two columns, so
+/// char-counting would let a wide-character cell overrun its column and
+/// break alignment with the rest of the table). Always stops on a whole
+/// character, so a cut never lands inside a multi-byte UTF-8 sequence.
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    let mut truncated = String::new();
+    let mut width_used = 0usize;
+    for character in text.chars() {
+        let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
+        if width_used + character_width > max_width {
+            break;
+        }
+        width_used += character_width;
+        truncated.push(character);
     }
-    text.chars().take(max_chars).collect()
+    truncated
 }
 
 fn render_table_row(
@@ -760,12 +787,24 @@ fn render_table_row(
         // padding target -- without truncating here too, any cell longer
         // than the cap still renders at full length and breaks alignment
         // with every other row in its column.
-        let text = truncate_chars(text, *width);
+        let text = truncate_to_width(text, *width);
+        // Pad manually rather than `format!`'s `width$`, which pads by
+        // `char` count -- a wide character would leave the cell short of
+        // its actual display-column budget and misalign the `│` rules.
+        let padding = width.saturating_sub(UnicodeWidthStr::width(text.as_str()));
         let alignment = alignments.get(index).copied().unwrap_or(Alignment::None);
         let padded = match alignment {
-            Alignment::Right => format!(" {text:>width$} "),
-            Alignment::Center => format!(" {text:^width$} "),
-            Alignment::Left | Alignment::None => format!(" {text:<width$} "),
+            Alignment::Right => format!(" {}{text} ", " ".repeat(padding)),
+            Alignment::Center => {
+                let left_padding = padding / 2;
+                let right_padding = padding - left_padding;
+                format!(
+                    " {}{text}{} ",
+                    " ".repeat(left_padding),
+                    " ".repeat(right_padding)
+                )
+            }
+            Alignment::Left | Alignment::None => format!(" {text}{} ", " ".repeat(padding)),
         };
         spans.push(Span::styled(padded, style));
     }
@@ -917,13 +956,18 @@ mod tests {
 
     #[test]
     fn unicode_table_cell_aligns_with_ascii_cell() {
+        // "日本語" is 3 chars but 6 terminal display columns -- comparing
+        // `chars().count()` here would pass even if the column padding
+        // were computed from char count instead of display width, so this
+        // must measure with `UnicodeWidthStr` to actually exercise wide
+        // character alignment.
         let doc = parse("| a | b |\n|---|---|\n| 日本語 | x |\n", Path::new("/tmp"));
         let Block::Text(lines) = &doc.blocks[0] else {
             panic!("expected text block");
         };
         let row_widths: Vec<usize> = lines
             .iter()
-            .map(|line| line_text(line).chars().count())
+            .map(|line| UnicodeWidthStr::width(line_text(line).as_str()))
             .collect();
         assert_eq!(
             row_widths[0], row_widths[2],
@@ -1096,6 +1140,37 @@ mod tests {
         };
         assert_eq!(line_text(&lines[0]), "• first");
         assert_eq!(line_text(&lines[1]), "  second");
+    }
+
+    #[test]
+    fn crlf_code_block_lines_carry_no_carriage_returns() {
+        // pulldown-cmark passes fenced-code text through with the source's
+        // own line endings, so a CRLF-authored file must not leave a stray
+        // `\r` control character at the end of every rendered code row.
+        let document = parse("```\r\nfirst\r\nsecond\r\n```\r\n", Path::new("/tmp"));
+
+        let Block::Text(code_lines) = &document.blocks[0] else {
+            panic!("expected code block, got {:?}", document.blocks[0]);
+        };
+        assert_eq!(code_lines.len(), 2);
+        assert_eq!(line_text(&code_lines[0]), " first");
+        assert_eq!(line_text(&code_lines[1]), " second");
+    }
+
+    #[test]
+    fn setext_heading_with_hard_break_keeps_all_text_in_the_heading() {
+        // A hard break inside a multi-line setext heading flushes the first
+        // half of the heading into `self.lines`; the heading block must
+        // still contain all of its text, and none of it may leak out as a
+        // stray text block ordered after the heading.
+        let document = parse("first  \nsecond\n===\n\nbody", Path::new("/tmp"));
+
+        let Block::Heading { text, level } = &document.blocks[0] else {
+            panic!("expected heading first, got {:?}", document.blocks[0]);
+        };
+        assert_eq!(*level, 1);
+        assert!(text.contains("first"), "lost pre-break text: {text}");
+        assert!(text.contains("second"), "lost post-break text: {text}");
     }
 
     /// Concatenates styled spans without losing the visible text contract

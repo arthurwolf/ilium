@@ -81,6 +81,12 @@ impl HeaderRasterizer {
 
         const HEADER_ROWS: u16 = 2;
         let tier_scale = (12.0 - f32::from(level).min(11.0)) / 12.0;
+        // `cell_px` comes from the terminal's own pixel-size report via
+        // `Picker::font_size()`, and some terminals answer that query with
+        // zeros. `cosmic_text::Buffer::new` asserts (panics) on a zero line
+        // height, so clamp both cell dimensions to at least one pixel
+        // instead of trusting the terminal's answer.
+        let cell_px = (cell_px.0.max(1), cell_px.1.max(1));
         let line_height = f32::from(cell_px.1) * f32::from(HEADER_ROWS);
         let font_size_px = (line_height * tier_scale).max(1.0);
 

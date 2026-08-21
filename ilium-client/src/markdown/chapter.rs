@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 /// Returns the raw source range for the innermost heading section containing
 /// `source_line_index` (zero-based), or `None` when that line is outside all
@@ -42,47 +42,44 @@ struct MarkdownHeading {
 /// Parses semantic headings so fenced code and escaped Markdown never become
 /// false chapter boundaries merely because they look like a `#` prefix.
 ///
-/// Also drops headings nested inside a block quote or list item (`> ## Not a
-/// chapter`, `- ## Not a chapter`): pulldown-cmark's source range for those
-/// starts right after the container marker, not at the physical line start.
-/// Treating them as real headings would truncate the enclosing chapter at an
-/// arbitrary mid-blockquote point and, if picked as the containing heading,
-/// hand back a range missing its own `>`/list prefix.
+/// Also drops headings nested inside a block quote or list item at any depth
+/// (`> ## Not a chapter`, `- ## Not a chapter`, or a heading indented under a
+/// list item on its own line): treating them as real headings would truncate
+/// the enclosing chapter at an arbitrary mid-container point and, if picked
+/// as the containing heading, hand back a range missing its own `>`/list
+/// prefix. Container membership is tracked from the event stream itself
+/// (`BlockQuote`/`Item` start and end events) rather than inferred from
+/// source bytes, since a nested heading's own line can contain nothing but
+/// whitespace before it when the container marker sits on an earlier line.
 fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM;
 
-    Parser::new_ext(markdown, options)
-        .into_offset_iter()
-        .filter_map(|(event, source_range)| {
-            let Event::Start(Tag::Heading { level, .. }) = event else {
-                return None;
-            };
-            if !starts_its_own_physical_line(markdown, source_range.start) {
-                return None;
-            }
-            Some(MarkdownHeading {
-                level: heading_level_number(level),
-                source_line_index: source_line_index_for_offset(markdown, source_range.start),
-                source_range,
-            })
-        })
-        .collect()
-}
+    let mut headings = Vec::new();
+    let mut container_depth: usize = 0;
 
-/// True when nothing but Markdown's own optional leading whitespace (up to
-/// three spaces, per the ATX heading rule) separates `offset` from the start
-/// of its line -- as opposed to a block quote (`> `) or list marker
-/// (`- `, `1. `) prefix, which contains non-whitespace bytes in that span.
-fn starts_its_own_physical_line(markdown: &str, offset: usize) -> bool {
-    let line_start = markdown[..offset]
-        .rfind('\n')
-        .map_or(0, |newline_byte_index| newline_byte_index + 1);
-    markdown[line_start..offset]
-        .bytes()
-        .all(|byte| byte == b' ' || byte == b'\t')
+    for (event, source_range) in Parser::new_ext(markdown, options).into_offset_iter() {
+        match event {
+            Event::Start(Tag::BlockQuote(_) | Tag::Item) => container_depth += 1,
+            // Saturating: depth only ever reaches zero via a matching Start, so this is
+            // never actually clamped -- it just avoids a panic if that invariant ever slips.
+            Event::End(TagEnd::BlockQuote(_) | TagEnd::Item) => {
+                container_depth = container_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Heading { level, .. }) if container_depth == 0 => {
+                headings.push(MarkdownHeading {
+                    level: heading_level_number(level),
+                    source_line_index: source_line_index_for_offset(markdown, source_range.start),
+                    source_range,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    headings
 }
 
 /// Converts pulldown-cmark's source byte offset to the editor's line index.
@@ -135,6 +132,18 @@ mod tests {
         let range = source_range_for_chapter_containing_line(markdown, 3).unwrap();
 
         assert_eq!(&markdown[range], markdown);
+    }
+
+    #[test]
+    fn ignores_a_heading_nested_in_a_list_item_on_its_own_line() {
+        let markdown =
+            "# Root\n\n## Chapter A\n\n- item\n\n  ## Nested\n\n  more\n\n## Chapter B\nb\n";
+        let range = source_range_for_chapter_containing_line(markdown, 8).unwrap();
+
+        assert_eq!(
+            &markdown[range],
+            "## Chapter A\n\n- item\n\n  ## Nested\n\n  more\n\n"
+        );
     }
 
     #[test]

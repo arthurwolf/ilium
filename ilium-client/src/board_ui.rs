@@ -269,8 +269,9 @@ pub fn hit_test(
             }
             if let Some(checkbox_index) =
                 card_checkbox_areas(&board.columns[column_index].cards[card_index], card_area)
-                    .iter()
-                    .position(|area| area.contains(position))
+                    .into_iter()
+                    .find(|(_, checkbox_area)| checkbox_area.contains(position))
+                    .map(|(occurrence_index, _)| occurrence_index)
             {
                 return Some(BoardHit::CardCheckbox {
                     column_index,
@@ -540,47 +541,93 @@ fn detail_close_area(detail_area: Rect) -> Rect {
     )
 }
 
+/// First Private Use Area code point used by `probe_checkbox_title` to tag a
+/// checkbox marker's fill cell with its occurrence index.
+const CHECKBOX_PROBE_FIRST_CODE_POINT: u32 = 0xE000;
+/// Number of code points in the Basic Multilingual Plane's Private Use Area
+/// (U+E000..=U+F8FF); occurrence indices at or past this bound cannot be
+/// probe-tagged and their checkboxes simply stop being pointer targets.
+const CHECKBOX_PROBE_CAPACITY: u32 = 0x1900;
+
+/// Rewrites every checkbox marker's single fill character (the byte between
+/// its "[" and "]") through `fill_for`; `None` keeps the original fill.
+/// `checkbox_occurrences` guarantees the marker bytes are ASCII and the
+/// occurrences are ascending and non-overlapping, so all slice points below
+/// land on character boundaries.
+fn substitute_checkbox_fills(
+    title: &str,
+    mut fill_for: impl FnMut(usize, bool) -> Option<char>,
+) -> Cow<'_, str> {
+    let occurrences = checkbox_occurrences(title);
+    if occurrences.is_empty() {
+        return Cow::Borrowed(title);
+    }
+    let mut substituted = String::with_capacity(title.len());
+    let mut cursor = 0;
+    for (occurrence_index, (byte_index, is_checked)) in occurrences.into_iter().enumerate() {
+        substituted.push_str(&title[cursor..byte_index + 1]);
+        match fill_for(occurrence_index, is_checked) {
+            Some(fill) => substituted.push(fill),
+            None => substituted.push_str(&title[byte_index + 1..byte_index + 2]),
+        }
+        cursor = byte_index + 2;
+    }
+    substituted.push_str(&title[cursor..]);
+    Cow::Owned(substituted)
+}
+
 /// Replaces an *unchecked* checkbox marker's fill space with a non-breaking
 /// space so Ratatui's word-wrap can never split "[ ]" across two lines (its
 /// "[" and "]" are otherwise two separate words joined by an ordinary space,
 /// which the wrapper is free to break between). Checked markers ("[x]"/"[X]")
 /// contain no whitespace at all, so they are already one unbreakable word and
 /// are left untouched -- substituting their fill character would render every
-/// checked box as visually unchecked. Both the visible card render and the
-/// hit-test buffer in `card_checkbox_areas` must render this exact text: if
-/// only one of them substituted, a checkbox that wraps mid-marker would be
-/// found in one but not the other, and every checkbox_index after the
-/// skipped one would point at the wrong checkbox.
+/// checked box as visually unchecked.
 fn atomic_checkbox_title(title: &str) -> Cow<'_, str> {
-    let occurrences = checkbox_occurrences(title);
-    if occurrences.is_empty() {
-        return Cow::Borrowed(title);
+    substitute_checkbox_fills(title, |_, is_checked| (!is_checked).then_some('\u{00A0}'))
+}
+
+/// Hit-test-only variant of `atomic_checkbox_title`: every marker's fill cell
+/// becomes a Private Use Area character encoding its occurrence index, so the
+/// off-screen scan in `card_checkbox_areas` can recover *which* checkbox each
+/// on-screen "[·]" is, even when an earlier marker was clipped or hard-split
+/// by the word wrapper. Every substitute is a width-1, non-whitespace
+/// character -- exactly like the NBSP/"x" fills the visible render uses -- so
+/// the wrap geometry of this probe text is identical to what the user sees.
+/// Occurrence indices past `CHECKBOX_PROBE_CAPACITY` fall back to the visible
+/// fill (NBSP when unchecked) to keep that geometry parity.
+fn probe_checkbox_title(title: &str) -> Cow<'_, str> {
+    substitute_checkbox_fills(title, |occurrence_index, is_checked| {
+        u32::try_from(occurrence_index)
+            .ok()
+            .filter(|index| *index < CHECKBOX_PROBE_CAPACITY)
+            .and_then(|index| char::from_u32(CHECKBOX_PROBE_FIRST_CODE_POINT + index))
+            .or_else(|| (!is_checked).then_some('\u{00A0}'))
+    })
+}
+
+/// Decodes a probe fill cell back to its checkbox occurrence index.
+fn probe_fill_occurrence_index(symbol: &str) -> Option<usize> {
+    let mut chars = symbol.chars();
+    let fill = chars.next()?;
+    if chars.next().is_some() {
+        return None;
     }
-    let mut atomic = String::with_capacity(title.len());
-    let mut cursor = 0;
-    for (byte_index, is_checked) in occurrences {
-        // `byte_index` is always an ASCII '[' byte (see `checkbox_occurrences`),
-        // so these slice points can never land mid-character.
-        atomic.push_str(&title[cursor..byte_index + 1]);
-        if is_checked {
-            atomic.push_str(&title[byte_index + 1..byte_index + 2]);
-        } else {
-            atomic.push('\u{00A0}');
-        }
-        cursor = byte_index + 2;
-    }
-    atomic.push_str(&title[cursor..]);
-    Cow::Owned(atomic)
+    let offset = u32::from(fill).checked_sub(CHECKBOX_PROBE_FIRST_CODE_POINT)?;
+    (offset < CHECKBOX_PROBE_CAPACITY).then_some(offset as usize)
 }
 
 /// Uses Ratatui itself to wrap the card title into an off-screen buffer, then
-/// reports the exact visible three-cell checkbox rectangles, in on-screen
-/// reading order -- which, thanks to `atomic_checkbox_title`, is always the
-/// same order `checkbox_occurrences` returns. Pointer targets therefore
-/// cannot drift from word wrapping or wide-character behavior, and the
-/// position of a found rectangle in this list is always its true occurrence
-/// index (used directly as `checkbox_index` by callers).
-fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
+/// reports each visible three-cell checkbox rectangle together with its true
+/// occurrence index (the `checkbox_index` callers pass to
+/// `toggle_card_checkbox`). The buffer is rendered from
+/// `probe_checkbox_title`, whose wrap geometry matches the visible render
+/// cell-for-cell, so pointer targets cannot drift from word wrapping or
+/// wide-character behavior -- and because the index is decoded from the fill
+/// cell itself rather than inferred from scan order, a marker that the
+/// wrapper hard-split mid-word (or that fell below the preview clip) can
+/// never shift a later checkbox onto the wrong index.
+fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<(usize, Rect)> {
     let expected_count = checkbox_occurrences(&card.title).len();
     if expected_count == 0 {
         return Vec::new();
@@ -590,30 +637,35 @@ fn card_checkbox_areas(card: &BoardCard, area: Rect) -> Vec<Rect> {
         return Vec::new();
     }
     let mut buffer = Buffer::empty(inner);
-    Paragraph::new(atomic_checkbox_title(&card.title))
+    Paragraph::new(probe_checkbox_title(&card.title))
         .wrap(Wrap { trim: true })
         .render(inner, &mut buffer);
-    let mut areas = Vec::new();
+    let mut areas: Vec<(usize, Rect)> = Vec::new();
     for y in inner.y..inner.bottom() {
         for x in inner.x..inner.right().saturating_sub(2) {
             let left = buffer[(x, y)].symbol();
             let middle = buffer[(x + 1, y)].symbol();
             let right = buffer[(x + 2, y)].symbol();
-            // The non-breaking space only ever appears here because
-            // `atomic_checkbox_title` put it there for a real occurrence. A
-            // title containing a literal, pre-existing "[<NBSP>]" (e.g.
-            // pasted from a browser) would also match and be counted before
-            // any real checkbox after it in reading order, but
-            // `checkbox_occurrences` never counts it, so `expected_count` is
-            // reached early: the affected click falls back to selecting the
-            // card rather than toggling the wrong checkbox. Rare and
-            // fails safe; a full fix would require normalizing pre-existing
-            // NBSPs out of the title before rendering.
-            if left == "[" && matches!(middle, " " | "\u{00A0}" | "x" | "X") && right == "]" {
-                areas.push(Rect::new(x, y, 3, 1));
-                if areas.len() == expected_count {
-                    return areas;
-                }
+            if left != "[" || right != "]" {
+                continue;
+            }
+            let Some(occurrence_index) = probe_fill_occurrence_index(middle) else {
+                continue;
+            };
+            // A probe fill can only come from `probe_checkbox_title`, unless
+            // the title itself contained a literal bracketed PUA character.
+            // Rejecting out-of-range and duplicate indices keeps that
+            // pathological case fail-safe: the bogus cell is ignored and a
+            // click there falls back to selecting the card.
+            let is_duplicate = areas
+                .iter()
+                .any(|(existing_index, _)| *existing_index == occurrence_index);
+            if occurrence_index >= expected_count || is_duplicate {
+                continue;
+            }
+            areas.push((occurrence_index, Rect::new(x, y, 3, 1)));
+            if areas.len() == expected_count {
+                return areas;
             }
         }
     }
@@ -754,7 +806,7 @@ mod tests {
         let area = Rect::new(0, 0, 30, 20);
         let layout = compute_layout(area, false, 1, 20);
         let card_area = card_area(Block::bordered().inner(layout.columns_area), 0, 3).unwrap();
-        let checkbox = card_checkbox_areas(&board.columns[0].cards[0], card_area)[0];
+        let checkbox = card_checkbox_areas(&board.columns[0].cards[0], card_area)[0].1;
 
         assert_eq!(
             hit_test(
@@ -826,6 +878,30 @@ mod tests {
             1,
             "a checkbox marker must never be split across a wrap point"
         );
+        assert_eq!(areas[0].0, 0);
+    }
+
+    #[test]
+    fn checkbox_index_survives_an_earlier_marker_hard_split_inside_a_long_word() {
+        // "AAAAAA[ ]" is one unbreakable word (the fill substitution joins
+        // the brackets), but at 9 cells it is wider than the 7-cell inner
+        // width, so the word wrapper hard-splits it mid-marker and the first
+        // checkbox has no complete on-screen rectangle. The second checkbox
+        // must still report its true occurrence index of 1 -- scan order
+        // alone would misreport it as 0 and toggle the wrong checkbox.
+        let card = BoardCard {
+            title: "AAAAAA[ ] [x]".to_string(),
+            body: String::new(),
+        };
+        let area = Rect::new(0, 0, 9, 8);
+
+        let areas = card_checkbox_areas(&card, area);
+
+        assert_eq!(areas.len(), 1);
+        assert_eq!(
+            areas[0].0, 1,
+            "a surviving checkbox must keep its true occurrence index"
+        );
     }
 
     #[test]
@@ -850,13 +926,14 @@ mod tests {
         // its brackets and go undetected, shifting the second checkbox's
         // reported index from 1 down to 0.
         assert_eq!(areas.len(), 2);
+        assert_eq!(areas[1].0, 1);
 
         let hit = hit_test(
             &board,
             area,
             preview_lines,
             minimum_column_width,
-            Position::new(areas[1].x + 1, areas[1].y),
+            Position::new(areas[1].1.x + 1, areas[1].1.y),
         );
 
         assert_eq!(

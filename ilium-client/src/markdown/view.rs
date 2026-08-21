@@ -54,14 +54,26 @@ fn text_paragraph(
 
 fn block_height(block: &RenderedBlock, width: u16, line_display: LineDisplay) -> u16 {
     match block {
-        RenderedBlock::Text(lines) => {
-            u16::try_from(text_paragraph(lines, line_display).line_count(width.max(1)))
-                .unwrap_or(u16::MAX)
+        RenderedBlock::Text(lines) => paragraph_height(lines, width, line_display),
+        // A placeholder line can carry an interpolated URL or filesystem path
+        // (see `render_image`/`render_block`'s fallback text) that's routinely
+        // wider than the pane -- it must share Text's overflow policy instead
+        // of a hardcoded one-row assumption, or Wrap mode would silently clip
+        // it while every neighboring text block wraps.
+        RenderedBlock::Placeholder(line) => {
+            paragraph_height(std::slice::from_ref(line), width, line_display)
         }
         RenderedBlock::BlankLines(lines) => u16::try_from(lines.len()).unwrap_or(u16::MAX),
         RenderedBlock::Header(protocol) | RenderedBlock::Image(protocol) => protocol.size().height,
-        RenderedBlock::Placeholder(_) => 1,
     }
+}
+
+fn paragraph_height(
+    lines: &[ratatui::text::Line<'static>],
+    width: u16,
+    line_display: LineDisplay,
+) -> u16 {
+    u16::try_from(text_paragraph(lines, line_display).line_count(width.max(1))).unwrap_or(u16::MAX)
 }
 
 /// Draws `document` into `area`, scrolled down by `scroll` rows under the
@@ -82,13 +94,6 @@ pub fn render(
 /// Draws one block at running cursor `y` (clipped to `area`) and returns its
 /// full, unclipped height so the caller can advance past it regardless of
 /// how much -- if any -- was actually on screen.
-///
-/// A `Text` block's word-wrapped `Paragraph` is built exactly once here: the
-/// same owned clone of `lines` backs both the `line_count` height query and
-/// the widget actually handed to `render_widget`. Measuring and drawing used
-/// to build that `Paragraph` from a fresh `lines.clone()` each, which meant
-/// cloning every visible text block's content twice per frame -- and this
-/// runs on every frame a Rendered-mode markdown pane is on screen.
 fn draw_block(
     frame: &mut Frame,
     area: Rect,
@@ -101,28 +106,25 @@ fn draw_block(
 
     match block {
         RenderedBlock::Text(lines) => {
-            let paragraph = text_paragraph(lines, line_display);
-            let height = u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
-            let visible = visible_rect(area, area_top, area_bottom, y, height);
-            if let Some((visible_top, _, rect)) = visible {
-                let skip = (visible_top - y) as u16;
-                frame.render_widget(paragraph.scroll((skip, 0)), rect);
-            }
-            i64::from(height)
+            draw_text_block(frame, area, area_top, area_bottom, lines, y, line_display)
         }
+        // Shares `Text`'s overflow policy -- see the matching comment on
+        // `block_height` for why a placeholder can't stay a hardcoded 1 row.
+        RenderedBlock::Placeholder(line) => draw_text_block(
+            frame,
+            area,
+            area_top,
+            area_bottom,
+            std::slice::from_ref(line),
+            y,
+            line_display,
+        ),
         RenderedBlock::BlankLines(lines) => {
             let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
             let visible = visible_rect(area, area_top, area_bottom, y, height);
             if let Some((visible_top, _, rect)) = visible {
                 let skip = (visible_top - y) as u16;
                 frame.render_widget(Paragraph::new((**lines).clone()).scroll((skip, 0)), rect);
-            }
-            i64::from(height)
-        }
-        RenderedBlock::Placeholder(line) => {
-            let height: u16 = 1;
-            if let Some((_, _, rect)) = visible_rect(area, area_top, area_bottom, y, height) {
-                frame.render_widget(Paragraph::new(line.clone()), rect);
             }
             i64::from(height)
         }
@@ -141,6 +143,30 @@ fn draw_block(
             i64::from(height)
         }
     }
+}
+
+/// Builds and draws one word-wrap/clip text block (`Text` or `Placeholder`)
+/// at running cursor `y`, following the shared overflow policy in
+/// `text_paragraph`. The `Paragraph` is built exactly once here: the same
+/// owned clone of `lines` backs both the `line_count` height query and the
+/// widget actually handed to `render_widget`.
+fn draw_text_block(
+    frame: &mut Frame,
+    area: Rect,
+    area_top: i64,
+    area_bottom: i64,
+    lines: &[ratatui::text::Line<'static>],
+    y: i64,
+    line_display: LineDisplay,
+) -> i64 {
+    let paragraph = text_paragraph(lines, line_display);
+    let height = u16::try_from(paragraph.line_count(area.width.max(1))).unwrap_or(u16::MAX);
+    let visible = visible_rect(area, area_top, area_bottom, y, height);
+    if let Some((visible_top, _, rect)) = visible {
+        let skip = (visible_top - y) as u16;
+        frame.render_widget(paragraph.scroll((skip, 0)), rect);
+    }
+    i64::from(height)
 }
 
 /// Clips a block spanning rows `[y, y + height)` to `area`'s visible rows,

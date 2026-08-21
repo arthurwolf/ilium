@@ -331,20 +331,24 @@ impl BoardPane {
     }
 
     pub fn add_card(&mut self, title: String) -> Result<(), String> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err("A card needs a title".to_string());
-        }
+        let title = validate_card_title(&title)?;
         let previous = self.clone();
         let column = self
             .columns
             .get_mut(self.selected_column)
             .ok_or_else(|| "No board column selected".to_string())?;
         column.cards.push(BoardCard {
-            title: title.to_string(),
+            title,
             body: String::new(),
         });
         self.selected_card = Some(column.cards.len() - 1);
+        // The selection just moved to the new card; an open detail panel must
+        // rebuild its buffers now, or its next keystroke would write the
+        // previously selected card's text into the new card (see
+        // `sync_detail_editor`'s stale-buffer invariant).
+        if self.is_detail_panel_open {
+            self.sync_detail_editor();
+        }
         self.persist_or_restore(previous)
     }
     pub fn add_column(&mut self, title: String) -> Result<(), String> {
@@ -371,10 +375,7 @@ impl BoardPane {
     }
 
     pub fn rename_selected_card(&mut self, title: String) -> Result<(), String> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err("A card needs a title".to_string());
-        }
+        let title = validate_card_title(&title)?;
         let selected_card = self
             .selected_card
             .ok_or_else(|| "No card selected".to_string())?;
@@ -387,7 +388,7 @@ impl BoardPane {
         if card.title == title {
             return Ok(());
         }
-        card.title = title.to_string();
+        card.title = title;
         self.persist_or_restore(previous)
     }
 
@@ -459,12 +460,9 @@ impl BoardPane {
             .ok_or_else(|| "No matching board card".to_owned())?;
         let mut did_change = false;
         if let Some(title) = title {
-            let title = title.trim();
-            if title.is_empty() {
-                return Err("A card needs a title".to_owned());
-            }
+            let title = validate_card_title(&title)?;
             if card.title != title {
-                card.title = title.to_owned();
+                card.title = title;
                 did_change = true;
             }
         }
@@ -638,14 +636,32 @@ impl BoardPane {
         }
         let body = editor.body_text();
         let selected_column = self.selected_column;
-        let selected_card = self
-            .selected_card
-            .ok_or_else(|| "No card selected".to_string())?;
-        let card = self
+        // Both lookups below restore the just-typed buffer before returning:
+        // the input above already mutated `editor` in place, and a selection
+        // that vanished out from under an open panel must not leave the
+        // visible buffer showing text that was never applied to any card.
+        let Some(selected_card) = self.selected_card else {
+            if let Some(editor) = self.detail_editor.as_mut() {
+                match focus {
+                    CardEditorField::Title => editor.title = field_before,
+                    CardEditorField::Body => editor.body = field_before,
+                }
+            }
+            return Err("No card selected".to_string());
+        };
+        let Some(card) = self
             .columns
             .get_mut(selected_column)
             .and_then(|column| column.cards.get_mut(selected_card))
-            .ok_or_else(|| "No card selected".to_string())?;
+        else {
+            if let Some(editor) = self.detail_editor.as_mut() {
+                match focus {
+                    CardEditorField::Title => editor.title = field_before,
+                    CardEditorField::Body => editor.body = field_before,
+                }
+            }
+            return Err("No card selected".to_string());
+        };
         // Rollback scope for a failed save: this one card's prior title and
         // body. Nothing else on the board changes as part of this call, so
         // nothing else needs restoring.
@@ -674,9 +690,10 @@ impl BoardPane {
     }
 
     /// Scrolls the body editor while preserving its contents and focus.
+    /// Wheel scrolling is a read gesture, not an edit gesture, so it must not
+    /// steal keyboard focus from the title field.
     pub fn scroll_detail_body(&mut self, rows: i16) {
         if let Some(editor) = self.detail_editor.as_mut() {
-            editor.focus = CardEditorField::Body;
             editor.body.scroll((rows, 0));
         }
     }
@@ -942,33 +959,48 @@ fn parse_markdown_board(source: &str) -> Vec<BoardColumn> {
 
     for line in source.lines() {
         let trimmed_line = line.trim_start();
+        // Card-body lines keep everything beyond the canonical two-space
+        // prefix `serialize_markdown_board` writes, so a body line that is
+        // itself indented (code, nested structure) round-trips instead of
+        // being flattened to its trimmed form on every reload. Other indent
+        // styles (tabs, a single space) from externally written files fall
+        // back to the fully trimmed line, as before.
+        let body_line = line.strip_prefix("  ").unwrap_or(trimmed_line);
         if trimmed_line.starts_with("```") || trimmed_line.starts_with("~~~") {
-            append_markdown_card_body_line(&mut current_column, trimmed_line);
+            append_markdown_card_body_line(&mut current_column, body_line);
             is_in_fenced_code_block = !is_in_fenced_code_block;
             continue;
         }
         if is_in_fenced_code_block {
-            append_markdown_card_body_line(&mut current_column, trimmed_line);
+            append_markdown_card_body_line(&mut current_column, body_line);
             continue;
         }
 
-        if let Some((level, title)) = markdown_heading(trimmed_line) {
-            if let Some(column) = current_column.take() {
-                parsed_columns.push(column);
+        // Only a non-indented line can start a heading: an indented "#" is a
+        // card-body continuation line (see append_markdown_card_body_line),
+        // not a new column, matching markdown_heading's own "non-indented"
+        // contract -- checked here, since markdown_heading only ever sees
+        // the already-left-trimmed line and cannot tell the difference.
+        let is_indented_line = line.len() != trimmed_line.len();
+        if !is_indented_line {
+            if let Some((level, title)) = markdown_heading(trimmed_line) {
+                if let Some(column) = current_column.take() {
+                    parsed_columns.push(column);
+                }
+                current_column = Some((
+                    level,
+                    BoardColumn {
+                        title: title.to_string(),
+                        cards: Vec::new(),
+                    },
+                ));
+                continue;
             }
-            current_column = Some((
-                level,
-                BoardColumn {
-                    title: title.to_string(),
-                    cards: Vec::new(),
-                },
-            ));
-            continue;
         }
 
         let Some(title) = markdown_list_item(trimmed_line) else {
-            if line.len() != trimmed_line.len() {
-                append_markdown_card_body_line(&mut current_column, trimmed_line);
+            if is_indented_line {
+                append_markdown_card_body_line(&mut current_column, body_line);
             } else if trimmed_line.is_empty() {
                 append_markdown_card_body_line(&mut current_column, "");
             }
@@ -1033,7 +1065,19 @@ fn markdown_heading(line: &str) -> Option<(usize, &str)> {
         return None;
     }
     let title = line.get(marker_count..)?.strip_prefix(' ')?.trim();
-    (!title.is_empty()).then_some((marker_count, title.trim_end_matches('#').trim_end()))
+    // An ATX closing sequence ("## Title ##") only counts when whitespace
+    // separates it from the title text; a trailing '#' glued to the text is
+    // part of the title itself, so a column named "C#" must not reload as
+    // "C".
+    let stripped = title.trim_end_matches('#');
+    let title = if stripped.len() != title.len()
+        && (stripped.is_empty() || stripped.ends_with(char::is_whitespace))
+    {
+        stripped.trim_end()
+    } else {
+        title
+    };
+    (!title.is_empty()).then_some((marker_count, title))
 }
 
 /// Returns the visible text of an unordered Markdown list item. Indentation
@@ -1127,12 +1171,37 @@ fn serialize_folder_card(card: &BoardCard) -> String {
     }
 }
 
+/// Validates a card title for both storage serializations. Markdown storage
+/// writes a title as one `- ` list line and folder storage as one `# `
+/// heading line, so an embedded line break (possible through the board tool
+/// call surface, which is not limited to single-line keyboard input) would
+/// silently corrupt the document: the extra lines would reparse as unrelated
+/// cards, body text, or top-level prose on the next load.
+fn validate_card_title(title: &str) -> Result<String, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("A card needs a title".to_string());
+    }
+    if title.contains(['\n', '\r']) {
+        return Err("A card title must be a single line".to_string());
+    }
+    Ok(title.to_string())
+}
+
 fn validate_column_title(title: impl AsRef<str>) -> Result<String, String> {
     let title = title.as_ref().trim();
+    // `std::path::is_separator` (not just MAIN_SEPARATOR) so a title
+    // containing '/' is rejected even on Windows, where Path::join and the
+    // OS both still treat '/' as a separator alongside the native '\'.
+    // Line breaks are rejected because a column title is also one `## `
+    // heading line under Markdown storage, where an embedded newline would
+    // silently corrupt the serialized document.
     if title.is_empty()
         || title == "."
         || title == ".."
-        || title.contains(std::path::MAIN_SEPARATOR)
+        || title
+            .chars()
+            .any(|character| std::path::is_separator(character) || matches!(character, '\n' | '\r'))
     {
         return Err(format!("Invalid board column name: {title}"));
     }
