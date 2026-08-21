@@ -357,7 +357,15 @@ fn collect_sounds(
             );
             continue;
         }
-        if !file_type.is_file() || !is_supported_sound_file(&path) {
+        // `DirEntry::file_type()` reports the entry itself, not the symlink
+        // target, so a symlinked sound file (common in freedesktop/GNOME/
+        // Ubuntu/elementary theme packages that alias files this way) must
+        // be confirmed with a metadata lookup that *does* follow the link.
+        // Directory symlinks are deliberately excluded from that fallback:
+        // they are the cyclic/misplaced-mount case `MAX_DISCOVERY_DEPTH`
+        // guards against, so only a non-directory symlink target counts.
+        let is_playable_file = file_type.is_file() || (file_type.is_symlink() && path.is_file());
+        if !is_playable_file || !is_supported_sound_file(&path) {
             continue;
         }
 
@@ -589,18 +597,25 @@ fn play_file(path: &Path) -> Result<(), SoundError> {
 #[cfg(target_os = "windows")]
 fn play_file(path: &Path) -> Result<(), SoundError> {
     ensure_file_exists(path)?;
-    run_command(
-        "powershell.exe",
-        [
-            OsStr::new("-NoProfile"),
-            OsStr::new("-NonInteractive"),
-            OsStr::new("-Command"),
-            OsStr::new(
-                "$player = New-Object System.Media.SoundPlayer $args[0]; $player.PlaySync()",
-            ),
-            path.as_os_str(),
-        ],
-    )
+
+    // The path travels through an environment variable, never through the
+    // command text: `powershell.exe -Command "<string>" <arg>` appends any
+    // trailing argument to the command string and re-parses it as code (it
+    // does not populate `$args`), so interpolating the path there both
+    // breaks playback outright and executes PowerShell metacharacters
+    // (`;`, `$(...)`, quotes) found in a configured filename.
+    let program = "powershell.exe";
+    let mut command = Command::new(program);
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$player = New-Object System.Media.SoundPlayer $env:ILIUM_SOUND_FILE; \
+             $player.PlaySync()",
+        ])
+        .env("ILIUM_SOUND_FILE", path.as_os_str());
+    run_prepared_command(program, command)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -702,8 +717,16 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = Command::new(program)
-        .args(arguments)
+    let mut command = Command::new(program);
+    command.args(arguments);
+    run_prepared_command(program, command)
+}
+
+/// Spawns an already-configured player command with quiet stdio, waits for it
+/// with the shared playback timeout, and always reaps the child on every exit
+/// path so no zombie process is left behind.
+fn run_prepared_command(program: &str, mut command: Command) -> Result<(), SoundError> {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
