@@ -263,7 +263,18 @@ fn build_index() -> Result<IconSemanticIndex, String> {
                     "the icon embedding model returned an incomplete catalogue index".to_string(),
                 );
             }
-            persist_embeddings(&index_path, &embeddings, cache_fingerprint)?;
+            // The durable cache is a startup optimization, not a requirement:
+            // `embeddings` is already complete and validated above, so a
+            // write failure here (read-only cache directory, a cache path
+            // shared and locked by another user's client, a Windows sharing
+            // violation against a concurrently-reading client) must not
+            // throw away a fully usable index and disable semantic search.
+            if let Err(message) = persist_embeddings(&index_path, &embeddings, cache_fingerprint) {
+                tracing::warn!(
+                    %message,
+                    "could not cache the icon vector index; rebuilding on next start"
+                );
+            }
             embeddings
         }
     };
@@ -435,7 +446,7 @@ impl IconSemanticIndex {
     fn search(&mut self, query: &str) -> Result<IconPickerSearchResults, String> {
         let query_embedding = self
             .model
-            .embed(vec![format!("query: {query}")], Some(1))
+            .embed(vec![query.to_owned()], Some(1))
             .map_err(|error| format!("could not embed icon search text: {error}"))?
             .into_iter()
             .next()
@@ -476,7 +487,7 @@ fn semantic_document(category: &str, family: IconCatalogFamily, entry: IconCatal
         IconCatalogFamily::NerdFont => "Nerd Font developer private-use icon",
     };
     format!(
-        "passage: icon name {name}. category {category}. family {family_description}. visual symbol for {name}.",
+        "icon name {name}. category {category}. family {family_description}. visual symbol for {name}.",
         name = entry.name,
     )
 }

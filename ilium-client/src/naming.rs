@@ -23,7 +23,7 @@ const STRUCTURED_OUTPUT_MAX_ATTEMPTS: u8 = 2;
 
 /// Sends one already-rendered prompt to the selected provider and returns its raw
 /// text reply. Both `project_naming` and `session_naming` implement this
-/// purely so tests can inject a fake generator without real HTTP; production
+/// purely so tests can inject a fake generator without real HTTP;
 /// production code uses the settings-backed provider adapter below.
 pub trait PromptCompletionClient {
     fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError>;
@@ -563,6 +563,7 @@ mod tests {
             "title",
         )
         .unwrap();
+        assert_eq!(result.icon, "🔐");
         assert_eq!(result.short, "Auth Bug");
         assert_eq!(result.long, "Fix the login authentication bug today");
     }
@@ -584,9 +585,12 @@ mod tests {
             )
         };
 
+        // "icon" is present in every fixture below so each assertion fails
+        // on the out-of-bounds field it is named for, rather than
+        // short-circuiting on the unrelated missing-icon check.
         let (short, long) = bounds();
         assert!(parse_dual_bounded_word_json(
-            r#"{"short":"Auth","long":"Fix the login authentication bug today"}"#,
+            r#"{"icon":"🔐","short":"Auth","long":"Fix the login authentication bug today"}"#,
             short,
             long,
             "title",
@@ -594,9 +598,13 @@ mod tests {
         .is_err());
 
         let (short, long) = bounds();
-        assert!(
-            parse_dual_bounded_word_json(r#"{"short":"Auth Bug"}"#, short, long, "title").is_err()
-        );
+        assert!(parse_dual_bounded_word_json(
+            r#"{"icon":"🔐","short":"Auth Bug"}"#,
+            short,
+            long,
+            "title",
+        )
+        .is_err());
     }
 
     #[test]

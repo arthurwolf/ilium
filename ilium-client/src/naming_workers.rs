@@ -13,12 +13,14 @@
 //! explicit row action before this background boundary.
 
 use std::collections::HashSet;
+use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use ilium_core::NodeId;
 use ilium_inference::InferenceSettings;
+use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender;
 
 use crate::naming::DualTitle;
@@ -161,6 +163,39 @@ impl Drop for InferencePermit {
     }
 }
 
+/// Contains a worker body's potential panic so a single bad turn (for
+/// example a byte-slicing bug hit while scanning arbitrary terminal or
+/// transcript text) degrades to a failed result instead of silently
+/// dropping the worker's completion event. A dropped event would leave the
+/// matching `*_in_flight` guard set forever, permanently disabling that
+/// naming feature for the rest of the client's run -- mirrors
+/// `search_workers::start`'s containment of the same risk.
+fn catch_worker_panic<T>(
+    worker_name: &str,
+    body: impl FnOnce() -> anyhow::Result<T> + UnwindSafe,
+) -> anyhow::Result<T> {
+    panic::catch_unwind(body).unwrap_or_else(|panic_payload| {
+        Err(anyhow::anyhow!(
+            "{worker_name} worker panicked: {}",
+            panic_payload_message(&panic_payload)
+        ))
+    })
+}
+
+/// Extracts a human-readable message from a caught panic payload.
+/// `std::panic!` payloads are almost always `&str` or `String`; anything
+/// else still logs usefully rather than silently swallowing the panic's
+/// presence.
+fn panic_payload_message(panic_payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = panic_payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = panic_payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "non-string panic payload".to_string()
+}
+
 impl NamingWorkers {
     pub fn new(
         events_tx: Sender<NamingWorkerEvent>,
@@ -193,8 +228,13 @@ impl NamingWorkers {
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            // Background inference must never compete with the render loop
+            // for CPU -- same convention as `search_workers::start`.
+            lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
-            let result = crate::project_naming::bootstrap_project_name(&cwd, &inference_settings);
+            let result = catch_worker_panic("project name", || {
+                crate::project_naming::bootstrap_project_name(&cwd, &inference_settings)
+            });
             // `blocking_send` (not the async `send`) since this closure
             // runs on a plain `std::thread`, not a tokio task -- exactly
             // the case that method exists for. It only ever actually
@@ -230,13 +270,28 @@ impl NamingWorkers {
         let provider = inference_settings.selected_provider;
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            // See `spawn_project_name_worker` on why every naming worker
+            // thread lowers its own scheduling priority first.
+            lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
             let started_at = Instant::now();
-            let trace = crate::session_naming::infer_pane_title_with_trace(
-                &inference_settings,
-                &home,
-                &input,
-            );
+            let trace = panic::catch_unwind(AssertUnwindSafe(|| {
+                crate::session_naming::infer_pane_title_with_trace(
+                    &inference_settings,
+                    &home,
+                    &input,
+                )
+            }))
+            .unwrap_or_else(|panic_payload| {
+                crate::session_naming::SessionTitleInferenceTrace {
+                    rendered_prompt: None,
+                    raw_response: None,
+                    result: Err(anyhow::anyhow!(
+                        "session title worker panicked: {}",
+                        panic_payload_message(&panic_payload)
+                    )),
+                }
+            });
             let elapsed = started_at.elapsed();
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
@@ -277,8 +332,13 @@ impl NamingWorkers {
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            // See `spawn_project_name_worker` on why every naming worker
+            // thread lowers its own scheduling priority first.
+            lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
-            let result = crate::terminal_naming::infer_terminal_title(&inference_settings, &input);
+            let result = catch_worker_panic("terminal title", || {
+                crate::terminal_naming::infer_terminal_title(&inference_settings, &input)
+            });
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
             let _ =
@@ -303,10 +363,14 @@ impl NamingWorkers {
         let settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            // See `spawn_project_name_worker` on why every naming worker
+            // thread lowers its own scheduling priority first.
+            lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
             let provider = settings.selected_provider;
             let started_at = std::time::Instant::now();
-            let result = crate::inference_test::run(&settings);
+            let result =
+                catch_worker_panic("inference test", || crate::inference_test::run(&settings));
             let _ = events_tx.blocking_send(NamingWorkerEvent::InferenceTest {
                 provider,
                 elapsed: started_at.elapsed(),
@@ -332,6 +396,9 @@ impl NamingWorkers {
         settings.selected_provider = provider;
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
+            // See `spawn_project_name_worker` on why every naming worker
+            // thread lowers its own scheduling priority first.
+            lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
             let endpoint = match provider {
                 ilium_inference::InferenceProviderKind::KiloGateway => {
@@ -344,9 +411,11 @@ impl NamingWorkers {
                 _ => provider.label().to_string(),
             };
             let started_at = std::time::Instant::now();
-            let result = ilium_inference::provider_from_settings(&settings)
-                .list_models()
-                .map_err(anyhow::Error::from);
+            let result = catch_worker_panic("model discovery", || {
+                ilium_inference::provider_from_settings(&settings)
+                    .list_models()
+                    .map_err(anyhow::Error::from)
+            });
             let _ = events_tx.blocking_send(NamingWorkerEvent::ProviderModels {
                 provider,
                 endpoint,
@@ -387,14 +456,25 @@ impl NamingWorkers {
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         std::thread::spawn(move || {
-            crate::restructure::resolve_content_extracts(&mut contexts, &home, &project_cwd);
-            let _permit = concurrency_limiter.acquire();
-            let result = crate::restructure::infer_restructure_plan_with_protected_splits(
-                &inference_settings,
-                &contexts,
-                &current_structure,
-                &protected_split_views,
-            );
+            // Lowered before `resolve_content_extracts`'s bulk transcript
+            // reads, not just the LLM call -- see `spawn_project_name_worker`.
+            lower_current_thread(WorkerPriority::BelowNormal);
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                crate::restructure::resolve_content_extracts(&mut contexts, &home, &project_cwd);
+                let _permit = concurrency_limiter.acquire();
+                crate::restructure::infer_restructure_plan_with_protected_splits(
+                    &inference_settings,
+                    &contexts,
+                    &current_structure,
+                    &protected_split_views,
+                )
+            }))
+            .unwrap_or_else(|panic_payload| {
+                Err(anyhow::anyhow!(
+                    "restructure worker panicked: {}",
+                    panic_payload_message(&panic_payload)
+                ))
+            });
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
             let _ =
