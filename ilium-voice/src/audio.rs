@@ -29,6 +29,7 @@ pub(crate) struct AudioEngine {
     playback_samples: Arc<Mutex<VecDeque<f32>>>,
     played_output_frames: Arc<AtomicU64>,
     output_sample_rate: u32,
+    output_sample_aligner: Pcm16SampleAligner,
     output_resampler: StreamingLinearResampler,
     output_volume: f32,
 }
@@ -104,6 +105,7 @@ impl AudioEngine {
             playback_samples,
             played_output_frames,
             output_sample_rate,
+            output_sample_aligner: Pcm16SampleAligner::default(),
             output_resampler: StreamingLinearResampler::new(
                 REALTIME_SAMPLE_RATE,
                 output_sample_rate,
@@ -114,6 +116,19 @@ impl AudioEngine {
 
     pub(crate) async fn next_capture(&mut self) -> Option<CapturedAudio> {
         self.capture_receiver.recv().await
+    }
+
+    /// Returns every capture frame already queued by the device callback
+    /// without waiting for more. Push-to-talk release must flush these tail
+    /// frames to the provider before committing the input buffer; otherwise
+    /// the end of the utterance is dropped from the committed turn and the
+    /// stale frames leak into the next turn's buffer instead.
+    pub(crate) fn drain_pending_captures(&mut self) -> Vec<CapturedAudio> {
+        let mut pending = Vec::new();
+        while let Ok(capture) = self.capture_receiver.try_recv() {
+            pending.push(capture);
+        }
+        pending
     }
 
     pub(crate) fn set_capture_enabled(&self, is_enabled: bool) {
@@ -127,13 +142,24 @@ impl AudioEngine {
     /// samples would keep incrementing `played_output_frames` after the
     /// reset below, misattributing the old item's playback time to the new
     /// item's `audio_end_ms` on a later `conversation.item.truncate`.
-    pub(crate) fn begin_response_audio(&self) {
+    pub(crate) fn begin_response_audio(&mut self) {
         lock_recovering_poison(&self.playback_samples).clear();
         self.played_output_frames.store(0, Ordering::Release);
+        self.reset_output_pipeline();
+    }
+
+    /// Discards the previous item's in-flight conversion state: a dangling
+    /// half-sample byte and the resampler's buffered tail both belong to the
+    /// item that just ended, and letting either bleed into the next item
+    /// would corrupt (byte-shift) or prepend stale audio to its first delta.
+    fn reset_output_pipeline(&mut self) {
+        self.output_sample_aligner.reset();
+        self.output_resampler =
+            StreamingLinearResampler::new(REALTIME_SAMPLE_RATE, self.output_sample_rate);
     }
 
     pub(crate) fn enqueue_realtime_pcm16(&mut self, bytes: &[u8]) {
-        let input_samples = pcm16_le_to_f32(bytes);
+        let input_samples = self.output_sample_aligner.process(bytes);
         let mut output_samples = self.output_resampler.process(&input_samples);
         for sample in &mut output_samples {
             *sample *= self.output_volume;
@@ -152,9 +178,10 @@ impl AudioEngine {
 
     /// Stops pending playback and returns how many milliseconds were actually
     /// emitted to the device for the current response item.
-    pub(crate) fn interrupt_playback(&self) -> u64 {
+    pub(crate) fn interrupt_playback(&mut self) -> u64 {
         lock_recovering_poison(&self.playback_samples).clear();
         let played_frames = self.played_output_frames.swap(0, Ordering::AcqRel);
+        self.reset_output_pipeline();
         played_frames.saturating_mul(1_000) / u64::from(self.output_sample_rate)
     }
 }
@@ -294,6 +321,12 @@ where
                     return;
                 }
 
+                // Dropping on a full channel is deliberate realtime behavior:
+                // the device callback must never block, and losing the newest
+                // frame under consumer stall beats stalling capture. A closed
+                // channel means the session is shutting down and this stream
+                // is about to be dropped, so that error carries no signal
+                // either.
                 let _ = capture_sender.try_send(CapturedAudio {
                     pcm16_le: f32_to_pcm16_le(&converted),
                 });
@@ -415,6 +448,48 @@ pub(crate) fn pcm16_le_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+/// Re-aligns a streamed PCM16-LE byte sequence to sample boundaries across
+/// arbitrary chunk splits. Network audio deltas are not guaranteed to end on
+/// a 16-bit sample boundary; without carrying the dangling byte to the next
+/// chunk, `chunks_exact(2)` would silently drop it and decode the entire
+/// following chunk one byte out of phase, which plays as loud noise.
+#[derive(Debug, Default)]
+struct Pcm16SampleAligner {
+    pending_byte: Option<u8>,
+}
+
+impl Pcm16SampleAligner {
+    /// Decodes every complete sample available once `bytes` is appended to
+    /// the carried remainder, keeping any new dangling byte for the next call.
+    fn process(&mut self, bytes: &[u8]) -> Vec<f32> {
+        // Only allocate a joined buffer when a byte was actually carried.
+        let joined_storage;
+        let aligned_bytes = match self.pending_byte.take() {
+            Some(carried_byte) => {
+                let mut joined = Vec::with_capacity(bytes.len() + 1);
+                joined.push(carried_byte);
+                joined.extend_from_slice(bytes);
+                joined_storage = joined;
+                joined_storage.as_slice()
+            }
+            None => bytes,
+        };
+
+        if aligned_bytes.len() % 2 == 1 {
+            self.pending_byte = aligned_bytes.last().copied();
+        }
+
+        // `pcm16_le_to_f32` uses `chunks_exact(2)`, which ignores exactly the
+        // dangling byte stored above.
+        pcm16_le_to_f32(aligned_bytes)
+    }
+
+    /// Drops any carried byte; the stream it belonged to has ended.
+    fn reset(&mut self) {
+        self.pending_byte = None;
+    }
+}
+
 /// Chunk-boundary-independent linear resampler. It deliberately keeps a
 /// source sample between calls, preventing clicks and drift between CPAL
 /// callbacks without coupling the API to a particular DSP library.
@@ -483,6 +558,42 @@ mod tests {
         assert_eq!(decoded[2], 0.0);
         assert!((decoded[3] - 0.5).abs() < 0.0001);
         assert!((decoded[4] - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn pcm16_sample_aligner_is_independent_of_chunk_boundaries() {
+        let samples = (0..500)
+            .map(|index| ((index as f32) / 15.0).sin())
+            .collect::<Vec<_>>();
+        let encoded = f32_to_pcm16_le(&samples);
+        let expected = pcm16_le_to_f32(&encoded);
+
+        // Odd chunk sizes force a carried byte on every call; the prime 7
+        // additionally walks the split point through every byte offset.
+        for chunk_size in [1_usize, 3, 7, 64, 129] {
+            let mut aligner = Pcm16SampleAligner::default();
+            let actual = encoded
+                .chunks(chunk_size)
+                .flat_map(|chunk| aligner.process(chunk))
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual, expected, "mismatch for chunk_size={chunk_size}");
+        }
+    }
+
+    #[test]
+    fn pcm16_sample_aligner_reset_drops_the_carried_byte() {
+        let mut aligner = Pcm16SampleAligner::default();
+
+        // One dangling byte: no complete sample yet, byte is carried.
+        assert!(aligner.process(&[0x12]).is_empty());
+        aligner.reset();
+
+        // After reset the next two bytes must decode as one whole sample
+        // instead of pairing with the stale carried byte.
+        let decoded = aligner.process(&[0x00, 0x40]);
+        assert_eq!(decoded.len(), 1);
+        assert!((decoded[0] - f32::from(0x4000_i16) / f32::from(i16::MAX)).abs() < 0.0001);
     }
 
     #[test]

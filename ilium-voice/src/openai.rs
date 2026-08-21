@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::http::{header, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::audio::AudioEngine;
+use crate::audio::{AudioEngine, CapturedAudio};
 use crate::{
     VoiceCommand, VoiceConnectionState, VoiceError, VoiceEvent, VoiceInputMode, VoiceRuntimeConfig,
     VoiceToolDefinition, VoiceToolInvocation, VoiceToolOutput,
@@ -236,11 +236,7 @@ async fn run_connected_session(
             }
             capture = audio.next_capture() => {
                 let capture = capture.ok_or(VoiceError::SessionEnded)?;
-                let encoded = base64::engine::general_purpose::STANDARD.encode(capture.pcm16_le);
-                send_json(socket, &json!({
-                    "type": "input_audio_buffer.append",
-                    "audio": encoded,
-                })).await?;
+                append_audio_capture(socket, capture).await?;
             }
             message = socket.next() => {
                 let message = message
@@ -269,7 +265,7 @@ async fn handle_command(
     config: &VoiceRuntimeConfig,
     state: &mut SessionState,
     socket: &mut RealtimeSocket,
-    audio: &AudioEngine,
+    audio: &mut AudioEngine,
     event_sender: &mpsc::Sender<VoiceEvent>,
     command: VoiceCommand,
 ) -> Result<CommandOutcome, VoiceError> {
@@ -348,6 +344,15 @@ async fn handle_command(
         VoiceCommand::StopPushToTalk => {
             if matches!(config.input_mode, VoiceInputMode::PushToTalk) {
                 audio.set_capture_enabled(false);
+                // The device callback delivers frames through a channel that
+                // only the session select loop drains, so at key-release time
+                // the tail of the utterance may still be queued locally. Flush
+                // it to the provider before committing; otherwise the commit
+                // cuts off the end of what the user said and the stale frames
+                // land in the next turn's buffer instead.
+                for capture in audio.drain_pending_captures() {
+                    append_audio_capture(socket, capture).await?;
+                }
                 send_json(socket, &json!({ "type": "input_audio_buffer.commit" })).await?;
                 send_json(socket, &json!({ "type": "response.create" })).await?;
                 // Mirrors SendText's eager update: without this, a StartPushToTalk
@@ -390,6 +395,23 @@ async fn submit_tool_outputs(
     }
 
     Ok(())
+}
+
+/// Encodes one captured microphone frame and appends it to the provider's
+/// input audio buffer.
+async fn append_audio_capture(
+    socket: &mut RealtimeSocket,
+    capture: CapturedAudio,
+) -> Result<(), VoiceError> {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(capture.pcm16_le);
+    send_json(
+        socket,
+        &json!({
+            "type": "input_audio_buffer.append",
+            "audio": encoded,
+        }),
+    )
+    .await
 }
 
 async fn handle_provider_event(

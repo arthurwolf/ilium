@@ -118,10 +118,6 @@ impl VoiceService {
         self.event_receiver.recv().await
     }
 
-    pub fn try_next_event(&mut self) -> Option<VoiceEvent> {
-        self.event_receiver.try_recv().ok()
-    }
-
     /// Stops the actor and waits for every owned stream and task to drop.
     pub async fn shutdown(mut self) {
         let _ = self.shutdown_sender.send(true);
