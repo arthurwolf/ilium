@@ -87,6 +87,7 @@ impl TerminalGuard {
                     DisableFocusChange,
                     DisableMouseCapture,
                     DisableBracketedPaste,
+                    EnableLineWrap,
                     LeaveAlternateScreen
                 );
                 let _ = disable_raw_mode();

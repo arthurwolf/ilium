@@ -56,7 +56,7 @@ pub fn link_at(
         }
         let value = token
             .trim_start_matches(|character: char| {
-                matches!(character, ')' | ']' | '}' | ',' | ';' | '"' | '\'' | '`')
+                matches!(character, '(' | '[' | '{' | ',' | ';' | '"' | '\'' | '`')
             })
             .trim_end_matches(|character: char| {
                 matches!(
@@ -87,7 +87,7 @@ pub fn link_at(
 /// preceding the click point are accounted for rather than counted as a
 /// single byte each. Clicking either half of a double-width character
 /// resolves to that character's own start, matching the token it belongs to.
-fn cell_column_to_byte_offset(line: &str, column: usize) -> usize {
+pub(crate) fn cell_column_to_byte_offset(line: &str, column: usize) -> usize {
     let mut cell = 0;
     for (byte_offset, character) in line.char_indices() {
         let width = UnicodeWidthChar::width(character).unwrap_or(1);
@@ -235,6 +235,24 @@ mod tests {
                 line: None,
                 column: None,
             })
+        );
+    }
+
+    #[test]
+    fn strips_a_matching_opening_bracket_from_a_wrapped_url() {
+        // "(https://example.test/docs)": the opening '(' must be stripped
+        // from the token's start (matching the closing ')' already
+        // stripped from its end), or the leftover '(' prefix would make
+        // the URL fail its "https://" prefix check and go undetected.
+        let link = link_at(
+            "see (https://example.test/docs) for details",
+            6,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::Url("https://example.test/docs".to_string()))
         );
     }
 

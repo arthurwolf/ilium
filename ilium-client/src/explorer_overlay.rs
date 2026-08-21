@@ -62,6 +62,25 @@ pub enum ExplorerSelection {
     Folder,
 }
 
+/// What the picker did with one input event. Callers close the overlay only
+/// on `Picked` (routing the path onward) or on an `Ignored` Escape press --
+/// `Consumed` exists so an event the overlay already acted on (most
+/// importantly Esc closing the manual-path field, which its hint promises
+/// "return[s] to browser") is never double-interpreted by the caller as
+/// "close the whole picker".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplorerOutcome {
+    /// The event chose a file or folder; the caller closes the overlay and
+    /// routes the path to the appropriate pane/tree action.
+    Picked(PathBuf),
+    /// The overlay handled the event itself (selection, navigation, the
+    /// modal manual-path field); the overlay stays open.
+    Consumed,
+    /// The event means nothing to the overlay; the caller may apply its own
+    /// bindings, e.g. Esc closing the picker.
+    Ignored,
+}
+
 impl ExplorerOverlay {
     /// Opens the picker rooted at `dir` (the originating pane's cwd).
     pub fn open_at(dir: &Path) -> anyhow::Result<Self> {
@@ -129,11 +148,19 @@ impl ExplorerOverlay {
     }
 
     /// Moves the selection by `delta` rows (negative = up), clamped to the
-    /// listing's bounds, and scrolls just enough to keep it in view.
+    /// listing's bounds, and scrolls just enough to keep it in view. Also
+    /// returns keyboard focus to the row list -- every operation that moves
+    /// the row cursor (this one, `select_first`, `select_last`) must clear
+    /// `folder_action_focused` here rather than at each call site, or a
+    /// cursor move that forgets to clear it (as PageUp/PageDown/Home/End
+    /// once did) leaves the bottom action highlighted while Enter silently
+    /// confirms the folder instead of acting on the row the user just
+    /// landed on.
     fn move_selection(&mut self, delta: i64, viewport_rows: usize) {
         if self.entries.is_empty() {
             return;
         }
+        self.folder_action_focused = false;
         let last = self.entries.len() - 1;
         let next = (self.selected as i64 + delta).clamp(0, last as i64);
         self.selected = next as usize;
@@ -147,6 +174,7 @@ impl ExplorerOverlay {
     }
 
     fn select_first(&mut self) {
+        self.folder_action_focused = false;
         self.selected = 0;
         self.offset = 0;
     }
@@ -155,6 +183,7 @@ impl ExplorerOverlay {
         if self.entries.is_empty() {
             return;
         }
+        self.folder_action_focused = false;
         self.selected = self.entries.len() - 1;
         self.offset = self.selected.saturating_sub(viewport_rows.max(1) - 1);
     }
@@ -214,15 +243,15 @@ impl ExplorerOverlay {
         Ok(())
     }
 
-    /// Feeds a crossterm event to the picker. Returns `Some(path)` when the
-    /// event chooses a file or folder -- callers close the overlay and route
-    /// that path to the appropriate pane/tree action. Returns `None` for
-    /// every other event, including selection and navigation.
-    pub fn handle(&mut self, event: &Event, screen_area: Rect) -> anyhow::Result<Option<PathBuf>> {
+    /// Feeds a crossterm event to the picker. See `ExplorerOutcome` for the
+    /// contract: `Picked` closes the overlay with a chosen path, `Consumed`
+    /// keeps it open, and `Ignored` lets the caller apply its own bindings
+    /// (Esc closing the picker being the one that matters).
+    pub fn handle(&mut self, event: &Event, screen_area: Rect) -> anyhow::Result<ExplorerOutcome> {
         match event {
             Event::Key(key) => self.handle_key(key, screen_area),
             Event::Mouse(mouse) => self.handle_mouse(*mouse, screen_area),
-            _ => Ok(None),
+            _ => Ok(ExplorerOutcome::Ignored),
         }
     }
 
@@ -244,11 +273,15 @@ impl ExplorerOverlay {
         (!entry.is_dir && entry.name != "..").then(|| entry.path.clone())
     }
 
-    fn handle_key(&mut self, key: &KeyEvent, screen_area: Rect) -> anyhow::Result<Option<PathBuf>> {
+    fn handle_key(&mut self, key: &KeyEvent, screen_area: Rect) -> anyhow::Result<ExplorerOutcome> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            return Ok(None);
+            return Ok(ExplorerOutcome::Ignored);
         }
         if let Some(manual_path) = self.manual_path.as_mut() {
+            // The manual-path field is modal: every key press belongs to it
+            // while it's open (its hint promises "Esc return to browser"),
+            // so nothing here may report `Ignored` -- an `Ignored` Esc would
+            // let the caller close the whole picker instead.
             match key.code {
                 KeyCode::Esc => self.manual_path = None,
                 KeyCode::Enter => {
@@ -266,7 +299,7 @@ impl ExplorerOverlay {
                     }
                     self.navigate_to(canonical)?;
                     self.manual_path = None;
-                    return Ok(None);
+                    return Ok(ExplorerOutcome::Consumed);
                 }
                 KeyCode::Backspace => {
                     manual_path.pop();
@@ -279,7 +312,7 @@ impl ExplorerOverlay {
                 }
                 _ => {}
             }
-            return Ok(None);
+            return Ok(ExplorerOutcome::Consumed);
         }
         let viewport_rows = usize::from(layout_for(screen_area).rows_area.height);
         match key.code {
@@ -299,39 +332,33 @@ impl ExplorerOverlay {
                 self.folder_action_focused = false;
             }
             KeyCode::Enter | KeyCode::Char(' ') if self.folder_action_focused => {
-                return Ok(self.confirm_current_folder());
+                return Ok(confirmation_outcome(self.confirm_current_folder()));
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(self.confirm_current_folder());
+                return Ok(confirmation_outcome(self.confirm_current_folder()));
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.folder_action_focused = false;
-                self.move_selection(-1, viewport_rows);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.folder_action_focused = false;
-                self.move_selection(1, viewport_rows);
-            }
+            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1, viewport_rows),
+            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1, viewport_rows),
             KeyCode::PageUp => self.move_selection(-(viewport_rows as i64), viewport_rows),
             KeyCode::PageDown => self.move_selection(viewport_rows as i64, viewport_rows),
             KeyCode::Home => self.select_first(),
             KeyCode::End => self.select_last(viewport_rows),
             KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => self.navigate_up()?,
-            KeyCode::Enter => return self.activate(),
+            KeyCode::Enter => return self.activate().map(activation_outcome),
             KeyCode::Right | KeyCode::Char('l') if self.selection == ExplorerSelection::Folder => {
                 self.navigate_selected_directory()?
             }
-            KeyCode::Right | KeyCode::Char('l') => return self.activate(),
-            _ => {}
+            KeyCode::Right | KeyCode::Char('l') => return self.activate().map(activation_outcome),
+            _ => return Ok(ExplorerOutcome::Ignored),
         }
-        Ok(None)
+        Ok(ExplorerOutcome::Consumed)
     }
 
     fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
         screen_area: Rect,
-    ) -> anyhow::Result<Option<PathBuf>> {
+    ) -> anyhow::Result<ExplorerOutcome> {
         // The manual-path text field is a modal sub-state: `handle_key`
         // routes every key into editing it while it's open. Mouse events
         // must be gated the same way, or a click/scroll landing on the
@@ -339,37 +366,59 @@ impl ExplorerOverlay {
         // or, worse, activate a row and close the picker -- silently
         // discarding whatever path the user was mid-way through typing.
         if self.manual_path.is_some() {
-            return Ok(None);
+            return Ok(ExplorerOutcome::Consumed);
         }
         let layout = layout_for(screen_area);
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.move_selection(-3, usize::from(layout.rows_area.height));
+                Ok(ExplorerOutcome::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.move_selection(3, usize::from(layout.rows_area.height));
+                Ok(ExplorerOutcome::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = Position::new(mouse.column, mouse.row);
                 if self.selection == ExplorerSelection::Folder
                     && layout.action_area.contains(position)
                 {
-                    return Ok(self.confirm_current_folder());
+                    return Ok(confirmation_outcome(self.confirm_current_folder()));
                 }
                 if let Some(index) = row_at(&layout, self.offset, self.entries.len(), position) {
                     if self.selection == ExplorerSelection::File && index == self.selected {
-                        return self.activate();
+                        return self.activate().map(activation_outcome);
                     }
                     self.selected = index;
                     self.folder_action_focused = false;
                     if self.selection == ExplorerSelection::Folder {
-                        return self.navigate_selected_directory().map(|()| None);
+                        self.navigate_selected_directory()?;
                     }
+                    return Ok(ExplorerOutcome::Consumed);
                 }
+                Ok(ExplorerOutcome::Ignored)
             }
-            _ => {}
+            _ => Ok(ExplorerOutcome::Ignored),
         }
-        Ok(None)
+    }
+}
+
+/// Maps `confirm_current_folder`'s result to an outcome: the confirmation
+/// gestures are picker chrome, so even when they yield no path (a File
+/// picker receiving Ctrl+Enter) they count as handled, not `Ignored`.
+fn confirmation_outcome(confirmed: Option<PathBuf>) -> ExplorerOutcome {
+    match confirmed {
+        Some(path) => ExplorerOutcome::Picked(path),
+        None => ExplorerOutcome::Consumed,
+    }
+}
+
+/// Maps `activate`'s result to an outcome: a file pick closes the overlay,
+/// while descending into a directory (or an empty listing) keeps it open.
+fn activation_outcome(activated: Option<PathBuf>) -> ExplorerOutcome {
+    match activated {
+        Some(path) => ExplorerOutcome::Picked(path),
+        None => ExplorerOutcome::Consumed,
     }
 }
 
@@ -598,14 +647,20 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
 
     let hint = if let Some(manual_path) = &overlay.manual_path {
         format!("Path: {manual_path}_ · Enter go to folder · Esc return to browser")
-    } else if overlay.entries.is_empty() {
-        "(empty directory) · Tab action · Ctrl+Enter confirm · ←/⌫ up · Ctrl+L enter path · Esc cancel"
-            .to_string()
     } else {
-        if overlay.selection == ExplorerSelection::Folder {
-            "↑↓/j/k move · Enter/→ open · Tab action · Ctrl+Enter confirm · ←/⌫/h up · Ctrl+L path · Esc cancel".to_string()
+        // The binding list depends only on picker mode, never on whether
+        // the current directory happens to be empty -- an empty File
+        // picker still needs "Ctrl+H hidden files" (the one binding that
+        // can actually populate it), not the Folder-mode bindings.
+        let bindings = if overlay.selection == ExplorerSelection::Folder {
+            "↑↓/j/k move · Enter/→ open · Tab action · Ctrl+Enter confirm · ←/⌫/h up · Ctrl+L path · Esc cancel"
         } else {
-            "↑↓/j/k move · →/Enter/l open · right-click .md board · ←/⌫/h up · Ctrl+H hidden files · Esc cancel".to_string()
+            "↑↓/j/k move · →/Enter/l open · right-click .md board · ←/⌫/h up · Ctrl+H hidden files · Esc cancel"
+        };
+        if overlay.entries.is_empty() {
+            format!("(empty directory) · {bindings}")
+        } else {
+            bindings.to_string()
         }
     };
     frame.render_widget(
@@ -780,7 +835,11 @@ mod tests {
         let picked = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("descend should not error");
-        assert_eq!(picked, None, "descending into a directory picks nothing");
+        assert_eq!(
+            picked,
+            ExplorerOutcome::Consumed,
+            "descending into a directory picks nothing"
+        );
         assert_eq!(overlay.current_dir, dir.join("sub"));
 
         overlay.selected = overlay
@@ -791,7 +850,10 @@ mod tests {
         let picked = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("pick should not error");
-        assert_eq!(picked, Some(dir.join("sub").join("note.txt")));
+        assert_eq!(
+            picked,
+            ExplorerOutcome::Picked(dir.join("sub").join("note.txt"))
+        );
     }
 
     #[test]
@@ -810,13 +872,13 @@ mod tests {
         let descended = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("enter should descend");
-        assert_eq!(descended, None);
+        assert_eq!(descended, ExplorerOutcome::Consumed);
         assert_eq!(overlay.current_dir, dir.join("sub"));
 
         let selected = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::CONTROL), SCREEN)
             .expect("control-enter should confirm the current directory");
-        assert_eq!(selected, Some(dir.join("sub")));
+        assert_eq!(selected, ExplorerOutcome::Picked(dir.join("sub")));
 
         let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("reopen folder picker");
         overlay
@@ -825,7 +887,7 @@ mod tests {
         let selected = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("action enter should confirm the current directory");
-        assert_eq!(selected, Some(dir));
+        assert_eq!(selected, ExplorerOutcome::Picked(dir));
     }
 
     #[test]
@@ -859,7 +921,7 @@ mod tests {
         let selected = overlay
             .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("manual path should navigate to its directory");
-        assert_eq!(selected, None);
+        assert_eq!(selected, ExplorerOutcome::Consumed);
         // The overlay resolves what was typed, so the expectation is resolved
         // the same way: `%TEMP%` hands out an 8.3 short path while resolving it
         // yields the long name, and the two are the same directory.
@@ -913,7 +975,8 @@ mod tests {
             .expect("click while typing a manual path should not error");
 
         assert_eq!(
-            picked, None,
+            picked,
+            ExplorerOutcome::Consumed,
             "a background click must not activate a row while the manual path field is open"
         );
         assert_eq!(
@@ -948,7 +1011,7 @@ mod tests {
         );
         assert_eq!(
             overlay.handle(&click, SCREEN).expect("navigate to docs"),
-            None
+            ExplorerOutcome::Consumed
         );
         assert_eq!(overlay.current_dir, selected_directory);
 
@@ -961,7 +1024,7 @@ mod tests {
             overlay
                 .handle(&confirm_click, SCREEN)
                 .expect("confirm docs folder"),
-            Some(selected_directory)
+            ExplorerOutcome::Picked(selected_directory)
         );
     }
 
@@ -1019,14 +1082,18 @@ mod tests {
 
         let first_click = mouse_event(MouseEventKind::Down(MouseButton::Left), column, row);
         let picked = overlay.handle(&first_click, SCREEN).expect("click");
-        assert_eq!(picked, None, "the first click only selects the row");
+        assert_eq!(
+            picked,
+            ExplorerOutcome::Consumed,
+            "the first click only selects the row"
+        );
         assert_eq!(overlay.selected, index);
 
         let second_click = mouse_event(MouseEventKind::Down(MouseButton::Left), column, row);
         let picked = overlay.handle(&second_click, SCREEN).expect("click");
         assert_eq!(
             picked,
-            Some(dir.join("note.txt")),
+            ExplorerOutcome::Picked(dir.join("note.txt")),
             "clicking the already-selected row activates it"
         );
     }
@@ -1098,8 +1165,42 @@ mod tests {
                 SCREEN,
             )
             .expect("click outside should not error");
-        assert_eq!(picked, None);
+        assert_eq!(picked, ExplorerOutcome::Ignored);
         assert_eq!(overlay.selected, 0);
+    }
+
+    #[test]
+    fn escape_while_typing_a_manual_path_returns_to_the_browser_without_closing() {
+        let dir = scratch_dir("manual-path-escape");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+
+        overlay
+            .handle(
+                &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
+                SCREEN,
+            )
+            .expect("open manual path entry");
+        assert!(overlay.manual_path.is_some());
+
+        let outcome = overlay
+            .handle(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
+            .expect("escape should close only the manual path field");
+        assert_eq!(
+            outcome,
+            ExplorerOutcome::Consumed,
+            "the field's hint promises 'Esc return to browser', so the overlay must \
+             report the Esc as consumed -- an Ignored Esc lets the caller close the picker"
+        );
+        assert_eq!(overlay.manual_path, None);
+
+        let outcome = overlay
+            .handle(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
+            .expect("escape in the browser is the caller's to handle");
+        assert_eq!(
+            outcome,
+            ExplorerOutcome::Ignored,
+            "with no manual path field open, Esc belongs to the caller (it closes the picker)"
+        );
     }
 
     #[test]

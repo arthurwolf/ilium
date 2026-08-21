@@ -16,6 +16,7 @@ use crate::app::{
     ClientExitReason, CreateBoardState, FocusTarget, KanbanBoardRow, Mode, ProjectFolderSelection,
     SettingsState, SettingsTab, SoundRow,
 };
+use crate::explorer_overlay::ExplorerOutcome;
 use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action};
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
@@ -391,9 +392,11 @@ fn handle_board_path_picker_event(
     event: &Event,
 ) {
     match overlay.handle(event, app.layout.screen_area) {
-        Ok(Some(path)) => app.return_to_create_board(Some(path)),
-        Ok(None) if is_escape(event) => app.return_to_create_board(None),
-        Ok(None) => app.mode = Mode::BoardPathPicker(overlay),
+        Ok(ExplorerOutcome::Picked(path)) => app.return_to_create_board(Some(path)),
+        // Only an Esc the overlay did not consume (e.g. one closing its
+        // manual-path field) cancels the picker.
+        Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.return_to_create_board(None),
+        Ok(_) => app.mode = Mode::BoardPathPicker(overlay),
         Err(error) => {
             app.status_message = Some(format!("Board path picker error: {error}"));
             app.mode = Mode::BoardPathPicker(overlay);
@@ -808,17 +811,13 @@ fn handle_explorer_event(
     event: &Event,
 ) {
     match overlay.handle(event, app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             app.request_new_editor(target, path);
             app.mode = Mode::Normal;
         }
-        Ok(None) => {
-            if is_escape(event) {
-                app.mode = Mode::Normal;
-            } else {
-                app.mode = Mode::Explorer(overlay, target);
-            }
-        }
+        // Only an Esc the overlay did not consume cancels the picker.
+        Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
+        Ok(_) => app.mode = Mode::Explorer(overlay, target),
         Err(err) => {
             app.status_message = Some(format!("File picker error: {err}"));
             app.mode = Mode::Explorer(overlay, target);
@@ -856,12 +855,13 @@ fn handle_folder_explorer_event(
     event: &Event,
 ) {
     match overlay.handle(event, app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             app.request_new_folder(target, path);
             app.mode = Mode::Normal;
         }
-        Ok(None) if is_escape(event) => app.mode = Mode::Normal,
-        Ok(None) => app.mode = Mode::FolderExplorer(overlay, target),
+        // Only an Esc the overlay did not consume cancels the picker.
+        Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
+        Ok(_) => app.mode = Mode::FolderExplorer(overlay, target),
         Err(err) => {
             app.status_message = Some(format!("Folder picker error: {err}"));
             app.mode = Mode::FolderExplorer(overlay, target);
@@ -876,7 +876,7 @@ fn handle_project_folder_explorer_event(
     event: &Event,
 ) {
     match overlay.handle(event, app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             match selection {
                 ProjectFolderSelection::NewProject => app.request_new_project(path),
                 ProjectFolderSelection::ChangeProject(project_id) => {
@@ -885,8 +885,9 @@ fn handle_project_folder_explorer_event(
             }
             app.mode = Mode::Normal;
         }
-        Ok(None) if is_escape(event) => app.mode = Mode::Normal,
-        Ok(None) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
+        // Only an Esc the overlay did not consume cancels the picker.
+        Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
+        Ok(_) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
         Err(err) => {
             app.status_message = Some(format!("Project picker error: {err}"));
             app.mode = Mode::ProjectFolderExplorer(overlay, selection);
@@ -1454,8 +1455,23 @@ fn handle_prompt_queue_event(app: &mut App, mut state: Box<PromptQueueDialogStat
 
     if let Event::Paste(pasted) = event {
         if state.focus == PromptQueueFocus::Text {
-            for character in pasted.chars() {
-                state.handle_text_key(KeyCode::Char(character));
+            // CRLF/CR/LF each land as one newline, mirroring
+            // `replay_pasted_text_as_keys`: passing '\r' through as a plain
+            // character would embed literal carriage returns in the queued
+            // prompt whenever the clipboard uses Windows-style line endings.
+            let mut characters = pasted.chars().peekable();
+            while let Some(character) = characters.next() {
+                let code = match character {
+                    '\r' => {
+                        if characters.peek() == Some(&'\n') {
+                            characters.next();
+                        }
+                        KeyCode::Enter
+                    }
+                    '\n' => KeyCode::Enter,
+                    character => KeyCode::Char(character),
+                };
+                state.handle_text_key(code);
             }
         }
         app.mode = Mode::QueuePrompt(state);
@@ -1735,11 +1751,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Triggers => {
             state.selected_row = state.selected_row.saturating_sub(1);
-            let choice_count = crate::trigger_settings::TriggerEvent::ALL[state.selected_row]
-                .available_actions()
-                .len()
-                + 1;
-            state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+            if let Some(event) = crate::trigger_settings::TriggerEvent::ALL.get(state.selected_row)
+            {
+                let choice_count = event.available_actions().len() + 1;
+                state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+            }
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Triggers => {
             state.selected_row = (state.selected_row + 1).min(
@@ -1747,27 +1763,33 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     .len()
                     .saturating_sub(1),
             );
-            let choice_count = crate::trigger_settings::TriggerEvent::ALL[state.selected_row]
-                .available_actions()
-                .len()
-                + 1;
-            state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+            if let Some(event) = crate::trigger_settings::TriggerEvent::ALL.get(state.selected_row)
+            {
+                let choice_count = event.available_actions().len() + 1;
+                state.trigger_action_cursor = state.trigger_action_cursor.min(choice_count - 1);
+            }
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Triggers => {
             state.trigger_action_cursor = state.trigger_action_cursor.saturating_sub(1);
         }
         KeyCode::Right | KeyCode::Char('l') if state.tab == SettingsTab::Triggers => {
-            let event = crate::trigger_settings::TriggerEvent::ALL[state.selected_row];
-            state.trigger_action_cursor =
-                (state.trigger_action_cursor + 1).min(event.available_actions().len());
+            if let Some(event) = crate::trigger_settings::TriggerEvent::ALL.get(state.selected_row)
+            {
+                state.trigger_action_cursor =
+                    (state.trigger_action_cursor + 1).min(event.available_actions().len());
+            }
         }
         KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Triggers => {
-            let event = crate::trigger_settings::TriggerEvent::ALL[state.selected_row];
-            let action = state
-                .trigger_action_cursor
-                .checked_sub(1)
-                .and_then(|index| event.available_actions().get(index).copied());
-            app.settings_toggle_trigger_action(event, action);
+            if let Some(event) = crate::trigger_settings::TriggerEvent::ALL
+                .get(state.selected_row)
+                .copied()
+            {
+                let action = state
+                    .trigger_action_cursor
+                    .checked_sub(1)
+                    .and_then(|index| event.available_actions().get(index).copied());
+                app.settings_toggle_trigger_action(event, action);
+            }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::VoiceControl => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -2674,6 +2696,29 @@ mod indent_outdent_tests {
             panic!("pasting text should keep the rename prompt open");
         };
         assert_eq!(state.buf, "before-café 世界");
+    }
+
+    #[test]
+    fn prompt_queue_paste_normalizes_crlf_to_single_newlines() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.mode = Mode::QueuePrompt(Box::new(PromptQueueDialogState::new(pane_id)));
+
+        handle_event(
+            &mut app,
+            Event::Paste("one\r\ntwo\rthree\nfour".to_string()),
+        );
+
+        let Mode::QueuePrompt(state) = &app.mode else {
+            panic!("pasting text should keep the prompt-queue dialog open");
+        };
+        // Every line-ending flavor collapses to exactly one '\n' -- no
+        // literal carriage returns may survive into the queued prompt.
+        assert_eq!(state.text.buf, "one\ntwo\nthree\nfour");
     }
 
     #[test]

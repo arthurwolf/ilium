@@ -18,7 +18,7 @@ use crate::agent_toolbar::AgentToolbarAction;
 use crate::app::{
     AgentToolbarModelSubmenuState, App, ContextMenu, CreateGroupState, Mode, RightPanelTarget,
 };
-use crate::explorer_overlay::ExplorerOverlay;
+use crate::explorer_overlay::{ExplorerOutcome, ExplorerOverlay};
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
@@ -118,6 +118,26 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         )
     {
         app.handle_chatroom_mouse(mouse, position);
+        return;
+    }
+
+    // A drag gesture that began on a tree row likewise retains ownership
+    // wherever the pointer travels (keyed off the press itself, so even the
+    // first drag event after the press cannot slip through): drag motion
+    // outside the tree must not leak into a terminal pane as PTY mouse
+    // input, and a release outside the tree is the drag's cancellation --
+    // never a click on whatever surface (pane, voice control) sits there.
+    if app.drag_source().is_some()
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+        )
+    {
+        if app.layout.tree_area.contains(position) {
+            handle_tree_mouse(app, mouse, position);
+        } else if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+            app.clear_tree_drag();
+        }
         return;
     }
 
@@ -252,8 +272,8 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             }
             Mode::BoardPathPicker(mut overlay) => {
                 match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-                    Ok(Some(path)) => app.return_to_create_board(Some(path)),
-                    Ok(None) => app.mode = Mode::BoardPathPicker(overlay),
+                    Ok(ExplorerOutcome::Picked(path)) => app.return_to_create_board(Some(path)),
+                    Ok(_) => app.mode = Mode::BoardPathPicker(overlay),
                     Err(error) => {
                         app.status_message = Some(format!("Board path picker error: {error}"));
                         app.mode = Mode::BoardPathPicker(overlay);
@@ -1619,11 +1639,11 @@ fn handle_explorer_mouse(
         }
     }
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             app.request_new_editor(target, path);
             app.mode = Mode::Normal;
         }
-        Ok(None) => app.mode = Mode::Explorer(overlay, target),
+        Ok(_) => app.mode = Mode::Explorer(overlay, target),
         Err(err) => {
             app.status_message = Some(format!("File picker error: {err}"));
             app.mode = Mode::Explorer(overlay, target);
@@ -1657,11 +1677,11 @@ fn handle_folder_explorer_mouse(
     mouse: MouseEvent,
 ) {
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             app.request_new_folder(target, path);
             app.mode = Mode::Normal;
         }
-        Ok(None) => app.mode = Mode::FolderExplorer(overlay, target),
+        Ok(_) => app.mode = Mode::FolderExplorer(overlay, target),
         Err(err) => {
             app.status_message = Some(format!("Folder picker error: {err}"));
             app.mode = Mode::FolderExplorer(overlay, target);
@@ -1676,7 +1696,7 @@ fn handle_project_folder_explorer_mouse(
     mouse: MouseEvent,
 ) {
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
-        Ok(Some(path)) => {
+        Ok(ExplorerOutcome::Picked(path)) => {
             match selection {
                 crate::app::ProjectFolderSelection::NewProject => app.request_new_project(path),
                 crate::app::ProjectFolderSelection::ChangeProject(project_id) => {
@@ -1685,7 +1705,7 @@ fn handle_project_folder_explorer_mouse(
             }
             app.mode = Mode::Normal;
         }
-        Ok(None) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
+        Ok(_) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
         Err(err) => {
             app.status_message = Some(format!("Project picker error: {err}"));
             app.mode = Mode::ProjectFolderExplorer(overlay, selection);

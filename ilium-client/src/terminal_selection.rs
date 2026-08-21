@@ -88,11 +88,26 @@ pub fn text(screen: &vt100::Screen, selection: &TerminalSelection) -> Option<Str
         return None;
     }
     let (start, end) = selection.normalized();
-    let (_, cols) = screen.size();
+    let (rows, cols) = screen.size();
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    // A selection's cell coordinates are captured once, at drag time, but
+    // `screen` here reflects whatever the pane's size is *now* -- a pane
+    // resize between the drag and this call can shrink the screen out from
+    // under a stale coordinate. `contents_between` computes `cols -
+    // start_col` internally with no bounds check, so an unclamped
+    // out-of-range `start_col` underflows and panics; clamp every
+    // coordinate to the live screen first.
+    let last_row = rows - 1;
+    let last_col = cols - 1;
+    let start_row = start.row.min(last_row);
+    let start_col = start.column.min(last_col);
+    let end_row = end.row.min(last_row);
     // `contents_between`'s `end_col` is exclusive -- without the +1 the cell
     // the cursor is actually sitting on would be dropped from the copy.
-    let end_col = end.column.saturating_add(1).min(cols);
-    Some(screen.contents_between(start.row, start.column, end.row, end_col))
+    let end_col = end.column.min(last_col).saturating_add(1).min(cols);
+    Some(screen.contents_between(start_row, start_col, end_row, end_col))
 }
 
 /// Draws the active selection as reversed-video cells over `content_area`.
@@ -110,7 +125,6 @@ pub fn render_highlight(
     let (start, end) = selection.normalized();
     frame.render_widget(
         SelectionHighlight {
-            content_area,
             screen_size,
             start,
             end,
@@ -120,20 +134,25 @@ pub fn render_highlight(
 }
 
 struct SelectionHighlight {
-    content_area: Rect,
     screen_size: (u16, u16),
     start: SelectionPoint,
     end: SelectionPoint,
 }
 
 impl Widget for SelectionHighlight {
-    fn render(self, _area: Rect, buf: &mut Buffer) {
-        let (rows, cols) = self.screen_size;
-        if rows == 0 || cols == 0 {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let (screen_rows, screen_cols) = self.screen_size;
+        if screen_rows == 0 || screen_cols == 0 || area.width == 0 || area.height == 0 {
             return;
         }
-        let last_row = rows - 1;
-        let last_col = cols - 1;
+        // `screen_size` describes the pane's PTY/vt100 screen, which the
+        // server resizes independently of this already-relaid-out `area`
+        // while a resize round-trips over IPC -- momentarily letting
+        // `screen_size` exceed `area`. Bound every cell by both so a stale,
+        // oversized `screen_size` can never paint into a neighboring pane or
+        // a border.
+        let last_row = screen_rows.min(area.height) - 1;
+        let last_col = screen_cols.min(area.width) - 1;
         let end_row = self.end.row.min(last_row);
         for row in self.start.row..=end_row {
             let row_start = if row == self.start.row {
@@ -147,10 +166,8 @@ impl Widget for SelectionHighlight {
                 last_col
             };
             for column in row_start..=row_end {
-                let position = Position::new(
-                    self.content_area.x.saturating_add(column),
-                    self.content_area.y.saturating_add(row),
-                );
+                let position =
+                    Position::new(area.x.saturating_add(column), area.y.saturating_add(row));
                 if let Some(cell) = buf.cell_mut(position) {
                     cell.modifier.insert(Modifier::REVERSED);
                 }

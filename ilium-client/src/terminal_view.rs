@@ -363,10 +363,18 @@ impl TerminalView {
     }
 
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
+        // `column` is a terminal *cell* index (as reported by the mouse
+        // event), while `label.len()`/`line.find` operate in bytes. Agent
+        // CLI panes routinely prefix a link's label with a multi-byte status
+        // glyph (`⏺`, `⎿`, `→`), so comparing a raw cell index against a byte
+        // range here would land inside that glyph's encoding rather than the
+        // clicked label -- the same class of bug `terminal_links::link_at`
+        // already guards against via this identical conversion.
+        let byte_column = crate::terminal_links::cell_column_to_byte_offset(line, column);
         self.osc8_links.iter().rev().find_map(|(label, target)| {
             let start = line.find(label)?;
             (start..start + label.len())
-                .contains(&column)
+                .contains(&byte_column)
                 .then(|| target.clone())
         })
     }
@@ -428,6 +436,21 @@ impl TerminalView {
                 .unwrap_or_default()
                 .to_string();
             let label_start = header_end + header_terminator_width;
+            if target.is_empty() {
+                // An OSC 8 tag with an empty URI *is* the close tag
+                // (`\x1b]8;;ST`), never an opener. Reaching one here means
+                // its matching opener was never seen -- discarded by this
+                // buffer's own stream-cap drain above, or by the server's
+                // retained-history cap on a replay -- so treat it as a
+                // stray close and resume scanning after it. Without this,
+                // the `find_bytes` search below would look for a "close"
+                // starting from `label_start`, and since `CLOSE` is a
+                // byte-for-byte prefix of `OPEN`, it would match the next
+                // real link's own opener instead: silently swallowing that
+                // whole link into a bogus, target-less entry.
+                self.osc8_stream.drain(..label_start);
+                continue;
+            }
             let Some(close_start) =
                 find_bytes(&pending[label_start..], CLOSE).map(|offset| label_start + offset)
             else {
@@ -801,6 +824,39 @@ mod tests {
         view.feed(b";;https://example.test\x1b\\label\x1b]8;;\x1b\\");
         assert_eq!(
             view.osc8_link_at("label", 1),
+            Some("https://example.test".to_string())
+        );
+    }
+
+    #[test]
+    fn a_stray_close_tag_does_not_swallow_the_link_that_follows_it() {
+        let mut view = TerminalView::new(4, 40);
+        // A close tag with no matching opener can reach this parser at the
+        // front of the buffer -- after the stream-cap drain above discards
+        // an opener, or after the server's own retained-history cap trims
+        // one out of a replay. This synthesizes that directly: an orphan
+        // close immediately followed by a genuine link. `CLOSE` is a
+        // byte-for-byte prefix of `OPEN`, so misreading the orphan as an
+        // opener would search for its "close" inside the real link's own
+        // header and swallow the whole link.
+        view.feed(b"\x1b]8;;\x1b\\\x1b]8;;https://example.test\x1b\\docs\x1b]8;;\x1b\\");
+        assert_eq!(
+            view.osc8_link_at("docs", 1),
+            Some("https://example.test".to_string())
+        );
+    }
+
+    #[test]
+    fn osc8_link_lookup_uses_cell_columns_not_byte_offsets() {
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"\x1b]8;;https://example.test\x1b\\docs\x1b]8;;\x1b\\");
+        // "界" is a double-width CJK character occupying byte offsets 0..3
+        // but only cells 0..2, so cell 3 (the "d" of "docs") converts to
+        // byte offset 4 -- inside "docs"'s 4..8 byte range. A raw,
+        // unconverted comparison of the cell index against that byte range
+        // would miss the label entirely.
+        assert_eq!(
+            view.osc8_link_at("界 docs", 3),
             Some("https://example.test".to_string())
         );
     }
