@@ -14,6 +14,7 @@ use crate::app::{
     App, BoardStorageKind, ClientExitReason, CreateBoardState, Mode, PaneRuntime, SettingsState,
     SettingsTab,
 };
+use crate::board::BoardPane;
 use crate::text_prompt::TextPromptState;
 
 use super::command::*;
@@ -361,6 +362,12 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                 editing_path: false,
             });
             if matches!(app.mode, Mode::CreateBoard(_)) {
+                // `commit_create_board` re-opens the interactive dialog on
+                // failure for the keyboard flow. The voice flow reports the
+                // failure through this receipt instead, so close the dialog
+                // rather than leaving a modal the user never opened -- one a
+                // corrected voice retry would clobber mid-edit anyway.
+                app.mode = Mode::Normal;
                 return Err(app
                     .status_message
                     .clone()
@@ -547,10 +554,43 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
         Some(PaneRuntime::Editor(editor)) => editor.content_revision(),
         _ => return Err("Target is not an editor pane".to_owned()),
     };
-    match command.action {
-        EditorAction::Save => app.action_save_focused_editor(),
+    // Only `Save`/`SaveAs` route their outcome through `app.status_message`;
+    // every other action here never touches that field, so reading it
+    // unconditionally after the match would report whatever unrelated status
+    // text some earlier command left behind instead of what this action
+    // actually did.
+    let message = match command.action {
+        EditorAction::Save => {
+            // A pane with no path yet makes `action_save_focused_editor`
+            // fall through to `action_start_save_as`, which opens an
+            // interactive filename-prompt overlay the voice flow cannot
+            // drive. Decide from the pane itself (not by sniffing `app.mode`
+            // afterwards, which false-errors when the user already had a
+            // Save As overlay open for another pane), close the overlay the
+            // fall-through opened, and report through this receipt instead.
+            let has_file_path = match app.panes.get(&pane_id) {
+                Some(PaneRuntime::Editor(editor)) => editor.path.is_some(),
+                _ => return Err("Target is not an editor pane".to_owned()),
+            };
+            app.action_save_focused_editor();
+            if !has_file_path {
+                if matches!(app.mode, Mode::SaveAs(id, _) if id == pane_id) {
+                    app.mode = Mode::Normal;
+                }
+                return Err(
+                    "This editor has no file path yet; use the save_as action with an explicit path"
+                        .to_owned(),
+                );
+            }
+            app.status_message
+                .clone()
+                .unwrap_or_else(|| "Editor updated".to_owned())
+        }
         EditorAction::SaveAs => {
-            app.action_save_as(pane_id, required_nonempty(command.path, "path")?)
+            app.action_save_as(pane_id, required_nonempty(command.path, "path")?);
+            app.status_message
+                .clone()
+                .unwrap_or_else(|| "Editor updated".to_owned())
         }
         EditorAction::InsertText => {
             let text = command.text.ok_or("text is required")?;
@@ -558,6 +598,13 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
                 return Err("Target is not an editor pane".to_owned());
             };
             editor.insert_text(&text);
+            // `mark_dirty` drops the pane's cached Rendered-mode document
+            // (it can go stale from a non-keyboard edit like this one) --
+            // rebuild it immediately rather than leaving a pane the user is
+            // actively looking at on the "Rendering…" placeholder until the
+            // next resize or view-mode toggle.
+            app.rebuild_rendered_markdown(pane_id);
+            "Inserted text into the editor".to_owned()
         }
         EditorAction::ReplaceDocument => {
             let text = command.text.ok_or("text is required")?;
@@ -565,6 +612,8 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
                 return Err("Target is not an editor pane".to_owned());
             };
             editor.replace_contents(&text);
+            app.rebuild_rendered_markdown(pane_id);
+            "Replaced the editor's document".to_owned()
         }
         EditorAction::JumpTo => {
             let line = command.line.ok_or("line is required")?;
@@ -573,12 +622,25 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
                 return Err("Target is not an editor pane".to_owned());
             };
             editor.jump_to_location(line.saturating_sub(1), column.saturating_sub(1));
+            "Moved the editor cursor".to_owned()
         }
-        EditorAction::ToggleRendered => app.action_toggle_editor_view_mode(),
-        EditorAction::ToggleLineNumbers => app.action_toggle_editor_line_numbers(),
-        EditorAction::ToggleMinimap => app.action_toggle_editor_minimap(),
-        EditorAction::ToggleAutosave => app.action_toggle_editor_autosave(),
-    }
+        EditorAction::ToggleRendered => {
+            app.action_toggle_editor_view_mode();
+            "Toggled the Rendered/Source view".to_owned()
+        }
+        EditorAction::ToggleLineNumbers => {
+            app.action_toggle_editor_line_numbers();
+            "Toggled line numbers".to_owned()
+        }
+        EditorAction::ToggleMinimap => {
+            app.action_toggle_editor_minimap();
+            "Toggled the minimap".to_owned()
+        }
+        EditorAction::ToggleAutosave => {
+            app.action_toggle_editor_autosave();
+            "Toggled autosave".to_owned()
+        }
+    };
     if app
         .panes
         .get(&pane_id)
@@ -586,11 +648,7 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
     {
         app.record_client_node_activity(pane_id);
     }
-    Ok(ExecutionReceipt::immediate(
-        app.status_message
-            .clone()
-            .unwrap_or_else(|| "Editor updated".to_owned()),
-    ))
+    Ok(ExecutionReceipt::immediate(message))
 }
 
 fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceipt, String> {
@@ -601,21 +659,27 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
     let content_revision_before = board.content_revision();
     match command.action {
         BoardAction::SelectColumn => {
-            board.select_column(command.column.ok_or("column is required")?)
+            select_column(board, command.column.ok_or("column is required")?)?
         }
-        BoardAction::SelectCard => board.select_card(
+        BoardAction::SelectCard => select_card(
+            board,
             command.column.ok_or("column is required")?,
             command.card.ok_or("card is required")?,
-        ),
-        BoardAction::OpenCard => board.open_card_details(
-            command.column.ok_or("column is required")?,
-            command.card.ok_or("card is required")?,
-        ),
+        )?,
+        BoardAction::OpenCard => {
+            // `BoardPane::open_card_details` no-ops on out-of-range indices;
+            // validate through `select_card` first so a bad index fails
+            // loudly instead of reporting success while nothing opened.
+            let column = command.column.ok_or("column is required")?;
+            let card = command.card.ok_or("card is required")?;
+            select_card(board, column, card)?;
+            board.open_card_details(column, card);
+        }
         BoardAction::CloseCard => board.close_card_details(),
         BoardAction::AddColumn => board.add_column(required_nonempty(command.title, "title")?)?,
         BoardAction::AddCard => {
             if let Some(column) = command.column {
-                board.select_column(column);
+                select_column(board, column)?;
             }
             board.add_card(required_nonempty(command.title, "title")?)?;
         }
@@ -626,7 +690,7 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
             command.body,
         )?,
         BoardAction::RenameColumn => {
-            board.select_column(command.column.ok_or("column is required")?);
+            select_column(board, command.column.ok_or("column is required")?)?;
             board.rename_selected_column(required_nonempty(command.title, "title")?)?;
         }
         BoardAction::MoveCard => board.move_card(
@@ -643,14 +707,15 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
             command.checkbox.ok_or("checkbox is required")?,
         )?,
         BoardAction::DeleteCard => {
-            board.select_card(
+            select_card(
+                board,
                 command.column.ok_or("column is required")?,
                 command.card.ok_or("card is required")?,
-            );
+            )?;
             board.delete_selected_card()?;
         }
         BoardAction::DeleteColumn => {
-            board.select_column(command.column.ok_or("column is required")?);
+            select_column(board, command.column.ok_or("column is required")?)?;
             board.delete_selected_column()?;
         }
     }
@@ -701,11 +766,47 @@ fn require_editor(app: &App, pane_id: ilium_core::NodeId) -> Result<(), String> 
 }
 
 fn resolve_filesystem_path(app: &App, path: String) -> PathBuf {
-    let path = PathBuf::from(path);
+    // Trim first -- otherwise a leading space survives into the path, and a
+    // leading space before a leading `/` defeats `is_absolute()` entirely,
+    // silently nesting an intended-absolute path under `session_cwd` (the
+    // same hazard `App::action_save_as` documents and guards against).
+    let path = PathBuf::from(path.trim());
     if path.is_absolute() {
         path
     } else {
         app.session_cwd.join(path)
+    }
+}
+
+/// Selects `column_index`, failing loudly instead of silently keeping the
+/// board's previous selection. `BoardPane::select_column` no-ops on an
+/// out-of-range index, which would otherwise let a caller that trusts the
+/// selection afterward (delete/rename/add) act on whichever column was
+/// selected before this command instead of the one actually requested.
+fn select_column(board: &mut BoardPane, column_index: usize) -> Result<(), String> {
+    board.select_column(column_index);
+    if board.selected_column == column_index {
+        Ok(())
+    } else {
+        Err(format!("Board has no column {column_index}"))
+    }
+}
+
+/// Selects `(column_index, card_index)`; see `select_column` for why this
+/// must fail rather than leave a stale prior selection in place for a
+/// subsequent destructive operation to act on.
+fn select_card(
+    board: &mut BoardPane,
+    column_index: usize,
+    card_index: usize,
+) -> Result<(), String> {
+    board.select_card(column_index, card_index);
+    if board.selected_column == column_index && board.selected_card == Some(card_index) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Board has no card {card_index} in column {column_index}"
+        ))
     }
 }
 

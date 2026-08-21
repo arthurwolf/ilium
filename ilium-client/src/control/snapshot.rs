@@ -1,6 +1,6 @@
 //! Redacted, bounded state snapshots returned to control providers.
 
-use ilium_core::{NodeId, NodeKind, PaneContentKind};
+use ilium_core::{AgentActivity, AgentClass, NodeId, NodeKind, PaneContentKind, PaneStatus};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -32,7 +32,7 @@ pub struct NodeSnapshot {
     pub name: String,
     pub path: String,
     pub kind: String,
-    pub status: Option<String>,
+    pub status: Option<Value>,
     pub content: Option<Value>,
 }
 
@@ -96,7 +96,7 @@ fn node_snapshot(app: &App, node_id: NodeId, include_content: bool) -> Option<No
                 PaneContentKind::Board => "board",
             }
             .to_owned(),
-            Some(format!("{status:?}")),
+            Some(pane_status_snapshot(status)),
         ),
     };
     Some(NodeSnapshot {
@@ -110,6 +110,51 @@ fn node_snapshot(app: &App, node_id: NodeId, include_content: bool) -> Option<No
             .then(|| pane_content_snapshot(app, node_id))
             .flatten(),
     })
+}
+
+/// A control API consumer needs stable, snake_case JSON, not `PaneStatus`'s
+/// derived `Debug` output -- that mixes Rust tuple/struct-literal syntax and
+/// PascalCase variant names into a field where every other value in this
+/// snapshot is deliberately snake_case (see `right_panel_snapshot`'s matching
+/// `"kind"`-tagged shape for the same discriminated-union convention).
+fn pane_status_snapshot(status: &PaneStatus) -> Value {
+    match status {
+        PaneStatus::PlainShell => json!({ "kind": "plain_shell" }),
+        PaneStatus::Agent(class, activity) => json!({
+            "kind": "agent",
+            "agent_class": agent_class_key(class),
+            "activity": agent_activity_key(activity),
+        }),
+        PaneStatus::AgentWithGoal(class, activity) => json!({
+            "kind": "agent_with_goal",
+            "agent_class": agent_class_key(class),
+            "activity": agent_activity_key(activity),
+        }),
+        PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
+        PaneStatus::Board => json!({ "kind": "board" }),
+    }
+}
+
+/// Machine-stable identifier for an agent class, matching the lowercase keys
+/// `BuiltinAgentProvider::from_config_name` already accepts. `AgentClass::label`
+/// stays reserved for the capitalized, human-facing product name.
+fn agent_class_key(class: &AgentClass) -> String {
+    match class {
+        AgentClass::Claude => "claude".to_owned(),
+        AgentClass::Codex => "codex".to_owned(),
+        AgentClass::Antigravity => "antigravity".to_owned(),
+        AgentClass::Other(name) => name.clone(),
+    }
+}
+
+fn agent_activity_key(activity: &AgentActivity) -> &'static str {
+    match activity {
+        AgentActivity::Working => "working",
+        AgentActivity::WaitingBackground => "waiting_background",
+        AgentActivity::WaitingApproval => "waiting_approval",
+        AgentActivity::Done => "done",
+        AgentActivity::Idle => "idle",
+    }
 }
 
 fn pane_content_snapshot(app: &App, pane_id: NodeId) -> Option<Value> {
@@ -207,7 +252,8 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.enabled", "voice.api_key", "voice.model", "voice.voice",
             "voice.reasoning_effort", "voice.input_mode", "voice.vad_eagerness",
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
-            "voice.confirm_terminal_submissions", "voice.custom_prompt",
+            "voice.confirm_terminal_submissions", "voice.pause_media_while_active",
+            "voice.custom_prompt",
             "debug.file_logging_enabled"
         ],
         "ui": {
@@ -307,6 +353,7 @@ fn settings_snapshot(app: &App) -> Value {
             "output_device": app.voice_settings.output_device_name,
             "output_volume_percent": app.voice_settings.output_volume_percent,
             "confirm_terminal_submissions": app.voice_settings.confirm_terminal_submissions,
+            "pause_media_while_active": app.voice_settings.pause_media_while_active,
             "custom_prompt": app.voice_settings.custom_prompt,
         },
         "debug": {

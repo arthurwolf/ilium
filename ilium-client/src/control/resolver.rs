@@ -32,17 +32,30 @@ pub fn resolve_node(app: &App, target: &NodeTarget) -> Result<NodeId, String> {
         return resolve_unique_name(app, name);
     }
 
+    // Every explicit branch above guarantees the returned id exists in the
+    // tree, so this fallback must too: the active-pane and tree-selection ids
+    // come from UI state that can briefly outlive the node it points at
+    // (e.g. a pane closed by the server before the panel target is
+    // reconciled), and a stale active id must fall through to a still-valid
+    // selection instead of being handed back as a resolved node.
     app.active_pane_id()
-        .or_else(|| app.selected_node_id())
+        .into_iter()
+        .chain(app.selected_node_id())
+        .find(|id| app.tree.get(*id).is_some())
         .ok_or_else(|| "No active or selected ilium node".to_owned())
 }
 
 pub fn resolve_parent(app: &App, target: &NodeTarget) -> Result<NodeId, String> {
     if !target.is_specified() {
+        // Try the active pane first, then the tree selection: a stale active
+        // id (its node already removed from the tree) must not mask a valid
+        // selection, so each candidate is resolved independently before
+        // falling back to the first project.
         return app
             .active_pane_id()
-            .or_else(|| app.selected_node_id())
-            .and_then(|id| nearest_ancestor_accepting_children(app, id))
+            .into_iter()
+            .chain(app.selected_node_id())
+            .find_map(|id| nearest_ancestor_accepting_children(app, id))
             .or_else(|| app.tree.project_ids().first().copied())
             .ok_or_else(|| "No destination group is available".to_owned());
     }
@@ -115,9 +128,13 @@ fn resolve_unique_name(app: &App, requested_name: &str) -> Result<NodeId, String
         .tree
         .all_ids()
         .filter(|id| {
+            // The requested name is trimmed above, so the stored name must be
+            // trimmed too -- node names are unconstrained free text and may
+            // carry incidental surrounding whitespace that would otherwise
+            // make the node unreachable by name.
             app.tree
                 .get(*id)
-                .is_some_and(|node| node.name.eq_ignore_ascii_case(requested_name))
+                .is_some_and(|node| node.name.trim().eq_ignore_ascii_case(requested_name))
         })
         .collect::<Vec<_>>();
     match matches.as_slice() {
@@ -150,9 +167,14 @@ fn resolve_path(app: &App, requested_path: &str) -> Result<NodeId, String> {
             .iter()
             .copied()
             .filter(|child| {
+                // `split_path_components` trims every component, so the
+                // stored name must be trimmed for the comparison too --
+                // otherwise a path produced by `node_path` for a node whose
+                // name carries surrounding whitespace would fail its own
+                // documented round-trip.
                 app.tree
                     .get(*child)
-                    .is_some_and(|node| node.name.eq_ignore_ascii_case(&component))
+                    .is_some_and(|node| node.name.trim().eq_ignore_ascii_case(&component))
             })
             .collect::<Vec<_>>();
         match matches.as_slice() {
@@ -284,6 +306,40 @@ mod tests {
 
         let suggested_path = node_path(&app, group);
 
+        assert_eq!(
+            resolve_node(
+                &app,
+                &NodeTarget {
+                    path: Some(suggested_path),
+                    ..NodeTarget::default()
+                }
+            ),
+            Ok(group)
+        );
+    }
+
+    #[test]
+    fn names_with_surrounding_whitespace_resolve_by_trimmed_name_and_path() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let project = app.tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        let group = app.tree.add_group(project, " build ").unwrap();
+
+        // By name: the request is trimmed, so the stored name must match
+        // through its own trim as well.
+        assert_eq!(
+            resolve_node(
+                &app,
+                &NodeTarget {
+                    name: Some("build".to_owned()),
+                    ..NodeTarget::default()
+                }
+            ),
+            Ok(group)
+        );
+
+        // By path: node_path's own suggested path must round-trip even
+        // though split_path_components trims each component.
+        let suggested_path = node_path(&app, group);
         assert_eq!(
             resolve_node(
                 &app,

@@ -1,11 +1,11 @@
 //! Deterministic confirmation policy for semantic commands.
 
-use crate::app::App;
+use crate::app::{App, PaneRuntime};
 
 use super::command::{
-    BoardAction, ControlCommand, EditorAction, NodeTarget, PromptDeliveryChoice, SessionAction,
-    TerminalAction, TerminalCommand, TerminalKey, TerminalSubmissionCommand, TerminalTypingCommand,
-    TreeAction, TreeCommand,
+    BoardAction, BoardCommand, ControlCommand, EditorAction, NodeTarget, PromptDeliveryChoice,
+    SessionAction, TerminalAction, TerminalCommand, TerminalKey, TerminalSubmissionCommand,
+    TerminalTypingCommand, TreeAction, TreeCommand,
 };
 use super::resolver::resolve_node;
 
@@ -28,10 +28,20 @@ pub fn confirmation_plan(
 ) -> Result<Option<ConfirmationPlan>, String> {
     let question = match command {
         ControlCommand::Tree(command) => match command.action {
-            TreeAction::CreateCommandPane => Some(format!(
-                "Run the shell command {:?} in a new terminal pane?",
-                command.command_line.as_deref().unwrap_or_default()
-            )),
+            TreeAction::CreateCommandPane => {
+                // Mirror the executor's own `required_nonempty` validation
+                // (control/executor.rs) so the confirmation question never
+                // shows a blank command that the execution step would then
+                // reject outright.
+                let command_line = command
+                    .command_line
+                    .as_deref()
+                    .filter(|command_line| !command_line.trim().is_empty())
+                    .ok_or_else(|| "command_line is required".to_owned())?;
+                Some(format!(
+                    "Run the shell command {command_line:?} in a new terminal pane?"
+                ))
+            }
             TreeAction::Close => return pinned_close_plan(app, command),
             _ => None,
         },
@@ -60,10 +70,19 @@ pub fn confirmation_plan(
                     Some(PromptDeliveryChoice::Forever) => {
                         "Queue this prompt to be submitted automatically after every future completion, indefinitely?".to_owned()
                     }
-                    Some(PromptDeliveryChoice::Times) => format!(
-                        "Queue this prompt to be submitted automatically for the next {} completions?",
-                        command.runs.unwrap_or(1)
-                    ),
+                    Some(PromptDeliveryChoice::Times) => {
+                        // Mirror the executor's own validation (see
+                        // control/executor.rs's QueuePrompt/Times handling)
+                        // so the confirmation question never promises a run
+                        // count the execution step will then reject.
+                        let runs = command.runs.filter(|runs| *runs > 0).ok_or_else(|| {
+                            "runs is required and must be positive when delivery is times"
+                                .to_owned()
+                        })?;
+                        format!(
+                            "Queue this prompt to be submitted automatically for the next {runs} completions?"
+                        )
+                    }
                     Some(PromptDeliveryChoice::Once) | None => {
                         "Queue this prompt for automatic submission after the agent's next completion?".to_owned()
                     }
@@ -77,7 +96,7 @@ pub fn confirmation_plan(
                 BoardAction::DeleteCard | BoardAction::DeleteColumn
             ) =>
         {
-            Some("Permanently delete the selected Kanban item from its backing storage?".to_owned())
+            return pinned_board_delete_plan(app, command);
         }
         ControlCommand::Session(command) => match command.action {
             SessionAction::KillSession => Some(
@@ -120,6 +139,64 @@ fn pinned_close_plan(app: &App, command: &TreeCommand) -> Result<Option<Confirma
         confirmed_command: ControlCommand::Tree(TreeCommand {
             target: NodeTarget {
                 id: Some(node_id.0),
+                name: None,
+                path: None,
+            },
+            ..command.clone()
+        }),
+        cancellation_message: "Cancelled the pending action".to_owned(),
+    }))
+}
+
+/// Resolves the board pane and the exact column/card the delete would remove,
+/// pins the pane into the confirmed command's target, and names the doomed
+/// item in the question. Mirrors the executor's own required-field and bounds
+/// validation (control/executor.rs's DeleteCard/DeleteColumn handling) so the
+/// confirmation question never promises a deletion the execution step would
+/// reject -- and, like `pinned_close_plan`, prevents a focus change while the
+/// question is pending from redirecting the delete to a different board.
+fn pinned_board_delete_plan(
+    app: &App,
+    command: &BoardCommand,
+) -> Result<Option<ConfirmationPlan>, String> {
+    let pane_id = resolve_node(app, &command.target)?;
+    let Some(PaneRuntime::Board(board)) = app.panes.get(&pane_id) else {
+        return Err("Target is not a board pane".to_owned());
+    };
+
+    let column_index = command.column.ok_or("column is required")?;
+    let column = board
+        .columns
+        .get(column_index)
+        .ok_or_else(|| format!("Board has no column {column_index}"))?;
+
+    let question = match command.action {
+        BoardAction::DeleteCard => {
+            let card_index = command.card.ok_or("card is required")?;
+            let card = column
+                .cards
+                .get(card_index)
+                .ok_or_else(|| format!("Board has no card {card_index} in column {column_index}"))?;
+            format!(
+                "Permanently delete the card {:?} from column {:?} and the board's backing storage?",
+                card.title, column.title
+            )
+        }
+        BoardAction::DeleteColumn => format!(
+            "Permanently delete the column {:?} and its {} card(s) from the board's backing storage?",
+            column.title,
+            column.cards.len()
+        ),
+        // `confirmation_plan` only routes DeleteCard/DeleteColumn here.
+        _ => return Ok(None),
+    };
+
+    Ok(Some(ConfirmationPlan {
+        question,
+        preparation: None,
+        confirmed_command: ControlCommand::Board(BoardCommand {
+            target: NodeTarget {
+                id: Some(pane_id.0),
                 name: None,
                 path: None,
             },
@@ -315,6 +392,75 @@ mod tests {
             .expect("an indefinitely-repeating queued prompt must be guarded");
 
         assert!(plan.question.contains("indefinitely"));
+    }
+
+    #[test]
+    fn board_delete_confirmation_pins_the_board_and_names_the_card() {
+        let (app, board_id) = board_fixture();
+        let command = board_delete_card_command(Some(0), Some(0));
+
+        let plan = confirmation_plan(&app, &command)
+            .expect("policy should resolve")
+            .expect("board deletion must be guarded");
+
+        // The question must describe the exact card the delete would remove,
+        // and the confirmed command must carry the board resolved *now* --
+        // otherwise a later focus change before the user answers would
+        // redirect the delete to whatever board happens to be focused then.
+        assert!(plan.question.contains("Ship it"));
+        assert!(matches!(
+            plan.confirmed_command,
+            ControlCommand::Board(BoardCommand {
+                action: BoardAction::DeleteCard,
+                target: NodeTarget { id: Some(id), .. },
+                ..
+            }) if id == board_id.0
+        ));
+    }
+
+    #[test]
+    fn board_delete_confirmation_rejects_an_out_of_range_card_before_asking() {
+        let (app, _) = board_fixture();
+        let command = board_delete_card_command(Some(0), Some(5));
+
+        // Mirroring the executor's bounds validation: the policy must fail
+        // loudly instead of asking a question the execution step would then
+        // reject anyway.
+        assert!(confirmation_plan(&app, &command).is_err());
+    }
+
+    fn board_fixture() -> (App, ilium_core::NodeId) {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = ilium_core::BoardStorage::MarkdownFile {
+            path: directory.path().join("board.md"),
+        };
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let board_id = app
+            .tree
+            .add_board(group_id, "Board".to_owned(), storage.clone())
+            .unwrap();
+        let mut board = crate::board::BoardPane::create(storage).unwrap();
+        board.add_card("Ship it".to_owned()).unwrap();
+        app.panes
+            .insert(board_id, PaneRuntime::Board(Box::new(board)));
+        app.focus_pane(board_id);
+
+        (app, board_id)
+    }
+
+    fn board_delete_card_command(column: Option<usize>, card: Option<usize>) -> ControlCommand {
+        ControlCommand::Board(BoardCommand {
+            action: BoardAction::DeleteCard,
+            target: NodeTarget::default(),
+            title: None,
+            body: None,
+            column,
+            card,
+            destination_column: None,
+            destination_card: None,
+            checkbox: None,
+        })
     }
 
     fn terminal_submission_fixture() -> (App, ilium_core::NodeId, ControlCommand) {

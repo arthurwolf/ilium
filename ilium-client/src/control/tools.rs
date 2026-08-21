@@ -1,5 +1,6 @@
 //! Stable Realtime function schemas for ilium's semantic control surface.
 
+use ilium_core::MAXIMUM_SPLIT_VIEW_PANES;
 use ilium_voice::VoiceToolDefinition;
 use serde_json::{json, Value};
 
@@ -69,7 +70,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
                     "command_line": { "type": "string" },
                     "initial_input": { "type": "string" },
                     "orientation": { "type": "string", "enum": ["horizontal", "vertical"] },
-                    "members": { "type": "array", "items": target_schema(), "maxItems": 4 },
+                    "members": { "type": "array", "items": target_schema(), "maxItems": MAXIMUM_SPLIT_VIEW_PANES },
                     "index": { "type": "integer", "minimum": 0 },
                     "storage": { "type": "string", "enum": ["markdown", "folder"] },
                     "provider": { "type": "string", "enum": ["claude", "codex", "antigravity"] },

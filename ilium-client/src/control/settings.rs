@@ -592,7 +592,12 @@ fn update_inference(
     value: &str,
 ) {
     let mut settings = app.inference_settings.clone();
-    update(&mut settings, value.to_owned());
+    // The interactive editor (`App::settings_commit_inference_field`) trims every
+    // inference field before storing it; do the same here so a control command
+    // pasting an API key or URL with stray whitespace cannot persist a value the
+    // interactive path would have rejected (a trailing newline in an API key
+    // silently breaks provider authentication).
+    update(&mut settings, value.trim().to_owned());
     app.apply_and_persist_inference_settings(settings);
 }
 
