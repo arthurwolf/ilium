@@ -150,8 +150,17 @@ impl ApiKeyProviderSettings {
     }
 }
 impl Default for ApiKeyProviderSettings {
+    // `ApiKeyProviderSettings` backs both the `openai` and `anthropic` fields
+    // of `InferenceSettings`, which have different correct endpoints -- this
+    // shared type cannot know which one it is for, so it must not bake in
+    // either provider's URL. A blank `base_url` is resolved to the right
+    // default inside each provider's own `complete`, not here. Baking
+    // `DEFAULT_OPENAI_URL` in here previously meant a hand-edited
+    // `[inference.anthropic]` table missing only `base_url` silently
+    // defaulted to OpenAI's endpoint (`#[serde(default)]` fills any field
+    // missing from a *present* table from this impl).
     fn default() -> Self {
-        Self::new(DEFAULT_OPENAI_URL)
+        Self::new("")
     }
 }
 
@@ -480,7 +489,12 @@ impl InferenceProvider for OpenAiProvider {
         Some(&self.0.model)
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        complete_openai_compatible(&self.0.base_url, &self.0.api_key, &self.0.model, request)
+        complete_openai_compatible(
+            resolve_base_url(&self.0.base_url, DEFAULT_OPENAI_URL),
+            &self.0.api_key,
+            &self.0.model,
+            request,
+        )
     }
 }
 struct OpenRouterProvider(Arc<OpenRouterSettings>);
@@ -518,7 +532,10 @@ impl InferenceProvider for AnthropicProvider {
             "Enter a model before testing or using inference",
         )?;
         let response = post_json(
-            &format_url(&self.0.base_url, "v1/messages"),
+            &format_url(
+                resolve_base_url(&self.0.base_url, DEFAULT_ANTHROPIC_URL),
+                "v1/messages",
+            ),
             &[
                 ("x-api-key", self.0.api_key.as_str().to_string()),
                 ("anthropic-version", "2023-06-01".to_string()),
@@ -538,6 +555,20 @@ fn require(value: &str, message: &str) -> Result<(), InferenceError> {
 }
 fn format_url(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
+}
+/// Falls back to `default_base_url` when settings carry a blank `base_url`
+/// (the safe zero value for `ApiKeyProviderSettings`, since that type is
+/// shared between providers with different correct endpoints and cannot
+/// bake either one into its own `Default`).
+fn resolve_base_url<'settings>(
+    base_url: &'settings str,
+    default_base_url: &'settings str,
+) -> &'settings str {
+    if base_url.trim().is_empty() {
+        default_base_url
+    } else {
+        base_url
+    }
 }
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
@@ -697,7 +728,9 @@ fn response_text(
 fn openai_compatible_response_text(
     value: &serde_json::Value,
 ) -> Result<InferenceResponse, InferenceError> {
-    if let Some(error) = value.get("error") {
+    // Some free OpenAI-compatible routers emit a literal `"error": null` on an
+    // otherwise successful envelope; only a non-null value is an actual error.
+    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
         return Err(InferenceError::InvalidResponse(format!(
             "provider returned an error envelope with HTTP 200: {error}"
         )));
@@ -706,7 +739,7 @@ fn openai_compatible_response_text(
 }
 
 fn anthropic_response_text(value: &serde_json::Value) -> Result<InferenceResponse, InferenceError> {
-    if let Some(error) = value.get("error") {
+    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
         return Err(InferenceError::InvalidResponse(format!(
             "Anthropic returned an error envelope with HTTP 200: {error}"
         )));
@@ -898,5 +931,56 @@ mod tests {
             openai_compatible_response_text(&response),
             Err(InferenceError::InvalidResponse(message)) if message.contains("error envelope")
         ));
+    }
+
+    #[test]
+    fn openai_compatible_response_tolerates_a_null_error_field() {
+        let response = serde_json::json!({
+            "error": null,
+            "choices": [{"message": {"content": "real answer"}}]
+        });
+
+        assert_eq!(
+            openai_compatible_response_text(&response).unwrap().text,
+            "real answer"
+        );
+    }
+
+    #[test]
+    fn anthropic_response_tolerates_a_null_error_field() {
+        let response = serde_json::json!({
+            "error": null,
+            "content": [{"type": "text", "text": "real answer"}]
+        });
+
+        assert_eq!(
+            anthropic_response_text(&response).unwrap().text,
+            "real answer"
+        );
+    }
+
+    #[test]
+    fn api_key_provider_settings_default_has_no_provider_specific_base_url() {
+        // The type is shared between the `openai` and `anthropic` fields of
+        // `InferenceSettings`, which need different URLs; its `Default` must
+        // stay neutral so a partially hand-edited config table doesn't fall
+        // back to the wrong provider's endpoint (see `resolve_base_url`).
+        assert_eq!(ApiKeyProviderSettings::default().base_url, "");
+    }
+
+    #[test]
+    fn resolve_base_url_falls_back_only_when_blank() {
+        assert_eq!(
+            resolve_base_url("", DEFAULT_ANTHROPIC_URL),
+            DEFAULT_ANTHROPIC_URL
+        );
+        assert_eq!(
+            resolve_base_url("   ", DEFAULT_ANTHROPIC_URL),
+            DEFAULT_ANTHROPIC_URL
+        );
+        assert_eq!(
+            resolve_base_url("https://custom.example/v1", DEFAULT_ANTHROPIC_URL),
+            "https://custom.example/v1"
+        );
     }
 }
