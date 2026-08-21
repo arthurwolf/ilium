@@ -291,6 +291,12 @@ mod tests {
                 is_bookmarked: true,
             },
             ClientRequest::RecordNodeActivity { node_id: NodeId(2) },
+            ClientRequest::AttachInteractive {
+                session: "main".to_string(),
+            },
+            ClientRequest::SetVisiblePanes {
+                pane_ids: vec![NodeId(2), NodeId(3)],
+            },
         ]
     }
 

@@ -9,11 +9,26 @@
 //! `ilium-server` can plug in a Unix domain socket later without this
 //! module changing.
 
+use bincode::Options;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::IpcError;
+
+/// The bincode configuration used to decode a frame payload: fixed-width
+/// integers (wire-compatible with what `bincode::serialize` already
+/// produces on the write side), but -- unlike `bincode::deserialize`'s
+/// convenience default, which silently allows and ignores trailing bytes
+/// -- keeping bincode's own default of erroring if the payload isn't fully
+/// consumed. Without this, a corrupted frame whose bytes happen to decode
+/// as a valid but truncated `T` (e.g. a flipped length field inside the
+/// payload) would silently misparse instead of surfacing as an error, the
+/// exact failure mode `read_frame`'s doc comment promises callers it won't
+/// hit.
+fn frame_decode_options() -> impl bincode::Options {
+    bincode::DefaultOptions::new().with_fixint_encoding()
+}
 
 /// Guards against a desynchronized stream being misread as a single
 /// enormous frame: real ilium-ipc messages (tree snapshots, terminal
@@ -24,9 +39,12 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
 
-/// A connection-owned encoder that retains its serialization allocation.
+/// A connection-owned encoder that retains its serialization allocation
+/// across frames, so long-lived connections don't pay a fresh `Vec`
+/// allocation per message.
 pub struct FrameWriter<W> {
     writer: W,
+    payload: Vec<u8>,
 }
 
 impl<W> FrameWriter<W>
@@ -35,27 +53,37 @@ where
 {
     /// Wraps a stream half with an initially empty reusable frame buffer.
     pub fn new(writer: W) -> Self {
-        Self { writer }
+        Self {
+            writer,
+            payload: Vec::new(),
+        }
     }
 
-    /// Serializes and submits one complete frame with a single write path.
+    /// Serializes and submits one complete frame with a single write path,
+    /// flushing before returning so the frame is actually delivered even
+    /// when the underlying stream buffers writes.
     pub async fn write<T>(&mut self, value: &T) -> Result<(), IpcError>
     where
         T: Serialize,
     {
-        let payload = bincode::serialize(value)?;
-        let length: u32 = payload
+        // `serialize_into` uses the same legacy fixint wire config as
+        // `bincode::serialize`, but appends into the retained buffer
+        // instead of allocating a fresh Vec per frame.
+        self.payload.clear();
+        bincode::serialize_into(&mut self.payload, value)?;
+        let length: u32 = self
+            .payload
             .len()
             .try_into()
-            .map_err(|_| IpcError::frame_too_large(payload.len()))?;
+            .map_err(|_| IpcError::frame_too_large(self.payload.len()))?;
         if length > MAX_FRAME_LEN {
-            return Err(IpcError::frame_too_large(payload.len()));
+            return Err(IpcError::frame_too_large(self.payload.len()));
         }
 
         let length_header = length.to_le_bytes();
         let buffers = [
             std::io::IoSlice::new(&length_header),
-            std::io::IoSlice::new(&payload),
+            std::io::IoSlice::new(&self.payload),
         ];
         let first_write = self.writer.write_vectored(&buffers).await?;
         if first_write == 0 {
@@ -64,15 +92,20 @@ where
             )));
         }
 
-        let frame_len = LENGTH_HEADER_BYTES.saturating_add(payload.len());
+        let frame_len = LENGTH_HEADER_BYTES.saturating_add(self.payload.len());
         if first_write < LENGTH_HEADER_BYTES {
             self.writer.write_all(&length_header[first_write..]).await?;
-            self.writer.write_all(&payload).await?;
+            self.writer.write_all(&self.payload).await?;
         } else if first_write < frame_len {
             self.writer
-                .write_all(&payload[first_write - LENGTH_HEADER_BYTES..])
+                .write_all(&self.payload[first_write - LENGTH_HEADER_BYTES..])
                 .await?;
         }
+
+        // A raw socket half's flush is a free no-op; a buffered writer
+        // (this module is generic over any `AsyncWrite`) would otherwise
+        // hold the frame indefinitely and the peer would never see it.
+        self.writer.flush().await?;
         Ok(())
     }
 }
@@ -116,7 +149,7 @@ where
             Err(error) => return Err(IpcError::Io(error)),
         }
 
-        Ok(bincode::deserialize(&self.payload)?)
+        Ok(frame_decode_options().deserialize(&self.payload)?)
     }
 }
 
@@ -339,6 +372,24 @@ mod tests {
         let mut cursor = Cursor::new(buffer);
         // A String decode expects a valid-length-prefixed UTF-8 body;
         // 0xFF bytes as a bincode-encoded String are not that.
+        let result: Result<String, IpcError> = read_frame(&mut cursor).await;
+        assert!(matches!(result, Err(IpcError::Bincode(_))));
+    }
+
+    #[tokio::test]
+    async fn read_frame_rejects_a_payload_with_unconsumed_trailing_bytes() {
+        // A length prefix that promises more bytes than the encoded value
+        // actually needs -- e.g. a desynchronized stream that happens to
+        // land on a byte sequence which decodes as a valid but short `T`.
+        // Must error rather than silently accept the value and drop the
+        // extra bytes.
+        let mut payload = bincode::serialize(&"short".to_string()).expect("serializable");
+        payload.extend_from_slice(&[0u8; 4]);
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&payload);
+
+        let mut cursor = Cursor::new(buffer);
         let result: Result<String, IpcError> = read_frame(&mut cursor).await;
         assert!(matches!(result, Err(IpcError::Bincode(_))));
     }
