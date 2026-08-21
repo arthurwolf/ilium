@@ -112,7 +112,13 @@ fn mouse_modifier_bits(modifiers: KeyModifiers) -> u8 {
 /// cells outside 223; SGR-capable applications receive unrestricted values.
 fn encode_legacy_mouse(code: u8, column: u32, row: u32, utf8: bool) -> Option<Vec<u8>> {
     let values = [u32::from(code) + 32, column + 32, row + 32];
-    if !utf8 && values.iter().any(|value| *value > 255) {
+
+    // Classic X10 bytes cap each value at 255; xterm's UTF-8 (1005) extension
+    // only reaches 2047 (the largest two-byte UTF-8 scalar, i.e. cell 2015).
+    // Emitting a three-byte sequence for anything larger would desync 1005
+    // parsers, so oversized coordinates drop the report instead.
+    let max_encodable_value = if utf8 { 2047 } else { 255 };
+    if values.iter().any(|value| *value > max_encodable_value) {
         return None;
     }
 

@@ -253,7 +253,7 @@ mod unix_only {
                 .screen_snapshot()
                 .text
                 .contains("watch-channel-marker"),
-            "expected echo's output on screen after being notified, got: {:?}",
+            "expected cat's echoed output on screen after being notified, got: {:?}",
             session.screen_text()
         );
         assert!(

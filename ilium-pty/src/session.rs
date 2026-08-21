@@ -730,6 +730,15 @@ fn clamp_pty_dimension(requested: u16) -> u16 {
     requested.max(MINIMUM_PTY_DIMENSION)
 }
 
+/// How long the background reader thread sleeps between non-blocking
+/// `try_wait` polls while reaping the child after its read loop ends. Kept
+/// short so a killed pane's exit status is collected promptly; the poll only
+/// runs at all in the brief window between the read loop ending and the
+/// child actually exiting (or, for a child that closed its tty without
+/// exiting, until `kill`/`Drop` ends it). See the reap loop in
+/// [`PtySession::spawn`] for why this polls instead of blocking in `wait()`.
+const CHILD_REAP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
 impl PtySession {
     /// Spawns `command` behind a new pty and starts the background reader
     /// thread that feeds its output into the shared `vt100::Parser`.
@@ -805,9 +814,7 @@ impl PtySession {
             rows,
             cols,
             0,
-            TerminalQueryResponder {
-                reply_writer: Arc::clone(&writer),
-            },
+            TerminalQueryResponder::new(Arc::clone(&writer)),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
         let (screen_changed_tx, screen_changed_rx) = watch::channel(());
@@ -878,6 +885,10 @@ impl PtySession {
                         // poisoned lock means one of those panicked, which
                         // we treat as unrecoverable for this pane.
                         let mut parser = parser.write().unwrap();
+                        // Bounds how many query replies `process()` can write
+                        // synchronously from this one chunk -- see
+                        // `TerminalQueryResponder::reset_reply_budget`.
+                        parser.callbacks_mut().reset_reply_budget();
                         parser.process(&buf[..bytes_read]);
                         screen_generation.fetch_add(1, Ordering::Release);
                     }
@@ -905,14 +916,30 @@ impl PtySession {
                 // actually collects its exit status -- without this, a
                 // child that needed a SIGKILL escalation to die would be
                 // left as a zombie for the rest of this process's life.
-                // Blocking here is fine even on the `Stopped` path: `Drop`
-                // always kills the direct child *before* requesting a
-                // stop (see `impl Drop for PtySession`), and SIGKILL is
-                // unignorable, so this `wait()` only ever blocks on a
-                // process that is already dying, never on an orphaned
-                // descendant this thread was never waiting on in the first
-                // place.
-                let _ = child.lock().unwrap().wait();
+                //
+                // Reaping polls `try_wait` rather than calling the blocking
+                // `wait()`: the `child` mutex is shared with `kill`/
+                // `has_exited`/`Drop`, and EOF does not imply the child has
+                // exited -- a child that redirects its stdio away from the
+                // tty and keeps running closes every slave fd (EOF here)
+                // while staying alive indefinitely. A blocking `wait()`
+                // under the mutex in that state would deadlock `kill()`,
+                // the very call that could have ended the child. Polling
+                // holds the lock only for a non-blocking check, and once
+                // `Drop`/`kill` signal the child (`portable_pty` escalates
+                // SIGHUP to an unignorable SIGKILL inside `kill()` itself),
+                // the next poll reaps it.
+                loop {
+                    // Poisoned-lock panic is an invariant violation (see
+                    // the parser-lock comment above). `Err` from `try_wait`
+                    // means the status cannot be determined at all; there
+                    // is nothing more this thread can do about the child.
+                    match child.lock().unwrap().try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) => {}
+                    }
+                    std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
+                }
             });
         }
 
@@ -1048,20 +1075,13 @@ impl PtySession {
         self.process_id
     }
 
-    /// Best-effort cwd of the directly spawned shell or command. Linux
-    /// exposes it through procfs; other targets deliberately return `None`
-    /// so higher layers can fall back to the project root safely.
+    /// Best-effort cwd of the directly spawned shell or command. Delegates to
+    /// `ilium_platform::process_info`, which owns every OS-specific way of
+    /// answering this (procfs on Linux, `proc_pidinfo` on macOS, PEB reads on
+    /// Windows); a platform or process it cannot read falls back to `None` so
+    /// higher layers can fall back to the project root safely.
     pub fn current_working_directory(&self) -> Option<PathBuf> {
-        #[cfg(target_os = "linux")]
-        {
-            let process_id = self.process_id?;
-            std::fs::read_link(format!("/proc/{process_id}/cwd")).ok()
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            None
-        }
+        ilium_platform::process_info::working_directory(self.process_id?)
     }
 
     /// Whether the pane's own shell -- rather than a command it launched --
@@ -1185,8 +1205,8 @@ impl Drop for PtySession {
     /// set. `kill()` sends an unignorable SIGKILL-equivalent to the direct
     /// child, so it dies promptly regardless of whether anything is
     /// reading its output; only once that signal is sent do we ask the
-    /// reader thread to stop, so its final `child.lock().unwrap().wait()`
-    /// (see `spawn`) blocks on an already-dying process rather than a live
+    /// reader thread to stop, so its final `try_wait` reap loop (see
+    /// `spawn`) polls a process that is already dying rather than a live
     /// one still waiting to be killed.
     ///
     /// This does not depend on the direct child's tty actually closing.
@@ -1215,9 +1235,17 @@ impl Drop for PtySession {
     /// before a `PtySession` is dropped) is not an error, and a failure to
     /// signal an already-gone process is not worth surfacing from `Drop`.
     fn drop(&mut self) {
-        if !self.has_exited() {
+        {
             // Poisoned-lock panic is an invariant violation (see `spawn`).
-            let _ = self.child.lock().unwrap().kill();
+            // As in `kill()`, the exited-check and the kill share one lock
+            // acquisition: with separate acquisitions the reader thread's
+            // reap loop (see `spawn`) could collect the child in between,
+            // and the kill would then signal a raw pid the OS may already
+            // have recycled for an unrelated process.
+            let mut child = self.child.lock().unwrap();
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                let _ = child.kill();
+            }
         }
         self.reader_should_stop.store(true, Ordering::Release);
         self.reader_cancellation.interrupt();
