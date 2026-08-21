@@ -98,16 +98,28 @@ mod tests {
         let held = ExclusiveFileLock::acquire(&path).expect("parent acquires");
 
         let mut child = std::process::Command::new(std::env::current_exe().expect("test binary"))
-            .args(["--exact", "--nocapture", "--ignored", "lock_child_helper"])
+            .args([
+                "--exact",
+                "--nocapture",
+                "--ignored",
+                "file_lock::tests::lock_child_helper",
+            ])
             .env("ILIUM_LOCK_TEST_PATH", &path)
             .spawn()
             .expect("spawn child");
 
         // Give the child long enough to reach its blocking acquire, then
-        // release; if exclusion were broken the child would already have
-        // exited successfully before this point either way, so the assertion
-        // below is on the child's own observation, not on this sleep.
+        // confirm it is still waiting before releasing. Without this check,
+        // a broken (non-exclusive) lock would let the child finish almost
+        // instantly, but `child.wait()` below would not be called until
+        // after this thread's own sleep anyway -- so only polling before the
+        // release actually distinguishes "blocked, then released" from
+        // "never blocked at all".
         std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            child.try_wait().expect("poll child").is_none(),
+            "child acquired the lock while the parent still held it"
+        );
         drop(held);
 
         let status = child.wait().expect("child exits");

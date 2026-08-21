@@ -96,7 +96,7 @@ mod tests {
     use std::process::Stdio;
 
     #[test]
-    fn a_detached_child_runs_and_leaves_no_zombie_behind() {
+    fn a_detached_child_runs_after_its_launcher_returns() {
         let root = tempfile::tempdir().expect("temp dir");
         let marker = root.path().join("marker.txt");
 
@@ -121,11 +121,16 @@ mod tests {
 
     #[cfg(unix)]
     fn shell_command_writing(marker: &std::path::Path) -> Command {
+        // Single-quote the path for the shell, escaping any embedded single
+        // quote as `'\''` (close the quoted string, an escaped literal
+        // quote, reopen it) -- the only fully general way to quote a
+        // filesystem path for `sh -c`. Stripping quotes instead of escaping
+        // them would silently redirect to a different path than `marker`.
+        let quoted_marker = format!("'{}'", marker.to_string_lossy().replace('\'', r"'\''"));
         let mut command = Command::new("/bin/sh");
-        command.arg("-c").arg(format!(
-            "printf started > {}",
-            marker.to_string_lossy().replace('\'', "")
-        ));
+        command
+            .arg("-c")
+            .arg(format!("printf started > {quoted_marker}"));
         command
     }
 

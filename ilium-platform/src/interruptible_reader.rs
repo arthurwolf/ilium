@@ -44,7 +44,7 @@ impl InterruptibleReader {
         // affects the bounded drain after that wake, letting one consumer
         // collapse every byte already queued by the kernel into one logical
         // read without ever waiting for a future byte.
-        set_descriptor_flags(&data, true)?;
+        set_descriptor_flags(&data)?;
 
         let mut wake_fds = [-1; 2];
         // SAFETY: `wake_fds` points to two writable descriptor slots.
@@ -55,8 +55,11 @@ impl InterruptibleReader {
         let wake_read = unsafe { File::from_raw_fd(wake_fds[0]) };
         // SAFETY: same invariant as `wake_read` for the other pipe end.
         let wake_write = unsafe { File::from_raw_fd(wake_fds[1]) };
-        set_descriptor_flags(&wake_read, false)?;
-        set_descriptor_flags(&wake_write, true)?;
+        // Nonblocking so `read`'s wake handler can drain every queued byte
+        // (see `interrupt`'s doc comment on coalescing) without risking a
+        // block on the final read once the pipe is actually empty.
+        set_descriptor_flags(&wake_read)?;
+        set_descriptor_flags(&wake_write)?;
 
         Ok((
             Self { data, wake_read },
@@ -92,8 +95,25 @@ impl InterruptibleReader {
                 return Err(error);
             }
             if poll_fds[1].revents != 0 {
+                // Drains every byte the wake pipe has queued, not just the
+                // one that woke this poll: `interrupt` writes are only
+                // best-effort coalesced (a `write` fails only once the pipe
+                // is entirely full, not merely non-empty), so more than one
+                // byte can be queued by the time this fires. Leaving extras
+                // behind would make a future `read` observe stale POLLIN and
+                // report a spurious `Interrupted` with no new interrupt.
                 let mut wake_byte = [0_u8; 1];
-                let _ = self.wake_read.read(&mut wake_byte);
+                loop {
+                    match self.wake_read.read(&mut wake_byte) {
+                        // A closed write end reports EOF here forever; stop
+                        // draining rather than spin at 100% CPU on `Ok(0)`.
+                        Ok(0) => break,
+                        Ok(_) => continue,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(_) => break,
+                    }
+                }
                 return Ok(InterruptibleRead::Interrupted);
             }
             if poll_fds[0].revents != 0 {
@@ -134,38 +154,51 @@ impl InterruptibleReader {
 }
 
 impl ReaderInterrupt {
-    /// Wakes the reader. Repeated calls coalesce in the one-byte pipe.
+    /// Wakes the reader. Repeated calls pile bytes into the kernel pipe
+    /// buffer, which the reader drains completely on each wake.
     pub fn interrupt(&self) {
         let byte = [1_u8; 1];
-        // SAFETY: `wake_write` owns a live pipe descriptor; the write end is
-        // nonblocking, so a full pipe simply means a wake is already pending.
-        let _ = unsafe {
-            libc::write(
-                self.wake_write.as_raw_fd(),
-                byte.as_ptr().cast(),
-                byte.len(),
-            )
-        };
+        loop {
+            // SAFETY: `wake_write` owns a live pipe descriptor for the whole
+            // call, and `byte` outlives the write.
+            let written = unsafe {
+                libc::write(
+                    self.wake_write.as_raw_fd(),
+                    byte.as_ptr().cast(),
+                    byte.len(),
+                )
+            };
+            if written >= 0 {
+                return;
+            }
+
+            // A signal-interrupted write transferred nothing: retrying is the
+            // only way the wake actually reaches an empty pipe. Every other
+            // failure is safe to ignore -- the write end is nonblocking, so a
+            // full pipe (`WouldBlock`) already holds a pending wake, and any
+            // remaining error means the pipe is unusable and unrecoverable.
+            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return;
+            }
+        }
     }
 }
 
-fn set_descriptor_flags(file: &File, is_nonblocking: bool) -> io::Result<()> {
+fn set_descriptor_flags(file: &File) -> io::Result<()> {
     let descriptor = file.as_raw_fd();
     // SAFETY: `descriptor` is live for this call and `F_SETFD` mutates only
     // its close-on-exec flag.
     if unsafe { libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    if is_nonblocking {
-        // SAFETY: `F_GETFL` only reads the live descriptor's status flags.
-        let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
-        if flags < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `F_SETFL` updates status flags on this live descriptor.
-        if unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
+    // SAFETY: `F_GETFL` only reads the live descriptor's status flags.
+    let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `F_SETFL` updates status flags on this live descriptor.
+    if unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
@@ -173,6 +206,7 @@ fn set_descriptor_flags(file: &File, is_nonblocking: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
@@ -188,5 +222,32 @@ mod tests {
         interrupt.interrupt();
         assert_eq!(thread.join().unwrap(), InterruptibleRead::Interrupted);
         assert!(started_at.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn repeated_interrupts_before_a_drain_do_not_leave_a_stale_wake_pending() {
+        let (data_source, mut idle_peer) = UnixStream::pair().unwrap();
+        let (mut reader, interrupt) =
+            InterruptibleReader::duplicate(data_source.as_raw_fd()).unwrap();
+
+        // Two wakes queued before anything ever reads the pipe: a pipe
+        // write only fails once its whole kernel buffer is full, so both
+        // bytes land, not just one -- this is what a real `Drop` racing an
+        // in-flight `interrupt` from another owner clone can produce.
+        interrupt.interrupt();
+        interrupt.interrupt();
+        assert_eq!(
+            reader.read(&mut [0_u8; 1]).unwrap(),
+            InterruptibleRead::Interrupted
+        );
+
+        // A left-over queued byte would make this second, unrelated read
+        // observe stale POLLIN on the wake pipe and report `Interrupted`
+        // again with no further interrupt ever having happened.
+        idle_peer.write_all(b"x").unwrap();
+        assert_eq!(
+            reader.read(&mut [0_u8; 1]).unwrap(),
+            InterruptibleRead::Data(1)
+        );
     }
 }

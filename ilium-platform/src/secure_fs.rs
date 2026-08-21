@@ -7,8 +7,10 @@
 //!
 //! On Unix that guarantee is explicit: mode `0o700` on directories, `0o600` on
 //! files, `O_NOFOLLOW` so a pre-planted symlink in a world-writable directory
-//! cannot redirect a write, and `O_CLOEXEC` so a descriptor never leaks into a
-//! spawned agent CLI.
+//! cannot redirect a write, `O_CLOEXEC` so a descriptor never leaks into a
+//! spawned agent CLI, and an `lstat`-based check ahead of every `chmod` so a
+//! symlink planted at the path itself (rather than encountered while opening
+//! a file through it) is refused instead of silently chmod'd through.
 //!
 //! On Windows it is inherited: the paths involved live under the user's own
 //! profile (see [`crate::runtime_dir`]), whose ACL already denies other
@@ -35,6 +37,7 @@ pub fn create_private_directory(path: &Path) -> io::Result<()> {
 pub fn restrict_directory_to_owner(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
+    refuse_pre_existing_symlink(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
@@ -54,12 +57,90 @@ pub fn restrict_directory_to_owner(path: &Path) -> io::Result<()> {
 pub fn restrict_file_to_owner(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
+    refuse_pre_existing_symlink(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+/// Refuses to act on a symlink already sitting at `path`.
+///
+/// `std::fs::set_permissions` follows symlinks, and so does
+/// `std::fs::create_dir_all`'s "does this already exist" check (it falls
+/// back to `path.is_dir()`, which resolves through a symlink and reports
+/// success without creating anything). Together those two facts mean a
+/// symlink pre-planted at a deterministic path in a world-writable directory
+/// -- exactly what [`crate::runtime_dir::short_shared_directory`] resolves
+/// under `/tmp` -- would make `create_private_directory` silently treat the
+/// symlink's target as already private, then chmod that target instead of
+/// failing. This lstat-based check sees the symlink itself and refuses
+/// before `set_permissions` can be tricked into following it.
+#[cfg(unix)]
+fn refuse_pre_existing_symlink(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::other(format!(
+            "refusing to follow pre-existing symlink at {}",
+            path.display()
+        ))),
+        // A regular file or directory at the path is what the caller expects
+        // to restrict.
+        Ok(_) => Ok(()),
+
+        // Nothing at the path is fine too: the caller may be about to create
+        // it, and the follow-up operation produces the natural error if not.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+
+        // Any other lstat failure (EACCES, ELOOP, EIO, ...) means the symlink
+        // question could not be answered at all -- propagate rather than
+        // report "safe" for a path this guard never actually inspected.
+        Err(error) => Err(error),
+    }
 }
 
 /// See [`restrict_directory_to_owner`] for why Windows relies on inheritance.
 #[cfg(not(unix))]
 pub fn restrict_file_to_owner(path: &Path) -> io::Result<()> {
+    let _ = path;
+    Ok(())
+}
+
+/// Restricts an already-open file to the current user through its handle.
+///
+/// Operating on the descriptor (`fchmod` underneath) instead of the path
+/// closes the race that [`restrict_file_to_owner`] cannot: nothing swapped in
+/// at the path after the open can redirect this call, so callers that hold
+/// the handle should always prefer this variant.
+#[cfg(unix)]
+pub fn restrict_open_file_to_owner(file: &std::fs::File) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
+
+/// See [`restrict_directory_to_owner`] for why Windows relies on inheritance.
+#[cfg(not(unix))]
+pub fn restrict_open_file_to_owner(file: &std::fs::File) -> io::Result<()> {
+    let _ = file;
+    Ok(())
+}
+
+/// Restricts an existing file to the current user, with the owner's execute
+/// bit set.
+///
+/// For a copied executable (a test fixture binary, an installed helper), not
+/// a data file: use [`restrict_file_to_owner`] for anything that should not
+/// run.
+#[cfg(unix)]
+pub fn restrict_executable_file_to_owner(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    refuse_pre_existing_symlink(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+/// Windows derives executability from the file extension rather than a
+/// permission bit; see the module comment for why no explicit ACL edit
+/// happens here either.
+#[cfg(not(unix))]
+pub fn restrict_executable_file_to_owner(path: &Path) -> io::Result<()> {
     let _ = path;
     Ok(())
 }
@@ -162,5 +243,40 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    /// Reproduces the attack the module doc calls out: a symlink pre-planted
+    /// at ilium's deterministic path in a world-writable directory, pointing
+    /// at a directory the attacker controls. `create_dir_all` alone would
+    /// silently treat the symlink's target as "already exists" and
+    /// `set_permissions` would chmod that target -- this asserts both that
+    /// the call is refused and that the decoy's own permissions are left
+    /// untouched, since a refusal that still mutated the target would not
+    /// actually close the hole.
+    #[cfg(unix)]
+    #[test]
+    fn create_private_directory_refuses_a_pre_planted_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temp dir");
+        let decoy = root.path().join("attacker-owned");
+        std::fs::create_dir(&decoy).expect("create decoy");
+        std::fs::set_permissions(&decoy, std::fs::Permissions::from_mode(0o755))
+            .expect("set decoy permissions");
+        let victim_path = root.path().join("ilium-socket-dir");
+        std::os::unix::fs::symlink(&decoy, &victim_path).expect("plant symlink");
+
+        let result = create_private_directory(&victim_path);
+
+        assert!(result.is_err(), "a pre-planted symlink must be refused");
+        let decoy_mode = std::fs::metadata(&decoy)
+            .expect("decoy metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            decoy_mode, 0o755,
+            "the decoy directory must not be chmod'd through the symlink"
+        );
     }
 }

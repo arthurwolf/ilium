@@ -22,10 +22,30 @@ use std::io;
 /// IPC shutdown request the caller already tried.
 #[cfg(unix)]
 pub fn terminate(process_id: u32) -> io::Result<()> {
+    // `kill(0, ...)` signals the caller's *entire process group* -- delivered
+    // here, that would SIGTERM this CLI and its shell job, not a server. Zero
+    // can reach this function from a corrupted on-disk ready marker, so it
+    // must be rejected, not passed through.
+    if process_id == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id 0 would signal the whole process group",
+        ));
+    }
+    // A truncating `as` cast can turn a `u32` at or above 2^31 into a
+    // negative `pid_t`, and `kill` treats a negative pid as "signal this
+    // whole process group" -- the opposite of the single-process semantics
+    // this function promises its caller.
+    let Ok(process_id) = libc::pid_t::try_from(process_id) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id does not fit in pid_t",
+        ));
+    };
     // SAFETY: `kill` takes no pointers and cannot corrupt this process's
     // memory; an invalid pid is reported through `errno`, not undefined
     // behaviour.
-    let result = unsafe { libc::kill(process_id as libc::pid_t, libc::SIGTERM) };
+    let result = unsafe { libc::kill(process_id, libc::SIGTERM) };
     if result == 0 {
         return Ok(());
     }
@@ -54,19 +74,32 @@ pub fn terminate(process_id: u32) -> io::Result<()> {
     // function closes on every path below.
     let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, process_id) };
     if handle.is_null() {
+        // Read the error left by `OpenProcess` before `is_running` makes its
+        // own Win32 calls below and overwrites the thread-local last-error
+        // value this function is about to report.
+        let open_error = io::Error::last_os_error();
         // It exited between the check above and here, which is still the
         // outcome asked for.
         if !is_running(process_id) {
             return Ok(());
         }
-        return Err(io::Error::last_os_error());
+        return Err(open_error);
     }
     // SAFETY: `handle` is a valid process handle owned by this function.
     let result = unsafe { TerminateProcess(handle, 1) };
+    // Read the error immediately, before `CloseHandle` below can overwrite
+    // the thread-local last-error value this function is about to report.
+    let terminate_error = (result == 0).then(io::Error::last_os_error);
     // SAFETY: same handle, closed exactly once, before any early return.
     unsafe { CloseHandle(handle) };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
+    if let Some(error) = terminate_error {
+        // `TerminateProcess` reports `ERROR_ACCESS_DENIED` for a process that
+        // exited between the open above and the call -- which is the outcome
+        // asked for, exactly like the null-handle path.
+        if !is_running(process_id) {
+            return Ok(());
+        }
+        return Err(error);
     }
     Ok(())
 }
@@ -107,9 +140,21 @@ pub fn replace_current_process(command: &mut std::process::Command) -> io::Error
 /// accept a queued connection and look alive.
 #[cfg(unix)]
 pub fn is_running(process_id: u32) -> bool {
+    // `kill(0, 0)` probes the caller's *own process group*, which always
+    // exists, so passing zero through would report a nonexistent tracked
+    // process as running forever. Zero is never a pid this process tracks.
+    if process_id == 0 {
+        return false;
+    }
+    // Same truncating-cast hazard as `terminate`: a `u32` that doesn't fit in
+    // `pid_t` is not a real pid this process could be tracking, so report it
+    // as not running rather than let the cast flip its sign.
+    let Ok(process_id) = libc::pid_t::try_from(process_id) else {
+        return false;
+    };
     // SAFETY: signal 0 performs only the existence and permission check that
     // a real signal would, and delivers nothing.
-    let result = unsafe { libc::kill(process_id as libc::pid_t, 0) };
+    let result = unsafe { libc::kill(process_id, 0) };
     // `EPERM` proves the process exists while belonging to another user, which
     // still answers the question asked.
     result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -167,6 +212,16 @@ mod tests {
 
         child.wait().expect("child is reaped");
         assert!(!is_running(process_id));
+    }
+
+    // Pid 0 means "the caller's own process group" to `kill`; the guards must
+    // keep it from ever reaching the syscall.
+    #[cfg(unix)]
+    #[test]
+    fn pid_zero_is_rejected_not_signalled() {
+        assert!(!is_running(0));
+        let error = terminate(0).expect_err("terminating pid 0 must be refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[cfg(unix)]

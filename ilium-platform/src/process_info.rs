@@ -157,10 +157,18 @@ pub fn working_directory(process_id: u32) -> Option<PathBuf> {
         let text = std::ffi::OsString::from_wide(&utf16);
         let path = PathBuf::from(text);
         // Windows stores it with a trailing separator; every caller compares
-        // against paths that have none.
-        Some(PathBuf::from(
-            path.to_string_lossy().trim_end_matches('\\').to_string(),
-        ))
+        // against paths that have none. A drive root ("C:\") is the one
+        // exception: stripping its separator would leave "C:", which means
+        // "the current directory on drive C" rather than the root, so the
+        // separator stays on a bare drive letter.
+        let text = path.to_string_lossy();
+        let trimmed = text.trim_end_matches('\\');
+        let normalized = if trimmed.len() == 2 && trimmed.ends_with(':') {
+            text.into_owned()
+        } else {
+            trimmed.to_string()
+        };
+        Some(PathBuf::from(normalized))
     })();
 
     // SAFETY: `process` came from the successful `OpenProcess` above and is
@@ -375,8 +383,12 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
             0,
         )
     };
+    // Round the hint up to whole descriptors, and never let it reach zero: a
+    // zero-descriptor buffer would re-run the sizing form (which reports a
+    // positive byte count), trip the "buffer full, grow" branch, and double
+    // zero forever.
     let mut count = if hinted > 0 {
-        hinted as usize / descriptor_size
+        (hinted as usize).div_ceil(descriptor_size).max(1)
     } else {
         INITIAL_DESCRIPTOR_CAPACITY
     };

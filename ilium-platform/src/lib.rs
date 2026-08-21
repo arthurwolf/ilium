@@ -23,6 +23,9 @@
 //! - [`runtime_dir`] -- where sockets and debug logs live, kept short enough
 //!   that a Unix-domain socket path cannot overflow `sockaddr_un`.
 //! - [`detached`] -- spawning a server process that outlives its parent.
+//! - [`interruptible_reader`] (Unix only) -- blocking file-descriptor reads a
+//!   dropped owner can wake immediately via a private pipe, so background
+//!   reader threads stop without polling timers.
 //! - [`thread_priority`] -- lowering one background worker thread so CPU-heavy
 //!   work never competes with keystrokes and rendering.
 //! - [`open_external`] -- handing a URL or path to the OS's own default
