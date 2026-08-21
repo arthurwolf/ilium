@@ -56,11 +56,23 @@ fn a_shebang_script_named_after_an_agent_is_identified_as_that_agent() {
 
     // The child needs a moment to exec the script before it can be recognised
     // as anything, and process tables are refreshed, not awaited.
+    //
+    // `child` -- not this test binary's own pid -- is the analogue of "the
+    // pane's directly-spawned child" that `identify_agent` expects: it is
+    // the `/bin/sh -c <script>` process the assertion is actually about,
+    // whether the shell exec-replaces itself into the script (depth 0) or
+    // forks it as a child (depth 1). Anchoring on the test harness's own pid
+    // instead would happen to still find it (the harness is `child`'s
+    // parent), but it walks a tree scoped to the whole test process rather
+    // than to this test's own spawned subtree, which is not what "the
+    // process tree matches what detection actually walks in production"
+    // above claims.
+    let script_process_pid = Pid::from_u32(child.id());
     let mut system = System::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     let identity = loop {
         refresh(&mut system);
-        let identity = identify_agent(&system, Pid::from_u32(std::process::id()));
+        let identity = identify_agent(&system, script_process_pid);
         if identity.is_some() || Instant::now() >= deadline {
             break identity;
         }

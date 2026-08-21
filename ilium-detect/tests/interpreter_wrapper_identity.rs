@@ -88,7 +88,7 @@ fn identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
     // Windows failure would look like, and both a bare panic and a leaked
     // 60s-lingering wrapper/child pair make that failure needlessly costly
     // to triage from CI log output alone.
-    let observed: Vec<String> = system
+    let matching_processes: Vec<(u32, String)> = system
         .processes()
         .values()
         .filter(|process| {
@@ -102,20 +102,35 @@ fn identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
             name.contains("codex") || name.contains("node") || arguments.contains("codex")
         })
         .map(|process| {
-            format!(
-                "pid={} name={:?} cmd={:?}",
-                process.pid(),
-                process.name(),
-                process.cmd().iter().collect::<Vec<_>>()
+            (
+                process.pid().as_u32(),
+                format!(
+                    "pid={} name={:?} cmd={:?}",
+                    process.pid(),
+                    process.name(),
+                    process.cmd().iter().collect::<Vec<_>>()
+                ),
             )
         })
         .collect();
 
-    let _ = ilium_platform::process_control::terminate(wrapper_process.id());
-    if let Some(identity) = &identity {
-        let _ = ilium_platform::process_control::terminate(identity.pid);
+    // Every codex/node-named process observed above is terminated, not only
+    // the wrapper and (when it was found) the identified native child: on a
+    // timeout failure `identity` is `None`, and the native child the wrapper
+    // already forked would otherwise be left to linger for its full 60s
+    // `LINGER` duration with nothing left holding a handle to its pid --
+    // exactly the "leaked wrapper/child pair" this test's cleanup exists to
+    // avoid.
+    for (pid, _) in &matching_processes {
+        let _ = ilium_platform::process_control::terminate(*pid);
     }
+    let _ = ilium_platform::process_control::terminate(wrapper_process.id());
     let _ = wrapper_process.wait();
+
+    let observed: Vec<String> = matching_processes
+        .into_iter()
+        .map(|(_, description)| description)
+        .collect();
 
     let identity = identity.unwrap_or_else(|| {
         panic!(

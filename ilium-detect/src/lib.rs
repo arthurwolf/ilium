@@ -712,13 +712,32 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 /// Codex keeps completed timing summaries on screen, often alongside an
 /// ellipsis and an elapsed-time token. Requiring a present-tense activity word
 /// prevents those historical rows from being mistaken for a live turn.
+///
+/// The activity word must open a footer *segment*, not just the whole line:
+/// real captured Codex chrome renders it either flush left
+/// (`"Thinking... (esc to interrupt) · 12s"`) or after a leading glyph
+/// (`"• Working (18m 26s • esc to interrupt)"`, see
+/// `tests/fixtures/codex_goal_active_wide_footer.txt`). A bare `starts_with`
+/// check only catches the first shape; reusing `has_status_boundary_before`
+/// (the same segment-boundary rule `codex_goal_evidence` already relies on)
+/// catches both while still rejecting the word mid-sentence or embedded in a
+/// longer word (e.g. "regenerating").
 fn looks_like_codex_live_status_line(screen_text: &str) -> bool {
     screen_text.lines().any(|line| {
         // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
         let lower = line.trim().to_ascii_lowercase();
         let names_active_turn = ["thinking", "working", "generating", "planning", "running"]
             .iter()
-            .any(|marker| lower.starts_with(marker));
+            .any(|marker| {
+                // Every occurrence is checked, not just the first: prose earlier
+                // on the same line can legitimately contain the activity word
+                // without a segment boundary ("tests are running fine ·
+                // Running… (5m)"), and stopping at that first failed occurrence
+                // would misclassify a live turn as idle.
+                lower
+                    .match_indices(*marker)
+                    .any(|(marker_index, _)| has_status_boundary_before(&lower, marker_index))
+            });
         names_active_turn
             && (lower.contains("…") || lower.contains("..."))
             && lower
@@ -1445,6 +1464,43 @@ mod tests {
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, &fixture("codex_working.txt"),),
             AgentActivity::Working
+        );
+    }
+
+    #[test]
+    fn codex_working_status_behind_a_leading_glyph_is_working() {
+        // Real captured Codex chrome (see
+        // `codex_goal_active_wide_footer.txt`) prefixes the activity word
+        // with a bullet instead of putting it at column 0. Strip the
+        // "esc to interrupt" hint that fixture also carries so this
+        // exercises `looks_like_codex_live_status_line` itself rather than
+        // being short-circuited by the interrupt-marker check.
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Codex, "• Working… (5m)"),
+            AgentActivity::Working
+        );
+    }
+
+    /// The activity word can legitimately appear earlier on the same line as
+    /// ordinary prose (no segment boundary) and again as the real status
+    /// segment. Every occurrence must be boundary-checked -- stopping at the
+    /// first (prose) occurrence would misreport a live turn as idle.
+    #[test]
+    fn codex_status_segment_after_a_prose_occurrence_of_the_same_word_is_working() {
+        assert_eq!(
+            classify_activity_for_agent(
+                &AgentClass::Codex,
+                "tests are running fine · Running… (5m)"
+            ),
+            AgentActivity::Working
+        );
+    }
+
+    #[test]
+    fn codex_activity_word_embedded_in_a_longer_word_is_not_working() {
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Codex, "Regenerating… (5m) is not a status"),
+            AgentActivity::Idle
         );
     }
 
