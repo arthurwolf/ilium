@@ -314,6 +314,32 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
         session_name.to_string(),
     )
     .await?;
+
+    // `Connection::connect` already queued the initial `AttachInteractive`.
+    // `handle_attach` replies with `ServerEvent::Error` instead of a
+    // `TreeSnapshot` on a session-name mismatch, without closing the
+    // connection -- sending the destructive `KillSession` request anyway
+    // would tear down whatever session this socket actually serves, which is
+    // not necessarily the one this command targets. Wait for that first
+    // reply and bail on an `Error` before sending anything destructive; a
+    // `TreeSnapshot` or a timed-out wait both mean it's safe to proceed (a
+    // timeout only means the reply didn't arrive in time, not that attach
+    // failed).
+    let initial_attach_reply = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ilium_ipc::ServerEvent::TreeSnapshot(_) => return Ok(()),
+                ilium_ipc::ServerEvent::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+        Ok(())
+    })
+    .await;
+    if let Ok(Err(message)) = initial_attach_reply {
+        return Err(CliError::ServerReportedError(message));
+    }
+
     connection
         .requests
         .send(ilium_ipc::ClientRequest::KillSession)
@@ -328,11 +354,21 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     // (`recv` returning `None`) and a timed-out wait are both treated as
     // "done here" rather than errors: either way there is nothing further
     // this connection can do, and the server process tears down its own
-    // socket file regardless.
-    let _ = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
-        while connection.events.recv().await.is_some() {}
+    // socket file regardless. `handle_kill_session` itself is infallible, so
+    // an `Error` reaching this drain would only mean some other request on
+    // this connection failed -- surface it rather than reporting success.
+    let drain_result = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            if let ilium_ipc::ServerEvent::Error { message } = event {
+                return Err(message);
+            }
+        }
+        Ok(())
     })
     .await;
+    if let Ok(Err(message)) = drain_result {
+        return Err(CliError::ServerReportedError(message));
+    }
 
     println!("session {session_name:?} killed");
     Ok(())
@@ -361,18 +397,30 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
     // interleave from other panes/clients already attached to this
     // session) lets the wait below tell "our `NewPane` landed" apart from
     // "some unrelated `TreeSnapshot` broadcast arrived" instead of just
-    // trusting the first `TreeSnapshot` it happens to see.
-    let baseline_pane_count = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+    // trusting the first `TreeSnapshot` it happens to see. `handle_attach`
+    // replies with `ServerEvent::Error` instead of a `TreeSnapshot` on a
+    // session-name mismatch, so that must short-circuit here too -- otherwise
+    // this loop would wait out the full timeout for a snapshot that will
+    // never come, then still send `NewPane` against a connection whose
+    // attach already failed.
+    let baseline_wait = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
-            if let ilium_ipc::ServerEvent::TreeSnapshot(tree) = event {
-                return Some(tree.panes().count());
+            match event {
+                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
+                    return Ok(Some(tree.panes().count()))
+                }
+                ilium_ipc::ServerEvent::Error { message } => return Err(message),
+                _ => {}
             }
         }
-        None
+        Ok(None)
     })
-    .await
-    .ok()
-    .flatten();
+    .await;
+    let baseline_pane_count = match baseline_wait {
+        Ok(Ok(count)) => count,
+        Ok(Err(message)) => return Err(CliError::ServerReportedError(message)),
+        Err(_elapsed) => None,
+    };
 
     let command_line = shell_join(cmd);
     connection

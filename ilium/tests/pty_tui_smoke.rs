@@ -2329,16 +2329,6 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     assert!(exited, "split-view TUI did not exit after session cleanup");
 }
 
-/// Every 0-based row whose text contains `needle`, in top-to-bottom order
-/// -- used to locate a specific pane's row in the rendered tree panel so
-/// its cells can be inspected for the creation-pulse flash, which
-/// `screen_text()`'s plain-text dump alone can't reveal (it drops all
-/// styling). A whole terminal row spans both the tree and pane panels
-/// side by side (e.g. `"│    > shell   │no pane selected...│"`), so this
-/// looks for `needle` anywhere in the row rather than at its end. Built
-/// from `Screen::rows` (one string per row, by construction) rather than
-/// splitting `contents()` on newlines, so the returned index always
-/// matches `Screen::cell`'s row argument exactly.
 /// Rows whose final cell holds something.
 ///
 /// A terminal wraps -- and, on the last row, scrolls -- when its rightmost
@@ -2368,6 +2358,16 @@ fn bottom_rows(screen: &vt100::Screen, count: usize) -> Vec<String> {
         .collect()
 }
 
+/// Every 0-based row whose text contains `needle`, in top-to-bottom order
+/// -- used to locate a specific pane's row in the rendered tree panel so
+/// its cells can be inspected for the creation-pulse flash, which
+/// `screen_text()`'s plain-text dump alone can't reveal (it drops all
+/// styling). A whole terminal row spans both the tree and pane panels
+/// side by side (e.g. `"│    > shell   │no pane selected...│"`), so this
+/// looks for `needle` anywhere in the row rather than at its end. Built
+/// from `Screen::rows` (one string per row, by construction) rather than
+/// splitting `contents()` on newlines, so the returned index always
+/// matches `Screen::cell`'s row argument exactly.
 fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
     let cols = screen.size().1;
     screen
@@ -2422,10 +2422,6 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
         .collect()
 }
 
-/// Finds the first terminal cell whose grapheme payload contains `needle`.
-/// Wide emoji can be stored as one multi-codepoint cell followed by a blank
-/// continuation cell, so matching cell contents is more reliable than byte
-/// offsets in a flattened screen row for mouse-coordinate assertions.
 /// Which of the icon catalogue's two view entries carries the selection dot.
 ///
 /// The entries render as `[● Multi-column]  [ Single column ]` and its mirror,
@@ -2479,6 +2475,10 @@ fn unicode_width_of(character: char) -> usize {
     }
 }
 
+/// Finds the first terminal cell whose grapheme payload contains `needle`.
+/// Wide emoji can be stored as one multi-codepoint cell followed by a blank
+/// continuation cell, so matching cell contents is more reliable than byte
+/// offsets in a flattened screen row for mouse-coordinate assertions.
 fn first_cell_containing(screen: &vt100::Screen, needle: &str) -> Option<(u16, u16)> {
     let (rows, columns) = screen.size();
     for row in 0..rows {

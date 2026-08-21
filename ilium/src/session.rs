@@ -691,9 +691,15 @@ fn read_active_log_metadata(session: &ProjectSession) -> Result<ActiveLogMetadat
             log_path,
         }
     } else {
+        // Legacy markers were written line-oriented like the current format,
+        // so a trailing newline is part of the marker, not of the path. A raw
+        // `PathBuf::from(contents)` would keep that newline inside the final
+        // path component, silently naming a nonexistent log file while still
+        // passing the parent-directory check below. Real log paths always end
+        // in `.txt`, so stripping trailing newline characters is lossless.
         ActiveLogMetadata {
             server_pid: None,
-            log_path: PathBuf::from(contents),
+            log_path: PathBuf::from(contents.trim_end_matches(['\n', '\r'])),
         }
     };
     let path = metadata.log_path;
@@ -947,6 +953,26 @@ mod tests {
             log_path.as_os_str().as_encoded_bytes(),
         )
         .expect("write ready-server metadata fixture");
+
+        assert_eq!(
+            read_active_log_path(&session).expect("read metadata"),
+            log_path
+        );
+    }
+
+    #[test]
+    fn legacy_active_log_metadata_ignores_a_trailing_newline() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let session = resolve_project_session(root.path(), "review").expect("session");
+        let log_path = session
+            .log_directory
+            .join("log-2026-07-19_12-00-00.000.txt");
+
+        std::fs::write(
+            &session.active_log_path_file,
+            format!("{}\n", log_path.display()),
+        )
+        .expect("write legacy line-oriented metadata fixture");
 
         assert_eq!(
             read_active_log_path(&session).expect("read metadata"),
