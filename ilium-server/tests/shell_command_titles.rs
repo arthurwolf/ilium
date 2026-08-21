@@ -19,6 +19,20 @@ use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
 mod common;
 use common::{expect_event, TestServer};
 
+/// A foreground command that is not a shell (so it must never receive an
+/// automatic title) and that keeps reading stdin instead of exiting
+/// immediately once spawned, so the typed marker below has a live pane to
+/// land in. `cat` with no arguments blocks on stdin forever. Windows has no
+/// `cat`; `findstr x` is the nearest stock equivalent that keeps reading
+/// stdin instead of exiting immediately, mirroring
+/// `ilium/tests/pty_tui_smoke.rs`'s `IDLE_PANE_ARGUMENTS`. It also becomes
+/// the pane's default title (`TerminalOrigin::default_pane_name`), so the
+/// command line and the title asserted against it cannot drift apart.
+#[cfg(unix)]
+const NON_SHELL_PROBE_COMMAND: &str = "cat";
+#[cfg(windows)]
+const NON_SHELL_PROBE_COMMAND: &str = "findstr x";
+
 async fn create_plain_shell(
     client: &mut ilium_transport::SessionStream,
     session_name: &str,
@@ -210,7 +224,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
         &mut client,
         &ClientRequest::NewPane {
             parent_group: ROOT_ID,
-            kind: NewPaneKind::Command("cat".to_string()),
+            kind: NewPaneKind::Command(NON_SHELL_PROBE_COMMAND.to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
         },
     )
@@ -275,7 +289,10 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     let ServerEvent::TreeSnapshot(tree) = event else {
         unreachable!("predicate only matches tree snapshots");
     };
-    assert_eq!(tree.get(pane_id).expect("pane exists").name, "cat");
+    assert_eq!(
+        tree.get(pane_id).expect("pane exists").name,
+        NON_SHELL_PROBE_COMMAND
+    );
 
     stop(server, &mut client).await;
 }

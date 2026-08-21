@@ -432,6 +432,13 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut saw_prompt_event = false;
     let mut saw_submitted_output = false;
+    // `ScreenUpdate.bytes` is "one or more consecutive raw PTY output
+    // chunks" (`ilium_ipc::protocol::ServerEvent::ScreenUpdate`'s own doc
+    // comment) -- a PTY read boundary is not guaranteed to fall outside the
+    // marker string, so, like `voice_submission_unblocks_a_real_pty_reader_with_enter`
+    // above, the check accumulates across events instead of testing one
+    // chunk in isolation.
+    let mut screen_bytes = Vec::new();
     while !(saw_prompt_event && saw_submitted_output) {
         let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
             .await
@@ -450,12 +457,11 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
             );
             saw_prompt_event = true;
         }
-        saw_submitted_output |= matches!(
-            event,
-            ServerEvent::ScreenUpdate { ref bytes, .. }
-                if String::from_utf8_lossy(bytes)
-                    .contains("received-after-ready:</goal inspect the selected line>")
-        );
+        if let ServerEvent::ScreenUpdate { ref bytes, .. } = event {
+            screen_bytes.extend_from_slice(bytes);
+        }
+        saw_submitted_output = String::from_utf8_lossy(&screen_bytes)
+            .contains("received-after-ready:</goal inspect the selected line>");
     }
 
     write_frame(&mut client, &ClientRequest::KillSession)
@@ -528,6 +534,11 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut saw_manual_output = false;
+    // See the matching comment in
+    // `command_with_initial_input_waits_for_agent_composer_then_submits_enter`:
+    // the marker can arrive split across more than one `ScreenUpdate`, so the
+    // check accumulates rather than testing one chunk in isolation.
+    let mut screen_bytes = Vec::new();
     while !saw_manual_output {
         let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
             .await
@@ -543,12 +554,11 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
             ),
             "manual terminal input must cancel the delayed automatic prompt"
         );
-        saw_manual_output = matches!(
-            event,
-            ServerEvent::ScreenUpdate { ref bytes, .. }
-                if String::from_utf8_lossy(bytes)
-                    .contains("received-after-ready:<manual task>")
-        );
+        if let ServerEvent::ScreenUpdate { ref bytes, .. } = event {
+            screen_bytes.extend_from_slice(bytes);
+        }
+        saw_manual_output =
+            String::from_utf8_lossy(&screen_bytes).contains("received-after-ready:<manual task>");
     }
 
     write_frame(&mut client, &ClientRequest::KillSession)
@@ -760,16 +770,24 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     )
     .await
     .unwrap();
+    // `NewGroup` with `parent_group: ROOT_ID` lands directly under the launch
+    // project (see `ipc::handlers::resolve_parent_group`), as a sibling of
+    // the project's pre-existing "default" group -- so waiting on the
+    // project's child count (rather than root's, which never changes) is
+    // what actually confirms "work" was created, and `.last()` is what
+    // actually names it instead of the pre-existing "default" group.
     let created = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(ROOT_ID).is_ok_and(|children| children.len() == 1))
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(launch_project_id(tree)).is_ok_and(|children| children.len() == 2))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree_before) = created else {
         unreachable!();
     };
-    let group_id = tree_before
+    let group_id = *tree_before
         .children_of(launch_project_id(&tree_before))
-        .unwrap()[0];
+        .unwrap()
+        .last()
+        .expect("newly created \"work\" group present");
 
     // A group is not an eligible split member. The domain validates every
     // requested member before inserting the split, so this must fail as one

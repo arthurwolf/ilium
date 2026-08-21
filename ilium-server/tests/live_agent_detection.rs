@@ -67,11 +67,11 @@ use common::{expect_event, TestServer};
 
 /// How long the fake `codex` script prints the `"esc to interrupt"`
 /// marker before switching to its idle phase. Long enough to comfortably
-/// span at least one real detection-loop tick (`ilium-server::detection`'s
-/// `BASE_TICK_INTERVAL` is a fixed 1s -- not configurable via
-/// `DetectionConfig`, which only controls how *often a due pane is
-/// rechecked*, not the loop's own wake cadence) even under test-runner
-/// load.
+/// span several real detection-loop wakeups (`ilium-server::detection`'s
+/// `run_loop` sleeps to the nearest due pane's deadline, which
+/// `interval_for` derives directly from `DetectionConfig`'s
+/// `working_poll_interval`/`idle_poll_interval` -- there is no fixed
+/// underlying tick the config merely samples) even under test-runner load.
 const WORKING_PHASE_SECONDS: u32 = 12;
 
 /// Generous relative to the fixed ~1s tick granularity above -- covers a
@@ -113,9 +113,6 @@ fn write_fake_codex_binary(bin_dir: &std::path::Path) -> std::path::PathBuf {
     .path
 }
 
-/// Writes a short-lived working phase followed by an idle screen. Unlike the
-/// queue fixture above, this process never reads terminal input, isolating the
-/// focus acknowledgement from queue-delivery acknowledgement behavior.
 /// A fake agent that reports working until the caller says otherwise, then
 /// reports completion. Returns both the script and the marker file that
 /// drives the transition.
@@ -276,10 +273,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
 
     // Short poll intervals so a real `Working -> Idle` transition shows up
     // within this test's timeout instead of the real default's 5s/45s
-    // cadence -- the detection loop's own wake cadence is still the fixed
-    // ~1s `BASE_TICK_INTERVAL` either way (see `WORKING_PHASE_SECONDS`'s
-    // doc comment), so this doesn't make the loop busy-poll, just makes a
-    // due pane eligible for recheck almost every tick.
+    // cadence -- `run_loop` sleeps to the nearest due pane's own deadline
+    // (see `WORKING_PHASE_SECONDS`'s doc comment), so this directly speeds
+    // up the loop's wake cadence for this pane rather than merely making it
+    // eligible for recheck sooner within some slower, fixed tick.
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
         idle_poll_interval: Duration::from_millis(200),
@@ -433,7 +430,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // reclassify the pane `Done`, not plain `Idle`, even though it is focused.
     // `ilium-server::detection::promote_to_done` must turn the raw "just went
     // idle" verdict into the durable completed-turn state that drives the
-    // sound, bell, and title marker.
+    // sound, bell, and title marker -- and since the previous broadcast
+    // status was `Working` (structural assertion #1 above), that promotion
+    // is unconditional here, so the client can never observe a bare `Idle`
+    // for this specific transition.
     let done_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
@@ -443,7 +443,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                         status,
                         PaneStatus::AgentWithGoal(
                             ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Idle | ilium_core::AgentActivity::Done
+                            ilium_core::AgentActivity::Done
                         )
                     )
         )
