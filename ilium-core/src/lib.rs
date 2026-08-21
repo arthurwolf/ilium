@@ -2753,7 +2753,20 @@ impl Tree {
 
     /// Finds the nearest sibling group before/after `group`, walking out of
     /// nested groups only when no peer group exists at the current level.
+    /// Candidates are restricted to `group`'s own project (both `None` in
+    /// legacy trees with no projects yet): `accepts_normal_children` alone
+    /// also matches sibling `Project` containers, so without this check a
+    /// pane sitting directly under a project could "arrow" past that
+    /// project's own top-level boundary into an unrelated project, which
+    /// `move_node` would then have to reject with `CrossProjectMove` instead
+    /// of this method reporting the ordinary `None` boundary case.
     fn adjacent_group(&self, group: NodeId, direction: TreeMoveDirection) -> Option<NodeId> {
+        let project = self.project_ancestor(group);
+        let is_candidate = |candidate: &NodeId| {
+            self.get(*candidate)
+                .is_some_and(Node::accepts_normal_children)
+                && self.project_ancestor(*candidate) == project
+        };
         let mut current_group = group;
         loop {
             let parent = self.parent_of(current_group)?;
@@ -2765,10 +2778,7 @@ impl Tree {
             match direction {
                 TreeMoveDirection::Up => {
                     for candidate in siblings[..position].iter().rev() {
-                        if self
-                            .get(*candidate)
-                            .is_some_and(Node::accepts_normal_children)
-                        {
+                        if is_candidate(candidate) {
                             found = Some(*candidate);
                             break;
                         }
@@ -2776,10 +2786,7 @@ impl Tree {
                 }
                 TreeMoveDirection::Down => {
                     for candidate in siblings[position + 1..].iter() {
-                        if self
-                            .get(*candidate)
-                            .is_some_and(Node::accepts_normal_children)
-                        {
+                        if is_candidate(candidate) {
                             found = Some(*candidate);
                             break;
                         }
@@ -3467,6 +3474,35 @@ mod tests {
             &[before, first, split, last, after]
         );
         assert_eq!(tree.children_of(split).unwrap(), &[]);
+    }
+
+    /// Regression test for a bug where `adjacent_group` treated a sibling
+    /// `Project` node as a valid hop target for a pane sitting directly
+    /// under a different project: the arrow-move boundary case must return
+    /// `Ok(false)`, never surface `move_node`'s `CrossProjectMove` error.
+    #[test]
+    fn pane_arrow_at_a_project_boundary_stops_instead_of_crossing_projects() {
+        let mut tree = Tree::new();
+        let first_project = tree.add_project(PathBuf::from("/tmp/arrow-first")).unwrap();
+        let second_project = tree
+            .add_project(PathBuf::from("/tmp/arrow-second"))
+            .unwrap();
+        let pane = tree
+            .add_pane(first_project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        assert!(!tree
+            .move_node_one_step(pane, TreeMoveDirection::Down)
+            .unwrap());
+        assert_eq!(tree.parent_of(pane), Some(first_project));
+
+        let second_pane = tree
+            .add_pane(second_project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        assert!(!tree
+            .move_node_one_step(second_pane, TreeMoveDirection::Up)
+            .unwrap());
+        assert_eq!(tree.parent_of(second_pane), Some(second_project));
     }
 
     #[test]
