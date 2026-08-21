@@ -5,6 +5,8 @@
 //! This sends the same `org.mpris.MediaPlayer2.Player.Pause`/`Play` D-Bus
 //! calls a desktop's physical media keys trigger -- no shelled-out command.
 
+use std::time::Duration;
+
 use zbus::zvariant::OwnedValue;
 use zbus::Connection;
 
@@ -14,6 +16,27 @@ const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
 const PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
 const PLAYING_STATUS: &str = "Playing";
 
+// Upper bound on any single D-Bus method call made through this module.
+// zbus applies no reply timeout by default, and the bus daemon never
+// answers on a peer's behalf, so without this a wedged bus-name owner
+// (e.g. a stopped player process that never replies to `Get` or `Pause`)
+// would hang the await forever -- and these calls run inline in the
+// client's single event loop, so that would freeze the whole TUI.
+const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Session-bus connection whose method calls all carry
+/// [`DBUS_METHOD_TIMEOUT`], or `None` when no session bus is reachable
+/// (headless environments, some containers) -- a normal, expected
+/// condition for this module, not a bug.
+async fn session_connection() -> Option<Connection> {
+    zbus::connection::Builder::session()
+        .ok()?
+        .method_timeout(DBUS_METHOD_TIMEOUT)
+        .build()
+        .await
+        .ok()
+}
+
 /// Pauses every MPRIS player currently reporting `PlaybackStatus: Playing`
 /// and returns their bus names, so a later [`resume_players`] call resumes
 /// only the players this call actually paused -- one already paused, or
@@ -22,7 +45,7 @@ const PLAYING_STATUS: &str = "Playing";
 /// player running is a normal, expected condition, not a bug -- it simply
 /// pauses nothing.
 pub async fn pause_playing_players() -> Vec<String> {
-    let Ok(connection) = Connection::session().await else {
+    let Some(connection) = session_connection().await else {
         return Vec::new();
     };
     let mut paused = Vec::new();
@@ -44,7 +67,7 @@ pub async fn resume_players(players: Vec<String>) {
     if players.is_empty() {
         return;
     }
-    let Ok(connection) = Connection::session().await else {
+    let Some(connection) = session_connection().await else {
         return;
     };
     for player in players {

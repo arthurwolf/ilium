@@ -22,8 +22,14 @@ pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> C
         return Cow::Borrowed(&[]);
     };
 
-    // Split views retain their explicit layout order in every mode.
-    if !tree.get(parent).is_some_and(Node::is_group) || tree_order == TreeOrder::Manual {
+    // Split views retain their explicit layout order in every mode. Projects
+    // accept the same normal-child kinds a group does (only split views are
+    // pane-only and structural), so they must be sortable too -- checking
+    // `is_group` here would silently leave every project's direct children
+    // stuck in manual order no matter which mode the user picks.
+    if !tree.get(parent).is_some_and(Node::accepts_normal_children)
+        || tree_order == TreeOrder::Manual
+    {
         return Cow::Borrowed(children);
     }
 
@@ -177,6 +183,20 @@ mod tests {
         assert_eq!(
             names(&tree, &ordered_children(&tree, parent, TreeOrder::Type)),
             ["nested", "split", "assets", "codex", "editor", "roadmap"]
+        );
+    }
+
+    #[test]
+    fn type_mode_also_sorts_a_projects_direct_children() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        tree.add_pane(project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        tree.add_group(project, "nested").unwrap();
+
+        assert_eq!(
+            names(&tree, &ordered_children(&tree, project, TreeOrder::Type)),
+            ["nested", "shell"]
         );
     }
 

@@ -341,11 +341,15 @@ mod tests {
     }
 
     #[test]
-    fn light_preset_differs_from_dark_in_every_color() {
+    fn light_preset_differs_from_dark_in_background_and_border_colors() {
         let dark = Theme::dark();
         let light = Theme::light();
         assert_ne!(dark.accent_bg, light.accent_bg);
         assert_ne!(dark.border_focused, light.border_focused);
         assert_ne!(dark.border_unfocused, light.border_unfocused);
+        // `accent_fg` is deliberately shared: near-black text reads correctly
+        // on both the dark preset's lavender accent and the light preset's
+        // pale lavender accent, so there is no separate light-mode value.
+        assert_eq!(dark.accent_fg, light.accent_fg);
     }
 }

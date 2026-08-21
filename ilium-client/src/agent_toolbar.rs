@@ -627,11 +627,19 @@ fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rec
 
     let mut center = center_buttons(ctx);
     // Drop from the end until the group fits beside Close, rather than
-    // silently overlapping it.
-    let available_for_center = close_right_edge.saturating_sub(1);
+    // silently overlapping it. The group is centered, so its right edge sits
+    // at `(area.width + total_width) / 2`, not at `total_width` -- comparing
+    // the raw width against the space left of Close would let a wide group's
+    // centered tail land on top of Close. Test the actual centered placement,
+    // and keep the same minimum gap before Close as between buttons.
     loop {
+        if center.is_empty() {
+            break;
+        }
         let total_width = group_width(&center);
-        if total_width <= available_for_center || center.is_empty() {
+        let centered_start = area.width.saturating_sub(total_width) / 2;
+        let centered_right_edge = centered_start.saturating_add(total_width);
+        if centered_right_edge.saturating_add(BUTTON_GAP) <= close_right_edge {
             break;
         }
         center.pop();
@@ -648,7 +656,14 @@ fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rec
     }
     rects.push((
         AgentToolbarAction::Close,
-        Rect::new(area.x + close_right_edge, area.y, close_width, 1),
+        // Clamp to the toolbar row so a Close label wider than the whole
+        // area cannot produce a rect that spills past `area`'s right edge.
+        Rect::new(
+            area.x + close_right_edge,
+            area.y,
+            close_width.min(area.width),
+            1,
+        ),
         close_text,
     ));
     rects

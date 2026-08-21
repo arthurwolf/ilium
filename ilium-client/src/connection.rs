@@ -108,9 +108,10 @@ impl Drop for Connection {
 /// loop is ever behind, applying backpressure here -- pausing this read
 /// loop rather than reading further frames off the socket into an
 /// unbounded backlog -- is the correct behavior. This task's only job is
-/// forwarding frames, so awaiting here never risks stalling anything else
-/// (unlike the main loop itself, which must never block on a full channel
-/// -- see `crate::run`'s outbound-request send).
+/// forwarding frames, so awaiting here never risks stalling anything else.
+/// (The main loop likewise awaits its outbound-request send for lossless
+/// backpressure -- see the comment at `crate::run`'s
+/// `connection.requests.send` call.)
 async fn read_loop(read_half: SessionReadHalf, event_tx: mpsc::Sender<ServerEvent>) {
     let mut frame_reader = FrameReader::new(read_half);
     loop {

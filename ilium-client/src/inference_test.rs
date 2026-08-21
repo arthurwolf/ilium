@@ -79,6 +79,8 @@ mod tests {
     fn normalization_bounds_labels() {
         assert_eq!(normalized("  Fix   login "), Some("Fix login".to_string()));
         assert_eq!(normalized(" "), None);
+        assert_eq!(normalized(&"x".repeat(73)), None);
+        assert_eq!(normalized(&"x".repeat(72)), Some("x".repeat(72)));
     }
 
     #[test]

@@ -22,7 +22,9 @@ pub fn render_report(
 ) -> String {
     let mut report = String::new();
     report.push_str("ILIUM AGENT DEBUG LOG\n");
-    report.push_str(&format!("Pane: {pane_name}\n"));
+    // Pane names can be LLM-inferred titles, so they are untrusted text for a
+    // line-oriented report: sanitize them like every other dynamic string.
+    report.push_str(&format!("Pane: {}\n", clean_single_line_text(pane_name)));
     report.push_str(&format!("Pane ID: {}\n", pane_id.0));
     report.push_str(&format!(
         "Saved: {}\n",
@@ -69,8 +71,10 @@ pub fn write_report(path: &Path, report: &str) -> io::Result<()> {
         .truncate(true)
         .open(path)?;
     // The open above only applies the mode when it creates the file, so an
-    // existing report from an earlier export is tightened here too.
-    secure_fs::restrict_file_to_owner(path)?;
+    // existing report from an earlier export is tightened here too. Going
+    // through the handle (fchmod) rather than the path means nothing swapped
+    // in at the path after the open can redirect the permission change.
+    secure_fs::restrict_open_file_to_owner(&file)?;
     file.write_all(report.as_bytes())?;
     file.flush()
 }
@@ -82,25 +86,35 @@ fn append_entry(report: &mut String, entry: &AgentDebugEntry) {
         "{}  [{}]  {}\n",
         crate::agent_debug_ui::format_timestamp(entry.occurred_at_unix_millis),
         category,
-        clean_text(&entry.summary),
+        clean_single_line_text(&entry.summary),
     ));
     report.push_str(&format!("Observed by: {}\n", source_label(entry.source)));
     if let Some(context) = context_summary(entry) {
         report.push_str(&format!("Context: {context}\n"));
     }
     if let Some(correlation_id) = entry.correlation_id.as_deref() {
-        report.push_str(&format!("Correlation: {}\n", clean_text(correlation_id)));
+        report.push_str(&format!(
+            "Correlation: {}\n",
+            clean_single_line_text(correlation_id)
+        ));
     }
     for field in &entry.fields {
+        // Values may legitimately span lines; continuation lines are indented
+        // so the report's `- label:` structure stays parseable by eye.
         let value = clean_text(&field.value).replace('\n', "\n    ");
-        report.push_str(&format!("- {}: {value}\n", clean_text(&field.label)));
+        report.push_str(&format!(
+            "- {}: {value}\n",
+            clean_single_line_text(&field.label)
+        ));
     }
 }
 
 fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(class) = entry.context.class.as_ref() {
-        parts.push(agent_class_label(class).to_string());
+        // `AgentClass::Other` carries a detector-provided name, which is
+        // untrusted text like the viewer treats it.
+        parts.push(clean_single_line_text(agent_class_label(class)));
     }
     if let Some(activity) = entry.context.activity {
         parts.push(activity_label(activity).to_string());
@@ -109,7 +123,9 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
         parts.push(format!("process {process_id}"));
     }
     if let Some(session_id) = entry.context.session_id.as_deref() {
-        parts.push(format!("session {session_id}"));
+        // Session ids come from session discovery over agent CLI state files,
+        // so they are sanitized like the viewer does.
+        parts.push(format!("session {}", clean_single_line_text(session_id)));
     }
     if entry.context.title_generation > 0 {
         parts.push(format!(
@@ -152,6 +168,17 @@ const fn activity_label(activity: AgentActivity) -> &'static str {
     }
 }
 
+/// Sanitizes text that must occupy exactly one line of the report (headers,
+/// summaries, labels): embedded newlines become spaces so they cannot break
+/// the line-oriented format, and every other control character is replaced
+/// like [`clean_text`] does.
+fn clean_single_line_text(value: &str) -> String {
+    clean_text(value).replace('\n', " ")
+}
+
+/// Sanitizes multi-line-capable text (field values): keeps newlines and tabs,
+/// replaces every other control character so terminal escape sequences from
+/// captured screen content cannot re-execute when the report is `cat`-ed.
 fn clean_text(value: &str) -> String {
     value
         .chars()
@@ -280,6 +307,52 @@ mod tests {
         );
         assert!(unfiltered.contains("Exported events: 2"));
         assert!(unfiltered.contains("tree animation resize"));
+    }
+
+    #[test]
+    fn report_keeps_untrusted_text_on_one_line_and_strips_escapes() {
+        let cache = AgentDebugLogCache {
+            log: ilium_ipc::PaneDebugLog {
+                entries: vec![AgentDebugEntry {
+                    sequence: 1,
+                    occurred_at_unix_millis: 1_700_000_000_000,
+                    severity: AgentDebugSeverity::Information,
+                    source: AgentDebugSource::Detector,
+                    kind: AgentDebugEventKind::DetectionCycle,
+                    summary: "line one\nline two".to_string(),
+                    fields: Vec::new(),
+                    correlation_id: None,
+                    context: AgentDebugContext {
+                        class: Some(AgentClass::Other("evil\u{1b}[31m\nagent".to_string())),
+                        activity: None,
+                        process_id: None,
+                        session_id: Some("id\nwith newline".to_string()),
+                        title_generation: 0,
+                    },
+                    metadata: Default::default(),
+                }],
+                ..Default::default()
+            },
+            through_sequence: 1,
+            is_loading: false,
+            has_loaded_retained_history: true,
+        };
+
+        let report = render_report(
+            "pane\nname\u{1b}[2J",
+            NodeId(3),
+            &cache,
+            AgentDebugLogFilter::default(),
+            1_700_000_001_000,
+        );
+
+        // Newlines in single-line contexts are flattened to spaces and the
+        // ANSI escape byte is replaced, so no untrusted text can break the
+        // line format or re-execute in a terminal viewing the file.
+        assert!(report.contains("Pane: pane name\u{fffd}[2J\n"));
+        assert!(report.contains("[DETECTION]  line one line two\n"));
+        assert!(report.contains("Context: evil\u{fffd}[31m agent · session id with newline\n"));
+        assert!(!report.contains('\u{1b}'));
     }
 
     #[test]

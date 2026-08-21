@@ -2658,6 +2658,15 @@ impl App {
                     .and_then(Node::project_path)
                     .map(Path::to_path_buf)
                 else {
+                    // The draft was already taken out of the composer above;
+                    // put it back so a project that vanished mid-composition
+                    // (stale right-panel target) doesn't silently discard the
+                    // user's typed message -- same recovery as a failed append.
+                    if let Some(state) = self.chatrooms.get_mut(&project_id) {
+                        state.draft = draft;
+                    }
+                    self.status_message =
+                        Some("Could not send chatroom message: project is gone".to_string());
                     return;
                 };
                 match crate::chatroom::append_message(&project_root, "user", &draft) {
@@ -2924,15 +2933,22 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
-        if !ui.agent_debug_menu_enabled
-            && matches!(
+        if !ui.agent_debug_menu_enabled {
+            if matches!(
                 self.mode,
                 Mode::AgentDebugLog(_) | Mode::AgentDebugSavePath(..)
-            )
-        {
-            self.mode = Mode::Normal;
-        }
-        if !ui.agent_debug_menu_enabled {
+            ) {
+                self.mode = Mode::Normal;
+            }
+            // The save-path prompt stacks over its debug-log parent via
+            // `push_modal_over`, and `ui::draw` renders every suspended
+            // `modal_stack` layer (and treats its first entry as the root
+            // mode). Resetting only `self.mode` would leave that suspended
+            // `AgentDebugLog` painted behind everything with no input path
+            // left to pop it, so the stack must drop those layers too.
+            self.modal_stack.retain(|mode| {
+                !matches!(mode, Mode::AgentDebugLog(_) | Mode::AgentDebugSavePath(..))
+            });
             self.remove_agent_debug_action_from_terminal_menu();
         }
         self.ui_settings = ui.clone();
@@ -3926,9 +3942,13 @@ impl App {
     /// Synchronous helper retained for focused unit tests. Interactive
     /// search uses `tick_workspace_search` and `SearchWorkers` instead.
     pub fn refresh_search_results(&self, state: &mut SearchState) {
+        // Adopt (rather than plain-replace) so the revision advances: a
+        // debounced background worker still running for the previous query
+        // must be rejected on completion instead of clobbering these
+        // synchronously-computed results afterwards.
         let query = state.query.buf.trim();
         if query.is_empty() {
-            state.replace_results(Vec::new());
+            state.adopt_synchronous_results(Vec::new());
             return;
         }
 
@@ -3937,7 +3957,7 @@ impl App {
             query: query.to_string(),
             sources: self.workspace_search_sources(),
         };
-        state.replace_results(search_ui::search_workspace(&request, || false));
+        state.adopt_synchronous_results(search_ui::search_workspace(&request, || false));
     }
 
     /// Captures all searchable client-owned state. The terminal half is an
@@ -6924,6 +6944,13 @@ impl App {
         match editor.save_to(&path) {
             Ok(()) => {
                 editor.retarget_path(path.clone());
+                // `retarget_path` drops any cached rendered document (its
+                // relative image links were resolved against the old path's
+                // directory); rebuild immediately so a pane sitting in
+                // Rendered mode doesn't linger on the "Rendering…"
+                // placeholder until some later resize. The rebuild guards
+                // itself against non-Markdown/non-Rendered panes.
+                self.rebuild_rendered_markdown(id);
                 if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
                     self.request_rename(id, name.to_string(), None, None);
                 }
@@ -7332,7 +7359,12 @@ impl App {
                         editor.rendered_scroll = editor.rendered_scroll.saturating_sub(1)
                     }
                     KeyCode::Down => {
-                        editor.rendered_scroll = (editor.rendered_scroll + 1).min(max_scroll)
+                        // Saturating: `max_scroll` can sit near `u16::MAX` for
+                        // a very tall rendered document (`content_height`
+                        // saturates), so a plain `+` here can overflow at the
+                        // bottom of the document.
+                        editor.rendered_scroll =
+                            editor.rendered_scroll.saturating_add(1).min(max_scroll)
                     }
                     KeyCode::PageUp => {
                         editor.rendered_scroll = editor
@@ -7340,8 +7372,10 @@ impl App {
                             .saturating_sub(editor_content_area.height)
                     }
                     KeyCode::PageDown => {
-                        editor.rendered_scroll =
-                            (editor.rendered_scroll + editor_content_area.height).min(max_scroll)
+                        editor.rendered_scroll = editor
+                            .rendered_scroll
+                            .saturating_add(editor_content_area.height)
+                            .min(max_scroll)
                     }
                     _ => {}
                 }
@@ -8762,6 +8796,11 @@ impl App {
                     Some(crate::board_ui::BoardHit::DetailBody)
                 ) =>
             {
+                // Wheel interaction with the body is an explicit engagement
+                // with that field: focus it so typed input lands where the
+                // user is looking. Focus policy lives here in the input
+                // router; `scroll_detail_body` itself stays a pure scroll.
+                board.set_detail_editor_focus(crate::board::CardEditorField::Body);
                 board.scroll_detail_body(-3);
             }
             MouseEventKind::ScrollDown
@@ -8776,6 +8815,8 @@ impl App {
                     Some(crate::board_ui::BoardHit::DetailBody)
                 ) =>
             {
+                // Same focus-follows-wheel policy as ScrollUp above.
+                board.set_detail_editor_focus(crate::board::CardEditorField::Body);
                 board.scroll_detail_body(3);
             }
             MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
@@ -8950,7 +8991,10 @@ impl App {
                     editor.rendered_scroll = editor.rendered_scroll.saturating_sub(3)
                 }
                 MouseEventKind::ScrollDown => {
-                    editor.rendered_scroll = (editor.rendered_scroll + 3).min(max_scroll)
+                    // Saturating for the same reason as the Rendered-mode key
+                    // path: `max_scroll` can approach `u16::MAX`.
+                    editor.rendered_scroll =
+                        editor.rendered_scroll.saturating_add(3).min(max_scroll)
                 }
                 _ => {}
             }
@@ -12121,6 +12165,12 @@ mod tests {
         let pane_id = codex_pane(&mut app);
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.set_screen_area(Rect::new(0, 0, 120, 40));
+        // Compact icons-only mode: with labels on (the default), Codex's
+        // labeled center group is wider than this pane, and `button_rects`'
+        // fit loop correctly drops the tier buttons from the right rather
+        // than overlapping Close. This test is about submenu dispatch, not
+        // narrow-toolbar degradation, so pin the compact mode it needs.
+        app.ui_settings.show_toolbar_labels = false;
         app.agent_toolbar_latched_panes.insert(pane_id);
         app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
         app.take_outbound_requests();

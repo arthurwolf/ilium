@@ -173,6 +173,20 @@ impl SearchState {
         self.results.get(self.selected_index)
     }
 
+    /// Adopts synchronously-computed results for the query text currently in
+    /// `self.query`, bumping the revision so a still-running debounced worker
+    /// launched for a previous query is rejected when it completes instead of
+    /// clobbering these results later. Selection resets because an index into
+    /// the previous query's results is meaningless against the new ones.
+    pub fn adopt_synchronous_results(&mut self, results: Vec<SearchResult>) {
+        self.query_revision = self.query_revision.wrapping_add(1);
+        self.completed_revision = Some(self.query_revision);
+        self.last_query_edit = None;
+        self.selected_index = 0;
+        self.scroll = 0;
+        self.replace_results(results);
+    }
+
     pub fn move_selection(&mut self, delta: i32, visible_rows: usize) {
         if self.results.is_empty() {
             return;
@@ -340,11 +354,29 @@ fn result_from_source(
         automatic_title: source.automatic_title.clone(),
         path: source.path.clone(),
         last_command: last_command.or_else(|| source.last_command.clone()),
-        before: before.to_string(),
-        matched: matched.to_string(),
-        after: after.to_string(),
+        before: single_line(before),
+        matched: single_line(matched),
+        after: single_line(after),
         location,
     }
+}
+
+/// Collapses embedded newlines into spaces. `context_parts` slices raw
+/// source text around a match without regard to line boundaries, so
+/// `before`/`after` routinely span a real newline; ratatui's `Span`
+/// contract assumes single-line content, and `render_results` places these
+/// straight into one `Line`, so an unhandled `\n`/`\r` would render as a
+/// stray control glyph inside an otherwise flat evidence row.
+fn single_line(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character == '\n' || character == '\r' {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
 }
 
 /// Finds all bounded, case-insensitive matches in a plain local document.
@@ -791,7 +823,21 @@ fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
             continue;
         }
         let byte = bytes[index];
-        if byte == b'\r' || byte == b'\n' {
+        if byte == b'\r' {
+            // A PTY's line ending is `\r\n`; collapsing the pair to one `\n`
+            // (instead of mapping each byte to its own `\n`) keeps the
+            // searchable text from gaining a spurious blank line after every
+            // line of real terminal output.
+            if bytes.get(index + 1) == Some(&b'\n') {
+                push_mapped_char(&mut text, &mut raw_ends, '\n', index + 2);
+                index += 2;
+            } else {
+                push_mapped_char(&mut text, &mut raw_ends, '\n', index + 1);
+                index += 1;
+            }
+            continue;
+        }
+        if byte == b'\n' {
             push_mapped_char(&mut text, &mut raw_ends, '\n', index + 1);
             index += 1;
             continue;
@@ -860,7 +906,13 @@ fn skip_escape(bytes: &[u8], index: usize) -> usize {
         }
         return bytes.len();
     }
-    if next == b']' {
+    // OSC (`]`), DCS (`P`), SOS (`X`), PM (`^`), and APC (`_`) are all
+    // string-typed escape sequences terminated by BEL or ST (`ESC \`); the
+    // 2-byte generic fallback below is only correct for the fixed-length
+    // C1-style sequences, so without this branch a DCS/SOS/PM/APC payload
+    // (e.g. Sixel graphics data) would leak into the searchable text as
+    // garbage matches instead of being skipped whole.
+    if matches!(next, b']' | b'P' | b'X' | b'^' | b'_') {
         let mut cursor = index + 2;
         while cursor < bytes.len() {
             if bytes[cursor] == 0x07 {
@@ -916,10 +968,23 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].matched, "needle");
-        assert!(matches!(
+        // Byte 17 (0-indexed) is the closing `e` of "needle" in `history`;
+        // the exclusive raw end one past it is 18. A weaker bound here
+        // can't tell a correct offset-table lookup from a fallback to
+        // `raw_len` (28) on a miss.
+        assert_eq!(
             results[0].location,
-            SearchLocation::Terminal { history_end_byte } if history_end_byte > 6
-        ));
+            SearchLocation::Terminal {
+                history_end_byte: 18
+            }
+        );
+    }
+
+    #[test]
+    fn stripping_collapses_a_crlf_pair_into_a_single_newline() {
+        let stripped = strip_terminal_controls(b"a\r\nb");
+        assert_eq!(stripped.text, "a\nb");
+        assert_eq!(stripped.raw_ends.len(), stripped.text.len());
     }
 
     #[test]
@@ -1012,6 +1077,31 @@ mod tests {
             .collect::<String>();
         assert!(text.contains("needle"));
         assert_eq!(terminal.get_cursor_position().expect("native cursor").y, 2);
+    }
+
+    #[test]
+    fn result_from_source_collapses_embedded_newlines_in_context_text() {
+        let source = WorkspaceSearchSource {
+            pane_id: NodeId(4),
+            kind: SearchObjectKind::File,
+            object_name: "note.md".to_string(),
+            automatic_title: None,
+            path: None,
+            last_command: None,
+            content: WorkspaceSearchContent::Text(Vec::new()),
+        };
+        let result = result_from_source(
+            &source,
+            "first line\nsecond ",
+            "needle",
+            " third\nline",
+            SearchLocation::Editor { line: 0 },
+            None,
+        );
+        assert_eq!(result.before, "first line second ");
+        assert_eq!(result.after, " third line");
+        assert!(!result.before.contains('\n'));
+        assert!(!result.after.contains('\n'));
     }
 
     #[test]

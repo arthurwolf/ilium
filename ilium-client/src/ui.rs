@@ -784,6 +784,9 @@ fn draw_agent_toolbar_model_submenu(frame: &mut Frame, state: &AgentToolbarModel
     const LEVEL_ICONS: [&str; 6] = [
         "\u{b7}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{2726}",
     ];
+    // Invariant: `tier_index` is only ever constructed by enumerating
+    // `CODEX_MODEL_TIERS` itself (see the `index as u8` in
+    // `agent_toolbar::render`'s button loop), so it is always in bounds here.
     let tier = &crate::agent_toolbar::CODEX_MODEL_TIERS[usize::from(state.tier_index)];
     let levels = crate::agent_toolbar::codex_reasoning_levels(usize::from(state.tier_index));
     let lines: Vec<Line> = levels
@@ -1128,13 +1131,13 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 .map_or(viewport.content_area, |action| action.terminal_area);
             term.render_screen(terminal_area, frame.buffer_mut());
             term.with_screen(|screen| {
-                draw_terminal_selection(
-                    app,
-                    frame,
-                    viewport.pane_id,
-                    viewport.content_area,
-                    screen,
-                );
+                // Highlight against the same rect the screen was just drawn
+                // into -- when a completed-agent close action reserves the
+                // bottom row, `terminal_area` is shorter than
+                // `viewport.content_area`, and mapping the selection to the
+                // full content area would let it claim a row of cells that
+                // were never actually painted with terminal content.
+                draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
             });
             draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
         }

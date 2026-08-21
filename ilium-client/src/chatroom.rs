@@ -104,9 +104,18 @@ pub fn append_message(project_root: &Path, author: &str, content: &str) -> anyho
     }
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string();
     with_project_lock(project_root, || {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .open(path_for_project(project_root))?;
+        let path = path_for_project(project_root);
+        // CHATROOM.md is human-editable (see module doc), so a prior manual
+        // edit may have left the file without a trailing newline. Appending
+        // straight onto that would silently splice our new record onto the
+        // end of the human's last line, corrupting both.
+        let needs_leading_newline = fs::read(&path)
+            .map(|bytes| bytes.last().is_some_and(|&byte| byte != b'\n'))
+            .unwrap_or(false);
+        let mut file = OpenOptions::new().append(true).open(&path)?;
+        if needs_leading_newline {
+            writeln!(file)?;
+        }
         writeln!(file, "- {timestamp} | {author} | {content}")?;
         file.sync_data()?;
         Ok(())
@@ -265,9 +274,14 @@ fn upsert_guidance(existing: &str) -> String {
     let section_start = existing[..marker_offset]
         .rfind("## Ilium Chatroom")
         .unwrap_or(marker_offset);
+    // Match the next ATX heading of ANY level ("#".."######"), not just "## ".
+    // A narrower match (e.g. "\n## " only) misses a following "# " or "### "
+    // heading, which pushes `section_end` all the way to `existing.len()` and
+    // makes the splice below delete every section after the ilium block.
     let section_end = existing[marker_offset..]
-        .find("\n## ")
-        .map(|offset| marker_offset + offset)
+        .match_indices('\n')
+        .map(|(offset, _)| marker_offset + offset)
+        .find(|&newline_offset| existing[newline_offset + 1..].starts_with('#'))
         .unwrap_or(existing.len());
     format!(
         "{}{}{}",
@@ -380,11 +394,30 @@ fn with_project_lock<T>(
 fn parse_message_line(line: &str) -> Option<ChatMessage> {
     let line = line.strip_prefix("- ")?;
     let mut fields = line.splitn(3, " | ");
+    let mut parse_field =
+        || -> Option<String> { Some(unescape_field(&strip_raw_control_bytes(fields.next()?))) };
     Some(ChatMessage {
-        timestamp: unescape_field(fields.next()?),
-        author: unescape_field(fields.next()?),
-        content: unescape_field(fields.next()?),
+        timestamp: parse_field()?,
+        author: parse_field()?,
+        content: parse_field()?,
     })
+}
+
+/// Drops raw control bytes from a record field as read from the file.
+/// `sanitize_field` guarantees ilium itself never writes them, but
+/// `CHATROOM.md` is human-editable, so a well-formed hand-edited record line
+/// can still smuggle raw terminal escape bytes into a field. Left in place
+/// they would reach every structured consumer unsanitized — `ilium chat tail`
+/// prints fields straight to the user's terminal and the TUI renders them —
+/// which the module contract ("human edits ... are safely ignored by the
+/// structured UI") promises never happens. A raw tab is kept as benign
+/// whitespace, and escaped `\n`/`\t` sequences are untouched here so
+/// `unescape_field` still reconstructs real newlines and tabs from them.
+fn strip_raw_control_bytes(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\t')
+        .collect()
 }
 
 fn sanitize_field(value: &str) -> String {
@@ -488,6 +521,60 @@ mod tests {
         assert!(repaired.contains("Will another agent act differently"));
         assert!(!repaired.contains("Post concise coordination"));
         assert!(repaired.contains("## User-owned notes\n\nKeep this section."));
+    }
+
+    #[test]
+    fn repair_preserves_a_following_section_at_any_heading_level() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        let agents_path = directory.path().join("AGENTS.md");
+        std::fs::write(
+            &agents_path,
+            "# Existing\n\n## Ilium Chatroom\n\n<!-- ilium-chatroom-guidance: v1 -->\n\nold body\n\n### User notes\n\nKeep this.\n",
+        )
+        .unwrap();
+
+        assert!(ensure_integrations(directory.path()).unwrap());
+
+        let repaired = std::fs::read_to_string(agents_path).unwrap();
+        assert!(repaired.contains("ilium-chatroom-guidance: v2"));
+        assert!(repaired.contains("### User notes\n\nKeep this."));
+    }
+
+    #[test]
+    fn append_repairs_a_missing_trailing_newline_left_by_a_human_edit() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        let chatroom_path = directory.path().join(super::CHATROOM_FILE_NAME);
+        let mut contents = std::fs::read_to_string(&chatroom_path).unwrap();
+        assert!(contents.ends_with('\n'));
+        while contents.ends_with('\n') {
+            contents.pop();
+        }
+        std::fs::write(&chatroom_path, &contents).unwrap();
+
+        append_message(directory.path(), "agent:codex", "hello").unwrap();
+
+        let messages = read_messages(directory.path(), 40).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn hand_edited_records_cannot_smuggle_raw_terminal_escapes() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        let chatroom_path = directory.path().join(super::CHATROOM_FILE_NAME);
+        let mut contents = std::fs::read_to_string(&chatroom_path).unwrap();
+        // A human-edited but well-formed record carrying a raw ANSI escape.
+        contents
+            .push_str("- 2026-08-19 10:00:00 +02:00 | human | red \u{1b}[31mtext\u{1b}[0m\tok\n");
+        std::fs::write(&chatroom_path, contents).unwrap();
+
+        let messages = read_messages(directory.path(), 40).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].author, "human");
+        assert_eq!(messages[0].content, "red [31mtext[0m\tok");
     }
 
     #[test]

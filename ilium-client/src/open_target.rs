@@ -15,7 +15,7 @@
 //! handler that calls this. Only a path already confined to `cwd` or
 //! `home_dir` is ever touched.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::terminal_links::{link_at, TerminalLink};
 
@@ -69,18 +69,53 @@ pub fn resolve_url(url: &str) -> Option<OpenTarget> {
 /// so an absolute path elsewhere on the machine (an unresponsive network
 /// mount, say) must never reach `stat` from this click handler.
 fn resolve_path(path: &Path, cwd: &Path, home_dir: Option<&Path>) -> Option<OpenTarget> {
-    let is_confined =
-        path.starts_with(cwd) || home_dir.is_some_and(|home_dir| path.starts_with(home_dir));
+    // `Path::starts_with` compares components verbatim and never resolves
+    // `..` itself, so a raw `/cwd/../etc/passwd`-shaped candidate (exactly
+    // what `terminal_links::resolve_reference_path` produces for a `../`
+    // reference) would satisfy `starts_with(cwd)` while actually pointing
+    // outside it. Normalize lexically first so confinement is checked
+    // against where the path really points, still without touching disk.
+    let normalized = normalize_lexically(path);
+
+    // The confinement roots must be normalized the same way as the candidate:
+    // a `cwd` that itself contains a `..` component (e.g. a server launched
+    // with `--cwd /a/b/../c`) would otherwise never prefix-match any
+    // normalized candidate, silently disabling path opening for the whole
+    // session.
+    let normalized_cwd = normalize_lexically(cwd);
+    let is_confined = normalized.starts_with(&normalized_cwd)
+        || home_dir.is_some_and(|home_dir| normalized.starts_with(normalize_lexically(home_dir)));
     if !is_confined {
         return None;
     }
-    if path.is_dir() {
-        Some(OpenTarget::Directory(path.to_path_buf()))
-    } else if path.is_file() {
-        Some(OpenTarget::File(path.to_path_buf()))
+    if normalized.is_dir() {
+        Some(OpenTarget::Directory(normalized))
+    } else if normalized.is_file() {
+        Some(OpenTarget::File(normalized))
     } else {
         None
     }
+}
+
+/// Collapses `.` and `..` components without touching the filesystem (no
+/// `canonicalize`, since the whole point is deciding *before* any `stat`
+/// whether a path is even allowed to be touched).
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.last() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => normalized.push(component),
+            },
+            other => normalized.push(other),
+        }
+    }
+    normalized.into_iter().collect()
 }
 
 #[cfg(test)]
@@ -155,6 +190,38 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
 
         assert_eq!(resolve_at(&line, 4, cwd.path(), None), None);
+    }
+
+    #[test]
+    fn refuses_to_stat_a_dot_dot_path_that_escapes_cwd_via_component_prefix_matching() {
+        // `terminal_links::link_at` builds `../`-relative references as
+        // `cwd.join("../...")`, which literally starts with `cwd` as a raw
+        // component prefix even though it resolves outside it. The
+        // confinement check must normalize `..` away before comparing,
+        // not just prefix-match the unresolved path.
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("real.txt"), b"hi").unwrap();
+        let cwd = outside.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let line = "see ../real.txt for details";
+        assert_eq!(resolve_at(line, 4, &cwd, None), None);
+    }
+
+    #[test]
+    fn resolves_inside_a_cwd_that_itself_contains_a_dot_dot_component() {
+        // A session cwd like `/a/b/../c` must confine (and resolve) exactly
+        // like its normalized form `/a/c`: the candidate is normalized before
+        // the prefix check, so the roots must be normalized too or nothing
+        // in the project would ever match.
+        let project = tempfile::tempdir().unwrap();
+        let file_path = project.path().join("src").join("main.rs");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, "fn main() {}").unwrap();
+
+        let unnormalized_cwd = project.path().join("src").join("..");
+        let target = resolve_at("see src/main.rs for details", 4, &unnormalized_cwd, None);
+        assert_eq!(target, Some(OpenTarget::File(file_path)));
     }
 
     #[test]

@@ -165,12 +165,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, project_id: NodeId) {
     draw_scrollbar(frame, room_layout, metrics, focused);
 
     let draft = room.map(|state| state.draft.as_str()).unwrap_or_default();
+    let composer_line = Line::from(vec![
+        Span::styled("<user> ", Style::new().add_modifier(Modifier::BOLD)),
+        Span::raw(draft),
+    ]);
+
+    // The composer is a single unwrapped row, so once the draft outgrows its
+    // width the insertion point would fall off the right edge. Scroll the row
+    // left just enough to keep the tail (where typing lands) visible.
+    let composer_width = usize::from(theme::block(false).inner(room_layout.composer_area).width);
+    let composer_scroll = composer_line.width().saturating_sub(composer_width);
     frame.render_widget(
-        Paragraph::new(vec![Line::from(vec![
-            Span::styled("<user> ", Style::new().add_modifier(Modifier::BOLD)),
-            Span::raw(draft),
-        ])])
-        .block(theme::block(focused).title(theme::chrome_title("Write message · Enter sends"))),
+        Paragraph::new(vec![composer_line])
+            .scroll((0, u16::try_from(composer_scroll).unwrap_or(u16::MAX)))
+            .block(theme::block(focused).title(theme::chrome_title("Write message · Enter sends"))),
         room_layout.composer_area,
     );
 
@@ -322,6 +330,43 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("unique chatroom message 19"));
         assert!(!rendered.contains("unique chatroom message 00"));
+    }
+
+    #[test]
+    fn composer_keeps_the_tail_of_a_long_draft_visible() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/chatroom-draft-scroll"))
+            .unwrap();
+        app.chatrooms.insert(
+            project_id,
+            ChatroomViewState {
+                draft: format!("{}TAIL-MARKER", "long draft padding ".repeat(20)),
+                ..ChatroomViewState::default()
+            },
+        );
+        app.right_panel_target = RightPanelTarget::Chatroom { project_id };
+        app.set_screen_area(Rect::new(0, 0, 100, 18));
+        let area = app.layout.pane_area;
+        let mut terminal = Terminal::new(TestBackend::new(100, 18)).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, area, &app, project_id))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // The insertion point (draft tail) must stay on screen even though the
+        // draft is far wider than the composer row.
+        assert!(rendered.contains("TAIL-MARKER"));
+        // The scrolled-off head of the draft must no longer be rendered.
+        assert!(!rendered.contains("<user> long draft"));
     }
 
     #[test]

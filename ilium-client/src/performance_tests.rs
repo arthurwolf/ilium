@@ -193,13 +193,17 @@ fn benchmark_unchanged_client_surface_recording() {
 #[ignore = "manual performance benchmark"]
 fn benchmark_hidden_agent_output_without_frame_damage() {
     let mut fixture = many_pane_fixture();
-    let hidden_pane_id = fixture
+    // `Tree::panes()` walks a `HashMap` in unspecified, per-process-random
+    // order, so it cannot reliably name "the pane that isn't focused" --
+    // `pane_ids_in_tree_order()` is deterministic insertion order, and index
+    // 0 is `first_pane_id` (the one `many_pane_fixture` focused), so index 1
+    // is guaranteed to be a genuinely hidden pane on every run.
+    let hidden_pane_id = *fixture
         .app
         .tree
-        .panes()
-        .nth(1)
-        .expect("benchmark has a hidden pane")
-        .id;
+        .pane_ids_in_tree_order()
+        .get(1)
+        .expect("benchmark has a hidden pane");
     let mut sequence = 0_u64;
 
     measure_median_nanoseconds("client.hidden_agent_output_no_draw", 500, || {

@@ -145,7 +145,6 @@ impl ProjectContext {
 fn root_listing(cwd: &Path) -> anyhow::Result<String> {
     let mut entries: Vec<String> = std::fs::read_dir(cwd)?
         .filter_map(Result::ok)
-        .take(ROOT_LISTING_MAX_LINES)
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             match entry.file_type() {
@@ -155,7 +154,12 @@ fn root_listing(cwd: &Path) -> anyhow::Result<String> {
             }
         })
         .collect();
+    // Sort before capping, not after: `read_dir` order is filesystem/hash
+    // order, not alphabetical, so truncating first would keep an arbitrary
+    // subset of entries -- easily dropping exactly the files (README.md,
+    // Cargo.toml, CLAUDE.md) this listing exists to surface to the model.
     entries.sort_unstable_by_key(|entry| entry.to_lowercase());
+    entries.truncate(ROOT_LISTING_MAX_LINES);
     Ok(entries.join("\n"))
 }
 
@@ -181,18 +185,6 @@ fn read_document_or_marker(path: &Path) -> anyhow::Result<String> {
         }
         Err(error) => Err(error.into()),
     }
-}
-
-// Only exercised directly by unit tests below; production cropping now
-// happens inline in `read_document_or_marker` via a bounded line iterator
-// so large files are never fully buffered in memory first.
-#[cfg(test)]
-fn first_lines(contents: &str, maximum: usize) -> String {
-    contents
-        .lines()
-        .take(maximum)
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn parse_project_name_response(response: &str) -> anyhow::Result<(String, String)> {
@@ -311,22 +303,30 @@ mod tests {
 
     #[test]
     fn documents_and_root_listing_are_cropped_at_the_requested_bounds() {
+        let cwd = scratch_dir();
         let document = (0..2_001)
             .map(|index| format!("line {index}\n"))
             .collect::<String>();
+        std::fs::write(cwd.join("CLAUDE.md"), document).unwrap();
         assert_eq!(
-            first_lines(&document, DOCUMENT_MAX_LINES).lines().count(),
-            2_000
+            read_document_or_marker(&cwd.join("CLAUDE.md"))
+                .unwrap()
+                .lines()
+                .count(),
+            DOCUMENT_MAX_LINES
         );
 
-        let cwd = scratch_dir();
         for index in 0..101 {
             std::fs::write(cwd.join(format!("file-{index:03}")), "").unwrap();
         }
-        assert_eq!(
-            root_listing(&cwd).unwrap().lines().count(),
-            ROOT_LISTING_MAX_LINES
-        );
+        let listing = root_listing(&cwd).unwrap();
+        assert_eq!(listing.lines().count(), ROOT_LISTING_MAX_LINES);
+        // Sorting happens before the cap, not after: the alphabetically
+        // first 100 entries are kept, not an arbitrary filesystem-order
+        // subset -- so `file-000` survives and `file-100` is the one
+        // dropped, alongside `CLAUDE.md` written above.
+        assert!(listing.contains("file-000"));
+        assert!(!listing.contains("file-100"));
     }
 
     #[test]

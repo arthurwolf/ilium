@@ -51,7 +51,7 @@ pub struct TreeWidthAnimation {
 
 impl TreeWidthAnimation {
     /// Starts in the ordinary pane-focused state without an initial flourish,
-    /// collapsed to `base_width`.
+    /// resting at `initial_width`.
     pub fn new(now: Instant, initial_width: u16) -> Self {
         Self {
             transition_start_width: initial_width,
@@ -215,22 +215,38 @@ impl UiLayout {
         // same column as the pane's left border -- `theme::block`'s
         // `merge_borders` then fuses the two into a single connected
         // divider (a `┬`/`┴` joint at top/bottom) instead of drawing two
-        // separate borders side by side.
+        // separate borders side by side. Clamped to `main_area.width` so a
+        // zero-width terminal never yields a one-column tree rect past the
+        // screen edge, which would render and mouse-hit-test off screen.
         let tree_area = Rect::new(
             columns[0].x,
             columns[0].y,
-            columns[0].width.saturating_add(1),
+            columns[0].width.saturating_add(1).min(main_area.width),
             columns[0].height,
         );
         let pane_area = columns[1];
 
-        // The pane's Block consumes one cell on every edge. Saturating math
-        // keeps this valid even in a terminal narrower than the tree column.
+        // The pane's Block consumes one cell on every edge. `MINIMUM_PANE_WIDTH`
+        // guarantees at least one content column whenever `main_area.width >= 3`,
+        // but on a pathologically narrow terminal (`main_area.width` itself below
+        // 3) `pane_area` can shrink to 0 or 1 cells wide/tall -- clamp the offset
+        // and size to `pane_area`'s own bounds so content never spills past its
+        // containing pane, instead of blindly assuming a cell that isn't there.
+        let content_x = pane_area.x.saturating_add(1).min(pane_area.right());
+        let content_y = pane_area.y.saturating_add(1).min(pane_area.bottom());
         let pane_content_area = Rect::new(
-            pane_area.x.saturating_add(1),
-            pane_area.y.saturating_add(1),
-            pane_area.width.saturating_sub(2).max(1),
-            pane_area.height.saturating_sub(2).max(1),
+            content_x,
+            content_y,
+            pane_area
+                .width
+                .saturating_sub(2)
+                .max(1)
+                .min(pane_area.right().saturating_sub(content_x)),
+            pane_area
+                .height
+                .saturating_sub(2)
+                .max(1)
+                .min(pane_area.bottom().saturating_sub(content_y)),
         );
 
         Self {
@@ -428,6 +444,26 @@ mod tests {
             DEFAULT_UNFOCUSED_TREE_WIDTH
         );
         assert!(!animation.is_animating());
+    }
+
+    #[test]
+    fn pane_content_area_never_exceeds_pane_area_on_pathologically_narrow_screens() {
+        for screen_area in [
+            Rect::new(0, 0, 1, 1),
+            Rect::new(0, 0, 2, 3),
+            Rect::new(0, 0, 0, 0),
+        ] {
+            let layout = UiLayout::from_screen_area(screen_area);
+            let pane_area = layout.pane_area;
+            let content_area = layout.pane_content_area;
+            assert!(
+                content_area.x >= pane_area.x
+                    && content_area.y >= pane_area.y
+                    && content_area.right() <= pane_area.right()
+                    && content_area.bottom() <= pane_area.bottom(),
+                "content_area {content_area:?} escaped pane_area {pane_area:?} for screen {screen_area:?}"
+            );
+        }
     }
 
     #[test]

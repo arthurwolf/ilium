@@ -2042,7 +2042,6 @@ const KEYBOARD_ACTION_COLUMN_WIDTH: usize = 16;
 const KEYBOARD_KEY_CAP_WIDTH: usize = 5;
 const KEYBOARD_MNEMONIC_COLUMN_WIDTH: usize = 10;
 const KEYBOARD_SUGGESTION_START_OFFSET: u16 = 37;
-const KEYBOARD_PICKER_START_OFFSET: u16 = KEYBOARD_SUGGESTION_START_OFFSET + 12;
 
 /// Keyboard-tab content: one live selector, explicit A/B presets, and the
 /// specific recommendation or warning for the currently selected letter.
@@ -2206,7 +2205,19 @@ pub fn keyboard_table_hit(
     let suggestion_start = content_area
         .x
         .saturating_add(KEYBOARD_SUGGESTION_START_OFFSET);
-    let picker_start = content_area.x.saturating_add(KEYBOARD_PICKER_START_OFFSET);
+    // `keyboard_lines` renders up to three `[x]`-style suggestions (3 cells
+    // each, joined by single spaces) followed by a literal space and then
+    // `[+]`. A fixed offset here assumed exactly three were always rendered,
+    // which drifted the `[+]` hit zone left of the real button whenever
+    // fewer than three keys remained free (late in remapping, close to a
+    // fully-assigned keyboard) -- reproduce the renderer's exact width
+    // instead: `3n + (n-1)` for the joined choices, plus the trailing space,
+    // or just the trailing space when there are no choices to render at all.
+    let rendered_suggestion_count = available.len().min(3) as u16;
+    let choices_width = rendered_suggestion_count
+        .saturating_mul(4)
+        .saturating_sub(1);
+    let picker_start = suggestion_start.saturating_add(choices_width + 1);
     if position.x >= picker_start {
         return Some(KeyboardTableAction::OpenPicker(binding.action));
     }
@@ -3093,8 +3104,14 @@ pub fn appearance_content_hit(
         .row_lines
         .into_iter()
         .find_map(|(row, line)| (line == virtual_line).then_some(row))?;
-    let control_start_x =
-        content_area.x + ROW_LEFT_INSET + appearance_control_label_width(content_area.width);
+    // `appearance_row_line` pads the label to `label_width` but never shrinks
+    // below the label's own rendered width (`saturating_sub` bottoms out at
+    // 0), so the control column is the wider of the two -- reproduce that
+    // exact max here, or a long label at a narrow terminal width desyncs the
+    // hit zone from where `‹ value ›` actually renders.
+    let label_width = appearance_control_label_width(content_area.width)
+        .max(UnicodeWidthStr::width(appearance_row_label(row)) as u16);
+    let control_start_x = content_area.x + ROW_LEFT_INSET + label_width;
     if position.x < control_start_x {
         return None;
     }

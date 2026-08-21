@@ -271,14 +271,13 @@ fn textual_value(value: Option<&Value>) -> Option<String> {
     match value? {
         Value::String(text) => non_empty(text),
         Value::Array(items) => {
+            // Recurse per item instead of re-deriving only the object-shaped
+            // extraction here: a bare scalar item (raw string/number/bool)
+            // must go through the same rules as every other shape, not be
+            // silently dropped because it isn't wrapped in an object.
             let text = items
                 .iter()
-                .filter_map(|item| {
-                    item.get("text")
-                        .and_then(Value::as_str)
-                        .and_then(non_empty)
-                        .or_else(|| textual_value(item.get("content")))
-                })
+                .filter_map(|item| textual_value(Some(item)))
                 .collect::<Vec<_>>()
                 .join("\n");
             non_empty(&text)
@@ -436,6 +435,15 @@ mod tests {
     fn textual_value_falls_back_to_content_when_text_is_blank() {
         let item = serde_json::json!([{"text": "   ", "content": "real text"}]);
         assert_eq!(textual_value(Some(&item)), Some("real text".to_string()));
+    }
+
+    #[test]
+    fn textual_value_keeps_bare_scalar_items_inside_an_array() {
+        let item = serde_json::json!(["raw string", 42, true]);
+        assert_eq!(
+            textual_value(Some(&item)),
+            Some("raw string\n42\ntrue".to_string())
+        );
     }
 
     #[test]

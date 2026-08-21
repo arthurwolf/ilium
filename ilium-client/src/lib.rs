@@ -1042,12 +1042,32 @@ async fn reconcile_voice_runtime(
         }
         crate::app::VoiceRuntimeRequest::Start => {
             *voice_service = start_voice_service(app, control_plane);
+            // A Stop can be coalesced away by an immediately-following Start
+            // within the same input batch (see `for_each_ready_input_event`
+            // in lib.rs, and `apply_and_persist_voice_settings` in app.rs),
+            // so `paused_media_players` may still hold an un-resumed set
+            // from the run this Start is replacing. Resume it before this
+            // Start's own pause overwrites the vector, or those bus names
+            // -- and the players behind them -- would stay paused forever.
+            let previously_paused = std::mem::take(paused_media_players);
+            crate::media_control::resume_players(previously_paused).await;
             if voice_service.is_some() && app.voice_settings.pause_media_while_active {
                 *paused_media_players = crate::media_control::pause_playing_players().await;
             }
         }
         crate::app::VoiceRuntimeRequest::Reconfigure => {
             *voice_service = start_voice_service(app, control_plane);
+            // A reconfigure that fails to reconnect leaves no live actor to
+            // justify keeping media paused -- without this, a bad API key or
+            // model entered mid-session would strand the user's paused
+            // player for the rest of the process, since neither `Stop` nor
+            // the crash-detection branch in the event loop ever fires here
+            // (this path never produced a service whose event stream could
+            // close).
+            if voice_service.is_none() {
+                let players = std::mem::take(paused_media_players);
+                crate::media_control::resume_players(players).await;
+            }
         }
     }
 }

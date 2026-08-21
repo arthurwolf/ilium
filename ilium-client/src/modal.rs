@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::text_prompt::TextPromptState;
 use crate::theme;
@@ -60,7 +61,15 @@ pub fn create_split_member_row_at(
         popup.height.saturating_sub(2),
     );
     let first_choice_row = inner.y.saturating_add(2);
-    if position.x < inner.x || position.x >= inner.right() || position.y < first_choice_row {
+    // The bottom bound matters on terminals shorter than the dialog's natural
+    // height: `centered_fixed_rect` clamps the popup, so without it a click
+    // below the popup (or on its clipped bottom rows) would still map to a
+    // choice index whose row was never actually painted.
+    if position.x < inner.x
+        || position.x >= inner.right()
+        || position.y < first_choice_row
+        || position.y >= inner.bottom()
+    {
         return None;
     }
     let (start, end) = create_split_member_visible_window(selected_index, choice_count);
@@ -92,12 +101,7 @@ pub fn create_group_dialog_area(screen_area: Rect, destination_count: usize) -> 
 /// Splits a create-group dialog's outer `area` into its fixed rows. Assumes
 /// a one-cell border on every edge, matching `theme::block`.
 pub fn create_group_layout(area: Rect) -> CreateGroupLayout {
-    let inner = Rect::new(
-        area.x + 1,
-        area.y + 1,
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(2),
-    );
+    let inner = inset_rect(area, 1);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -477,25 +481,35 @@ pub fn render_text_prompt(
         layout.hint_row,
     );
 
-    // ilium's prompts only ever hold pane/group names and shell command
-    // lines -- ordinary Latin text -- so one `char` == one terminal cell.
-    // A wide-character-aware cursor would need `unicode-width`, which
-    // nothing else in this crate depends on yet.
-    // `saturating_add` before the clamp -- `state.cursor` grows with every
-    // typed/pasted character and is otherwise unbounded, so `rows[0].x +
-    // cursor` could overflow `u16` (panic in debug, wrap to a bogus column
-    // in release) before the `.min()` below ever got a chance to clamp it.
-    let cursor_x = layout
-        .input_area
-        .x
-        .saturating_add(u16::try_from(state.cursor).unwrap_or(u16::MAX));
-    // `Rect::right()` is exclusive (the first column *outside* the rect), so
-    // clamping to it directly would let the cursor land on the block's right
-    // border instead of the last real cell of the input row.
-    frame.set_cursor_position(Position::new(
-        cursor_x.min(layout.input_area.right().saturating_sub(1)),
-        layout.input_area.y,
+    // `state.cursor` is a *char* index, but `Paragraph` gives wide (CJK/
+    // emoji) characters two cells -- the cursor column must be the rendered
+    // display width of everything left of it, exactly as
+    // `ui::draw_create_group` measures its name-field prefix.
+    let prefix: String = state.buf.chars().take(state.cursor).collect();
+    frame.set_cursor_position(single_line_cursor_position(
+        layout.input_area,
+        prefix.width(),
     ));
+}
+
+/// Terminal cursor position for a single-line input starting at
+/// `input_area`'s origin, `display_columns` rendered cells in.
+///
+/// `saturating_add` before the clamp -- the column count grows with every
+/// typed/pasted character and is otherwise unbounded, so `x + columns` could
+/// overflow `u16` (panic in debug, wrap to a bogus column in release) before
+/// the `.min()` below ever got a chance to clamp it. `Rect::right()` is
+/// exclusive (the first column *outside* the rect), so clamping to it
+/// directly would let the cursor land on the block's right border instead of
+/// the last real cell of the input row.
+fn single_line_cursor_position(input_area: Rect, display_columns: usize) -> Position {
+    let cursor_x = input_area
+        .x
+        .saturating_add(u16::try_from(display_columns).unwrap_or(u16::MAX));
+    Position::new(
+        cursor_x.min(input_area.right().saturating_sub(1)),
+        input_area.y,
+    )
 }
 
 /// Credential variant of [`render_text_prompt`]. The editable buffer stays
@@ -530,14 +544,9 @@ pub fn render_masked_text_prompt(
             .style(Style::new().add_modifier(Modifier::DIM)),
         layout.hint_row,
     );
-    let cursor_x = layout
-        .input_area
-        .x
-        .saturating_add(u16::try_from(state.cursor).unwrap_or(u16::MAX));
-    frame.set_cursor_position(Position::new(
-        cursor_x.min(layout.input_area.right().saturating_sub(1)),
-        layout.input_area.y,
-    ));
+    // Every buffer char is painted as exactly one single-cell bullet, so the
+    // char index *is* the display column here -- no width measurement needed.
+    frame.set_cursor_position(single_line_cursor_position(layout.input_area, state.cursor));
 }
 
 /// Large multiline text area used by the Voice control prompt editor.

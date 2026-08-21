@@ -12,7 +12,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
     AgentDebugLogCache, AgentDebugLogFilter, AgentDebugLogScrollPosition, AgentDebugLogViewState,
@@ -26,11 +25,10 @@ const RESIZE_FILTER_BUTTON_WIDTH: u16 = 24;
 const TOOLBAR_GAP: u16 = 2;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &AgentDebugLogViewState) {
-    let pane_name = app
-        .tree
-        .get(state.pane_id)
-        .map(|node| node.name.as_str())
-        .unwrap_or("closed pane");
+    let pane_name = app.tree.get(state.pane_id).map_or_else(
+        || "closed pane".to_string(),
+        |node| sanitize_single_line_text(&node.name),
+    );
     let cache = app.agent_debug_logs.get(&state.pane_id);
     let filter = app.agent_debug_log_filter;
     let entry_count = cache.map_or(0, |cache| filter.visible_entry_count(cache));
@@ -80,18 +78,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &AgentDebugLogVie
 
     let lines = history_lines(cache, filter);
     let content_width = regions[1].width.saturating_sub(1).max(1);
-    let total_lines = estimated_wrapped_line_count(&lines, content_width);
+    // Measure with ratatui's own word-wrapping (same widget, same width) so
+    // the scroll bounds match what actually renders; a character-width
+    // estimate undercounts word wrap and would strand the newest rows below
+    // the reachable scroll range.
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(content_width);
     let visible_lines = usize::from(regions[1].height);
     let maximum_top = total_lines.saturating_sub(visible_lines);
     let top = match state.scroll_position {
         AgentDebugLogScrollPosition::FromNewest(offset) => maximum_top.saturating_sub(offset),
         AgentDebugLogScrollPosition::FromOldest(offset) => offset.min(maximum_top),
     };
+    // The gutter column is reserved unconditionally (matching content_width,
+    // used above for the wrap-based scroll math) so that math stays correct
+    // whether or not the scrollbar actually draws, and so the scrollbar --
+    // drawn afterwards over the same rightmost column -- never overwrites text.
+    let text_area = Rect::new(regions[1].x, regions[1].y, content_width, regions[1].height);
     frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((u16::try_from(top).unwrap_or(u16::MAX), 0)),
-        regions[1],
+        paragraph.scroll((u16::try_from(top).unwrap_or(u16::MAX), 0)),
+        text_area,
     );
     if total_lines > visible_lines {
         let mut scrollbar_state = ScrollbarState::new(total_lines).position(top);
@@ -238,7 +244,7 @@ fn history_lines(
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
-                sanitize_terminal_text(&entry.summary),
+                sanitize_single_line_text(&entry.summary),
                 Style::new().add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -252,7 +258,10 @@ fn history_lines(
             lines.push(Line::from(vec![
                 Span::raw("    "),
                 Span::styled(
-                    format!("↳ correlation: {}", sanitize_terminal_text(correlation_id)),
+                    format!(
+                        "↳ correlation: {}",
+                        sanitize_single_line_text(correlation_id)
+                    ),
                     Style::new().add_modifier(Modifier::DIM),
                 ),
             ]));
@@ -276,7 +285,7 @@ fn history_lines(
                 lines.push(Line::from(vec![
                     Span::styled(
                         if index == 0 {
-                            format!("    {prefix}{}: ", sanitize_terminal_text(&field.label))
+                            format!("    {prefix}{}: ", sanitize_single_line_text(&field.label))
                         } else {
                             "      │ ".to_string()
                         },
@@ -380,7 +389,7 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
             ilium_core::AgentClass::Claude => "Claude Code".to_string(),
             ilium_core::AgentClass::Codex => "Codex".to_string(),
             ilium_core::AgentClass::Antigravity => "Antigravity".to_string(),
-            ilium_core::AgentClass::Other(name) => sanitize_terminal_text(name),
+            ilium_core::AgentClass::Other(name) => sanitize_single_line_text(name),
         });
     }
     if let Some(activity) = entry.context.activity {
@@ -399,7 +408,7 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
         parts.push(format!("process {process_id}"));
     }
     if let Some(session_id) = entry.context.session_id.as_deref() {
-        parts.push(format!("session {}", sanitize_terminal_text(session_id)));
+        parts.push(format!("session {}", sanitize_single_line_text(session_id)));
     }
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
@@ -417,6 +426,22 @@ fn source_label(source: AgentDebugSource) -> &'static str {
     }
 }
 
+/// Single-row variant for span content that must stay on one line: ratatui
+/// does not honor a raw newline or tab inside a `Span`, so either would
+/// silently corrupt the row layout. They collapse to spaces here; every other
+/// control character is rendered inert exactly as in
+/// `sanitize_terminal_text`.
+fn sanitize_single_line_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\n' | '\t' => ' ',
+            character if character.is_control() => '�',
+            character => character,
+        })
+        .collect()
+}
+
 fn sanitize_terminal_text(value: &str) -> String {
     value
         .chars()
@@ -428,21 +453,6 @@ fn sanitize_terminal_text(value: &str) -> String {
             }
         })
         .collect()
-}
-
-fn estimated_wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
-    let width = usize::from(width.max(1));
-    lines
-        .iter()
-        .map(|line| {
-            let line_width = line
-                .spans
-                .iter()
-                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-                .sum::<usize>();
-            line_width.max(1).div_ceil(width)
-        })
-        .sum()
 }
 
 #[cfg(test)]
@@ -482,6 +492,14 @@ mod tests {
         assert_eq!(
             sanitize_terminal_text("safe\u{1b}[31m red"),
             "safe�[31m red"
+        );
+    }
+
+    #[test]
+    fn single_line_sanitizer_collapses_line_breaks_and_tabs() {
+        assert_eq!(
+            sanitize_single_line_text("multi\nline\tsummary\u{1b}[31m"),
+            "multi line summary�[31m"
         );
     }
 
