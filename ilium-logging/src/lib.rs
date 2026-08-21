@@ -147,12 +147,18 @@ impl Write for DynamicFileWriter {
             .file
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(file) = file.as_mut() {
-            file.write_all(&self.event_buffer)?;
-            file.flush()?;
-        }
+        let write_result = match file.as_mut() {
+            Some(file) => file
+                .write_all(&self.event_buffer)
+                .and_then(|()| file.flush()),
+            None => Ok(()),
+        };
+        // Clear even when the write failed: `write_all` may have appended part
+        // of the event before erroring, and `Drop` retries `flush`, so keeping
+        // the buffer would append that partial event a second time and break
+        // the one-writer/one-event/one-flush contract documented on this type.
         self.event_buffer.clear();
-        Ok(())
+        write_result
     }
 }
 
@@ -580,12 +586,17 @@ mod tests {
         first_handle.join().expect("client writer thread");
         second_handle.join().expect("server writer thread");
 
-        let lines = std::fs::read_to_string(path)
-            .expect("shared log")
-            .lines()
-            .map(str::to_owned)
+        let contents = std::fs::read_to_string(path).expect("shared log");
+        // Collecting into a `HashSet` before counting would silently absorb a
+        // duplicated append (two writers flushing the same buffered event) --
+        // exactly the failure mode this test exists to catch per the
+        // `DynamicFileWriter` doc comment -- so the length check must run
+        // against the raw line count first.
+        let raw_lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(raw_lines.len(), 200);
+        let lines = raw_lines
+            .into_iter()
             .collect::<std::collections::HashSet<_>>();
-        assert_eq!(lines.len(), 200);
         assert!(lines.contains("client-0"));
         assert!(lines.contains("client-99"));
         assert!(lines.contains("server-0"));
