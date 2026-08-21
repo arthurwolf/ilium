@@ -247,14 +247,22 @@ impl EditorPane {
     /// flips to `false`, so the toolbar's Source/Rendered buttons disappear
     /// (see `editor_toolbar::buttons_for`) and `toggle_view_mode` becomes a
     /// no-op, leaving no control able to get back to Source. Forcing
-    /// `Source` here -- and dropping the now-stale rendered document, which
-    /// was parsed against the old path's base directory -- keeps that
-    /// invariant ("non-Markdown implies Source") true everywhere at once.
+    /// `Source` here keeps that invariant ("non-Markdown implies Source")
+    /// true everywhere at once.
+    ///
+    /// The cached rendered document is dropped for *every* retarget, not
+    /// just the non-Markdown case: it was parsed against the previous
+    /// path's base directory (relative image links resolve there, see
+    /// `markdown::document::parse`), so a Markdown-to-Markdown Save As into
+    /// a different directory would otherwise keep showing images resolved
+    /// against the old location. `EditorPane` can't rebuild the document
+    /// itself (see the `rendered` field doc); the caller triggers the
+    /// rebuild (`app.rs::action_save_as`).
     pub fn retarget_path(&mut self, new_path: PathBuf) {
         self.path = Some(new_path);
+        self.rendered = None;
         if !self.is_markdown() {
             self.view_mode = EditorViewMode::Source;
-            self.rendered = None;
             self.rendered_scroll = 0;
         }
     }
@@ -513,12 +521,25 @@ impl EditorPane {
     /// Marks the buffer dirty and, if autosave is on, (re)starts its
     /// debounce window -- shared by every mutation path (`input`,
     /// `toggle_checkbox`) so none of them can forget to arm the timer.
+    ///
+    /// Also drops any cached Rendered-mode document, for the same reason
+    /// `retarget_path` drops it: a stale `rendered` built from the buffer's
+    /// previous content must never keep showing on screen. Ordinary typing
+    /// can't reach this while `view_mode` is `Rendered` (`Source` is the
+    /// only mode that accepts keystrokes), but `insert_text`/
+    /// `replace_contents` are also reachable from outside keyboard input
+    /// (voice/remote-control commands in `control::executor`) with no such
+    /// guard, and `EditorPane` has no way to rebuild the document itself
+    /// (see the `rendered` field doc) -- dropping it here falls back to
+    /// `ui::draw_editor`'s existing "Rendering…" placeholder instead of a
+    /// mismatched document until the next rebuild.
     fn mark_dirty(&mut self) {
         self.dirty = true;
         self.content_revision += 1;
         if self.show_autosave {
             self.autosave_pending_since = Some(Instant::now());
         }
+        self.rendered = None;
     }
 
     /// Keeps the Source viewport valid for this render. Keyboard navigation
@@ -651,10 +672,19 @@ impl EditorPane {
     /// `TextArea`'s native viewport used by plain files, then clamps the
     /// shared position so the final page remains aligned with the bottom.
     pub fn scroll_source_view(&mut self, delta: i16, viewport_height: u16, viewport_width: u16) {
-        // Keep `TextArea`'s native renderer in sync for unhighlighted files;
-        // highlighted files use the explicit mirror below because they render
-        // through `editor_highlight` instead of the widget itself.
-        self.textarea.scroll((delta, 0));
+        // Keep `TextArea`'s native renderer in sync, but only for files that
+        // actually render through the widget (no recognized highlighting --
+        // the same predicate `ui::draw_editor` uses). Highlighted files never
+        // render the widget, so its internal `Viewport` is a stale zero-sized
+        // rect, and `TextArea::scroll` doesn't just move that viewport -- it
+        // also drags the cursor to stay inside it (`CursorMove::InViewport`),
+        // which against a never-rendered rect teleports the insertion point
+        // to (scroll offset, column 0). Highlighted panes must scroll only
+        // through the explicit mirror below.
+        let renders_through_widget = self.highlighted_lines().is_none();
+        if renders_through_widget {
+            self.textarea.scroll((delta, 0));
+        }
 
         let max_top = saturating_u16(self.source_visual_rows(viewport_width).len())
             .saturating_sub(viewport_height);
@@ -727,12 +757,21 @@ impl EditorPane {
         let tab_width = usize::from(self.textarea.tab_length()).max(1);
         let mut column = 0;
         for (byte, grapheme) in line.grapheme_indices(true) {
-            let grapheme_width = if grapheme == "\t" {
+            // A tab's width depends on where its segment starts, so it must
+            // be measured against `segment_width` *after* the wrap decision
+            // below has settled which segment (the current one, or a fresh
+            // one starting at column 0) this grapheme actually belongs to --
+            // measuring it against the pre-wrap segment when the tab itself
+            // is what triggers the wrap credits it with the old row's
+            // leftover width instead of the full tab stop it occupies at
+            // the start of the new row, understating that row's true width.
+            let tentative_width = if grapheme == "\t" {
                 tab_width - segment_width % tab_width
             } else {
                 UnicodeWidthStr::width(grapheme).max(1)
             };
-            if segment_width > 0 && segment_width + grapheme_width > width {
+            let wraps = segment_width > 0 && segment_width + tentative_width > width;
+            if wraps {
                 rows.push(SourceVisualRow {
                     source_row,
                     start_byte: segment_start_byte,
@@ -746,6 +785,11 @@ impl EditorPane {
                 segment_start_column = column;
                 segment_width = 0;
             }
+            let grapheme_width = if wraps && grapheme == "\t" {
+                tab_width - segment_width % tab_width
+            } else {
+                tentative_width
+            };
             segment_width += grapheme_width;
             column += grapheme.chars().count();
         }
@@ -957,6 +1001,25 @@ mod tests {
 
         pane.scroll_source_view(-100, 4, 20);
         assert_eq!(pane.source_scroll_row(), 0);
+    }
+
+    #[test]
+    fn wheel_scroll_does_not_move_the_cursor_in_highlighted_files() {
+        let mut pane = EditorPane::empty();
+        // A recognized-language path makes `highlighted_lines` return
+        // tokens, putting the pane on the `editor_highlight` render path
+        // where the `TextArea` widget (and its internal viewport) is never
+        // rendered -- forwarding a wheel scroll to the widget there used to
+        // drag the insertion point into its stale zero-sized viewport.
+        pane.path = Some(PathBuf::from("scroll-cursor.rs"));
+        pane.textarea = TextArea::from((0..10).map(|row| format!("let line_{row} = {row};")));
+        pane.jump_to_location(5, 4);
+        let cursor_before = pane.textarea.cursor();
+
+        pane.scroll_source_view(3, 4, 40);
+
+        assert_eq!(pane.textarea.cursor(), cursor_before);
+        assert_eq!(pane.source_scroll_row(), 3);
     }
 
     #[test]

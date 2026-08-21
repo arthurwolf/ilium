@@ -5,16 +5,30 @@
 //! is available. Keeping that policy pure except for the final metadata check
 //! prevents menu visibility and action execution from drifting apart.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Removes presentation punctuation around a candidate file reference while
 /// preserving its actual path characters, including Unix and Windows
 /// separators. The first and last retained characters must be a separator or
 /// alphanumeric, matching the source-line interaction contract.
+///
+/// The leading edge additionally retains `.`, unlike the trailing edge: a
+/// leading `.` is path-meaningful (`../sibling.rs`, `./local.rs`,
+/// `.gitignore`) and anchors relative-vs-absolute resolution, while a
+/// trailing `.` is ordinary prose punctuation (`see docs/plan.md.`). Trimming
+/// a leading `..` used to strip it down to the separator that followed,
+/// silently turning `../src/lib.rs` into the absolute-looking `/src/lib.rs`.
 pub fn normalized_path_candidate(line: &str) -> Option<&str> {
-    let candidate = line.trim_matches(|character: char| {
-        character != '/' && character != '\\' && !character.is_alphanumeric()
-    });
+    let candidate = line
+        .trim_start_matches(|character: char| {
+            character != '/'
+                && character != '\\'
+                && character != '.'
+                && !character.is_alphanumeric()
+        })
+        .trim_end_matches(|character: char| {
+            character != '/' && character != '\\' && !character.is_alphanumeric()
+        });
     (!candidate.is_empty()).then_some(candidate)
 }
 
@@ -22,7 +36,20 @@ pub fn normalized_path_candidate(line: &str) -> Option<&str> {
 /// and returns it only when it is an ordinary file on disk.
 pub fn project_file_from_line(line: &str, project_cwd: &Path) -> Option<PathBuf> {
     let candidate = PathBuf::from(normalized_path_candidate(line)?);
-    let path = if candidate.is_absolute() {
+    let mut components = candidate.components().peekable();
+    // `is_absolute()` alone misses Windows paths that are anchored but not
+    // fully absolute -- root-without-prefix (`\foo.txt`) and
+    // prefix-without-root (`C:foo.txt`). Both still carry a leading Prefix or
+    // RootDir component, and `PathBuf::extend`'s documented Windows push
+    // semantics discard most or all of an existing buffer when fed one of
+    // those, which would silently drop `project_cwd` instead of resolving
+    // under it. Treat any leading Prefix/RootDir component as anchored so it
+    // is used as-is rather than combined with `project_cwd`.
+    let is_anchored = matches!(
+        components.peek(),
+        Some(Component::Prefix(_) | Component::RootDir)
+    );
+    let path = if is_anchored {
         candidate
     } else {
         // Extended component-by-component rather than joined whole. A source
@@ -32,7 +59,7 @@ pub fn project_file_from_line(line: &str, project_cwd: &Path) -> Option<PathBuf>
         // user and stored with both. Windows treats `/` as a separator when
         // splitting too, so the components round-trip into the native form.
         let mut resolved = project_cwd.to_path_buf();
-        resolved.extend(candidate.components());
+        resolved.extend(components);
         resolved
     };
     path.is_file().then_some(path)
@@ -55,6 +82,22 @@ mod tests {
         assert_eq!(normalized_path_candidate("***"), None);
     }
 
+    /// A leading `..`/`.` anchors relative-vs-absolute resolution and must
+    /// survive normalization intact -- trimming it down to the separator
+    /// that follows would turn `../src/lib.rs` into the absolute-looking
+    /// `/src/lib.rs`, silently escaping `project_cwd`.
+    #[test]
+    fn preserves_leading_dot_segments_that_anchor_the_path() {
+        assert_eq!(
+            normalized_path_candidate("- `../src/lib.rs`"),
+            Some("../src/lib.rs")
+        );
+        assert_eq!(
+            normalized_path_candidate("`.gitignore`"),
+            Some(".gitignore")
+        );
+    }
+
     #[test]
     fn resolves_only_existing_regular_files_relative_to_project_cwd() {
         let project = tempfile::tempdir().unwrap();
@@ -69,6 +112,20 @@ mod tests {
         );
         assert_eq!(project_file_from_line("docs", project_cwd), None);
         assert_eq!(project_file_from_line("missing.md", project_cwd), None);
+    }
+
+    #[test]
+    fn resolves_a_leading_parent_dir_reference_relative_to_project_cwd() {
+        let workspace = tempfile::tempdir().unwrap();
+        let project_cwd = workspace.path().join("project");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        let sibling_file = workspace.path().join("sibling.rs");
+        std::fs::write(&sibling_file, "fn main() {}\n").unwrap();
+
+        assert_eq!(
+            project_file_from_line("- `../sibling.rs`", &project_cwd),
+            Some(project_cwd.join("../sibling.rs"))
+        );
     }
 
     /// A source line writes `docs/plan.md` on every platform, but the resolved

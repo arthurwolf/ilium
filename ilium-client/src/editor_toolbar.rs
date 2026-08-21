@@ -138,7 +138,12 @@ fn button_rects(area: Rect, pane: &EditorPane) -> Vec<(ToolbarAction, Rect, Stri
     let mut rects = Vec::new();
     for button in buttons_for(pane) {
         let width = button.label.chars().count() as u16;
-        if x + width > area.right() {
+
+        // Saturating math throughout: `area` comes from the live terminal
+        // size, so near-u16::MAX coordinates must degrade to "button
+        // doesn't fit" rather than overflow-panic in debug builds.
+        let button_end = x.saturating_add(width);
+        if button_end > area.right() {
             break;
         }
         rects.push((
@@ -147,7 +152,7 @@ fn button_rects(area: Rect, pane: &EditorPane) -> Vec<(ToolbarAction, Rect, Stri
             button.label,
             button.active,
         ));
-        x += width + 1; // one-column gap between buttons
+        x = button_end.saturating_add(1); // one-column gap between buttons
     }
     let left_edge = x;
 
@@ -160,7 +165,7 @@ fn button_rects(area: Rect, pane: &EditorPane) -> Vec<(ToolbarAction, Rect, Stri
     let mut right_rects = Vec::new();
     for button in right_buttons_for(pane).into_iter().rev() {
         let width = button.label.chars().count() as u16;
-        if right_x < left_edge + width {
+        if right_x < left_edge.saturating_add(width) {
             break;
         }
         right_x -= width;

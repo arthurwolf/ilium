@@ -94,9 +94,18 @@ pub fn render(frame: &mut Frame, area: Rect, editor: &EditorPane, tokens: &[Line
                     line_number_placeholder_span(gutter_width)
                 });
             }
+            // Same defensive posture as the scroll-row clamp above: `tokens`
+            // is documented to hold one entry per buffer line, but it is
+            // caller-supplied -- a future caller passing a stale/short slice
+            // must degrade to an unstyled line (the same fallback
+            // `syntax::highlight` uses when one line fails to highlight),
+            // not a slice-index panic that takes down the whole client.
+            let line_tokens = tokens
+                .get(visual_row.source_row)
+                .map_or(&[][..], Vec::as_slice);
             spans.extend(render_row_spans(
                 line,
-                &tokens[visual_row.source_row],
+                line_tokens,
                 *visual_row,
                 is_cursor_row,
                 cursor_col,
@@ -180,7 +189,7 @@ fn char_byte_offset(line: &str, char_col: usize) -> usize {
 /// replacing it outright the way `LineHighlighter` does.
 fn render_row_spans(
     line: &str,
-    tokens: &LineTokens,
+    tokens: &[(std::ops::Range<usize>, Style)],
     visual_row: SourceVisualRow,
     is_cursor_row: bool,
     cursor_col: usize,
