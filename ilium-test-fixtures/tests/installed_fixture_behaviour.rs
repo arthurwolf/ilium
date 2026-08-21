@@ -108,7 +108,16 @@ fn a_fixture_without_its_sidecar_fails_loudly_instead_of_doing_nothing() {
 
 #[test]
 fn the_fixture_binary_name_matches_the_bin_target_cargo_builds() {
-    // Guards the one string that ties this crate's `[[bin]]` name to the
-    // path search every other crate performs.
-    assert_eq!(FIXTURE_BINARY_NAME, "ilium-fixture-agent");
+    // `CARGO_BIN_EXE_<name>` is set by cargo only for a `[[bin]]` target that
+    // actually exists in this package under that exact name, so this ties
+    // `FIXTURE_BINARY_NAME` to the real `[[bin]]` in Cargo.toml rather than to
+    // a second hand-written copy of the same string: renaming the `[[bin]]`
+    // target now fails this test (or fails to compile it) instead of leaving
+    // every other crate's path search silently pointed at a binary cargo
+    // never built.
+    let built = std::path::Path::new(env!("CARGO_BIN_EXE_ilium-fixture-agent"));
+    assert_eq!(
+        built.file_stem().and_then(|stem| stem.to_str()),
+        Some(FIXTURE_BINARY_NAME)
+    );
 }

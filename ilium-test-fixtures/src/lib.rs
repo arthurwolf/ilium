@@ -297,21 +297,14 @@ fn fixture_binary_candidates(test_executable: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(unix)]
+// Owner-only: this copy is never run by anything but this test process's own
+// children. `ilium-platform` owns every OS-specific permission decision, this
+// crate included, so the actual `chmod` (and the Windows no-op, since
+// executability there comes from the extension `std::env::consts::EXE_SUFFIX`
+// already gave the copy) lives there.
 fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Owner-only: this copy is never run by anything but this test process's
-    // own children.
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    ilium_platform::secure_fs::restrict_executable_file_to_owner(path)
         .unwrap_or_else(|error| panic!("chmod {}: {error}", path.display()));
-}
-
-#[cfg(not(unix))]
-fn make_executable(path: &Path) {
-    // Windows derives executability from the file extension, which
-    // `std::env::consts::EXE_SUFFIX` already gave the copy.
-    let _ = path;
 }
 
 #[cfg(test)]
@@ -328,6 +321,29 @@ mod tests {
             behavior_file_for(executable),
             PathBuf::from("/tmp/fixtures/codex.exe.fixture.json")
         );
+    }
+
+    /// Exhaustively matched, with no wildcard arm, so a new
+    /// [`FixtureBehavior`] variant fails this file's own compile rather than
+    /// silently going untested by
+    /// `every_behavior_round_trips_through_its_sidecar_encoding` below.
+    fn assert_every_variant_is_covered(behavior: &FixtureBehavior) {
+        match behavior {
+            FixtureBehavior::Idle
+            | FixtureBehavior::WorkingThenIdle { .. }
+            | FixtureBehavior::WorkingUntilMarker { .. }
+            | FixtureBehavior::HoldArgument { .. }
+            | FixtureBehavior::ResumePrompt
+            | FixtureBehavior::ClearTransition { .. }
+            | FixtureBehavior::ChangeOnly
+            | FixtureBehavior::EchoSubmittedLine { .. }
+            | FixtureBehavior::DelayedComposerThenEcho { .. }
+            | FixtureBehavior::EmitNumberedLines { .. }
+            | FixtureBehavior::RecordThenRunTarget { .. }
+            | FixtureBehavior::ShellImpersonator { .. }
+            | FixtureBehavior::RecordSubmittedPrompt { .. }
+            | FixtureBehavior::SpawnChild { .. } => {}
+        }
     }
 
     #[test]
@@ -348,7 +364,33 @@ mod tests {
                 second_argument_index: 2,
             },
             FixtureBehavior::ChangeOnly,
+            FixtureBehavior::EchoSubmittedLine {
+                prefix: "queued".to_string(),
+            },
+            FixtureBehavior::DelayedComposerThenEcho { delay_seconds: 3 },
+            FixtureBehavior::EmitNumberedLines {
+                prefix: "line".to_string(),
+                count: 42,
+            },
+            FixtureBehavior::RecordThenRunTarget {
+                marker_variable: "ILIUM_MARKER".to_string(),
+                target_variable: "ILIUM_TARGET".to_string(),
+                marker_text: "ran".to_string(),
+            },
+            FixtureBehavior::ShellImpersonator {
+                intercepted_command: "launch codex".to_string(),
+                replacement: PathBuf::from("/tmp/fake-codex"),
+            },
+            FixtureBehavior::RecordSubmittedPrompt {
+                transcript_path: PathBuf::from("/tmp/transcript"),
+            },
+            FixtureBehavior::SpawnChild {
+                child_path: PathBuf::from("/tmp/fake-child"),
+            },
         ];
+        for behavior in &behaviors {
+            assert_every_variant_is_covered(behavior);
+        }
         for behavior in behaviors {
             let encoded = serde_json::to_vec(&behavior).expect("serialize");
             let decoded: FixtureBehavior = serde_json::from_slice(&encoded).expect("deserialize");

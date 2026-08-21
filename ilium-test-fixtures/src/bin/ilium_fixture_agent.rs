@@ -146,10 +146,22 @@ fn run_shell_impersonator(intercepted_command: &str, replacement: &std::path::Pa
         std::process::Command::new(replacement).status()
     } else {
         let (shell, flag) = real_shell();
-        std::process::Command::new(shell)
-            .arg(flag)
-            .args(&arguments[arguments.len().min(1)..])
-            .status()
+        let mut command = std::process::Command::new(shell);
+        match arguments.as_slice() {
+            // Invoked with no arguments -- an interactive shell, which is how
+            // `ilium_server::pane::spawn_terminal_session` starts a plain
+            // shell pane. Hand over argument-free: forwarding the bare `-c`
+            // flag with nothing after it would make the real shell exit with
+            // a usage error instead of a prompt.
+            [] => {}
+            // Invoked as `-c <command line>`: translate this fixture's flag
+            // to the real shell's own (`/C` under `cmd.exe`) and forward the
+            // rest untouched.
+            [_own_flag, rest @ ..] => {
+                command.arg(flag).args(rest);
+            }
+        }
+        command.status()
     };
     let status = status.unwrap_or_else(|error| panic!("fixture shell dispatching: {error}"));
     std::process::exit(status.code().unwrap_or(1));
