@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ilium_core::NodeId;
+use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
 use ilium_ipc::PromptSubmissionSource;
 use tokio::sync::oneshot;
 
@@ -128,13 +128,11 @@ async fn pane_has_ready_agent_composer(state: &ServerState, pane_id: NodeId) -> 
         return ilium_detect::is_agent_prompt_ready(agent_class, &screen_snapshot.text);
     }
 
-    [
-        ilium_core::AgentClass::Claude,
-        ilium_core::AgentClass::Codex,
-        ilium_core::AgentClass::Antigravity,
-    ]
-    .iter()
-    .any(|agent_class| ilium_detect::is_agent_prompt_ready(agent_class, &screen_snapshot.text))
+    // The canonical provider registry drives this fallback, so adding a new
+    // built-in provider automatically extends readiness detection here too.
+    BuiltinAgentProvider::ALL.into_iter().any(|provider| {
+        ilium_detect::is_agent_prompt_ready(&provider.class(), &screen_snapshot.text)
+    })
 }
 
 /// Encodes a multiline editor task as bracketed paste and appends the sole
@@ -151,18 +149,23 @@ fn initial_submission_bytes(initial_input: &str) -> Vec<u8> {
 ///
 /// Two boundary hazards are normalized before framing: a bare or CRLF `\r`
 /// (e.g. classic-Mac or Windows line endings surviving into an editor source
-/// line) reads to a composer as a premature Enter if written raw, and a
-/// literal bracketed-paste end marker embedded in the task text would close
-/// our paste early and let the remainder of the payload run as live
-/// keystrokes in whatever the agent CLI is doing at that moment.
+/// line) reads to a composer as a premature Enter if written raw, and literal
+/// bracketed-paste markers embedded in the task text corrupt paste framing --
+/// an end marker inside our paste would close it early and let the remainder
+/// of the payload run as live keystrokes, while a start marker written raw on
+/// the single-line path would open a phantom paste that swallows the
+/// submission Enter (and everything typed after it). Both markers are
+/// stripped before either framing branch runs.
 pub(crate) fn initial_input_bytes(initial_input: &str) -> Vec<u8> {
     let normalized_input = initial_input.replace("\r\n", "\n").replace('\r', "\n");
+    let sanitized_input = normalized_input
+        .replace("\x1b[200~", "")
+        .replace("\x1b[201~", "");
 
-    if !normalized_input.contains('\n') {
-        return normalized_input.into_bytes();
+    if !sanitized_input.contains('\n') {
+        return sanitized_input.into_bytes();
     }
 
-    let sanitized_input = normalized_input.replace("\x1b[201~", "");
     let mut bracketed_paste = Vec::with_capacity(sanitized_input.len() + 12);
     bracketed_paste.extend_from_slice(b"\x1b[200~");
     bracketed_paste.extend_from_slice(sanitized_input.as_bytes());
@@ -210,6 +213,22 @@ mod tests {
     fn an_embedded_paste_end_marker_is_stripped_so_it_cannot_end_the_paste_early() {
         assert_eq!(
             initial_input_bytes("before\x1b[201~after\nnext"),
+            b"\x1b[200~beforeafter\nnext\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn a_single_line_paste_start_marker_is_stripped_so_it_cannot_open_a_phantom_paste() {
+        // Written raw, `ESC[200~` would put the composer into paste mode with
+        // no closing marker, so the submission `\r` appended by
+        // `initial_submission_bytes` would be swallowed as paste content.
+        assert_eq!(initial_input_bytes("before\x1b[200~after"), b"beforeafter");
+    }
+
+    #[test]
+    fn an_embedded_paste_start_marker_inside_a_multiline_paste_is_stripped() {
+        assert_eq!(
+            initial_input_bytes("before\x1b[200~after\nnext"),
             b"\x1b[200~beforeafter\nnext\x1b[201~"
         );
     }

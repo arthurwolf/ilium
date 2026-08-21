@@ -962,7 +962,18 @@ async fn handle_session_recovery_resolution(
             .await;
         }
     }
-    send_initial_state(state, direct_tx, true).await;
+    // Every real caller reaches this only through `AttachInteractive` (the
+    // TUI never issues the legacy `Attach`), which promises metadata-only
+    // startup with terminal bytes recovered lazily once the client names its
+    // visible panes via `SetVisiblePanes`. Passing `true` here would eagerly
+    // clone and queue a full multi-megabyte-per-pane replay on every
+    // crash-recovery resolution -- work `ipc::connection`'s writer then
+    // silently discards for this exact connection because its terminal
+    // stream selection is still `None` at this point (see
+    // `should_forward_terminal_event`). `false` matches the same
+    // `AttachInteractive` contract `handle_attach` already applies before a
+    // recovery decision is pending.
+    send_initial_state(state, direct_tx, false).await;
 }
 
 /// Shared plumbing for the two tree-only mutations (`MoveNode`,
@@ -1581,12 +1592,17 @@ async fn handle_new_pane(
         }
         Err(RegisterPaneError::Spawn(error)) => {
             // The tree node exists (created just above) but has no resource
-            // behind it -- nothing was broadcast yet, so no attached client has
-            // seen it; remove it rather than leaving a phantom node no client
-            // could ever interact with.
+            // behind it; remove it rather than leaving a phantom node no
+            // client could ever interact with. This handler has not broadcast
+            // the node itself, but a concurrent structural mutation may have
+            // snapshotted and broadcast the tree while the spawn was in
+            // flight -- so broadcast (and re-mark the recovery snapshot)
+            // after the removal, ensuring every attached client and the
+            // persisted snapshot converge on the tree without the phantom.
             let mut tree = state.tree.write().await;
             let _ = tree.remove_node(pane_id);
             drop(tree);
+            broadcast_and_persist(state).await;
             send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
             return;
         }
@@ -1649,7 +1665,7 @@ pub(crate) async fn create_agent_with_prompt(
     };
 
     let origin = TerminalOrigin::Command(command_line.clone());
-    if let Err(error) = spawn_and_register_pane_in_directory(
+    match spawn_and_register_pane_in_directory(
         state,
         pane_id,
         PaneSnapshotKind::Terminal(origin),
@@ -1657,9 +1673,26 @@ pub(crate) async fn create_agent_with_prompt(
     )
     .await
     {
-        let mut tree = state.tree.write().await;
-        let _ = tree.remove_node(pane_id);
-        return Err(format!("failed to spawn {command_line}: {error}"));
+        Ok(()) => {}
+        Err(RegisterPaneError::NodeRemoved(_)) => {
+            // A concurrent request removed the node while the spawn was in
+            // flight; it already broadcast the tree without it and the
+            // now-orphaned resource has been torn back down (see
+            // `RegisterPaneError::NodeRemoved`) -- nothing to remove here.
+            return Err(format!(
+                "the {command_line} pane was removed before it could start"
+            ));
+        }
+        Err(RegisterPaneError::Spawn(error)) => {
+            // Same convergence rule as `handle_new_pane`'s spawn-error path:
+            // remove the resourceless node, then broadcast so any client
+            // that saw it via a concurrent mutation's snapshot drops it.
+            let mut tree = state.tree.write().await;
+            let _ = tree.remove_node(pane_id);
+            drop(tree);
+            broadcast_and_persist(state).await;
+            return Err(format!("failed to spawn {command_line}: {error}"));
+        }
     }
 
     broadcast_and_persist(state).await;
@@ -2191,6 +2224,12 @@ async fn handle_key_input(
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     if let Err(message) = write_key_input(state, pane_id, bytes, submission).await {
+        // `write_key_input` returns this same `Err(String)` both for an
+        // actual PTY write failure and for a downstream bookkeeping failure
+        // (e.g. `record_node_activity` rejecting a pane removed concurrently
+        // with a write that already succeeded) -- label the diagnostic event
+        // generically rather than asserting the write itself failed when it
+        // may not have.
         let _ = crate::agent_debug::record(
             state,
             pane_id,
@@ -2198,7 +2237,7 @@ async fn handle_key_input(
             AgentDebugEventDraft {
                 severity: AgentDebugSeverity::Error,
                 kind: AgentDebugEventKind::Error,
-                summary: "PTY input write failed".to_string(),
+                summary: "PTY input handling failed".to_string(),
                 fields: vec![AgentDebugField::multiline("error", message.clone())],
                 correlation_id: None,
                 metadata: Default::default(),

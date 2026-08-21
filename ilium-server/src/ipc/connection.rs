@@ -34,6 +34,14 @@ const DIRECT_CHANNEL_CAPACITY: usize = 64;
 /// owns terminal delivery watermarks.
 const STREAM_CONTROL_CHANNEL_CAPACITY: usize = 8;
 
+/// Upper bound on how many panes one interactive client may subscribe to at
+/// once. The TUI's right panel shows at most a 2x2 grid, so anything past the
+/// first four requested panes is stream demand no client can actually render.
+/// Both the reader-side demand registration and the writer-side selection must
+/// truncate identically, or the session-wide demand index and this
+/// connection's delivery filter would disagree about which panes stream.
+const MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS: usize = 4;
+
 enum StreamControl {
     /// A compatibility attach or diagnostic consumer needs every terminal's
     /// live output after its complete replay has established parser state.
@@ -187,19 +195,34 @@ async fn read_requests<R>(
     let mut terminal_subscription_guard = TerminalSubscriptionGuard::new(Arc::clone(&state));
     let mut has_terminal_stream_selection = false;
     loop {
-        let request: ClientRequest = match frame_reader.read().await {
-            Ok(request) => request,
-            Err(ilium_ipc::IpcError::Io(io_error))
-                if io_error.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                // The peer closed the connection between frames -- the
-                // normal way a client disconnects, not an error.
-                break;
-            }
-            Err(error) => {
-                tracing::warn!("connection closed after a frame read/decode error: {error}");
-                break;
-            }
+        let request: ClientRequest = tokio::select! {
+            biased;
+            // `write_replies` drops `direct_rx` on every exit path, not only
+            // the ones already covered by this loop's own EOF/decode-error
+            // breaks -- a failed socket write, a lost broadcast sender, or
+            // server shutdown all end it while this reader could otherwise
+            // stay parked on `frame_reader.read()` indefinitely (the peer's
+            // read half can outlive our write failure). Once the writer is
+            // gone, every reply this loop would produce is silently dropped
+            // by `handlers::send_direct` anyway, so continuing to read only
+            // leaks this task's socket half and this connection's
+            // `terminal_subscription_guard` contribution until the peer
+            // eventually disconnects or the whole server shuts down.
+            () = direct_tx.closed() => break,
+            read_result = frame_reader.read() => match read_result {
+                Ok(request) => request,
+                Err(ilium_ipc::IpcError::Io(io_error))
+                    if io_error.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    // The peer closed the connection between frames -- the
+                    // normal way a client disconnects, not an error.
+                    break;
+                }
+                Err(error) => {
+                    tracing::warn!("connection closed after a frame read/decode error: {error}");
+                    break;
+                }
+            },
         };
 
         let request_name = request.diagnostic_name();
@@ -225,7 +248,13 @@ async fn read_requests<R>(
 
         let stream_control = match &request {
             ClientRequest::SetVisiblePanes { pane_ids } => {
-                terminal_subscription_guard.set_visible(pane_ids.iter().copied().take(4).collect());
+                terminal_subscription_guard.set_visible(
+                    pane_ids
+                        .iter()
+                        .copied()
+                        .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
+                        .collect(),
+                );
                 has_terminal_stream_selection = true;
                 Some(StreamControl::SetVisiblePanes(pane_ids.clone()))
             }
@@ -385,6 +414,7 @@ async fn write_replies<W>(
                         &mut broadcast_rx,
                         &mut frame_writer,
                         &terminal_stream_selection,
+                        &mut delivered_terminal_sequences,
                     )
                     .await;
                     break;
@@ -407,6 +437,7 @@ async fn write_replies<W>(
                         &mut broadcast_rx,
                         &mut frame_writer,
                         &terminal_stream_selection,
+                        &mut delivered_terminal_sequences,
                     )
                     .await;
                     break;
@@ -437,7 +468,10 @@ async fn write_replies<W>(
                                     .await
                                 } else {
                                     terminal_stream_selection = TerminalStreamSelection::Visible(
-                                        pane_ids.into_iter().take(4).collect(),
+                                        pane_ids
+                                            .into_iter()
+                                            .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
+                                            .collect(),
                                     );
                                     true
                                 }
@@ -564,7 +598,10 @@ async fn apply_visible_pane_selection<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let visible_pane_ids: HashSet<_> = pane_ids.into_iter().take(4).collect();
+    let visible_pane_ids: HashSet<_> = pane_ids
+        .into_iter()
+        .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
+        .collect();
     *terminal_stream_selection = TerminalStreamSelection::Visible(visible_pane_ids.clone());
     let activity_revisions: HashMap<_, _> = {
         let tree = state.tree.read().await;
@@ -717,10 +754,19 @@ fn screen_update_requires_recovery(
 /// reader loop has ended and no more direct replies or requests are coming,
 /// so there is no reason left to keep waiting on *future* broadcasts (see
 /// `write_replies`).
+///
+/// The same per-connection delivery watermarks that guard the live path apply
+/// here: after a lag resynchronization, this queue can still hold terminal
+/// frames at or below the watermark, and replaying them would duplicate raw
+/// bytes in the client's parser in the final state it renders. A
+/// non-contiguous frame is dropped rather than resynchronized -- the
+/// connection is ending, and applying misordered bytes is strictly worse than
+/// omitting a tail the client will never observe settle anyway.
 async fn drain_pending_broadcasts<W>(
     broadcast_rx: &mut tokio::sync::broadcast::Receiver<ServerEvent>,
     frame_writer: &mut FrameWriter<W>,
     terminal_stream_selection: &TerminalStreamSelection,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
 ) where
     W: AsyncWrite + Unpin,
 {
@@ -740,7 +786,14 @@ async fn drain_pending_broadcasts<W>(
         if !should_forward_terminal_event(&event, terminal_stream_selection) {
             continue;
         }
-        if let Err(error) = frame_writer.write(&event).await {
+        if is_redundant_terminal_event(&event, delivered_terminal_sequences)
+            || screen_update_requires_recovery(&event, delivered_terminal_sequences)
+        {
+            continue;
+        }
+        if let Err(error) =
+            write_server_event(frame_writer, &event, delivered_terminal_sequences).await
+        {
             tracing::warn!("connection write failed while draining final broadcasts: {error}");
             return;
         }

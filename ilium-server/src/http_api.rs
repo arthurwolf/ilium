@@ -89,8 +89,22 @@ async fn create_agent(
             "prompt must not be empty",
         ));
     }
-    let project_path = resolve_project_path(&state, &request.project)
-        .map_err(|message| api_error(StatusCode::BAD_REQUEST, message))?;
+    // Project resolution walks the filesystem (canonicalize plus a bounded
+    // `~/dev` scan), which is blocking I/O -- run it off the async runtime so
+    // a slow disk or a large dev tree cannot stall the server's other duties.
+    let project_path = {
+        let state = Arc::clone(&state);
+        let project = request.project.clone();
+        tokio::task::spawn_blocking(move || resolve_project_path(&state, &project))
+            .await
+            .map_err(|error| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("project lookup task failed: {error}"),
+                )
+            })?
+            .map_err(|message| api_error(StatusCode::BAD_REQUEST, message))?
+    };
     let pane_id = create_agent_with_prompt(
         &state,
         request.agent_type.provider(),
@@ -124,17 +138,30 @@ fn resolve_project_path(state: &ServerState, project: &str) -> Result<PathBuf, S
         return Err("project must be a non-empty directory path or project name".to_string());
     }
     let supplied_path = PathBuf::from(project);
-    if supplied_path.is_absolute() || project.contains(std::path::MAIN_SEPARATOR) {
+    // `'/'` is a path separator on both platforms; `MAIN_SEPARATOR` adds `\`
+    // on Windows only -- it must stay a separate check rather than a
+    // hardcoded `'\\'`, since backslash is a legal filename character on
+    // Unix. Checking `MAIN_SEPARATOR` alone missed a forward-slash relative
+    // path (e.g. "sub/dir") on Windows, misrouting it into the bare-name
+    // search below.
+    if supplied_path.is_absolute()
+        || project.contains('/')
+        || project.contains(std::path::MAIN_SEPARATOR)
+    {
         return canonical_directory(&supplied_path);
     }
 
     let mut matches = BTreeSet::new();
+    // A stale or now-unavailable `session_cwd` must not abort the whole
+    // lookup via `?` -- it should just fail to contribute a candidate, the
+    // same way an unresolvable dev-tree candidate below is skipped rather
+    // than treated as a hard error.
     if state
         .session_cwd
         .file_name()
         .is_some_and(|name| name == project)
     {
-        matches.insert(canonical_directory(&state.session_cwd)?);
+        matches.extend(canonical_directory(&state.session_cwd).ok());
     }
     let development_root = state.home_dir.join("dev");
     for candidate in project_name_candidates(&development_root, project) {
@@ -180,7 +207,13 @@ fn project_name_candidates(root: &Path, name: &str) -> Vec<PathBuf> {
                     matches.push(canonical);
                 }
             }
-            if depth < 2 {
+            // `depth` is the directory's own depth below `root`, so its
+            // entries sit at `depth + 1`. Descending only from depth-0/1
+            // directories caps candidates at depth two (`~/dev/<area>/<proj>`),
+            // matching the documented contract and keeping the scan from
+            // reading the contents of every depth-two directory (e.g.
+            // `~/dev/<proj>/node_modules`).
+            if depth < 1 {
                 pending.push_back((path, depth + 1));
             }
         }
@@ -201,6 +234,20 @@ mod tests {
         assert_eq!(
             project_name_candidates(directory.path(), "ilium"),
             vec![ilium_platform::paths::canonicalize(&target).unwrap()]
+        );
+    }
+
+    #[test]
+    fn project_name_lookup_stops_at_depth_two() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        // A depth-three directory must never be a candidate: the documented
+        // contract is a depth-two search of the dev tree.
+        let too_deep = directory.path().join("ai").join("vendor").join("ilium");
+        std::fs::create_dir_all(&too_deep).expect("nested directory");
+
+        assert_eq!(
+            project_name_candidates(directory.path(), "ilium"),
+            Vec::<std::path::PathBuf>::new()
         );
     }
 }

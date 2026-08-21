@@ -95,6 +95,20 @@ impl ShellCommandTracker {
                     index += 6;
                     continue;
                 }
+                // Input arrives in per-message chunks, so the paste-end
+                // marker can be split across two observe calls. An ESC here
+                // is indistinguishable from a split end marker (or stray
+                // escape inside the pasted text); inserting it literally
+                // would leave the tracker stuck in paste mode forever,
+                // swallowing every later Enter. Fail closed and drop back to
+                // normal parsing so the next terminator still commits an
+                // (opaque) submission boundary.
+                if bytes[index] == b'\x1b' {
+                    self.is_bracketed_paste = false;
+                    self.discard_pending_line(OpaqueInputReason::UnsupportedEscapeSequence);
+                    index += 1;
+                    continue;
+                }
                 if let Some((character, consumed)) = decode_utf8_character(&bytes[index..]) {
                     self.insert_character(character);
                     index += consumed;
@@ -106,8 +120,19 @@ impl ShellCommandTracker {
             }
             match bytes[index] {
                 b'\r' | b'\n' => {
+                    let terminator = bytes[index];
                     latest_submission = Some(self.commit_current_line());
                     index += 1;
+                    // A CRLF (or LFCR) pair is one Enter, not two -- without
+                    // this, the second byte would commit the just-cleared
+                    // line and silently replace the real submission with a
+                    // spurious empty one. Plain (non-bracketed) pasted text
+                    // can still deliver raw "\r\n" line endings straight
+                    // into this stream.
+                    let opposite_terminator = if terminator == b'\r' { b'\n' } else { b'\r' };
+                    if bytes.get(index) == Some(&opposite_terminator) {
+                        index += 1;
+                    }
                 }
                 b'\x7f' | b'\x08' => {
                     self.backspace();
@@ -279,10 +304,11 @@ impl ShellCommandTracker {
     /// Drops the stale truncation warning once every character that could
     /// have been affected by it is gone. `was_truncated` otherwise stays set
     /// for the rest of the pending line's life (it is only cleared wholesale
-    /// by `reset_pending_line`/`discard_pending_line`), which would wrongly
-    /// mark a fully cleared-and-retyped line -- e.g. an oversized paste
-    /// undone with Ctrl-U and replaced by a short command -- as untrustworthy
-    /// even though the retyped text is exact.
+    /// by `reset_pending_line`; `discard_pending_line` deliberately keeps it
+    /// as diagnostic evidence alongside the opaque reason), which would
+    /// wrongly mark a fully cleared-and-retyped line -- e.g. an oversized
+    /// paste undone with Ctrl-U and replaced by a short command -- as
+    /// untrustworthy even though the retyped text is exact.
     fn clear_truncation_flag_if_line_is_empty(&mut self) {
         if self.current_line.is_empty() {
             self.was_truncated = false;
@@ -331,24 +357,29 @@ fn escape_sequence_len(bytes: &[u8]) -> usize {
     if bytes.len() < 2 || bytes[1] != b'[' {
         // A non-CSI escape (e.g. an unrecognized Alt+<key> or SS3 sequence)
         // normally also consumes the byte right after ESC. But if that byte
-        // is a line terminator, consuming it would swallow the submission
-        // boundary itself rather than just marking the line's content
-        // opaque -- fail closed on the escape alone and let the terminator
-        // still end the line on the next loop iteration.
-        if bytes
-            .get(1)
-            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
-        {
+        // is a control byte (a line terminator, Ctrl-C, ...), consuming it
+        // would swallow that byte's own meaning -- the submission boundary
+        // or the line reset -- rather than just marking the line's content
+        // opaque. Fail closed on the escape alone and let the control byte
+        // keep its meaning on the next loop iteration.
+        if bytes.get(1).is_some_and(|byte| *byte < b' ') {
             return 1;
         }
         return bytes.len().min(2);
     }
-    bytes
-        .iter()
-        .enumerate()
-        .skip(2)
-        .find_map(|(index, byte)| (b'@'..=b'~').contains(byte).then_some(index + 1))
-        .unwrap_or(bytes.len())
+    for (index, &byte) in bytes.iter().enumerate().skip(2) {
+        // A control byte inside a malformed CSI (e.g. the user typing ESC,
+        // '[', Enter) aborts the sequence in real terminals. Stop before it
+        // so a line terminator still commits and a Ctrl-C still resets,
+        // instead of being silently swallowed with the escape.
+        if byte < b' ' {
+            return index;
+        }
+        if (b'@'..=b'~').contains(&byte) {
+            return index + 1;
+        }
+    }
+    bytes.len()
 }
 
 fn normalize_title(command: &str) -> String {
@@ -495,6 +526,52 @@ mod tests {
         assert_eq!(
             submission.opaque_reason,
             Some(OpaqueInputReason::UnsupportedEscapeSequence)
+        );
+    }
+
+    #[test]
+    fn split_paste_end_marker_fails_closed_instead_of_sticking_in_paste_mode() {
+        let mut tracker = ShellCommandTracker::default();
+        // The paste-end marker arrives split across two input chunks. The
+        // tracker must not insert the lone ESC literally and stay in paste
+        // mode forever; the next Enter must still be a submission boundary.
+        assert_eq!(tracker.observe_submission(b"\x1b[200~hi\x1b"), None);
+        let submission = tracker
+            .observe_submission(b"[201~\r")
+            .expect("the terminator after the split marker still submits");
+
+        assert_eq!(submission.text, None);
+        assert_eq!(
+            submission.opaque_reason,
+            Some(OpaqueInputReason::UnsupportedEscapeSequence)
+        );
+
+        // The tracker recovered: the next full line is tracked exactly.
+        assert_eq!(tracker.observe(b"ls\r"), Some("ls".to_string()));
+    }
+
+    #[test]
+    fn malformed_csi_never_swallows_a_line_terminator_or_reset() {
+        let mut tracker = ShellCommandTracker::default();
+        // ESC, '[', Enter is real keyboard input; the Enter must stay a
+        // submission boundary instead of being scanned past as a CSI byte.
+        let submission = tracker
+            .observe_submission(b"ab\x1b[\r")
+            .expect("the terminator survives the malformed escape");
+        assert_eq!(submission.text, None);
+        assert_eq!(
+            submission.opaque_reason,
+            Some(OpaqueInputReason::UnsupportedEscapeSequence)
+        );
+
+        // The commit reset the tracker, so the next line is exact again.
+        assert_eq!(tracker.observe(b"ls\r"), Some("ls".to_string()));
+
+        // A Ctrl-C right after a bare ESC must still reset the pending
+        // line, so the following command is tracked exactly again.
+        assert_eq!(
+            tracker.observe(b"junk\x1b\x03echo ok\r"),
+            Some("echo ok".to_string())
         );
     }
 
