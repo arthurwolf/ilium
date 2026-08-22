@@ -2432,6 +2432,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
         AppearanceRow::AgentToolbar => "Agent toolbar",
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
+        AppearanceRow::LastPrompt => "Last prompt banner",
+        AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
     }
 }
@@ -2484,6 +2486,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ShowToolbarLabels => {
             "Show a text label after every agent-toolbar icon, turning the compact icon row into a traditional, easier-to-read text menu."
+        }
+        AppearanceRow::LastPrompt => {
+            "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
+        }
+        AppearanceRow::LastPromptMaxLines => {
+            "Rows the last-prompt banner reserves. A longer prompt is truncated in the middle, keeping its first and last lines."
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
@@ -2563,6 +2571,14 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "Off (icons only)".to_string()
             }
         }
+        AppearanceRow::LastPrompt => {
+            if ui.last_prompt_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
         AppearanceRow::TerminalTextSelection => {
             if ui.terminal_text_selection_enabled {
                 "On".to_string()

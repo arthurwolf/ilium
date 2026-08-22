@@ -389,6 +389,13 @@ fn run_delayed_composer_then_echo(delay_seconds: u32) {
 /// Repaints in place: cursor home, then two rows whose numbers change while
 /// their structure does not.
 fn run_change_only() {
+    // Real interactive agent CLIs enable bracketed paste on their own line
+    // editor; without this, `ilium_client::app::forward_terminal_paste`
+    // correctly downgrades a multi-line paste to plain unwrapped text (see
+    // its `wants_bracketed_paste` check), which is accurate for a program
+    // that never asked for paste markers but not for what this fixture is
+    // meant to model.
+    emit("\x1b[?2004h");
     let mut counter: u64 = 1;
     loop {
         // Built as one string rather than two `emit` calls. Note this is not

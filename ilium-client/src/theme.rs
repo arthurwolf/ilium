@@ -264,6 +264,43 @@ pub fn selected_style() -> Style {
     Style::new().bg(theme.accent_bg).fg(theme.accent_fg)
 }
 
+/// Linearly blends `from` toward `to` by `t` (0.0 keeps `from`, 1.0 becomes
+/// `to`). Non-`Rgb` colors pass through `from` unchanged -- every `Theme`
+/// color is `Rgb`, so this only ever matters for a future non-`Rgb` value.
+fn mix(from: Color, to: Color, t: f32) -> Color {
+    let (Color::Rgb(from_r, from_g, from_b), Color::Rgb(to_r, to_g, to_b)) = (from, to) else {
+        return from;
+    };
+    let lerp = |from: u8, to: u8| (f32::from(from) + (f32::from(to) - f32::from(from)) * t) as u8;
+    Color::Rgb(lerp(from_r, to_r), lerp(from_g, to_g), lerp(from_b, to_b))
+}
+
+/// A muted variant of the accent background, for a persistent chrome fill
+/// (the last-prompt banner) large enough that the full, saturated
+/// `accent_bg` -- designed for a one-row status bar / selection highlight --
+/// would read as too loud. Deliberately not a fifth configurable `Theme`
+/// color (see the module doc: theming stays scoped to the four colors
+/// there); this derives from `accent_bg` instead, blended toward black or
+/// white depending on `scheme` so it reads as a subtle tint against that
+/// scheme's implied terminal background rather than a flat gray that would
+/// suit neither.
+pub fn muted_accent_bg(scheme: ColorScheme) -> Color {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    mix(current().accent_bg, blend_target, 0.72)
+}
+
+/// Background fill for the last-prompt banner. No explicit `fg`: the
+/// banner's muted background stays close enough in lightness to an
+/// unstyled cell's implied terminal background that the surrounding
+/// content's ordinary (unset) foreground keeps reading correctly on top of
+/// it, the same assumption `agent_toolbar`'s unstyled buttons already make.
+pub fn last_prompt_style(scheme: ColorScheme) -> Style {
+    Style::new().bg(muted_accent_bg(scheme))
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::backend::TestBackend;
@@ -338,6 +375,29 @@ mod tests {
     fn for_scheme_selects_the_matching_preset() {
         assert_eq!(Theme::for_scheme(ColorScheme::Dark), Theme::dark());
         assert_eq!(Theme::for_scheme(ColorScheme::Light), Theme::light());
+    }
+
+    #[test]
+    fn muted_accent_bg_darkens_for_dark_scheme_and_lightens_for_light_scheme() {
+        // Neither `init` nor `set` has run in this test binary (see the
+        // comment above), so `current()` reads `Theme::default()` ==
+        // `Theme::dark()` -- its `accent_bg` is the bright lavender used for
+        // both assertions below.
+        let accent = Theme::dark().accent_bg;
+        let dark_muted = muted_accent_bg(ColorScheme::Dark);
+        let light_muted = muted_accent_bg(ColorScheme::Light);
+        let Color::Rgb(accent_r, accent_g, accent_b) = accent else {
+            unreachable!("Theme::dark().accent_bg is always Rgb");
+        };
+        let Color::Rgb(dark_r, dark_g, dark_b) = dark_muted else {
+            unreachable!("mix of two Rgb colors always returns Rgb");
+        };
+        let Color::Rgb(light_r, light_g, light_b) = light_muted else {
+            unreachable!("mix of two Rgb colors always returns Rgb");
+        };
+        assert!(dark_r < accent_r && dark_g < accent_g && dark_b < accent_b);
+        assert!(light_r > accent_r && light_g > accent_g && light_b > accent_b);
+        assert_ne!(dark_muted, light_muted);
     }
 
     #[test]

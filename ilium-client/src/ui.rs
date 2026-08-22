@@ -1192,6 +1192,17 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
         }
     }
 
+    if let Some(last_prompt_area) = viewport.last_prompt_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            crate::last_prompt_banner::render(
+                frame,
+                last_prompt_area,
+                app.tree.last_prompt(viewport.pane_id),
+                app.ui_settings.color_scheme,
+            );
+        }
+    }
+
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
     }

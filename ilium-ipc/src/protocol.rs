@@ -581,4 +581,15 @@ pub enum ServerEvent {
     /// Correlates a structurally invalid apply with the project job that
     /// initiated it, keeping the footer state truthful.
     ProjectRestructureRejected { project_id: NodeId, message: String },
+    /// A terminal pane's exactly-reconstructed last submitted line changed
+    /// (see `ilium_core::Tree::set_last_prompt`). Sent as its own lightweight
+    /// event rather than folded into `PanePromptSubmitted` because most
+    /// consumers of that event (retitle/debug triggers) don't need the text,
+    /// and rather than a full `TreeSnapshot` because this can fire on every
+    /// Enter press in a busy pane. Appended last to preserve every existing
+    /// bincode discriminant.
+    PaneLastPromptChanged {
+        pane_id: NodeId,
+        last_prompt: Option<String>,
+    },
 }

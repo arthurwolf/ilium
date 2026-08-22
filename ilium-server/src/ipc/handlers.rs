@@ -2532,11 +2532,33 @@ pub(crate) async fn write_key_input(
                     detection_was_forced.to_string(),
                 ),
                 AgentDebugField::plain("written bytes", bytes.len().to_string()),
-                AgentDebugField::sensitive("submitted input", text),
+                AgentDebugField::sensitive("submitted input", text.clone()),
             ])
             .with_correlation_id(submission_correlation_id.clone()),
         )
         .await;
+
+        // Only a hand-typed or pasted, exactly reconstructed line updates the
+        // banner -- other submission sources (voice, scheduled/queued
+        // prompts, toolbar actions) already have their own presentation, and
+        // an inexact/opaque reconstruction must leave the last good value in
+        // place rather than overwrite it with placeholder text.
+        if submission == Some(PromptSubmissionSource::Keyboard)
+            && exactness == "exact"
+            && !text.is_empty()
+        {
+            let updated = {
+                let mut tree = state.tree.write().await;
+                tree.set_last_prompt(pane_id, Some(text.clone())).is_ok()
+            };
+            if updated {
+                state.request_snapshot_save();
+                state.broadcast(ServerEvent::PaneLastPromptChanged {
+                    pane_id,
+                    last_prompt: Some(text),
+                });
+            }
+        }
     }
 
     if goal_was_cleared {

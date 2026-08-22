@@ -54,6 +54,17 @@ pub struct PaneViewport {
     /// `content_area` both happen in `App`, not here; this field only
     /// carries the result so rendering, PTY sizing, and hit-testing agree.
     pub toolbar_area: Option<Rect>,
+    /// The reserved last-prompt banner rows, directly below `toolbar_area`
+    /// (or at the content top if no toolbar shows) -- `None` unless
+    /// `App::pane_viewports` decided this pane shows it. Always exactly
+    /// `UiSettings::last_prompt_max_lines` rows tall while shown, regardless
+    /// of how many lines the current prompt actually renders: a size that
+    /// tracked prompt content would change `content_area`'s height on every
+    /// submission without a matching PTY resize, drawing into a region the
+    /// child process doesn't know has shrunk. A fixed reservation only
+    /// changes size when the setting itself changes, which already goes
+    /// through `resize_displayed_panes`.
+    pub last_prompt_area: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -70,6 +81,7 @@ impl PaneViewport {
             content_area,
             slot_index,
             toolbar_area: None,
+            last_prompt_area: None,
         }
     }
 
@@ -95,6 +107,34 @@ impl PaneViewport {
         Self {
             content_area,
             toolbar_area: Some(toolbar_area),
+            ..self
+        }
+    }
+
+    /// Reserves `rows` at the top of `content_area` for the last-prompt
+    /// banner, below any already-reserved toolbar row. A no-op on an
+    /// already-empty content area or a zero-row request, so a sliver-sized
+    /// split or a misconfigured setting can't underflow into a huge `Rect`.
+    pub fn with_last_prompt_reserved(self, rows: u16) -> Self {
+        if self.content_area.height == 0 || rows == 0 {
+            return self;
+        }
+        let rows = rows.min(self.content_area.height);
+        let last_prompt_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y,
+            self.content_area.width,
+            rows,
+        );
+        let content_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y.saturating_add(rows),
+            self.content_area.width,
+            self.content_area.height.saturating_sub(rows),
+        );
+        Self {
+            content_area,
+            last_prompt_area: Some(last_prompt_area),
             ..self
         }
     }

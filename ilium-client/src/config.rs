@@ -389,6 +389,9 @@ pub const DEFAULT_CARD_PREVIEW_LINES: u16 = 3;
 pub const MIN_BOARD_COLUMN_WIDTH: u16 = 10;
 pub const MAX_BOARD_COLUMN_WIDTH: u16 = 80;
 pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 20;
+pub const MIN_LAST_PROMPT_MAX_LINES: u8 = 1;
+pub const MAX_LAST_PROMPT_MAX_LINES: u8 = 20;
+pub const DEFAULT_LAST_PROMPT_MAX_LINES: u8 = 4;
 
 /// `[kanban_board]` settings, validated before they reach board layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -747,6 +750,16 @@ pub struct UiSettings {
     /// Shows a short text label after every agent-toolbar icon, turning the
     /// compact icon row into a traditional, easier-to-read text menu.
     pub show_toolbar_labels: bool,
+    /// Shows the last exactly-reconstructed prompt typed or pasted into a
+    /// detected agent pane in a persistent banner below its toolbar (see
+    /// `ilium_core::Tree::set_last_prompt`).
+    pub last_prompt_enabled: bool,
+    /// Maximum rows the last-prompt banner reserves. A prompt with more
+    /// lines than this is middle-truncated (see `crate::last_prompt_banner`)
+    /// rather than growing the banner, so the reservation stays a fixed
+    /// size the PTY only needs resizing for when this setting itself
+    /// changes.
+    pub last_prompt_max_lines: u8,
     /// Claims left-button drag over a terminal pane's content as a local
     /// text selection (highlight plus clipboard copy) instead of forwarding
     /// the raw mouse event to the pane's PTY. On by default because the
@@ -775,6 +788,8 @@ impl Default for UiSettings {
             show_context_menu_icons: true,
             agent_toolbar_enabled: true,
             show_toolbar_labels: true,
+            last_prompt_enabled: true,
+            last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             terminal_text_selection_enabled: true,
             icons: IconSettings::default(),
         }
@@ -863,6 +878,8 @@ struct RawUiConfig {
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
     show_toolbar_labels: Option<bool>,
+    last_prompt_enabled: Option<bool>,
+    last_prompt_max_lines: Option<u8>,
     terminal_text_selection_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
@@ -991,6 +1008,11 @@ pub enum ConfigLoadError {
         "kanban_board.minimum_column_width = {0} must be between {MIN_BOARD_COLUMN_WIDTH} and {MAX_BOARD_COLUMN_WIDTH}"
     )]
     InvalidBoardColumnWidth(u16),
+    /// `ui.last_prompt_max_lines` is outside the supported range.
+    #[error(
+        "ui.last_prompt_max_lines = {0} must be between {MIN_LAST_PROMPT_MAX_LINES} and {MAX_LAST_PROMPT_MAX_LINES}"
+    )]
+    InvalidLastPromptMaxLines(u8),
     #[error("voice.output_volume_percent = {0} must be between 0 and 100")]
     InvalidVoiceOutputVolume(u8),
 }
@@ -1255,6 +1277,18 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_toolbar_labels: raw
             .show_toolbar_labels
             .unwrap_or(defaults.show_toolbar_labels),
+        last_prompt_enabled: raw
+            .last_prompt_enabled
+            .unwrap_or(defaults.last_prompt_enabled),
+        last_prompt_max_lines: match raw.last_prompt_max_lines {
+            Some(lines)
+                if (MIN_LAST_PROMPT_MAX_LINES..=MAX_LAST_PROMPT_MAX_LINES).contains(&lines) =>
+            {
+                lines
+            }
+            Some(lines) => return Err(ConfigLoadError::InvalidLastPromptMaxLines(lines)),
+            None => defaults.last_prompt_max_lines,
+        },
         terminal_text_selection_enabled: raw
             .terminal_text_selection_enabled
             .unwrap_or(defaults.terminal_text_selection_enabled),
@@ -2011,6 +2045,14 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "show_toolbar_labels".to_string(),
         toml::Value::Boolean(ui.show_toolbar_labels),
+    );
+    table.insert(
+        "last_prompt_enabled".to_string(),
+        toml::Value::Boolean(ui.last_prompt_enabled),
+    );
+    table.insert(
+        "last_prompt_max_lines".to_string(),
+        toml::Value::Integer(i64::from(ui.last_prompt_max_lines)),
     );
     table.insert(
         "terminal_text_selection_enabled".to_string(),
@@ -2786,6 +2828,8 @@ mod tests {
             show_context_menu_icons: false,
             agent_toolbar_enabled: false,
             show_toolbar_labels: false,
+            last_prompt_enabled: false,
+            last_prompt_max_lines: 7,
             terminal_text_selection_enabled: false,
             use_stable_glyphs: true,
             icons,
@@ -2842,6 +2886,54 @@ mod tests {
         save_ui_settings(&dir, &ui).unwrap();
 
         assert!(!load(&dir).unwrap().ui.show_toolbar_labels);
+    }
+
+    #[test]
+    fn last_prompt_defaults_on_with_four_lines_and_round_trips_through_ui_config() {
+        let dir = scratch_dir();
+        let defaults = load(&dir).unwrap();
+        assert!(defaults.ui.last_prompt_enabled);
+        assert_eq!(
+            defaults.ui.last_prompt_max_lines,
+            DEFAULT_LAST_PROMPT_MAX_LINES
+        );
+
+        let ui = UiSettings {
+            last_prompt_enabled: false,
+            last_prompt_max_lines: 8,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+
+        let loaded = load(&dir).unwrap();
+        assert!(!loaded.ui.last_prompt_enabled);
+        assert_eq!(loaded.ui.last_prompt_max_lines, 8);
+    }
+
+    #[test]
+    fn last_prompt_max_lines_outside_the_supported_range_is_rejected() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nlast_prompt_max_lines = 21\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidLastPromptMaxLines(21),
+                ..
+            })
+        ));
+
+        std::fs::write(dir.join("config.toml"), "[ui]\nlast_prompt_max_lines = 0\n").unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidLastPromptMaxLines(0),
+                ..
+            })
+        ));
     }
 
     #[test]

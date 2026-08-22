@@ -4508,3 +4508,172 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     }
     assert!(exited, "agent-debug TUI did not exit after cleanup");
 }
+
+/// A bracketed paste whose content uses a lone `\r` between lines (what a
+/// real terminal paste can deliver, and the exact separator
+/// `ilium-server`'s `ShellCommandTracker` preserves byte-exactly rather than
+/// normalizing) followed by a real Enter keystroke that submits the line.
+/// Regression coverage for `last_prompt_banner::truncate_middle`, which used
+/// to treat this whole six-line paste as one unsplit line because
+/// `str::lines()` alone does not recognize a lone `\r` as a boundary.
+#[tokio::test]
+async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("last-prompt-project");
+    let fixture_directory = temp_root.path().join("fixture-bin");
+    std::fs::create_dir_all(&project_dir).expect("create project directory");
+    std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
+    seed_project_config(&project_dir);
+    let fake_codex = write_change_only_fake_codex(&fixture_directory);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fake_codex_argument = fake_codex.to_string_lossy().to_string();
+    let new_pane_output = run_one_shot(
+        &xdg,
+        &project_dir,
+        &["new-pane", "--", &fake_codex_argument],
+    )
+    .await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating fake Codex pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 140)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn last-prompt-banner TUI");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                })
+            },
+            DETECTION_TIMEOUT,
+        )
+        .await,
+        "expected a detected working Codex row.\n{}\nscreen: {:?}",
+        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+        tui.screen_text()
+    );
+    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
+    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
+    let agent_row = agent_rows[0];
+
+    tui.write(&sgr_mouse_down(0, 8, agent_row))
+        .expect("focus detected Codex row");
+    tui.write(&sgr_mouse_up(8, agent_row))
+        .expect("release detected Codex row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Cogitating (esc to interrupt)"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected focused fake Codex terminal, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Selecting the tree row reveals the pane; a click inside the terminal
+    // moves keyboard focus from the tree to the PTY before typing.
+    tui.write(&sgr_mouse_down(0, 80, 10))
+        .expect("focus the fake Codex PTY");
+    tui.write(&sgr_mouse_up(80, 10))
+        .expect("release the fake Codex PTY focus click");
+
+    // A bracketed paste of six lines separated by lone `\r` bytes, then a
+    // real Enter to submit -- mirroring exactly what was captured from a
+    // live session's stored `last_prompt` before this fix.
+    tui.write(b"\x1b[200~first line\rsecond line\rthird line\rfourth line\rfifth line\rsixth line\x1b[201~")
+        .expect("deliver bracketed paste to the fake Codex PTY");
+    tui.write(b"\r").expect("submit the pasted prompt");
+
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("first line")
+                    && screen.contains("second line")
+                    && screen.contains("fifth line")
+                    && screen.contains("sixth line")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the last-prompt banner to show all four kept rows: {:?}",
+        tui.screen_text()
+    );
+    // The banner sits in its own reserved rows directly below the toolbar --
+    // distinct from the pane's own terminal content further down, which the
+    // pty's normal input echo (now legitimately reproducing the whole raw
+    // paste, since the fixture requests bracketed paste) may also contain
+    // "third line"/"fourth line" without that being the banner. Scope the
+    // middle-truncation assertion to the banner's own four rows so echoed
+    // content in the pane body below can't produce a false pass or fail.
+    let (banner_rows_ok, screen_for_diagnostics) = tui.with_screen(|screen| {
+        let toolbar_rows = rows_containing(screen, "⏹ Stop");
+        let Some(&toolbar_row) = toolbar_rows.first() else {
+            return (false, String::new());
+        };
+        let cols = screen.size().1;
+        let banner_texts: Vec<String> = (1..=4)
+            .map(|offset| {
+                screen
+                    .rows(0, cols)
+                    .nth((toolbar_row + offset) as usize)
+                    .unwrap_or_default()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect();
+        let matches = banner_texts.len() == 4
+            && banner_texts[0].contains("first line")
+            && banner_texts[1].contains("second line")
+            && banner_texts[2].contains("fifth line")
+            && banner_texts[3].contains("sixth line");
+        (matches, format!("{banner_texts:?}"))
+    });
+    assert!(
+        banner_rows_ok,
+        "expected the banner's four reserved rows to read exactly \
+         [\"first line\", \"second line\", \"fifth line\", \"sixth line\"], got: {screen_for_diagnostics}"
+    );
+
+    let (socket_path, _) = isolated_server_identity(&xdg, &project_dir).await;
+    let mut control_connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
+        .await
+        .expect("attach last-prompt control connection");
+    let tree = receive_tree_snapshot(&mut control_connection, "last-prompt verification").await;
+    let pane_ids = tree.pane_ids_in_tree_order();
+    assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
+    assert_eq!(
+        tree.last_prompt(pane_ids[0]),
+        Some("first line\rsecond line\rthird line\rfourth line\rfifth line\rsixth line"),
+        "server should store the exact byte-for-byte submission, lone carriage returns included"
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill last-prompt-banner TUI");
+    }
+    assert!(exited, "last-prompt-banner TUI did not exit after cleanup");
+}

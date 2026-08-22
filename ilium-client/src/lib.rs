@@ -55,6 +55,7 @@ pub mod icon_settings;
 pub mod inference_test;
 pub mod keymap;
 pub mod keys;
+pub mod last_prompt_banner;
 pub mod layout;
 pub mod markdown;
 pub mod media_control;

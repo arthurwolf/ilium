@@ -405,6 +405,14 @@ mod tests {
                 project_id: NodeId(1),
                 message: "project changed during inference".to_string(),
             },
+            ServerEvent::PaneLastPromptChanged {
+                pane_id: NodeId(2),
+                last_prompt: Some("fix the login bug".to_string()),
+            },
+            ServerEvent::PaneLastPromptChanged {
+                pane_id: NodeId(2),
+                last_prompt: None,
+            },
         ]
     }
 

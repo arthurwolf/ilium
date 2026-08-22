@@ -534,11 +534,13 @@ pub enum AppearanceRow {
     ContextMenuIcons,
     AgentToolbar,
     ShowToolbarLabels,
+    LastPrompt,
+    LastPromptMaxLines,
     TerminalTextSelection,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 13] = [
+    const GENERAL: [AppearanceRow; 15] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -551,6 +553,8 @@ impl AppearanceRow {
         Self::ContextMenuIcons,
         Self::AgentToolbar,
         Self::ShowToolbarLabels,
+        Self::LastPrompt,
+        Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
     ];
 
@@ -2286,8 +2290,14 @@ impl App {
         viewports
             .into_iter()
             .map(|viewport| {
-                if self.shows_agent_toolbar(viewport.pane_id) {
+                let viewport = if self.shows_agent_toolbar(viewport.pane_id) {
                     viewport.with_agent_toolbar_reserved()
+                } else {
+                    viewport
+                };
+                if self.shows_last_prompt_banner(viewport.pane_id) {
+                    viewport
+                        .with_last_prompt_reserved(self.ui_settings.last_prompt_max_lines.into())
                 } else {
                     viewport
                 }
@@ -2305,6 +2315,17 @@ impl App {
     /// job of keeping the row reserved after that agent exits.
     pub fn shows_agent_toolbar(&self, pane_id: NodeId) -> bool {
         self.ui_settings.agent_toolbar_enabled
+            && (self.is_detected_agent_pane(pane_id)
+                || self.agent_toolbar_latched_panes.contains(&pane_id))
+    }
+
+    /// Whether `pane_id` currently reserves the last-prompt banner. Uses the
+    /// same detected-or-latched eligibility as [`Self::shows_agent_toolbar`]
+    /// (a latched pane keeps showing its last prompt after its agent exits,
+    /// same rationale as that method's doc comment) gated by its own
+    /// independent toggle rather than the toolbar's.
+    pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
+        self.ui_settings.last_prompt_enabled
             && (self.is_detected_agent_pane(pane_id)
                 || self.agent_toolbar_latched_panes.contains(&pane_id))
     }
@@ -4242,6 +4263,33 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Switches the last-prompt banner on or off. The reservation is a fixed
+    /// number of rows (see `PaneViewport::with_last_prompt_reserved`), so --
+    /// like the toolbar's own toggle -- this is the one place its presence
+    /// changes `content_area` and therefore needs an explicit PTY resize.
+    pub fn settings_toggle_last_prompt(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.last_prompt_enabled = !ui.last_prompt_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
+    /// Adjusts the last-prompt banner's fixed row budget by one line,
+    /// clamped to the supported range. Changes `content_area`'s height for
+    /// every pane currently showing the banner, so this resizes displayed
+    /// panes just like the toggle above.
+    pub fn settings_adjust_last_prompt_max_lines(&mut self, delta: i32) {
+        let current = self.ui_settings.last_prompt_max_lines;
+        let lines = (i32::from(current) + delta).clamp(
+            i32::from(crate::config::MIN_LAST_PROMPT_MAX_LINES),
+            i32::from(crate::config::MAX_LAST_PROMPT_MAX_LINES),
+        ) as u8;
+        let mut ui = self.ui_settings.clone();
+        ui.last_prompt_max_lines = lines;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
     /// Switches whether a left-button drag over a terminal pane's content is
     /// claimed as a local text selection (see `crate::terminal_selection`)
     /// or forwarded to the pane's PTY like every other terminal mouse event.
@@ -4499,6 +4547,10 @@ impl App {
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
+            AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
+            AppearanceRow::LastPromptMaxLines => {
+                self.settings_adjust_last_prompt_max_lines(direction)
+            }
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
         }
     }
@@ -11718,6 +11770,21 @@ mod tests {
                 PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
             )
             .unwrap();
+        // Becoming a detected agent reserves the toolbar row and the
+        // last-prompt banner's rows, shrinking `content_area` -- reuse of
+        // the plain-shell `position` from above would now land in that
+        // reserved chrome instead of the terminal content it targets.
+        let agent_viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(
+            agent_viewport.content_area.x + 3,
+            agent_viewport.content_area.y + 1,
+        );
+        let right_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
         app.handle_pane_mouse(right_click, position);
         let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
             panic!("detected agent right click should retain terminal copy actions");

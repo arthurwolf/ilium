@@ -386,6 +386,15 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.reject_project_restructure(project_id, message);
             None
         }
+        ServerEvent::PaneLastPromptChanged {
+            pane_id,
+            last_prompt,
+        } => {
+            if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
+                tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
+            }
+            None
+        }
     }
 }
 
@@ -1192,7 +1201,17 @@ mod tests {
         assert!(app.shows_agent_toolbar(pane_id));
         let after = app.pane_viewport(pane_id).unwrap();
         assert!(after.toolbar_area.is_some());
-        assert_eq!(after.content_area.height, before.content_area.height - 1);
+        assert!(app.shows_last_prompt_banner(pane_id));
+        assert!(after.last_prompt_area.is_some());
+        // Toolbar row plus the default-on last-prompt banner's fixed row
+        // budget (`DEFAULT_LAST_PROMPT_MAX_LINES`), both reserved the same
+        // tick detection latches this pane as an agent.
+        assert_eq!(
+            after.content_area.height,
+            before.content_area.height
+                - 1
+                - u16::from(crate::config::DEFAULT_LAST_PROMPT_MAX_LINES)
+        );
         // The PTY must be told the *reduced* size -- not just the render
         // area -- or the agent's own bottom row (its input/prompt line)
         // renders past what the real terminal was told it has.

@@ -649,6 +649,14 @@ pub enum NodeKind {
         /// `serde(default)` keeps existing recovery snapshots compatible.
         #[serde(default)]
         prompt_queue: Vec<QueuedPrompt>,
+        /// The most recent exactly-reconstructed line a user typed or pasted
+        /// and submitted with Enter in a terminal pane. `None` until a first
+        /// exact submission, and left unchanged (never cleared) by a
+        /// submission the server could not reconstruct exactly -- see
+        /// `ilium-server`'s `ShellCommandTracker`. `serde(default)` keeps
+        /// existing recovery snapshots compatible.
+        #[serde(default)]
+        last_prompt: Option<String>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -1452,6 +1460,7 @@ impl Tree {
                     board_storage: None,
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
+                    last_prompt: None,
                 },
             },
         );
@@ -1513,6 +1522,7 @@ impl Tree {
                     board_storage: Some(storage),
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
+                    last_prompt: None,
                 },
             },
         );
@@ -2391,6 +2401,32 @@ impl Tree {
         Ok(())
     }
 
+    /// Records the most recent exactly-reconstructed submitted line for a
+    /// terminal pane. Callers pass `None` only to clear the field
+    /// explicitly (e.g. pane recreation); an inexact or unreconstructable
+    /// submission must simply not call this rather than overwrite a good
+    /// value with a worse one.
+    pub fn set_last_prompt(
+        &mut self,
+        id: NodeId,
+        last_prompt: Option<String>,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            last_prompt: field,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        *field = last_prompt;
+        Ok(())
+    }
+
     /// Returns the FIFO head without consuming it. The server writes it to
     /// the PTY before acknowledging delivery, so a failed write leaves it
     /// queued for the next genuine completion.
@@ -2458,6 +2494,16 @@ impl Tree {
     pub fn prompt_queue_len(&self, id: NodeId) -> Option<usize> {
         match &self.get(id)?.kind {
             NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
+            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
+        }
+    }
+
+    /// The most recent exactly-reconstructed submitted line for a pane, if
+    /// any. `None` both when the pane has never had an exact submission and
+    /// when `id` is not a pane at all.
+    pub fn last_prompt(&self, id: NodeId) -> Option<&str> {
+        match &self.get(id)?.kind {
+            NodeKind::Pane { last_prompt, .. } => last_prompt.as_deref(),
             NodeKind::Container(_) | NodeKind::Folder { .. } => None,
         }
     }
@@ -3980,6 +4026,32 @@ mod tests {
             tree.prompt_queue_len(terminal),
             Some(MAXIMUM_PROMPT_QUEUE_LEN)
         );
+    }
+
+    #[test]
+    fn set_last_prompt_round_trips_and_rejects_non_terminal_panes() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+
+        assert_eq!(tree.last_prompt(terminal), None);
+        tree.set_last_prompt(terminal, Some("fix the login bug".to_string()))
+            .unwrap();
+        assert_eq!(tree.last_prompt(terminal), Some("fix the login bug"));
+
+        tree.set_last_prompt(terminal, Some("run the tests".to_string()))
+            .unwrap();
+        assert_eq!(tree.last_prompt(terminal), Some("run the tests"));
+
+        assert!(matches!(
+            tree.set_last_prompt(editor, Some("nope".to_string())),
+            Err(TreeError::NotATerminal(id)) if id == editor
+        ));
     }
 
     #[test]
