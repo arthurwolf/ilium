@@ -4677,3 +4677,167 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     }
     assert!(exited, "last-prompt-banner TUI did not exit after cleanup");
 }
+
+/// Ordinary hand-typed input, not a paste: types a word, backs up over a
+/// typo with plain Backspace, retypes it, then hits Enter. Every prior
+/// last-prompt-banner test drove either a perfectly-formed byte string or a
+/// bracketed paste; this is the one test that exercises the same
+/// `ShellCommandTracker`/`session_command_tracker` reconstruction path a
+/// real human actually uses, since a real prompt almost always includes at
+/// least one correction. Also asserts the banner reserves zero rows before
+/// any prompt has been recorded -- reserving screen space for an empty
+/// banner would waste it for no reason.
+#[tokio::test]
+async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("typed-prompt-project");
+    let fixture_directory = temp_root.path().join("fixture-bin");
+    std::fs::create_dir_all(&project_dir).expect("create project directory");
+    std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
+    seed_project_config(&project_dir);
+    let fake_codex = write_change_only_fake_codex(&fixture_directory);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fake_codex_argument = fake_codex.to_string_lossy().to_string();
+    let new_pane_output = run_one_shot(
+        &xdg,
+        &project_dir,
+        &["new-pane", "--", &fake_codex_argument],
+    )
+    .await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating fake Codex pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 140)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn typed-prompt TUI");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                })
+            },
+            DETECTION_TIMEOUT,
+        )
+        .await,
+        "expected a detected working Codex row.\n{}\nscreen: {:?}",
+        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+        tui.screen_text()
+    );
+    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
+    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
+    let agent_row = agent_rows[0];
+
+    tui.write(&sgr_mouse_down(0, 8, agent_row))
+        .expect("focus detected Codex row");
+    tui.write(&sgr_mouse_up(8, agent_row))
+        .expect("release detected Codex row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Cogitating (esc to interrupt)"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected focused fake Codex terminal, got: {:?}",
+        tui.screen_text()
+    );
+
+    // No prompt recorded yet -- the banner must reserve zero screen rows, so
+    // the fixture's own first content line ("model · workspace · ...")
+    // should paint directly below the toolbar rather than an empty banner
+    // background band sitting between them.
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
+                        return false;
+                    };
+                    let cols = screen.size().1;
+                    screen
+                        .rows(0, cols)
+                        .nth((toolbar_row + 1) as usize)
+                        .unwrap_or_default()
+                        .contains("Pursuing goal")
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "with no prompt recorded yet, the row directly below the toolbar should already be pane \
+         content, not a reserved empty banner row: {:?}",
+        tui.screen_text()
+    );
+
+    // Selecting the tree row reveals the pane; a click inside the terminal
+    // moves keyboard focus from the tree to the PTY before typing.
+    tui.write(&sgr_mouse_down(0, 80, 10))
+        .expect("focus the fake Codex PTY");
+    tui.write(&sgr_mouse_up(80, 10))
+        .expect("release the fake Codex PTY focus click");
+
+    // Type "fix the tests" but fumble "tests" as "testz", correct it with a
+    // plain Backspace (0x7f), then finish and submit -- exactly what a human
+    // typing at a keyboard produces, unlike every other prompt-banner test.
+    tui.write(b"fix the testz")
+        .expect("type the prompt with a typo");
+    tui.write(b"\x7f").expect("backspace over the typo");
+    tui.write(b"s").expect("retype the correct ending");
+    tui.write(b"\r").expect("submit the typed prompt");
+
+    // Polled against the server's own tree state, not screen text: this bare
+    // fixture script never puts its pty side into raw mode, so the kernel's
+    // own canonical-mode tty echo leaks our raw typed keystrokes onto screen
+    // independently of ilium's banner rendering, which would make a
+    // screen-text assertion pass or fail for the wrong reason.
+    let (socket_path, _) = isolated_server_identity(&xdg, &project_dir).await;
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let observed_last_prompt = loop {
+        let mut connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
+            .await
+            .expect("attach typed-prompt control connection");
+        let tree = receive_tree_snapshot(&mut connection, "typed-prompt verification").await;
+        let pane_ids = tree.pane_ids_in_tree_order();
+        assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
+        let last_prompt = tree.last_prompt(pane_ids[0]).map(str::to_owned);
+        if last_prompt.as_deref() == Some("fix the tests")
+            || tokio::time::Instant::now() >= deadline
+        {
+            break last_prompt;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(
+        observed_last_prompt.as_deref(),
+        Some("fix the tests"),
+        "server should reconstruct the corrected typed line exactly, backspace included"
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill typed-prompt TUI");
+    }
+    assert!(exited, "typed-prompt TUI did not exit after cleanup");
+}

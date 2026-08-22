@@ -209,6 +209,15 @@ pub async fn handle_request(
             .await;
             false
         }
+        ClientRequest::ReportLastPromptFromTranscript {
+            pane_id,
+            expected_session_id,
+            last_prompt,
+        } => {
+            handle_last_prompt_from_transcript(state, pane_id, &expected_session_id, last_prompt)
+                .await;
+            false
+        }
         ClientRequest::RecordNodeActivity { node_id } => {
             if let Err(error) = record_node_activity(state, node_id).await {
                 send_direct_error(direct_tx, error).await;
@@ -1373,6 +1382,65 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
             },
         )
         .await;
+    }
+}
+
+/// Applies the last-user-message a background client worker found in the
+/// agent CLI's own session transcript (see `ilium-client`'s
+/// `transcript_context::recent_user_prompts`). Preferred over live keystroke
+/// reconstruction when the two disagree: the transcript is the agent's own
+/// authoritative record, so it stays correct even for a submission live
+/// tracking could not reconstruct exactly (shell history recall, an
+/// unsupported escape sequence, ...). Discarded, same as a stale title
+/// result, when the pane's session has since changed or been invalidated --
+/// `expected_session_id` was captured before the worker's (possibly slow)
+/// transcript read, so the pane may already be on a different session by
+/// the time this arrives.
+async fn handle_last_prompt_from_transcript(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    expected_session_id: &str,
+    last_prompt: String,
+) {
+    let panes = state.panes.read().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+        return;
+    };
+    if runtime.is_session_identity_invalidated
+        || runtime.session_id.as_deref() != Some(expected_session_id)
+    {
+        drop(panes);
+        let _ = crate::agent_debug::record(
+            state,
+            pane_id,
+            AgentDebugSource::Inference,
+            AgentDebugEventDraft {
+                severity: AgentDebugSeverity::Warning,
+                kind: AgentDebugEventKind::Custom("last_prompt_transcript_discarded".to_string()),
+                summary: "Stale transcript-sourced last prompt rejected by the server".to_string(),
+                fields: vec![AgentDebugField::plain(
+                    "expected session",
+                    expected_session_id.to_string(),
+                )],
+                correlation_id: None,
+                metadata: Default::default(),
+            },
+        )
+        .await;
+        return;
+    }
+    drop(panes);
+    let updated = {
+        let mut tree = state.tree.write().await;
+        tree.set_last_prompt(pane_id, Some(last_prompt.clone()))
+            .is_ok()
+    };
+    if updated {
+        state.request_snapshot_save();
+        state.broadcast(ServerEvent::PaneLastPromptChanged {
+            pane_id,
+            last_prompt: Some(last_prompt),
+        });
     }
 }
 

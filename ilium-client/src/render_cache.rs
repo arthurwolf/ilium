@@ -1201,17 +1201,14 @@ mod tests {
         assert!(app.shows_agent_toolbar(pane_id));
         let after = app.pane_viewport(pane_id).unwrap();
         assert!(after.toolbar_area.is_some());
-        assert!(app.shows_last_prompt_banner(pane_id));
-        assert!(after.last_prompt_area.is_some());
-        // Toolbar row plus the default-on last-prompt banner's fixed row
-        // budget (`DEFAULT_LAST_PROMPT_MAX_LINES`), both reserved the same
-        // tick detection latches this pane as an agent.
-        assert_eq!(
-            after.content_area.height,
-            before.content_area.height
-                - 1
-                - u16::from(crate::config::DEFAULT_LAST_PROMPT_MAX_LINES)
-        );
+        // No prompt recorded yet -- the last-prompt banner must not reserve
+        // any rows purely from agent detection/latching, or it would waste
+        // screen space showing nothing before the user has typed anything.
+        assert!(!app.shows_last_prompt_banner(pane_id));
+        assert!(after.last_prompt_area.is_none());
+        // Toolbar row only reserved so far -- the last-prompt banner's fixed
+        // row budget joins once a prompt actually exists, asserted below.
+        assert_eq!(after.content_area.height, before.content_area.height - 1);
         // The PTY must be told the *reduced* size -- not just the render
         // area -- or the agent's own bottom row (its input/prompt line)
         // renders past what the real terminal was told it has.
@@ -1230,6 +1227,23 @@ mod tests {
         assert_eq!(
             resize,
             Some((after.content_area.height, after.content_area.width))
+        );
+
+        // Once a prompt is recorded, the banner joins the toolbar in
+        // reserving its own fixed row budget (`DEFAULT_LAST_PROMPT_MAX_LINES`).
+        apply(
+            &mut app,
+            ServerEvent::PaneLastPromptChanged {
+                pane_id,
+                last_prompt: Some("say hello".to_string()),
+            },
+        );
+        assert!(app.shows_last_prompt_banner(pane_id));
+        let with_prompt = app.pane_viewport(pane_id).unwrap();
+        assert!(with_prompt.last_prompt_area.is_some());
+        assert_eq!(
+            with_prompt.content_area.height,
+            after.content_area.height - u16::from(crate::config::DEFAULT_LAST_PROMPT_MAX_LINES)
         );
     }
 

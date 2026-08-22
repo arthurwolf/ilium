@@ -372,6 +372,31 @@ pub fn apply_naming_worker_event(
             }
             app.finish_project_restructure(project_id, &inference_activity_revisions, result);
         }
+        NamingWorkerEvent::LastPromptTranscript(result) => {
+            let crate::naming_workers::LastPromptTranscriptWorkerResult {
+                pane_id,
+                session_id,
+                last_prompt,
+            } = result;
+            // A `None` result (no transcript yet, or none of its entries
+            // were a user message) leaves whatever live keystroke tracking
+            // already recorded untouched -- this check only ever upgrades,
+            // never clears, the banner. Matching what's already in the
+            // local tree mirror avoids sending an IPC request for every
+            // Enter press when the transcript just confirms what live
+            // tracking already got right.
+            if let Some(last_prompt) = last_prompt {
+                if !last_prompt.is_empty()
+                    && app.tree.last_prompt(pane_id) != Some(last_prompt.as_str())
+                {
+                    app.queue_request(ilium_ipc::ClientRequest::ReportLastPromptFromTranscript {
+                        pane_id,
+                        expected_session_id: session_id,
+                        last_prompt,
+                    });
+                }
+            }
+        }
     }
 }
 

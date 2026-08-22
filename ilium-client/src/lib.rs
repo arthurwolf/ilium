@@ -1399,6 +1399,30 @@ fn dispatch_pending_app_work(
         }
     }
 
+    // Best-effort fallback/upgrade only -- live keystroke tracking already
+    // covers the immediate case, so a missing home directory or an
+    // unresolved session ID here just means this check is silently skipped
+    // rather than reported, unlike the retitle path above.
+    if let Some(home_dir) = home_dir {
+        for pane_id in app.take_pending_last_prompt_transcript_checks() {
+            if let Some((agent_class, session_id, project_path)) =
+                app.last_prompt_transcript_context(pane_id)
+            {
+                naming_workers.spawn_last_prompt_transcript_worker(
+                    crate::naming_workers::LastPromptTranscriptWorkerRequest {
+                        home: home_dir.to_path_buf(),
+                        pane_id,
+                        project_path,
+                        agent_class,
+                        session_id,
+                    },
+                );
+            }
+        }
+    } else {
+        app.take_pending_last_prompt_transcript_checks();
+    }
+
     for request in app.take_pending_restructure_requests() {
         match home_dir {
             Some(home_dir) => {

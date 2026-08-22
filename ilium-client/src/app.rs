@@ -1531,6 +1531,14 @@ pub struct App {
     /// moment that worker's result lands, in `crate::tick`, rather than
     /// silently dropping the user's explicit request.
     pub pending_manual_retitles: HashSet<NodeId>,
+    /// Agent panes whose Enter keystroke was just forwarded, queued for
+    /// `crate::naming_workers::spawn_last_prompt_transcript_worker` to check
+    /// the agent CLI's own session transcript for a fresher/more-exact
+    /// version of this submission than live keystroke tracking managed --
+    /// see `Self::last_prompt_transcript_context`. Drained every tick in
+    /// `crate::lib::dispatch_pending_app_work`, same pattern as every other
+    /// pending-work outbox on this struct.
+    pub pending_last_prompt_transcript_checks: Vec<NodeId>,
     /// Files this client itself just asked the server to open as a new
     /// editor pane (via `request_new_editor`), keyed by file basename --
     /// consumed by `crate::render_cache::apply_tree_snapshot` to load the
@@ -1814,6 +1822,7 @@ impl App {
             is_project_name_loading: false,
             titles_loading: HashSet::new(),
             pending_manual_retitles: HashSet::new(),
+            pending_last_prompt_transcript_checks: Vec::new(),
             pending_editor_opens: Vec::new(),
             pending_pane_focuses: Vec::new(),
             // Deliberately the protocol-free fallback rather than a probed
@@ -1986,6 +1995,42 @@ impl App {
     /// for -- see that type's doc comment.
     pub fn take_pending_retitle_requests(&mut self) -> Vec<PendingRetitleRequest> {
         std::mem::take(&mut self.pending_retitle_requests)
+    }
+
+    /// Drains every pane queued for a transcript-sourced last-prompt check
+    /// since the last drain -- see `Self::pending_last_prompt_transcript_checks`.
+    pub fn take_pending_last_prompt_transcript_checks(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.pending_last_prompt_transcript_checks)
+    }
+
+    /// Locates the agent CLI's own session transcript for `pane_id`, for the
+    /// last-prompt-from-transcript fallback. Deliberately independent of
+    /// `crate::title_inference::session_title_input`'s retitle-specific
+    /// gates (`titles_loading`, a user-specified title source): last-prompt
+    /// tracking must keep working even while retitling is disabled, paused,
+    /// or already in flight for this pane. `None` when no agent session ID
+    /// has been resolved for this pane yet, matching the original feature
+    /// request's "OR ... assuming we have the session id" phrasing -- live
+    /// keystroke tracking remains the only source until then.
+    pub fn last_prompt_transcript_context(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<(ilium_core::AgentClass, String, std::path::PathBuf)> {
+        let session_id = self.agent_session_ids.get(&pane_id)?.clone();
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        let class = match status {
+            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => class.clone(),
+            PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
+        };
+        let project_path = self
+            .tree
+            .project_path_for(pane_id)
+            .unwrap_or(&self.session_cwd)
+            .to_path_buf();
+        Some((class, session_id, project_path))
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
@@ -2342,15 +2387,31 @@ impl App {
                 || self.agent_toolbar_latched_panes.contains(&pane_id))
     }
 
-    /// Whether `pane_id` currently reserves the last-prompt banner. Uses the
-    /// same detected-or-latched eligibility as [`Self::shows_agent_toolbar`]
-    /// (a latched pane keeps showing its last prompt after its agent exits,
-    /// same rationale as that method's doc comment) gated by its own
-    /// independent toggle rather than the toolbar's.
-    pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
+    /// Whether the last-prompt feature is active for `pane_id` at all: the
+    /// user hasn't turned it off, and the pane is detected-or-latched using
+    /// the same eligibility as [`Self::shows_agent_toolbar`] (a latched pane
+    /// keeps tracking its last prompt after its agent exits, same rationale
+    /// as that method's doc comment), gated by its own independent toggle
+    /// rather than the toolbar's. Split out from [`Self::shows_last_prompt_banner`]
+    /// so the Enter-keystroke trigger for a transcript-sourced fallback check
+    /// (`Self::pending_last_prompt_transcript_checks`) can ask "should this
+    /// pane track a last prompt" without also requiring one to already exist.
+    pub fn last_prompt_tracking_enabled(&self, pane_id: NodeId) -> bool {
         self.ui_settings.last_prompt_enabled
             && (self.is_detected_agent_pane(pane_id)
                 || self.agent_toolbar_latched_panes.contains(&pane_id))
+    }
+
+    /// Whether `pane_id` currently reserves the last-prompt banner: tracking
+    /// is active for it (see [`Self::last_prompt_tracking_enabled`]) and it
+    /// actually has a recorded prompt -- reserving rows for an empty banner
+    /// would waste screen space before the user has typed anything.
+    pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
+        self.last_prompt_tracking_enabled(pane_id)
+            && self
+                .tree
+                .last_prompt(pane_id)
+                .is_some_and(|text| !text.is_empty())
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -7674,6 +7735,14 @@ impl App {
                 bytes,
                 submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
             });
+            // Enter just submitted something (whether or not live keystroke
+            // tracking reconstructed it exactly) -- queue a check of the
+            // agent CLI's own session transcript in case it has a better
+            // answer, e.g. after shell-history recall or another
+            // unsupported edit marked the live reconstruction opaque.
+            if is_enter_press && self.last_prompt_tracking_enabled(id) {
+                self.pending_last_prompt_transcript_checks.push(id);
+            }
         }
         if did_change_client_content {
             self.record_client_node_activity(id);

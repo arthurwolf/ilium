@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use ilium_core::NodeId;
+use ilium_agent_session::TranscriptLocator;
+use ilium_core::{AgentClass, NodeId};
 use ilium_inference::InferenceSettings;
 use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender;
@@ -58,6 +59,7 @@ pub enum NamingWorkerEvent {
         result: anyhow::Result<Vec<String>>,
     },
     Restructure(RestructureWorkerResult),
+    LastPromptTranscript(LastPromptTranscriptWorkerResult),
 }
 
 /// All immutable inputs captured when a session-title worker starts. Keeping
@@ -94,6 +96,38 @@ pub struct RestructureWorkerResult {
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     pub result: anyhow::Result<ilium_core::RestructurePlan>,
 }
+
+/// Immutable inputs for one last-prompt-from-transcript check -- see
+/// `App::last_prompt_transcript_context` for how the caller resolves these.
+pub struct LastPromptTranscriptWorkerRequest {
+    pub home: PathBuf,
+    pub pane_id: NodeId,
+    pub project_path: PathBuf,
+    pub agent_class: AgentClass,
+    pub session_id: String,
+}
+
+/// The most recent user message the worker found in the transcript, if any
+/// -- `None` covers both "no transcript found yet" and "found one with no
+/// user entries", neither worth distinguishing to the caller, which either
+/// way just leaves the live-tracked value in place.
+pub struct LastPromptTranscriptWorkerResult {
+    pub pane_id: NodeId,
+    pub session_id: String,
+    pub last_prompt: Option<String>,
+}
+
+/// Initial wait before the first transcript read: the agent CLI needs a
+/// moment to flush this turn's submitted message to its own session log, and
+/// reading too early would just see the previous turn's already-applied
+/// value (or no file at all yet on a session's very first prompt).
+const LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY: Duration = Duration::from_millis(400);
+/// Polling interval between retries once the initial wait has elapsed.
+const LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL: Duration = Duration::from_millis(400);
+/// Upper bound on retries -- worst case ~2.8s total, well inside how long a
+/// human already waits after hitting Enter before expecting the banner to
+/// reflect what they typed.
+const LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS: u32 = 6;
 
 /// Tracks which naming workers are currently in flight, so a caller never
 /// accidentally spawns a second one for the same target while the first is
@@ -316,6 +350,59 @@ impl NamingWorkers {
             .remove(&(pane_id, session_id.to_string()));
     }
 
+    /// Spawns a background check of the agent CLI's own session transcript
+    /// for `request.pane_id`'s most recent user message -- the "OR get it
+    /// from the .jsonl history file" fallback/upgrade for the last-prompt
+    /// banner. Deliberately no in-flight dedup: each call is one bounded,
+    /// idempotent file read (worst case ~2.8s), so an Enter press racing a
+    /// still-running prior check just costs a redundant read rather than
+    /// risking a dropped update.
+    pub fn spawn_last_prompt_transcript_worker(
+        &mut self,
+        request: LastPromptTranscriptWorkerRequest,
+    ) {
+        let LastPromptTranscriptWorkerRequest {
+            home,
+            pane_id,
+            project_path,
+            agent_class,
+            session_id,
+        } = request;
+        let events_tx = self.events_tx.clone();
+        std::thread::spawn(move || {
+            // See `spawn_project_name_worker` on why every naming worker
+            // thread lowers its own scheduling priority first.
+            lower_current_thread(WorkerPriority::BelowNormal);
+            std::thread::sleep(LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY);
+            let mut last_prompt = None;
+            for attempt in 0..LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
+                last_prompt = TranscriptLocator::new(&home, &project_path)
+                    .transcript_for_session(&agent_class, &session_id)
+                    .and_then(|transcript| {
+                        crate::transcript_context::recent_user_prompts(
+                            &agent_class,
+                            &transcript.path,
+                        )
+                        .ok()
+                    })
+                    .and_then(|prompts| prompts.into_iter().next_back());
+                if last_prompt.is_some() || attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
+                    break;
+                }
+                std::thread::sleep(LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL);
+            }
+            // See `spawn_project_name_worker`'s matching comment on why
+            // `blocking_send` is correct here.
+            let _ = events_tx.blocking_send(NamingWorkerEvent::LastPromptTranscript(
+                LastPromptTranscriptWorkerResult {
+                    pane_id,
+                    session_id,
+                    last_prompt,
+                },
+            ));
+        });
+    }
+
     /// Spawns a terminal-screen title inference worker for `input.pane_id`,
     /// unless one is already running for it -- see `crate::terminal_naming`
     /// and the manual/automatic request paths in `App`.
@@ -494,6 +581,86 @@ impl NamingWorkers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// End-to-end regression for the last-prompt banner's ".jsonl transcript"
+    /// fallback: writes a synthetic Claude Code transcript to a temp home
+    /// directory (same shape `ilium-agent-session`'s own fixtures use),
+    /// spawns the real worker against it, and asserts the worker's result
+    /// actually carries the transcript's last user message back out. This is
+    /// the durable regression coverage the throwaway
+    /// `diagnose_real_claude_last_prompt` PTY test could not provide, since a
+    /// nested-under-test `claude` process has transcript saving disabled.
+    #[test]
+    fn last_prompt_transcript_worker_reads_the_most_recent_user_message() {
+        let home = tempfile::tempdir().expect("temp home dir");
+        let project_path = std::path::Path::new("/work/ilium-transcript-test");
+        let session_id = "33333333-3333-4333-8333-333333333333";
+        // Mirrors Claude Code's own project-directory slug (every non-ASCII-
+        // alphanumeric character becomes `-`), duplicated here rather than
+        // reaching into `ilium-agent-session`'s private `slugify_claude_project_path`.
+        let slug: String = project_path
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let project_dir = home.path().join(".claude").join("projects").join(slug);
+        std::fs::create_dir_all(&project_dir).expect("create claude project dir");
+        let transcript_path = project_dir.join(format!("{session_id}.jsonl"));
+        let lines = [
+            serde_json::json!({
+                "type": "user",
+                "sessionId": session_id,
+                "cwd": project_path,
+                "message": {"content": "first prompt, superseded"}
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "sessionId": session_id,
+                "cwd": project_path,
+                "message": {"content": [{"type": "text", "text": "on it"}]}
+            }),
+            serde_json::json!({
+                "type": "user",
+                "sessionId": session_id,
+                "cwd": project_path,
+                "message": {"content": "fix the failing tests"}
+            }),
+        ]
+        .map(|entry| entry.to_string())
+        .join("\n");
+        std::fs::write(&transcript_path, lines).expect("write synthetic transcript");
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let pane_id = NodeId(11);
+        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+            home: home.path().to_path_buf(),
+            pane_id,
+            project_path: project_path.to_path_buf(),
+            agent_class: AgentClass::Claude,
+            session_id: session_id.to_string(),
+        });
+
+        let event = events_rx
+            .blocking_recv()
+            .expect("worker reports its result");
+        let NamingWorkerEvent::LastPromptTranscript(result) = event else {
+            panic!("expected a LastPromptTranscript event");
+        };
+        assert_eq!(result.pane_id, pane_id);
+        assert_eq!(result.session_id, session_id);
+        assert_eq!(
+            result.last_prompt,
+            Some("fix the failing tests".to_string()),
+            "must pick the most recent user message, not the superseded first one"
+        );
+    }
 
     #[test]
     fn inference_concurrency_limiter_never_admits_more_than_its_capacity() {

@@ -368,6 +368,22 @@ pub enum ClientRequest {
         node_id: NodeId,
         locked_closed: bool,
     },
+    /// Reports the most recent user message a background worker found in
+    /// the agent CLI's own session transcript (see
+    /// `ilium-client`'s `transcript_context::recent_user_prompts`),
+    /// preferred over live keystroke reconstruction when it disagrees --
+    /// the transcript is the agent's own authoritative record, so it stays
+    /// correct even when live tracking couldn't reconstruct a submission
+    /// exactly (shell history recall, an unsupported escape sequence, ...).
+    /// The server discards this when `expected_session_id` no longer
+    /// matches the pane's current session, the same staleness guard
+    /// `RecordAgentDebugEvent` uses. Appended to preserve every earlier
+    /// bincode variant discriminant.
+    ReportLastPromptFromTranscript {
+        pane_id: NodeId,
+        expected_session_id: String,
+        last_prompt: String,
+    },
 }
 
 impl ClientRequest {
@@ -417,6 +433,7 @@ impl ClientRequest {
             Self::SetVisiblePanes { .. } => "set_visible_panes",
             Self::SetNodeExpanded { .. } => "set_node_expanded",
             Self::SetNodeLockedClosed { .. } => "set_node_locked_closed",
+            Self::ReportLastPromptFromTranscript { .. } => "report_last_prompt_from_transcript",
         }
     }
 
