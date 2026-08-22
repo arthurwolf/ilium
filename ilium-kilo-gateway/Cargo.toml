@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
+rand = { version = "0.10", default-features = false, features = ["std", "thread_rng"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"

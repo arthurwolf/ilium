@@ -20,6 +20,58 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAXIMUM_COMPLETION_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAXIMUM_MODEL_CATALOG_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
+/// One paid egress proxy used to reach Kilo Gateway instead of calling it
+/// directly. Shape mirrors the `paid_proxies` row used elsewhere (ip, port,
+/// CONNECT protocol, optional credentials) so operators can copy entries
+/// from an existing paid-proxy list verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PaidProxy {
+    pub ip: String,
+    pub port: u16,
+    pub protocol: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for PaidProxy {
+    fn default() -> Self {
+        Self {
+            ip: String::new(),
+            port: 0,
+            protocol: "http".to_string(),
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+}
+
+impl PaidProxy {
+    /// Full CONNECT URL `protocol://[user:pass@]ip:port` -- credentials only
+    /// when both fields are non-empty, so an IP-authorized proxy stays the
+    /// clean `ip:port` form.
+    pub fn connect_url(&self) -> String {
+        let credentials = if !self.username.is_empty() && !self.password.is_empty() {
+            format!("{}:{}@", self.username, self.password)
+        } else {
+            String::new()
+        };
+        format!(
+            "{}://{}{}:{}",
+            self.protocol, credentials, self.ip, self.port
+        )
+    }
+}
+
+/// Picks one proxy uniformly at random from `proxies`, or `None` when the
+/// list is empty.
+pub fn choose_random_paid_proxy(proxies: &[PaidProxy]) -> Option<&PaidProxy> {
+    if proxies.is_empty() {
+        return None;
+    }
+    proxies.get(rand::random_range(0..proxies.len()))
+}
+
 /// One text-only OpenAI-compatible chat message.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatMessage {
@@ -115,6 +167,8 @@ pub enum GatewayError {
     Transport(String),
     #[error("Kilo Gateway returned an invalid response: {0}")]
     InvalidResponse(String),
+    #[error("invalid paid proxy URL: {0}")]
+    InvalidProxy(String),
 }
 
 impl GatewayError {
@@ -134,6 +188,9 @@ impl GatewayError {
 pub struct KiloGatewayClient {
     base_url: String,
     retry_policy: RetryPolicy,
+    /// Full CONNECT URL of a paid proxy this client should route every
+    /// request through, when the caller opted into paid-proxy egress.
+    proxy_url: Option<String>,
 }
 
 impl Default for KiloGatewayClient {
@@ -147,7 +204,31 @@ impl KiloGatewayClient {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             retry_policy,
+            proxy_url: None,
         }
+    }
+
+    /// Routes every request this client sends through the given proxy's
+    /// CONNECT URL instead of calling Kilo Gateway directly.
+    pub fn with_proxy_url(mut self, proxy_url: impl Into<String>) -> Self {
+        self.proxy_url = Some(proxy_url.into());
+        self
+    }
+
+    fn build_agent(&self) -> Result<ureq::Agent, GatewayError> {
+        let mut config = ureq::Agent::config_builder()
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .http_status_as_error(false);
+        if let Some(proxy_url) = &self.proxy_url {
+            let proxy = ureq::Proxy::new(proxy_url).map_err(|error| {
+                GatewayError::InvalidProxy(format!(
+                    "{}: {error}",
+                    ilium_logging::redacted_url(proxy_url)
+                ))
+            })?;
+            config = config.proxy(Some(proxy));
+        }
+        Ok(ureq::Agent::new_with_config(config.build()))
     }
 
     /// Sends a non-streaming completion and returns only its assistant text.
@@ -307,12 +388,7 @@ impl KiloGatewayClient {
         );
         // A one-shot UI enrichment must never leave its tracked worker
         // waiting indefinitely on a broken network path.
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder()
-                .timeout_global(Some(REQUEST_TIMEOUT))
-                .http_status_as_error(false)
-                .build(),
-        );
+        let agent = self.build_agent()?;
         let mut response = match agent
             .post(&url)
             .header("Content-Type", "application/json")
@@ -365,12 +441,7 @@ impl KiloGatewayClient {
         let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
         let diagnostic_url = ilium_logging::redacted_url(&url);
         tracing::info!(method = "GET", url = %diagnostic_url, "HTTP request started");
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder()
-                .timeout_global(Some(REQUEST_TIMEOUT))
-                .http_status_as_error(false)
-                .build(),
-        );
+        let agent = self.build_agent()?;
         let mut response = agent.get(&url).call().map_err(|error| {
             let message = error.to_string().replace(&url, &diagnostic_url);
             tracing::error!(method = "GET", url = %diagnostic_url, error = %message, "HTTP transport failed");
@@ -549,6 +620,7 @@ fn gateway_error_kind(error: &GatewayError) -> &'static str {
         GatewayError::Http { .. } => "http",
         GatewayError::Transport(_) => "transport",
         GatewayError::InvalidResponse(_) => "invalid_response",
+        GatewayError::InvalidProxy(_) => "invalid_proxy",
     }
 }
 
@@ -820,5 +892,99 @@ mod tests {
             .recv()
             .expect("captured model request")
             .starts_with("GET /models "));
+    }
+
+    #[test]
+    fn paid_proxy_connect_url_includes_credentials_only_when_both_present() {
+        let proxy = PaidProxy {
+            ip: "198.51.100.7".to_string(),
+            port: 8080,
+            protocol: "http".to_string(),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        };
+        assert_eq!(proxy.connect_url(), "http://user:pass@198.51.100.7:8080");
+
+        let ip_authorized = PaidProxy {
+            username: String::new(),
+            password: String::new(),
+            ..proxy.clone()
+        };
+        assert_eq!(ip_authorized.connect_url(), "http://198.51.100.7:8080");
+
+        let one_sided = PaidProxy {
+            username: "user".to_string(),
+            password: String::new(),
+            ..proxy
+        };
+        assert_eq!(one_sided.connect_url(), "http://198.51.100.7:8080");
+    }
+
+    #[test]
+    fn choose_random_paid_proxy_returns_none_for_an_empty_list() {
+        assert!(choose_random_paid_proxy(&[]).is_none());
+    }
+
+    #[test]
+    fn choose_random_paid_proxy_always_picks_from_the_list() {
+        let proxies = vec![
+            PaidProxy {
+                ip: "198.51.100.1".to_string(),
+                port: 8080,
+                ..Default::default()
+            },
+            PaidProxy {
+                ip: "198.51.100.2".to_string(),
+                port: 8081,
+                ..Default::default()
+            },
+        ];
+        for _ in 0..20 {
+            let chosen = choose_random_paid_proxy(&proxies).expect("non-empty list yields Some");
+            assert!(proxies.contains(chosen));
+        }
+    }
+
+    #[test]
+    fn client_with_proxy_url_routes_the_request_through_it() {
+        let response_body = r#"{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#;
+        let (target_url, target_receiver) = spawn_http_response("200 OK", response_body);
+        let base_url = target_url.trim_end_matches("/chat/completions").to_string();
+        // No proxy actually listens here; the point of this test is that the
+        // client fails trying to reach a proxy instead of silently calling
+        // the base URL directly.
+        let client = KiloGatewayClient::new(
+            base_url,
+            RetryPolicy {
+                max_attempts: 1,
+                ..RetryPolicy::default()
+            },
+        )
+        .with_proxy_url("http://127.0.0.1:1/");
+        let request = CompletionRequest::new("kilo-auto/free", vec![ChatMessage::user("hi")], 16);
+
+        let result = client.complete_text(&request);
+
+        assert!(result.is_err());
+        assert!(target_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn client_with_an_invalid_proxy_url_fails_with_invalid_proxy() {
+        let client = KiloGatewayClient::new(
+            DEFAULT_BASE_URL,
+            RetryPolicy {
+                max_attempts: 1,
+                ..RetryPolicy::default()
+            },
+        )
+        .with_proxy_url("not a url");
+        let request = CompletionRequest::new("kilo-auto/free", vec![ChatMessage::user("hi")], 16);
+
+        let error = client
+            .complete_text(&request)
+            .expect_err("malformed proxy URL must fail");
+
+        assert!(matches!(error, GatewayError::InvalidProxy(_)));
     }
 }

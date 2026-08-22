@@ -7,8 +7,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ilium_kilo_gateway::{
-    ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient,
-    DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL, DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
+    choose_random_paid_proxy, ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient,
+    PaidProxy, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
+    DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
     FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
@@ -95,13 +96,38 @@ impl InferenceSettings {
 #[serde(default)]
 pub struct KiloGatewaySettings {
     pub model: String,
+    /// Power-user escape hatch, deliberately absent from the settings UI:
+    /// enable only by hand-editing `config.toml`'s `[inference.kilo_gateway]`
+    /// table. When true and `paid_proxies` is non-empty, every Kilo Gateway
+    /// call is routed through one proxy sampled at random from the list
+    /// instead of calling Kilo directly.
+    #[serde(default)]
+    pub paid_proxies_enabled: bool,
+    #[serde(default)]
+    pub paid_proxies: Vec<PaidProxy>,
 }
 
 impl Default for KiloGatewaySettings {
     fn default() -> Self {
         Self {
             model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
+            paid_proxies_enabled: false,
+            paid_proxies: Vec::new(),
         }
+    }
+}
+
+/// Builds a Kilo Gateway client honoring the hidden paid-proxies flag: a
+/// fresh random proxy is sampled per call so repeated calls spread across
+/// the configured list rather than pinning to one egress IP.
+fn kilo_gateway_client(settings: &KiloGatewaySettings) -> KiloGatewayClient {
+    let client = KiloGatewayClient::default();
+    if !settings.paid_proxies_enabled {
+        return client;
+    }
+    match choose_random_paid_proxy(&settings.paid_proxies) {
+        Some(proxy) => client.with_proxy_url(proxy.connect_url()),
+        None => client,
     }
 }
 
@@ -379,14 +405,14 @@ impl InferenceProvider for KiloGatewayProvider {
             ],
             request.max_tokens,
         );
-        KiloGatewayClient::default()
+        kilo_gateway_client(&self.0)
             .complete_text(&request)
             .map(|text| InferenceResponse { text })
             .map_err(map_gateway_error)
     }
 
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
-        let models = KiloGatewayClient::default()
+        let models = kilo_gateway_client(&self.0)
             .list_free_models()
             .map_err(map_gateway_error)?;
         if models.is_empty() {
@@ -403,6 +429,9 @@ fn map_gateway_error(error: GatewayError) -> InferenceError {
         GatewayError::Http { status, message } => InferenceError::Http { status, message },
         GatewayError::Transport(message) => InferenceError::Transport(message),
         GatewayError::InvalidResponse(message) => InferenceError::InvalidResponse(message),
+        GatewayError::InvalidProxy(message) => {
+            InferenceError::Configuration(format!("paid proxy configuration invalid: {message}"))
+        }
     }
 }
 
@@ -838,6 +867,53 @@ mod tests {
         assert_eq!(settings.kilo_gateway.model, "kilo-auto/free");
         assert_eq!(settings.openrouter.model, DEFAULT_OPENROUTER_MODEL);
         assert_eq!(InferenceRequest::json_only("{}").max_tokens, 4096);
+        // Hidden power-user flag: safe/off by default, never exposed by the
+        // settings UI, only reachable by hand-editing config.toml.
+        assert!(!settings.kilo_gateway.paid_proxies_enabled);
+        assert!(settings.kilo_gateway.paid_proxies.is_empty());
+    }
+
+    #[test]
+    fn kilo_gateway_client_ignores_paid_proxies_when_disabled() {
+        let settings = KiloGatewaySettings {
+            paid_proxies_enabled: false,
+            paid_proxies: vec![ilium_kilo_gateway::PaidProxy {
+                ip: "127.0.0.1".to_string(),
+                port: 1,
+                protocol: "http".to_string(),
+                username: String::new(),
+                password: String::new(),
+            }],
+            ..KiloGatewaySettings::default()
+        };
+        // No assertion beyond "does not panic building the client" -- the
+        // real behavioral guarantee (proxy actually used) is covered by
+        // `kilo_gateway_provider_routes_through_a_configured_paid_proxy`
+        // below, since `proxy_url` is private to `KiloGatewayClient`.
+        let _client = kilo_gateway_client(&settings);
+    }
+
+    #[test]
+    fn kilo_gateway_provider_routes_through_a_configured_paid_proxy() {
+        let settings = KiloGatewaySettings {
+            model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
+            paid_proxies_enabled: true,
+            paid_proxies: vec![ilium_kilo_gateway::PaidProxy {
+                // Nothing listens here; a completion attempt must fail
+                // trying to reach this proxy rather than silently calling
+                // Kilo Gateway directly over the real network.
+                ip: "127.0.0.1".to_string(),
+                port: 1,
+                protocol: "http".to_string(),
+                username: String::new(),
+                password: String::new(),
+            }],
+        };
+        let provider = KiloGatewayProvider(Arc::new(settings));
+
+        let result = provider.complete(&InferenceRequest::json_only("hello"));
+
+        assert!(result.is_err());
     }
     #[test]
     fn factory_selects_provider() {
