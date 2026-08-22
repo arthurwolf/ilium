@@ -549,6 +549,11 @@ pub struct ContainerNode {
     pub kind: ContainerKind,
     pub children: Vec<NodeId>,
     pub expanded: bool,
+    /// When true, the container is collapsed and rejects any expand
+    /// request until explicitly unlocked. `serde(default)` keeps existing
+    /// crash-recovery snapshots (written before this field existed) loading.
+    #[serde(default)]
+    pub locked_closed: bool,
 }
 
 impl ContainerNode {
@@ -557,6 +562,7 @@ impl ContainerNode {
             kind: ContainerKind::Project { path },
             children: Vec::new(),
             expanded: true,
+            locked_closed: false,
         }
     }
 
@@ -565,6 +571,7 @@ impl ContainerNode {
             kind: ContainerKind::Group,
             children: Vec::new(),
             expanded: true,
+            locked_closed: false,
         }
     }
 
@@ -573,6 +580,7 @@ impl ContainerNode {
             kind: ContainerKind::SplitView { orientation },
             children: Vec::new(),
             expanded: true,
+            locked_closed: false,
         }
     }
 
@@ -662,6 +670,17 @@ pub enum NodeKind {
     /// client and intentionally never become server-owned domain nodes.
     Folder {
         path: PathBuf,
+        /// Whether the tree row shows this folder's children. `serde(default)`
+        /// (to `false`) is safe for pre-existing snapshots: the client's
+        /// local `TreeState` already treats an unknown path as closed, so a
+        /// snapshot written before this field existed simply restores to the
+        /// same closed state a restart already produced.
+        #[serde(default)]
+        expanded: bool,
+        /// When true, double-click/menu-driven expand is rejected until
+        /// explicitly unlocked -- see `Tree::set_node_locked_closed`.
+        #[serde(default)]
+        locked_closed: bool,
     },
 }
 
@@ -763,6 +782,26 @@ impl Node {
     pub fn is_folder(&self) -> bool {
         matches!(self.kind, NodeKind::Folder { .. })
     }
+
+    /// Whether this container or folder currently shows its children.
+    /// `None` for a pane, which has no expand/collapse state.
+    pub fn is_expanded(&self) -> Option<bool> {
+        match &self.kind {
+            NodeKind::Container(container) => Some(container.expanded),
+            NodeKind::Folder { expanded, .. } => Some(*expanded),
+            NodeKind::Pane { .. } => None,
+        }
+    }
+
+    /// Whether this container or folder is locked closed -- see
+    /// `Tree::set_node_locked_closed`. `None` for a pane.
+    pub fn is_locked_closed(&self) -> Option<bool> {
+        match &self.kind {
+            NodeKind::Container(container) => Some(container.locked_closed),
+            NodeKind::Folder { locked_closed, .. } => Some(*locked_closed),
+            NodeKind::Pane { .. } => None,
+        }
+    }
 }
 
 /// One entry revision captured with a project-restructure request. The server
@@ -861,6 +900,8 @@ pub enum TreeError {
     BoardStorageAlreadyOpen(PathBuf),
     #[error("node {0:?} is not a folder")]
     NotAFolder(NodeId),
+    #[error("node {0:?} is locked closed and cannot be expanded")]
+    NodeLockedClosed(NodeId),
     #[error("node {0:?} was referenced more than once in a restructure plan")]
     RestructureDuplicateLeaf(NodeId),
     #[error("restructure plan referenced node {node:?} outside project {project:?}")]
@@ -1017,6 +1058,64 @@ impl Tree {
     ) -> Result<(), TreeError> {
         self.get_mut(id)?.is_bookmarked = is_bookmarked;
         Ok(())
+    }
+
+    /// Sets a container's or folder's expand/collapse state. Idempotent
+    /// assignment, not a toggle, for the same multi-client-safety reason as
+    /// [`Self::set_node_bookmarked`]. Rejects expanding a node locked closed
+    /// (see [`Self::set_node_locked_closed`]) so a stale client can't
+    /// silently defeat a lock it doesn't know about.
+    pub fn set_node_expanded(&mut self, id: NodeId, expanded: bool) -> Result<(), TreeError> {
+        match &mut self.get_mut(id)?.kind {
+            NodeKind::Container(container) => {
+                if expanded && container.locked_closed {
+                    return Err(TreeError::NodeLockedClosed(id));
+                }
+                container.expanded = expanded;
+                Ok(())
+            }
+            NodeKind::Folder {
+                expanded: folder_expanded,
+                locked_closed,
+                ..
+            } => {
+                if expanded && *locked_closed {
+                    return Err(TreeError::NodeLockedClosed(id));
+                }
+                *folder_expanded = expanded;
+                Ok(())
+            }
+            NodeKind::Pane { .. } => Err(TreeError::NotAContainer(id)),
+        }
+    }
+
+    /// Locks or unlocks a container's or folder's closed state. Locking
+    /// always collapses it (it must not be visibly expanded while locked);
+    /// unlocking always re-expands it, matching the double-click gesture's
+    /// documented "unlock and re-open" behavior. The right-click menu action
+    /// calls this same method so gesture and menu can never diverge.
+    pub fn set_node_locked_closed(
+        &mut self,
+        id: NodeId,
+        locked_closed: bool,
+    ) -> Result<(), TreeError> {
+        match &mut self.get_mut(id)?.kind {
+            NodeKind::Container(container) => {
+                container.locked_closed = locked_closed;
+                container.expanded = !locked_closed;
+                Ok(())
+            }
+            NodeKind::Folder {
+                expanded,
+                locked_closed: folder_locked_closed,
+                ..
+            } => {
+                *folder_locked_closed = locked_closed;
+                *expanded = !locked_closed;
+                Ok(())
+            }
+            NodeKind::Pane { .. } => Err(TreeError::NotAContainer(id)),
+        }
     }
 
     /// Advances one entry's activity generation after an accepted mutation.
@@ -1559,7 +1658,11 @@ impl Tree {
                 last_restructure_activity_revision: None,
                 last_focus_activity_revision: None,
                 structure_source: StructureSource::Manual,
-                kind: NodeKind::Folder { path },
+                kind: NodeKind::Folder {
+                    path,
+                    expanded: false,
+                    locked_closed: false,
+                },
             },
         );
         Ok(id)
@@ -3251,7 +3354,7 @@ mod tests {
         assert_eq!(tree.parent_of(folder), Some(group));
         assert_eq!(tree.get(folder).unwrap().name, "project");
         assert!(
-            matches!(tree.get(folder).unwrap().kind, NodeKind::Folder { ref path } if path == &PathBuf::from("/tmp/project"))
+            matches!(tree.get(folder).unwrap().kind, NodeKind::Folder { ref path, .. } if path == &PathBuf::from("/tmp/project"))
         );
         assert_eq!(tree.children_of(group).unwrap(), &[folder]);
     }
@@ -3696,6 +3799,77 @@ mod tests {
             NodeKind::Container(container) => assert!(!container.expanded),
             _ => panic!("expected group"),
         }
+    }
+
+    #[test]
+    fn set_node_expanded_is_idempotent_for_containers_and_folders() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = tree
+            .add_folder(group, PathBuf::from("/tmp/project"))
+            .unwrap();
+
+        tree.set_node_expanded(group, false).unwrap();
+        assert!(!tree.get(group).unwrap().is_expanded().unwrap());
+        tree.set_node_expanded(group, false).unwrap();
+        assert!(!tree.get(group).unwrap().is_expanded().unwrap());
+
+        assert!(!tree.get(folder).unwrap().is_expanded().unwrap());
+        tree.set_node_expanded(folder, true).unwrap();
+        assert!(tree.get(folder).unwrap().is_expanded().unwrap());
+    }
+
+    #[test]
+    fn set_node_expanded_rejects_panes() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        assert!(matches!(
+            tree.set_node_expanded(pane, true),
+            Err(TreeError::NotAContainer(id)) if id == pane
+        ));
+    }
+
+    #[test]
+    fn locking_a_folder_closed_collapses_it_and_rejects_further_expansion() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = tree
+            .add_folder(group, PathBuf::from("/tmp/project"))
+            .unwrap();
+        tree.set_node_expanded(folder, true).unwrap();
+
+        tree.set_node_locked_closed(folder, true).unwrap();
+        assert!(tree.get(folder).unwrap().is_locked_closed().unwrap());
+        assert!(!tree.get(folder).unwrap().is_expanded().unwrap());
+        assert!(matches!(
+            tree.set_node_expanded(folder, true),
+            Err(TreeError::NodeLockedClosed(id)) if id == folder
+        ));
+
+        tree.set_node_locked_closed(folder, false).unwrap();
+        assert!(!tree.get(folder).unwrap().is_locked_closed().unwrap());
+        assert!(tree.get(folder).unwrap().is_expanded().unwrap());
+        tree.set_node_expanded(folder, true).unwrap();
+    }
+
+    #[test]
+    fn locking_a_group_closed_collapses_it_and_rejects_further_expansion() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+
+        tree.set_node_locked_closed(group, true).unwrap();
+        assert!(tree.get(group).unwrap().is_locked_closed().unwrap());
+        assert!(!tree.get(group).unwrap().is_expanded().unwrap());
+        assert!(matches!(
+            tree.set_node_expanded(group, true),
+            Err(TreeError::NodeLockedClosed(id)) if id == group
+        ));
+
+        tree.set_node_locked_closed(group, false).unwrap();
+        assert!(tree.get(group).unwrap().is_expanded().unwrap());
     }
 
     #[test]
@@ -4903,6 +5077,8 @@ mod tests {
         let mut tree = Tree::new();
         tree.nodes.get_mut(&ROOT_ID).unwrap().kind = NodeKind::Folder {
             path: PathBuf::from("/tmp/not-a-group"),
+            expanded: false,
+            locked_closed: false,
         };
 
         assert!(matches!(

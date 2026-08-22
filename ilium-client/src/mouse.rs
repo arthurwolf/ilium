@@ -7,6 +7,8 @@
 //! request (see `compute_drop_target`) the same way any other structural
 //! tree edit does.
 
+use std::time::{Duration, Instant};
+
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -692,9 +694,15 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 {
                     app.toggle_selected_tree_node();
                     app.show_split_view(hit.id);
+                } else if app
+                    .tree
+                    .get(hit.id)
+                    .is_some_and(ilium_core::Node::is_folder)
+                {
+                    handle_folder_left_click(app, hit.id);
                 } else if matches!(
                     app.tree.get(hit.id).map(|node| &node.kind),
-                    Some(NodeKind::Container(_) | NodeKind::Folder { .. })
+                    Some(NodeKind::Container(_))
                 ) {
                     app.toggle_selected_tree_node();
                 } else {
@@ -728,6 +736,55 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         }
         _ => {}
     }
+}
+
+/// A second left click on the same folder row within this window counts as
+/// a double-click. Long enough for a deliberate double-click, short enough
+/// that two unrelated single clicks on the same row (e.g. reselect, then
+/// expand) don't get misread as one.
+const FOLDER_DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
+/// Routes a left click on a folder row to a plain expand/collapse toggle,
+/// or -- on a same-row double-click, only while the feature is enabled --
+/// to locking/unlocking it closed. Locking always collapses the folder;
+/// unlocking always re-opens it (see `App::request_set_node_locked_closed`),
+/// so a single click never needs to fight a lock it cannot change: while
+/// locked, a plain click is a no-op and only the double-click unlocks.
+fn handle_folder_left_click(app: &mut App, id: NodeId) {
+    let now = Instant::now();
+    let lock_feature_enabled = app.ui_settings.folder_lock_enabled;
+    let is_double_click = lock_feature_enabled
+        && app.last_tree_left_click.is_some_and(|(last_id, last_at)| {
+            last_id == id && now.duration_since(last_at) <= FOLDER_DOUBLE_CLICK_WINDOW
+        });
+    // Consumed once matched, so a third rapid click starts a fresh pair
+    // instead of being misread as another double-click.
+    app.last_tree_left_click = if is_double_click {
+        None
+    } else {
+        Some((id, now))
+    };
+
+    if is_double_click {
+        let is_locked_closed = app
+            .tree
+            .get(id)
+            .and_then(ilium_core::Node::is_locked_closed)
+            .unwrap_or(false);
+        app.request_set_node_locked_closed(id, !is_locked_closed);
+        return;
+    }
+
+    let is_locked_closed = lock_feature_enabled
+        && app
+            .tree
+            .get(id)
+            .and_then(ilium_core::Node::is_locked_closed)
+            .unwrap_or(false);
+    if is_locked_closed {
+        return;
+    }
+    app.toggle_selected_tree_node();
 }
 
 /// Updates the two independent hover affordances (row hit + toolbar) from
@@ -1836,6 +1893,111 @@ mod create_split_orientation_mouse_tests {
         );
 
         assert!(matches!(app.mode, Mode::CreateSplitMembers(_)));
+    }
+}
+
+#[cfg(test)]
+mod folder_lock_mouse_tests {
+    use super::*;
+    use crate::app::App;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    fn app_with_folder() -> (App, NodeId) {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, PathBuf::from("/tmp/lock-mouse"))
+            .unwrap();
+        app.select_node(folder);
+        app.take_outbound_requests();
+        (app, folder)
+    }
+
+    #[test]
+    fn single_click_toggles_expand_and_persists_it() {
+        let (mut app, folder) = app_with_folder();
+        handle_folder_left_click(&mut app, folder);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SetNodeExpanded {
+                node_id: folder,
+                expanded: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn rapid_second_click_locks_closed_instead_of_toggling_again() {
+        let (mut app, folder) = app_with_folder();
+        handle_folder_left_click(&mut app, folder); // first click: opens
+        app.take_outbound_requests();
+
+        handle_folder_left_click(&mut app, folder); // second click, same row: double-click
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SetNodeLockedClosed {
+                node_id: folder,
+                locked_closed: true,
+            }]
+        );
+        assert!(app.last_tree_left_click.is_none());
+    }
+
+    #[test]
+    fn a_click_after_the_double_click_window_is_a_fresh_single_click() {
+        let (mut app, folder) = app_with_folder();
+        app.last_tree_left_click = Some((folder, Instant::now() - Duration::from_millis(500)));
+
+        handle_folder_left_click(&mut app, folder);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SetNodeExpanded {
+                node_id: folder,
+                expanded: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_locked_folder_ignores_a_plain_click_but_a_double_click_unlocks_it() {
+        let (mut app, folder) = app_with_folder();
+        app.tree.set_node_locked_closed(folder, true).unwrap();
+
+        handle_folder_left_click(&mut app, folder);
+        assert!(app.take_outbound_requests().is_empty());
+
+        handle_folder_left_click(&mut app, folder);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::SetNodeLockedClosed {
+                node_id: folder,
+                locked_closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn disabling_the_feature_falls_back_to_a_plain_toggle_on_every_click() {
+        let (mut app, folder) = app_with_folder();
+        app.ui_settings.folder_lock_enabled = false;
+
+        handle_folder_left_click(&mut app, folder);
+        handle_folder_left_click(&mut app, folder);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![
+                ilium_ipc::ClientRequest::SetNodeExpanded {
+                    node_id: folder,
+                    expanded: true,
+                },
+                ilium_ipc::ClientRequest::SetNodeExpanded {
+                    node_id: folder,
+                    expanded: false,
+                },
+            ]
+        );
     }
 }
 

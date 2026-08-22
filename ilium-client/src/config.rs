@@ -768,6 +768,11 @@ pub struct UiSettings {
     /// mouse events back for a foreground app that wants to handle its own
     /// clicks/drags (e.g. clicking a menu inside an agent CLI).
     pub terminal_text_selection_enabled: bool,
+    /// Enables double-click (or the right-click menu) locking a folder
+    /// closed -- see `ilium_core::Tree::set_node_locked_closed`. Disabling
+    /// this only hides the gesture and the menu action; it does not clear
+    /// an already-locked folder's persisted state.
+    pub folder_lock_enabled: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -791,6 +796,7 @@ impl Default for UiSettings {
             last_prompt_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             terminal_text_selection_enabled: true,
+            folder_lock_enabled: true,
             icons: IconSettings::default(),
         }
     }
@@ -881,6 +887,7 @@ struct RawUiConfig {
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     terminal_text_selection_enabled: Option<bool>,
+    folder_lock_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
 }
@@ -1292,6 +1299,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         terminal_text_selection_enabled: raw
             .terminal_text_selection_enabled
             .unwrap_or(defaults.terminal_text_selection_enabled),
+        folder_lock_enabled: raw
+            .folder_lock_enabled
+            .unwrap_or(defaults.folder_lock_enabled),
         icons,
     })
 }
@@ -2058,6 +2068,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "terminal_text_selection_enabled".to_string(),
         toml::Value::Boolean(ui.terminal_text_selection_enabled),
     );
+    table.insert(
+        "folder_lock_enabled".to_string(),
+        toml::Value::Boolean(ui.folder_lock_enabled),
+    );
     let icons = IconTarget::ALL
         .into_iter()
         .map(|target| {
@@ -2208,6 +2222,7 @@ mod tests {
             selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
             kilo_gateway: ilium_inference::KiloGatewaySettings {
                 model: "stepfun/step-3.7-flash:free".to_string(),
+                ..ilium_inference::KiloGatewaySettings::default()
             },
             openrouter: ilium_inference::OpenRouterSettings {
                 api_key: "test-key".to_string(),
@@ -2831,6 +2846,7 @@ mod tests {
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
             terminal_text_selection_enabled: false,
+            folder_lock_enabled: false,
             use_stable_glyphs: true,
             icons,
         };
@@ -2948,6 +2964,20 @@ mod tests {
         save_ui_settings(&dir, &ui).unwrap();
 
         assert!(!load(&dir).unwrap().ui.terminal_text_selection_enabled);
+    }
+
+    #[test]
+    fn folder_lock_defaults_on_and_round_trips_through_ui_config() {
+        let dir = scratch_dir();
+        assert!(load(&dir).unwrap().ui.folder_lock_enabled);
+
+        let ui = UiSettings {
+            folder_lock_enabled: false,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).unwrap();
+
+        assert!(!load(&dir).unwrap().ui.folder_lock_enabled);
     }
 
     #[test]

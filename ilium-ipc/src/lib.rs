@@ -297,6 +297,14 @@ mod tests {
             ClientRequest::SetVisiblePanes {
                 pane_ids: vec![NodeId(2), NodeId(3)],
             },
+            ClientRequest::SetNodeExpanded {
+                node_id: NodeId(2),
+                expanded: true,
+            },
+            ClientRequest::SetNodeLockedClosed {
+                node_id: NodeId(2),
+                locked_closed: true,
+            },
         ]
     }
 

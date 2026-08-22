@@ -192,6 +192,23 @@ pub async fn handle_request(
             .await;
             false
         }
+        ClientRequest::SetNodeExpanded { node_id, expanded } => {
+            handle_tree_mutation(state, direct_tx, |tree| {
+                tree.set_node_expanded(node_id, expanded)
+            })
+            .await;
+            false
+        }
+        ClientRequest::SetNodeLockedClosed {
+            node_id,
+            locked_closed,
+        } => {
+            handle_tree_mutation(state, direct_tx, |tree| {
+                tree.set_node_locked_closed(node_id, locked_closed)
+            })
+            .await;
+            false
+        }
         ClientRequest::RecordNodeActivity { node_id } => {
             if let Err(error) = record_node_activity(state, node_id).await {
                 send_direct_error(direct_tx, error).await;
@@ -3101,6 +3118,101 @@ mod tests {
         assert!(state.tree.read().await.get(group_id).unwrap().is_bookmarked);
         assert!(state.is_snapshot_dirty());
         assert!(direct_rx.try_recv().is_err());
+        sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn locking_a_folder_closed_collapses_it_and_rejects_a_stale_expand_request() {
+        let directory = tempfile::tempdir().expect("create lock test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "lock-request".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("lock.snapshot.json"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+        }));
+        let folder_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree
+                .project_ids()
+                .into_iter()
+                .next()
+                .expect("fresh server has its launch project");
+            let group_id = tree
+                .add_group(project_id, "work")
+                .expect("launch project accepts a group");
+            tree.add_folder(group_id, directory.path().to_path_buf())
+                .expect("group accepts a folder")
+        };
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+
+        assert!(
+            !handle_request(
+                &state,
+                ClientRequest::SetNodeLockedClosed {
+                    node_id: folder_id,
+                    locked_closed: true,
+                },
+                &direct_tx,
+            )
+            .await
+        );
+        let ServerEvent::TreeSnapshot(snapshot) = events.recv().await.expect("tree broadcast")
+        else {
+            panic!("lock update must broadcast a tree snapshot");
+        };
+        assert_eq!(
+            snapshot.get(folder_id).unwrap().is_locked_closed(),
+            Some(true)
+        );
+        assert_eq!(snapshot.get(folder_id).unwrap().is_expanded(), Some(false));
+        assert!(state.is_snapshot_dirty());
+        assert!(direct_rx.try_recv().is_err());
+
+        // A stale client that doesn't know about the lock still can't
+        // expand it -- the server rejects the mutation and sends only a
+        // direct error, no broadcast.
+        assert!(
+            !handle_request(
+                &state,
+                ClientRequest::SetNodeExpanded {
+                    node_id: folder_id,
+                    expanded: true,
+                },
+                &direct_tx,
+            )
+            .await
+        );
+        assert!(events.try_recv().is_err());
+        assert!(direct_rx.try_recv().is_ok());
+
+        assert!(
+            !handle_request(
+                &state,
+                ClientRequest::SetNodeLockedClosed {
+                    node_id: folder_id,
+                    locked_closed: false,
+                },
+                &direct_tx,
+            )
+            .await
+        );
+        let ServerEvent::TreeSnapshot(unlocked) = events.recv().await.expect("tree broadcast")
+        else {
+            panic!("unlock must broadcast a tree snapshot");
+        };
+        assert_eq!(
+            unlocked.get(folder_id).unwrap().is_locked_closed(),
+            Some(false)
+        );
+        assert_eq!(unlocked.get(folder_id).unwrap().is_expanded(), Some(true));
         sound_task.abort();
     }
 

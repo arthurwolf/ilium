@@ -32,6 +32,7 @@ pub enum IconTarget {
     Idle,
     Goal,
     Bookmark,
+    Lock,
     ToolbarSearch,
     ToolbarRestructure,
     ToolbarSettings,
@@ -65,7 +66,7 @@ pub enum IconTarget {
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -86,6 +87,7 @@ impl IconTarget {
         Self::Idle,
         Self::Goal,
         Self::Bookmark,
+        Self::Lock,
         Self::ToolbarSearch,
         Self::ToolbarRestructure,
         Self::ToolbarSettings,
@@ -140,6 +142,7 @@ impl IconTarget {
             Self::Idle => "Idle",
             Self::Goal => "Goal attached",
             Self::Bookmark => "Bookmarked tree item",
+            Self::Lock => "Locked closed folder",
             Self::ToolbarSearch => "Toolbar: search",
             Self::ToolbarRestructure => "Toolbar: restructure",
             Self::ToolbarSettings => "Toolbar: settings",
@@ -195,6 +198,7 @@ impl IconTarget {
             Self::Idle => "idle",
             Self::Goal => "goal",
             Self::Bookmark => "bookmark",
+            Self::Lock => "lock",
             Self::ToolbarSearch => "toolbar_search",
             Self::ToolbarRestructure => "toolbar_restructure",
             Self::ToolbarSettings => "toolbar_settings",
@@ -254,6 +258,7 @@ impl IconTarget {
             Self::Idle => "●",
             Self::Goal => "🏁",
             Self::Bookmark => "★",
+            Self::Lock => "🔒",
             Self::ToolbarSearch => "⌕",
             Self::ToolbarRestructure => "♻️",
             Self::ToolbarSettings => "🎚️",
@@ -306,6 +311,7 @@ impl IconTarget {
             Self::Idle => &["●", "·", "○", "—"],
             Self::Goal => &["🏁", "⚑", "◆", "✦"],
             Self::Bookmark => &["★", "☆", "🔖", "📌"],
+            Self::Lock => &["🔒", "🔐", "🔏", "⛓️"],
             Self::ToolbarSearch => &["⌕", "🔎", "🔍", "◉"],
             Self::ToolbarRestructure | Self::RowRetitle | Self::RowProjectRestructure => {
                 &["♻️", "↻", "⟳", "✦"]
@@ -364,6 +370,7 @@ pub struct IconSettings {
     pub idle: String,
     pub goal: String,
     pub bookmark: String,
+    pub lock: String,
     pub toolbar_search: String,
     pub toolbar_restructure: String,
     pub toolbar_settings: String,
@@ -425,6 +432,7 @@ impl IconSettings {
             idle: value(IconTarget::Idle),
             goal: value(IconTarget::Goal),
             bookmark: value(IconTarget::Bookmark),
+            lock: value(IconTarget::Lock),
             toolbar_search: value(IconTarget::ToolbarSearch),
             toolbar_restructure: value(IconTarget::ToolbarRestructure),
             toolbar_settings: value(IconTarget::ToolbarSettings),
@@ -480,6 +488,7 @@ impl IconSettings {
             IconTarget::Idle => &self.idle,
             IconTarget::Goal => &self.goal,
             IconTarget::Bookmark => &self.bookmark,
+            IconTarget::Lock => &self.lock,
             IconTarget::ToolbarSearch => &self.toolbar_search,
             IconTarget::ToolbarRestructure => &self.toolbar_restructure,
             IconTarget::ToolbarSettings => &self.toolbar_settings,
@@ -535,6 +544,7 @@ impl IconSettings {
             IconTarget::Idle => &mut self.idle,
             IconTarget::Goal => &mut self.goal,
             IconTarget::Bookmark => &mut self.bookmark,
+            IconTarget::Lock => &mut self.lock,
             IconTarget::ToolbarSearch => &mut self.toolbar_search,
             IconTarget::ToolbarRestructure => &mut self.toolbar_restructure,
             IconTarget::ToolbarSettings => &mut self.toolbar_settings,

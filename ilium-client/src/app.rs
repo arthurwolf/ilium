@@ -537,10 +537,11 @@ pub enum AppearanceRow {
     LastPrompt,
     LastPromptMaxLines,
     TerminalTextSelection,
+    FolderLockEnabled,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 15] = [
+    const GENERAL: [AppearanceRow; 16] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -556,6 +557,7 @@ impl AppearanceRow {
         Self::LastPrompt,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
+        Self::FolderLockEnabled,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -883,6 +885,13 @@ pub enum ContextMenuAction {
     SetBookmark {
         is_bookmarked: bool,
     },
+    /// Locks or unlocks a folder's closed state -- see
+    /// `App::request_set_node_locked_closed`. The desired state is captured
+    /// while the menu opens, the same idempotent-value pattern as
+    /// `SetBookmark`.
+    SetFolderLockedClosed {
+        locked_closed: bool,
+    },
     Rename,
     MoveUp,
     MoveDown,
@@ -921,6 +930,7 @@ impl ContextMenuAction {
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
             Self::AddChatroom => IconTarget::Project,
             Self::SetBookmark { .. } => IconTarget::Bookmark,
+            Self::SetFolderLockedClosed { .. } => IconTarget::Lock,
             Self::Rename => IconTarget::RowRename,
             Self::MoveUp => IconTarget::RowMoveUp,
             Self::MoveDown => IconTarget::RowMoveDown,
@@ -955,6 +965,12 @@ impl ContextMenuAction {
             Self::SetBookmark {
                 is_bookmarked: false,
             } => "Remove bookmark".to_string(),
+            Self::SetFolderLockedClosed {
+                locked_closed: true,
+            } => "Lock closed".to_string(),
+            Self::SetFolderLockedClosed {
+                locked_closed: false,
+            } => "Unlock".to_string(),
             Self::Rename => "Rename".to_string(),
             Self::MoveUp => "Move up".to_string(),
             Self::MoveDown => "Move down".to_string(),
@@ -1462,6 +1478,12 @@ pub struct App {
     is_terminal_focused: bool,
     tree_drag_source: Option<NodeId>,
     tree_drag_in_progress: bool,
+    /// The tree row and time of the last left-click accepted as the first
+    /// half of a possible double-click, used only to detect a folder
+    /// double-click (lock/unlock closed) -- see `crate::mouse`. `None` once
+    /// consumed by a completed double-click, so a third rapid click starts
+    /// a fresh pair instead of re-triggering.
+    pub(crate) last_tree_left_click: Option<(NodeId, Instant)>,
     pub hovered_tree_node: Option<TreeNodeHit>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
@@ -1776,6 +1798,7 @@ impl App {
             is_terminal_focused: true,
             tree_drag_source: None,
             tree_drag_in_progress: false,
+            last_tree_left_click: None,
             hovered_tree_node: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
@@ -4224,6 +4247,15 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles the folder lock-closed feature (double-click gesture and its
+    /// right-click menu equivalent). Disabling only hides the gesture and
+    /// menu action; an already-locked folder's persisted state is untouched.
+    pub fn settings_toggle_folder_lock_enabled(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.folder_lock_enabled = !ui.folder_lock_enabled;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Toggles both discoverability and server-side capture of the persisted
     /// per-agent semantic history.
     pub fn settings_toggle_agent_debug_menu(&mut self) {
@@ -4552,6 +4584,7 @@ impl App {
                 self.settings_adjust_last_prompt_max_lines(direction)
             }
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
+            AppearanceRow::FolderLockEnabled => self.settings_toggle_folder_lock_enabled(),
         }
     }
 
@@ -5055,12 +5088,51 @@ impl App {
         let changed = self.tree_state.toggle_selected();
         if changed {
             self.bump_tree_version();
+            self.persist_selected_node_expanded_state();
         }
         changed
     }
 
+    /// Persists the expand/collapse state `tree_state` just applied to the
+    /// selected row, when it is a real server-owned container or folder.
+    /// A virtual filesystem row nested under a `Folder` root has no domain
+    /// node id and intentionally stays client-only (see `tree_ui`'s module
+    /// docs), so `self.tree.get(id)` returning `None` -- or the node being
+    /// a pane -- both mean there is nothing to persist here.
+    fn persist_selected_node_expanded_state(&mut self) {
+        let Some(id) = self.selected_node_id() else {
+            return;
+        };
+        let Some(node) = self.tree.get(id) else {
+            return;
+        };
+        if node.is_expanded().is_none() {
+            return;
+        }
+        let path = self.path_to(id);
+        let expanded = self.tree_state.opened().contains(&path);
+        self.queue_request(ClientRequest::SetNodeExpanded {
+            node_id: id,
+            expanded,
+        });
+    }
+
     pub(crate) fn selected_node_id(&self) -> Option<NodeId> {
         self.tree_state.selected().last().copied()
+    }
+
+    /// Requests the server lock or unlock a folder's closed state -- see
+    /// `ilium_core::Tree::set_node_locked_closed`. Both the tree panel's
+    /// folder double-click gesture and the right-click "Lock closed"/
+    /// "Unlock" menu action call this same method, so the two can never
+    /// diverge. Unlocking always re-opens the folder (the server-side
+    /// method forces `expanded = true`), matching the double-click
+    /// gesture's documented "unlock and re-open" behavior.
+    pub(crate) fn request_set_node_locked_closed(&mut self, node_id: NodeId, locked_closed: bool) {
+        self.queue_request(ClientRequest::SetNodeLockedClosed {
+            node_id,
+            locked_closed,
+        });
     }
 
     /// Applies persisted group expansion to the widget state after a server
@@ -5104,18 +5176,30 @@ impl App {
             self.tree_state.close(&path);
         }
 
-        let expanded_group_ids: Vec<NodeId> = self
+        // Every server-owned container/folder's persisted `expanded` flag is
+        // now the single source of truth for the widget's opened-path set,
+        // in both directions: a collapse recorded by another client (or a
+        // lock closing this one) must remove a stale-open path exactly as
+        // an expand must add one, or a restart would silently reopen
+        // whatever this client happened to have open beforehand.
+        let expandable_nodes: Vec<(NodeId, bool)> = self
             .tree
             .all_ids()
-            .filter(|id| {
-                matches!(
-                    self.tree.get(*id).map(|node| &node.kind),
-                    Some(NodeKind::Container(container)) if container.expanded && *id != ROOT_ID
-                )
+            .filter(|id| *id != ROOT_ID)
+            .filter_map(|id| {
+                self.tree
+                    .get(id)
+                    .and_then(|node| node.is_expanded())
+                    .map(|expanded| (id, expanded))
             })
             .collect();
-        for group_id in expanded_group_ids {
-            self.tree_state.open(self.path_to(group_id));
+        for (id, expanded) in expandable_nodes {
+            let path = self.path_to(id);
+            if expanded {
+                self.tree_state.open(path);
+            } else {
+                self.tree_state.close(&path);
+            }
         }
     }
 
@@ -6696,9 +6780,31 @@ impl App {
             }
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
             Some(Node {
-                kind: NodeKind::Folder { .. },
+                kind: NodeKind::Folder { locked_closed, .. },
                 ..
-            }) => actions.insert(0, ContextMenuAction::ToggleGroup),
+            }) => {
+                if *locked_closed {
+                    // Unlock always stays offered, even with the feature
+                    // disabled -- otherwise a folder locked before
+                    // disabling would have no way back through the UI.
+                    actions.insert(
+                        0,
+                        ContextMenuAction::SetFolderLockedClosed {
+                            locked_closed: false,
+                        },
+                    );
+                } else {
+                    actions.insert(0, ContextMenuAction::ToggleGroup);
+                    if self.ui_settings.folder_lock_enabled {
+                        actions.insert(
+                            1,
+                            ContextMenuAction::SetFolderLockedClosed {
+                                locked_closed: true,
+                            },
+                        );
+                    }
+                }
+            }
             Some(_) => {
                 return ContextMenuAction::GLOBAL_ACTIONS.to_vec();
             }
@@ -6764,6 +6870,14 @@ impl App {
                     "Bookmark added".to_string()
                 } else {
                     "Bookmark removed".to_string()
+                });
+            }
+            ContextMenuAction::SetFolderLockedClosed { locked_closed } => {
+                self.request_set_node_locked_closed(target, locked_closed);
+                self.status_message = Some(if locked_closed {
+                    "Folder locked closed".to_string()
+                } else {
+                    "Folder unlocked".to_string()
                 });
             }
             ContextMenuAction::Rename => self.action_start_rename(),
@@ -10005,6 +10119,113 @@ mod tests {
             .contains(&ContextMenuAction::SetBookmark {
                 is_bookmarked: false,
             }));
+    }
+
+    #[test]
+    fn folder_context_menu_offers_lock_when_unlocked_and_only_unlock_when_locked() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, std::path::PathBuf::from("/tmp/lock-menu"))
+            .unwrap();
+
+        let actions = app.context_actions_for(folder);
+        assert!(actions.contains(&ContextMenuAction::ToggleGroup));
+        assert!(actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+            locked_closed: true
+        }));
+        assert!(
+            !actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: false
+            })
+        );
+
+        app.execute_context_action(
+            ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: true,
+            },
+            folder,
+        );
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SetNodeLockedClosed {
+                node_id: folder,
+                locked_closed: true,
+            }]
+        );
+
+        app.tree.set_node_locked_closed(folder, true).unwrap();
+        let locked_actions = app.context_actions_for(folder);
+        assert!(!locked_actions.contains(&ContextMenuAction::ToggleGroup));
+        assert!(
+            !locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: true
+            })
+        );
+        assert!(
+            locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: false
+            })
+        );
+    }
+
+    #[test]
+    fn disabling_folder_lock_hides_only_the_lock_action_not_the_unlock_escape_hatch() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, std::path::PathBuf::from("/tmp/lock-menu-disabled"))
+            .unwrap();
+        let mut ui = app.ui_settings.clone();
+        ui.folder_lock_enabled = false;
+        app.apply_and_persist_ui_settings(ui);
+
+        let unlocked_actions = app.context_actions_for(folder);
+        assert!(unlocked_actions.contains(&ContextMenuAction::ToggleGroup));
+        assert!(
+            !unlocked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: true
+            })
+        );
+
+        app.tree.set_node_locked_closed(folder, true).unwrap();
+        let locked_actions = app.context_actions_for(folder);
+        assert!(
+            locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+                locked_closed: false
+            })
+        );
+    }
+
+    #[test]
+    fn toggling_a_folder_expand_state_persists_the_resulting_value() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, std::path::PathBuf::from("/tmp/persist-expand"))
+            .unwrap();
+        app.select_node(folder);
+
+        app.toggle_selected_tree_node();
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SetNodeExpanded {
+                node_id: folder,
+                expanded: true,
+            }]
+        );
+
+        app.toggle_selected_tree_node();
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SetNodeExpanded {
+                node_id: folder,
+                expanded: false,
+            }]
+        );
     }
 
     #[test]

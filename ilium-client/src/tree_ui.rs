@@ -707,27 +707,38 @@ fn build_item(
                 apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density),
             )
         }
-        NodeKind::Folder { path } => {
+        NodeKind::Folder {
+            path,
+            locked_closed,
+            ..
+        } => {
             let label = node_label(
                 Span::raw(context.icons.glyph(IconTarget::Folder).to_string()),
                 None,
-                Span::raw(title_with_bookmark(
-                    title_with_optional_icon(
-                        &node.name,
-                        node.inferred_icon.as_deref(),
-                        context.show_inferred_title_icons,
+                Span::raw(title_with_lock(
+                    title_with_bookmark(
+                        title_with_optional_icon(
+                            &node.name,
+                            node.inferred_icon.as_deref(),
+                            context.show_inferred_title_icons,
+                        ),
+                        node.is_bookmarked,
+                        context.icons,
                     ),
-                    node.is_bookmarked,
+                    *locked_closed,
                     context.icons,
                 )),
             );
             // The root itself is a normal tree row. Once opened, its direct
             // children are listed; each child directory recurses only after
-            // *that* exact virtual path has been expanded.
-            let children = if context.opened_paths.contains(identifier_path) {
-                folder_children(node.id, path, context, identifier_path)
-            } else {
+            // *that* exact virtual path has been expanded. A locked folder
+            // never shows children even if a stale widget path still thinks
+            // it is open (the domain forces `expanded` false when locking,
+            // but the local widget only catches up on the next snapshot).
+            let children = if *locked_closed || !context.opened_paths.contains(identifier_path) {
                 Vec::new()
+            } else {
+                folder_children(node.id, path, context, identifier_path)
             };
             TreeItem::new(
                 node.id,
@@ -758,9 +769,19 @@ fn title_with_bookmark(title: String, is_bookmarked: bool, icons: &IconSettings)
     title
 }
 
+/// Marks a folder locked closed -- see `ilium_core::Tree::set_node_locked_closed`.
+/// Prefixed the same way as [`title_with_bookmark`] so both markers can
+/// combine without disturbing the row's fixed columns.
+fn title_with_lock(title: String, locked_closed: bool, icons: &IconSettings) -> String {
+    if locked_closed {
+        return format!("{} {title}", icons.glyph(IconTarget::Lock));
+    }
+    title
+}
+
 #[cfg(test)]
 mod inferred_title_icon_tests {
-    use super::{title_with_bookmark, title_with_optional_icon};
+    use super::{title_with_bookmark, title_with_lock, title_with_optional_icon};
     use crate::icon_settings::{IconSettings, IconTarget};
 
     #[test]
@@ -787,6 +808,21 @@ mod inferred_title_icon_tests {
         assert_eq!(
             title_with_bookmark("Build the tree".to_string(), false, &icons),
             "Build the tree"
+        );
+    }
+
+    #[test]
+    fn locked_folder_titles_use_the_configured_lock_glyph_immediately_before_text() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::Lock, "🔐".to_string());
+
+        assert_eq!(
+            title_with_lock("project".to_string(), true, &icons),
+            "🔐 project"
+        );
+        assert_eq!(
+            title_with_lock("project".to_string(), false, &icons),
+            "project"
         );
     }
 }
@@ -911,7 +947,7 @@ pub struct FolderEntry {
 /// changed after the previous render.
 pub fn folder_entry(tree: &Tree, id: NodeId) -> Option<FolderEntry> {
     for node in tree.all_ids().filter_map(|node_id| tree.get(node_id)) {
-        let NodeKind::Folder { path } = &node.kind else {
+        let NodeKind::Folder { path, .. } = &node.kind else {
             continue;
         };
         if let Some(found) = find_folder_entry(node.id, path, &tree_path(tree, node.id), id) {
@@ -3322,6 +3358,41 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(root_path);
+    }
+
+    #[test]
+    fn a_locked_folder_never_shows_children_even_if_its_path_is_marked_open() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "workspace").unwrap();
+        let folder = tree.add_folder(group, std::env::temp_dir()).unwrap();
+        tree.set_node_locked_closed(folder, true).unwrap();
+
+        // A stale widget path claiming this folder is open must not defeat
+        // the lock -- see `build_item`'s `NodeKind::Folder` arm.
+        let mut opened_paths = HashSet::new();
+        opened_paths.insert(vec![group, folder]);
+        let items = build_tree_items(
+            &tree,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
+                tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::default(),
+                show_inferred_title_icons: false,
+                panel_width: 0,
+                opened_paths: &opened_paths,
+                panes: &HashMap::new(),
+            },
+        );
+        let folder_item = &items[0].children()[0];
+        assert!(folder_item.children().is_empty());
     }
 
     #[test]

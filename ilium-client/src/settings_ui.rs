@@ -2435,6 +2435,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::LastPrompt => "Last prompt banner",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
+        AppearanceRow::FolderLockEnabled => "Folder lock-closed",
     }
 }
 
@@ -2495,6 +2496,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
+        }
+        AppearanceRow::FolderLockEnabled => {
+            "Double-click a folder (or use its right-click menu) to lock it closed, showing a lock icon and blocking expansion until unlocked. Disabling this only hides the gesture and menu action -- an already-locked folder stays locked."
         }
     }
 }
@@ -2584,6 +2588,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "On".to_string()
             } else {
                 "Off (raw mouse forwarded)".to_string()
+            }
+        }
+        AppearanceRow::FolderLockEnabled => {
+            if ui.folder_lock_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
             }
         }
     }

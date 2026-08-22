@@ -358,6 +358,16 @@ pub enum ClientRequest {
     /// authoritative in the server journal and recover on the next request
     /// that makes them visible. A split view supplies up to four pane ids.
     SetVisiblePanes { pane_ids: Vec<NodeId> },
+    /// Sets a container's or folder's expand/collapse state. Appended to
+    /// preserve every earlier bincode variant discriminant.
+    SetNodeExpanded { node_id: NodeId, expanded: bool },
+    /// Locks or unlocks a container's or folder's closed state -- see
+    /// `ilium_core::Tree::set_node_locked_closed`. Appended to preserve
+    /// every earlier bincode variant discriminant.
+    SetNodeLockedClosed {
+        node_id: NodeId,
+        locked_closed: bool,
+    },
 }
 
 impl ClientRequest {
@@ -405,6 +415,8 @@ impl ClientRequest {
             Self::RecordNodeActivity { .. } => "record_node_activity",
             Self::AttachInteractive { .. } => "attach_interactive",
             Self::SetVisiblePanes { .. } => "set_visible_panes",
+            Self::SetNodeExpanded { .. } => "set_node_expanded",
+            Self::SetNodeLockedClosed { .. } => "set_node_locked_closed",
         }
     }
 
