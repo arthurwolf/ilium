@@ -1198,6 +1198,7 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 frame,
                 last_prompt_area,
                 app.tree.last_prompt(viewport.pane_id),
+                app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
             );
         }

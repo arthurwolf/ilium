@@ -4841,3 +4841,127 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     }
     assert!(exited, "typed-prompt TUI did not exit after cleanup");
 }
+
+/// Regression test for the banner's dynamic height: a short, single-word
+/// prompt must reserve exactly one row, not the default four-line ceiling.
+/// Mirrors the "zero rows before any prompt" check above, one submission
+/// later -- the row directly below the toolbar must now be the banner
+/// (showing the short prompt), and the very next row must already be the
+/// fixture's own content, proving nothing beyond that one row was reserved.
+#[tokio::test]
+async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("short-prompt-project");
+    let fixture_directory = temp_root.path().join("fixture-bin");
+    std::fs::create_dir_all(&project_dir).expect("create project directory");
+    std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
+    seed_project_config(&project_dir);
+    let fake_codex = write_change_only_fake_codex(&fixture_directory);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fake_codex_argument = fake_codex.to_string_lossy().to_string();
+    let new_pane_output = run_one_shot(
+        &xdg,
+        &project_dir,
+        &["new-pane", "--", &fake_codex_argument],
+    )
+    .await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating fake Codex pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 140)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn short-prompt TUI");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                })
+            },
+            DETECTION_TIMEOUT,
+        )
+        .await,
+        "expected a detected working Codex row.\n{}\nscreen: {:?}",
+        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+        tui.screen_text()
+    );
+    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
+    let agent_row = agent_rows[0];
+
+    tui.write(&sgr_mouse_down(0, 8, agent_row))
+        .expect("focus detected Codex row");
+    tui.write(&sgr_mouse_up(8, agent_row))
+        .expect("release detected Codex row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Cogitating (esc to interrupt)"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected focused fake Codex terminal, got: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(&sgr_mouse_down(0, 80, 10))
+        .expect("focus the fake Codex PTY");
+    tui.write(&sgr_mouse_up(80, 10))
+        .expect("release the fake Codex PTY focus click");
+
+    tui.write(b"hi").expect("type a short one-word prompt");
+    tui.write(b"\r").expect("submit the short prompt");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
+                        return false;
+                    };
+                    let cols = screen.size().1;
+                    let banner_row = screen
+                        .rows(0, cols)
+                        .nth((toolbar_row + 1) as usize)
+                        .unwrap_or_default();
+                    let next_row = screen
+                        .rows(0, cols)
+                        .nth((toolbar_row + 2) as usize)
+                        .unwrap_or_default();
+                    banner_row.contains("hi") && next_row.contains("Pursuing goal")
+                })
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the banner to reserve exactly one row (\"hi\" directly below the toolbar, \
+         the fixture's own content starting the very next row), got: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill short-prompt TUI");
+    }
+    assert!(exited, "short-prompt TUI did not exit after cleanup");
+}

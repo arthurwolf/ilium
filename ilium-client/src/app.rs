@@ -1252,6 +1252,20 @@ pub enum PendingRetitleRequest {
     },
 }
 
+/// One agent pane's Enter keystroke queued for
+/// `crate::naming_workers::spawn_last_prompt_transcript_worker` -- see
+/// `App::pending_last_prompt_transcript_checks`. `baseline_last_prompt` is
+/// this pane's last-prompt value from *before* this submission (captured at
+/// keypress time, ahead of any server round trip), so the worker can tell a
+/// transcript read that landed before the agent CLI flushed this turn's
+/// message (still showing the previous turn's text) apart from a genuinely
+/// fresh one -- both look like `Some(text)` to a naive read, but only the
+/// second actually differs from the baseline.
+pub struct PendingLastPromptTranscriptCheck {
+    pub pane_id: NodeId,
+    pub baseline_last_prompt: Option<String>,
+}
+
 /// Complete compare-and-set payload for a session-derived LLM title. Keeping
 /// its provenance, title pair, and icon together prevents parallel argument
 /// lists from drifting as title metadata evolves.
@@ -1538,7 +1552,7 @@ pub struct App {
     /// see `Self::last_prompt_transcript_context`. Drained every tick in
     /// `crate::lib::dispatch_pending_app_work`, same pattern as every other
     /// pending-work outbox on this struct.
-    pub pending_last_prompt_transcript_checks: Vec<NodeId>,
+    pub pending_last_prompt_transcript_checks: Vec<PendingLastPromptTranscriptCheck>,
     /// Files this client itself just asked the server to open as a new
     /// editor pane (via `request_new_editor`), keyed by file basename --
     /// consumed by `crate::render_cache::apply_tree_snapshot` to load the
@@ -1999,7 +2013,9 @@ impl App {
 
     /// Drains every pane queued for a transcript-sourced last-prompt check
     /// since the last drain -- see `Self::pending_last_prompt_transcript_checks`.
-    pub fn take_pending_last_prompt_transcript_checks(&mut self) -> Vec<NodeId> {
+    pub fn take_pending_last_prompt_transcript_checks(
+        &mut self,
+    ) -> Vec<PendingLastPromptTranscriptCheck> {
         std::mem::take(&mut self.pending_last_prompt_transcript_checks)
     }
 
@@ -2364,8 +2380,13 @@ impl App {
                     viewport
                 };
                 if self.shows_last_prompt_banner(viewport.pane_id) {
-                    viewport
-                        .with_last_prompt_reserved(self.ui_settings.last_prompt_max_lines.into())
+                    let text = self.tree.last_prompt(viewport.pane_id).unwrap_or("");
+                    let rows = crate::last_prompt_banner::reserved_height(
+                        text,
+                        viewport.content_area.width,
+                        self.ui_settings.last_prompt_max_lines.into(),
+                    );
+                    viewport.with_last_prompt_reserved(rows)
                 } else {
                     viewport
                 }
@@ -4357,10 +4378,10 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Switches the last-prompt banner on or off. The reservation is a fixed
-    /// number of rows (see `PaneViewport::with_last_prompt_reserved`), so --
-    /// like the toolbar's own toggle -- this is the one place its presence
-    /// changes `content_area` and therefore needs an explicit PTY resize.
+    /// Switches the last-prompt banner on or off. Toggling it on or off
+    /// changes `content_area` (see `PaneViewport::with_last_prompt_reserved`)
+    /// just like the toolbar's own toggle, and therefore needs an explicit
+    /// PTY resize.
     pub fn settings_toggle_last_prompt(&mut self) {
         let mut ui = self.ui_settings.clone();
         ui.last_prompt_enabled = !ui.last_prompt_enabled;
@@ -4368,10 +4389,12 @@ impl App {
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
-    /// Adjusts the last-prompt banner's fixed row budget by one line,
-    /// clamped to the supported range. Changes `content_area`'s height for
-    /// every pane currently showing the banner, so this resizes displayed
-    /// panes just like the toggle above.
+    /// Adjusts the last-prompt banner's maximum row budget by one line,
+    /// clamped to the supported range -- the ceiling `last_prompt_banner`
+    /// wraps and middle-truncates against, not a height every banner
+    /// actually uses. Can change `content_area`'s height for any pane
+    /// currently showing a banner long/numerous enough to hit the old or new
+    /// ceiling, so this resizes displayed panes just like the toggle above.
     pub fn settings_adjust_last_prompt_max_lines(&mut self, delta: i32) {
         let current = self.ui_settings.last_prompt_max_lines;
         let lines = (i32::from(current) + delta).clamp(
@@ -7755,7 +7778,16 @@ impl App {
             // answer, e.g. after shell-history recall or another
             // unsupported edit marked the live reconstruction opaque.
             if is_enter_press && self.last_prompt_tracking_enabled(id) {
-                self.pending_last_prompt_transcript_checks.push(id);
+                // Captured now, before this submission's own server round
+                // trip can land -- see `PendingLastPromptTranscriptCheck`'s
+                // doc comment on why the worker needs this pre-submission
+                // value rather than whatever's in the tree once it runs.
+                let baseline_last_prompt = self.tree.last_prompt(id).map(str::to_string);
+                self.pending_last_prompt_transcript_checks
+                    .push(PendingLastPromptTranscriptCheck {
+                        pane_id: id,
+                        baseline_last_prompt,
+                    });
             }
         }
         if did_change_client_content {

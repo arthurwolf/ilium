@@ -105,6 +105,13 @@ pub struct LastPromptTranscriptWorkerRequest {
     pub project_path: PathBuf,
     pub agent_class: AgentClass,
     pub session_id: String,
+    /// This pane's last-prompt value from before the submission being
+    /// checked -- see `crate::app::PendingLastPromptTranscriptCheck`. The
+    /// worker keeps retrying while the transcript's most recent user message
+    /// still matches this (trimmed the same way transcript entries are),
+    /// since that means the agent CLI hasn't flushed this turn's message yet
+    /// and the read is just seeing the previous turn's already-applied text.
+    pub baseline_last_prompt: Option<String>,
 }
 
 /// The most recent user message the worker found in the transcript, if any
@@ -120,14 +127,28 @@ pub struct LastPromptTranscriptWorkerResult {
 /// Initial wait before the first transcript read: the agent CLI needs a
 /// moment to flush this turn's submitted message to its own session log, and
 /// reading too early would just see the previous turn's already-applied
-/// value (or no file at all yet on a session's very first prompt).
+/// value (or no file at all yet on a session's very first prompt). Scaled
+/// down under `#[cfg(test)]` so the retry-until-fresh regression tests below
+/// don't have to burn the full production window.
+#[cfg(not(test))]
 const LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY: Duration = Duration::from_millis(400);
+#[cfg(test)]
+const LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY: Duration = Duration::from_millis(20);
 /// Polling interval between retries once the initial wait has elapsed.
+#[cfg(not(test))]
 const LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL: Duration = Duration::from_millis(400);
-/// Upper bound on retries -- worst case ~2.8s total, well inside how long a
-/// human already waits after hitting Enter before expecting the banner to
-/// reflect what they typed.
-const LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS: u32 = 6;
+#[cfg(test)]
+const LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+/// Upper bound on retries -- worst case ~10s total. Every candidate read is
+/// checked against the submission's baseline (see
+/// `LastPromptTranscriptWorkerRequest::baseline_last_prompt`) before it's
+/// accepted, so a longer window than the banner-feels-instant case actually
+/// needs is safe rather than risky: it only ever extends how long an opaque
+/// (history-recall/completion/unsupported-escape) submission -- for which the
+/// transcript is the *only* source of the banner text -- keeps waiting for a
+/// slow-to-flush agent CLI, never how long a stale read can masquerade as
+/// fresh.
+const LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS: u32 = 25;
 
 /// Tracks which naming workers are currently in flight, so a caller never
 /// accidentally spawns a second one for the same target while the first is
@@ -354,7 +375,7 @@ impl NamingWorkers {
     /// for `request.pane_id`'s most recent user message -- the "OR get it
     /// from the .jsonl history file" fallback/upgrade for the last-prompt
     /// banner. Deliberately no in-flight dedup: each call is one bounded,
-    /// idempotent file read (worst case ~2.8s), so an Enter press racing a
+    /// idempotent file read (worst case ~10s), so an Enter press racing a
     /// still-running prior check just costs a redundant read rather than
     /// risking a dropped update.
     pub fn spawn_last_prompt_transcript_worker(
@@ -367,7 +388,12 @@ impl NamingWorkers {
             project_path,
             agent_class,
             session_id,
+            baseline_last_prompt,
         } = request;
+        let baseline_trimmed = baseline_last_prompt
+            .as_deref()
+            .map(str::trim)
+            .map(String::from);
         let events_tx = self.events_tx.clone();
         std::thread::spawn(move || {
             // See `spawn_project_name_worker` on why every naming worker
@@ -376,7 +402,7 @@ impl NamingWorkers {
             std::thread::sleep(LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY);
             let mut last_prompt = None;
             for attempt in 0..LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
-                last_prompt = TranscriptLocator::new(&home, &project_path)
+                let candidate = TranscriptLocator::new(&home, &project_path)
                     .transcript_for_session(&agent_class, &session_id)
                     .and_then(|transcript| {
                         crate::transcript_context::recent_user_prompts(
@@ -386,7 +412,22 @@ impl NamingWorkers {
                         .ok()
                     })
                     .and_then(|prompts| prompts.into_iter().next_back());
-                if last_prompt.is_some() || attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
+                // A candidate that's empty or still matches the
+                // pre-submission baseline isn't this turn's message yet --
+                // the agent CLI just hasn't flushed it to the transcript
+                // file. Treating either as "found" (as a bare `is_some()`
+                // check would) is exactly the bug this baseline exists to
+                // prevent: it would report the previous turn's text as if it
+                // were fresh, and the caller would overwrite a correct
+                // live-tracked value with stale content.
+                let is_fresh = candidate.as_deref().map(str::trim).is_some_and(|trimmed| {
+                    !trimmed.is_empty() && Some(trimmed) != baseline_trimmed.as_deref()
+                });
+                if is_fresh {
+                    last_prompt = candidate;
+                    break;
+                }
+                if attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
                     break;
                 }
                 std::thread::sleep(LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL);
@@ -645,6 +686,7 @@ mod tests {
             project_path: project_path.to_path_buf(),
             agent_class: AgentClass::Claude,
             session_id: session_id.to_string(),
+            baseline_last_prompt: None,
         });
 
         let event = events_rx
@@ -660,6 +702,135 @@ mod tests {
             Some("fix the failing tests".to_string()),
             "must pick the most recent user message, not the superseded first one"
         );
+    }
+
+    /// Claude Code's own project-directory slug (every non-ASCII-alphanumeric
+    /// character becomes `-`), duplicated here rather than reaching into
+    /// `ilium-agent-session`'s private `slugify_claude_project_path`.
+    fn claude_project_slug(project_path: &std::path::Path) -> String {
+        project_path
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    }
+
+    fn write_claude_transcript(
+        home: &std::path::Path,
+        project_path: &std::path::Path,
+        session_id: &str,
+        user_messages: &[&str],
+    ) -> std::path::PathBuf {
+        let project_dir = home
+            .join(".claude")
+            .join("projects")
+            .join(claude_project_slug(project_path));
+        std::fs::create_dir_all(&project_dir).expect("create claude project dir");
+        let transcript_path = project_dir.join(format!("{session_id}.jsonl"));
+        let lines = user_messages
+            .iter()
+            .map(|content| {
+                serde_json::json!({
+                    "type": "user",
+                    "sessionId": session_id,
+                    "cwd": project_path,
+                    "message": {"content": content}
+                })
+                .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&transcript_path, lines).expect("write synthetic transcript");
+        transcript_path
+    }
+
+    /// Regression for the staleness bug: a transcript read that lands before
+    /// the agent CLI flushes this turn's message sees only the previous
+    /// turn's already-applied text -- which is exactly what
+    /// `baseline_last_prompt` holds. A worker that accepted the first
+    /// `Some(_)` it read (the pre-fix behavior) would report that stale text
+    /// as this submission's answer and never look again. The fixed worker
+    /// must keep polling past that stale read and pick up the new message
+    /// once it actually lands.
+    #[test]
+    fn stale_transcript_read_matching_the_baseline_is_retried_until_it_changes() {
+        let home = tempfile::tempdir().expect("temp home dir");
+        let project_path = std::path::Path::new("/work/ilium-transcript-stale-test");
+        let session_id = "44444444-4444-4444-8444-444444444444";
+        write_claude_transcript(home.path(), project_path, session_id, &["old prompt"]);
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let pane_id = NodeId(12);
+        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+            home: home.path().to_path_buf(),
+            pane_id,
+            project_path: project_path.to_path_buf(),
+            agent_class: AgentClass::Claude,
+            session_id: session_id.to_string(),
+            baseline_last_prompt: Some("old prompt".to_string()),
+        });
+
+        // Appended only after the worker's first (pre-fix: only) read would
+        // already have happened, simulating the agent CLI's flush landing
+        // late.
+        std::thread::sleep(LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY * 2);
+        write_claude_transcript(
+            home.path(),
+            project_path,
+            session_id,
+            &["old prompt", "new prompt"],
+        );
+
+        let event = events_rx
+            .blocking_recv()
+            .expect("worker reports its result");
+        let NamingWorkerEvent::LastPromptTranscript(result) = event else {
+            panic!("expected a LastPromptTranscript event");
+        };
+        assert_eq!(
+            result.last_prompt,
+            Some("new prompt".to_string()),
+            "must not settle for the baseline-matching stale read"
+        );
+    }
+
+    /// When the transcript never advances past the baseline (the agent CLI
+    /// never flushed this turn, or the read genuinely raced something else
+    /// forever), the worker must give up and report `None` rather than
+    /// eventually returning the stale baseline text as if it were fresh.
+    #[test]
+    fn transcript_stuck_on_the_baseline_reports_none_after_exhausting_retries() {
+        let home = tempfile::tempdir().expect("temp home dir");
+        let project_path = std::path::Path::new("/work/ilium-transcript-stuck-test");
+        let session_id = "55555555-5555-4555-8555-555555555555";
+        write_claude_transcript(home.path(), project_path, session_id, &["only prompt"]);
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let pane_id = NodeId(13);
+        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+            home: home.path().to_path_buf(),
+            pane_id,
+            project_path: project_path.to_path_buf(),
+            agent_class: AgentClass::Claude,
+            session_id: session_id.to_string(),
+            baseline_last_prompt: Some("only prompt".to_string()),
+        });
+
+        let event = events_rx
+            .blocking_recv()
+            .expect("worker reports its result");
+        let NamingWorkerEvent::LastPromptTranscript(result) = event else {
+            panic!("expected a LastPromptTranscript event");
+        };
+        assert_eq!(result.last_prompt, None);
     }
 
     #[test]

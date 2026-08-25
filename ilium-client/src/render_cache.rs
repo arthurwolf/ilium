@@ -390,8 +390,19 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
-            if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
-                tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
+            match app.tree.set_last_prompt(pane_id, last_prompt) {
+                Ok(()) => {
+                    // The banner's reserved height now tracks how many rows
+                    // the prompt actually wraps to (see
+                    // `last_prompt_banner::reserved_height`), so a changed
+                    // prompt can grow or shrink `content_area` the same way
+                    // an agent toolbar latching does above -- the PTY must
+                    // be told the new size, not just the render area.
+                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+                }
+                Err(error) => {
+                    tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
+                }
             }
             None
         }
@@ -1206,8 +1217,9 @@ mod tests {
         // screen space showing nothing before the user has typed anything.
         assert!(!app.shows_last_prompt_banner(pane_id));
         assert!(after.last_prompt_area.is_none());
-        // Toolbar row only reserved so far -- the last-prompt banner's fixed
-        // row budget joins once a prompt actually exists, asserted below.
+        // Toolbar row only reserved so far -- the last-prompt banner's
+        // dynamic row budget joins once a prompt actually exists, asserted
+        // below.
         assert_eq!(after.content_area.height, before.content_area.height - 1);
         // The PTY must be told the *reduced* size -- not just the render
         // area -- or the agent's own bottom row (its input/prompt line)
@@ -1230,7 +1242,9 @@ mod tests {
         );
 
         // Once a prompt is recorded, the banner joins the toolbar in
-        // reserving its own fixed row budget (`DEFAULT_LAST_PROMPT_MAX_LINES`).
+        // reserving rows -- but only as many as the prompt actually needs
+        // (one, for this short single-line prompt), not the full
+        // `DEFAULT_LAST_PROMPT_MAX_LINES` budget.
         apply(
             &mut app,
             ServerEvent::PaneLastPromptChanged {
@@ -1240,10 +1254,120 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert!(with_prompt.last_prompt_area.is_some());
+        assert_eq!(
+            with_prompt.last_prompt_area.map(|area| area.height),
+            Some(1)
+        );
         assert_eq!(
             with_prompt.content_area.height,
-            after.content_area.height - u16::from(crate::config::DEFAULT_LAST_PROMPT_MAX_LINES)
+            after.content_area.height - 1
+        );
+        // The banner's appearance shrank `content_area` again -- the PTY
+        // must be resized a second time to match, exactly as it was for the
+        // toolbar row above.
+        let second_resize = app
+            .take_outbound_requests()
+            .into_iter()
+            .find_map(|request| match request {
+                ilium_ipc::ClientRequest::ResizePane {
+                    pane_id: resized_pane,
+                    rows,
+                    cols,
+                    ..
+                } if resized_pane == pane_id => Some((rows, cols)),
+                _ => None,
+            });
+        assert_eq!(
+            second_resize,
+            Some((
+                with_prompt.content_area.height,
+                with_prompt.content_area.width
+            ))
+        );
+    }
+
+    #[test]
+    fn a_long_single_line_prompt_reserves_only_as_many_wrapped_rows_as_it_needs() {
+        // Regression test for the banner growing past one row without ever
+        // reserving its full `max_lines` ceiling: a prompt long enough to
+        // wrap, but not long enough to hit the default four-line cap.
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            },
+        );
+        let after_toolbar = app.pane_viewport(pane_id).unwrap();
+        let width = after_toolbar.content_area.width;
+        app.take_outbound_requests();
+
+        // The exact row count this specific text needs at this specific
+        // width is computed with the same wrap function the banner itself
+        // uses -- already covered byte-for-byte by `last_prompt_banner`'s
+        // own unit tests -- so this test is free to assert the *wiring*
+        // (viewport reservation and PTY resize actually agreeing with that
+        // count) without hand-deriving wrap arithmetic from a hardcoded
+        // width that could silently drift from the real layout.
+        let text: String = (0..40)
+            .map(|index| format!("word{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let expected_rows = crate::last_prompt_banner::wrap_lines(&text, width).len();
+        assert!(
+            expected_rows > 1,
+            "test text must actually need wrapping at width {width}"
+        );
+        assert!(
+            expected_rows <= 4,
+            "keep this test inside the default max-lines ceiling, got {expected_rows} rows"
+        );
+
+        apply(
+            &mut app,
+            ServerEvent::PaneLastPromptChanged {
+                pane_id,
+                last_prompt: Some(text),
+            },
+        );
+        let with_prompt = app.pane_viewport(pane_id).unwrap();
+        assert_eq!(
+            with_prompt.last_prompt_area.map(|area| area.height),
+            Some(expected_rows as u16),
+            "reserved height must match wrapped row count exactly -- neither 1 row \
+             (clipped, no wrap) nor the full max_lines ceiling (over-reserved)"
+        );
+        let resize = app
+            .take_outbound_requests()
+            .into_iter()
+            .find_map(|request| match request {
+                ilium_ipc::ClientRequest::ResizePane {
+                    pane_id: resized_pane,
+                    rows,
+                    cols,
+                    ..
+                } if resized_pane == pane_id => Some((rows, cols)),
+                _ => None,
+            });
+        assert_eq!(
+            resize,
+            Some((
+                with_prompt.content_area.height,
+                with_prompt.content_area.width
+            ))
         );
     }
 

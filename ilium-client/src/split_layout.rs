@@ -56,14 +56,17 @@ pub struct PaneViewport {
     pub toolbar_area: Option<Rect>,
     /// The reserved last-prompt banner rows, directly below `toolbar_area`
     /// (or at the content top if no toolbar shows) -- `None` unless
-    /// `App::pane_viewports` decided this pane shows it. Always exactly
-    /// `UiSettings::last_prompt_max_lines` rows tall while shown, regardless
-    /// of how many lines the current prompt actually renders: a size that
-    /// tracked prompt content would change `content_area`'s height on every
-    /// submission without a matching PTY resize, drawing into a region the
-    /// child process doesn't know has shrunk. A fixed reservation only
-    /// changes size when the setting itself changes, which already goes
-    /// through `resize_displayed_panes`.
+    /// `App::pane_viewports` decided this pane shows it. Sized dynamically
+    /// between 1 and `UiSettings::last_prompt_max_lines` rows by
+    /// `last_prompt_banner::reserved_height`, tracking how many rows the
+    /// current prompt actually wraps to -- never a fixed `max_lines`
+    /// regardless of content. Because this can now change on every prompt
+    /// submission (not only when the setting itself changes), every caller
+    /// that updates the tracked prompt must also call
+    /// `App::resize_displayed_panes` in the same tick -- see
+    /// `render_cache::apply`'s `PaneLastPromptChanged` arm -- so the PTY's
+    /// own idea of its size never drifts from what's actually drawn above
+    /// it.
     pub last_prompt_area: Option<Rect>,
 }
 
@@ -112,9 +115,12 @@ impl PaneViewport {
     }
 
     /// Reserves `rows` at the top of `content_area` for the last-prompt
-    /// banner, below any already-reserved toolbar row. A no-op on an
-    /// already-empty content area or a zero-row request, so a sliver-sized
-    /// split or a misconfigured setting can't underflow into a huge `Rect`.
+    /// banner, below any already-reserved toolbar row. `rows` is the
+    /// caller's already-computed dynamic height (see
+    /// `last_prompt_banner::reserved_height`), not necessarily
+    /// `UiSettings::last_prompt_max_lines`. A no-op on an already-empty
+    /// content area or a zero-row request, so a sliver-sized split or an
+    /// empty prompt can't underflow into a huge `Rect`.
     pub fn with_last_prompt_reserved(self, rows: u16) -> Self {
         if self.content_area.height == 0 || rows == 0 {
             return self;
