@@ -537,7 +537,7 @@ pub enum AppearanceRow {
     LastPrompt,
     LastPromptMaxLines,
     TerminalTextSelection,
-    FolderLockEnabled,
+    LockClosedEnabled,
 }
 
 impl AppearanceRow {
@@ -557,7 +557,7 @@ impl AppearanceRow {
         Self::LastPrompt,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
-        Self::FolderLockEnabled,
+        Self::LockClosedEnabled,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -885,11 +885,11 @@ pub enum ContextMenuAction {
     SetBookmark {
         is_bookmarked: bool,
     },
-    /// Locks or unlocks a folder's closed state -- see
-    /// `App::request_set_node_locked_closed`. The desired state is captured
-    /// while the menu opens, the same idempotent-value pattern as
+    /// Locks or unlocks a project, group, or folder row's closed state --
+    /// see `App::request_set_node_locked_closed`. The desired state is
+    /// captured while the menu opens, the same idempotent-value pattern as
     /// `SetBookmark`.
-    SetFolderLockedClosed {
+    SetNodeLockedClosed {
         locked_closed: bool,
     },
     Rename,
@@ -930,7 +930,7 @@ impl ContextMenuAction {
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
             Self::AddChatroom => IconTarget::Project,
             Self::SetBookmark { .. } => IconTarget::Bookmark,
-            Self::SetFolderLockedClosed { .. } => IconTarget::Lock,
+            Self::SetNodeLockedClosed { .. } => IconTarget::Lock,
             Self::Rename => IconTarget::RowRename,
             Self::MoveUp => IconTarget::RowMoveUp,
             Self::MoveDown => IconTarget::RowMoveDown,
@@ -965,10 +965,10 @@ impl ContextMenuAction {
             Self::SetBookmark {
                 is_bookmarked: false,
             } => "Remove bookmark".to_string(),
-            Self::SetFolderLockedClosed {
+            Self::SetNodeLockedClosed {
                 locked_closed: true,
             } => "Lock closed".to_string(),
-            Self::SetFolderLockedClosed {
+            Self::SetNodeLockedClosed {
                 locked_closed: false,
             } => "Unlock".to_string(),
             Self::Rename => "Rename".to_string(),
@@ -4308,12 +4308,13 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Toggles the folder lock-closed feature (double-click gesture and its
-    /// right-click menu equivalent). Disabling only hides the gesture and
-    /// menu action; an already-locked folder's persisted state is untouched.
-    pub fn settings_toggle_folder_lock_enabled(&mut self) {
+    /// Toggles the lock-closed feature for projects, groups, and folders
+    /// (double-click gesture and its right-click menu equivalent).
+    /// Disabling only hides the gesture and menu action; an already-locked
+    /// entry's persisted state is untouched.
+    pub fn settings_toggle_lock_closed_enabled(&mut self) {
         let mut ui = self.ui_settings.clone();
-        ui.folder_lock_enabled = !ui.folder_lock_enabled;
+        ui.lock_closed_enabled = !ui.lock_closed_enabled;
         self.apply_and_persist_ui_settings(ui);
     }
 
@@ -4645,7 +4646,7 @@ impl App {
                 self.settings_adjust_last_prompt_max_lines(direction)
             }
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
-            AppearanceRow::FolderLockEnabled => self.settings_toggle_folder_lock_enabled(),
+            AppearanceRow::LockClosedEnabled => self.settings_toggle_lock_closed_enabled(),
         }
     }
 
@@ -5182,13 +5183,13 @@ impl App {
         self.tree_state.selected().last().copied()
     }
 
-    /// Requests the server lock or unlock a folder's closed state -- see
-    /// `ilium_core::Tree::set_node_locked_closed`. Both the tree panel's
-    /// folder double-click gesture and the right-click "Lock closed"/
-    /// "Unlock" menu action call this same method, so the two can never
-    /// diverge. Unlocking always re-opens the folder (the server-side
-    /// method forces `expanded = true`), matching the double-click
-    /// gesture's documented "unlock and re-open" behavior.
+    /// Requests the server lock or unlock a project, group, or folder
+    /// row's closed state -- see `ilium_core::Tree::set_node_locked_closed`.
+    /// Both the tree panel's double-click gesture and the right-click
+    /// "Lock closed"/"Unlock" menu action call this same method, so the two
+    /// can never diverge. Unlocking always re-opens the entry (the
+    /// server-side method forces `expanded = true`), matching the
+    /// double-click gesture's documented "unlock and re-open" behavior.
     pub(crate) fn request_set_node_locked_closed(&mut self, node_id: NodeId, locked_closed: bool) {
         self.queue_request(ClientRequest::SetNodeLockedClosed {
             node_id,
@@ -6762,6 +6763,44 @@ impl App {
         self.mode = Mode::Normal;
     }
 
+    /// Inserts the expand/collapse and lock/unlock actions appropriate to
+    /// `target`'s current locked state at `insert_at`, shared by the
+    /// project, group, and folder arms of `context_actions_for` so their
+    /// lock/unlock UI can never diverge between node kinds.
+    fn insert_lock_actions(
+        &self,
+        actions: &mut Vec<ContextMenuAction>,
+        target: NodeId,
+        insert_at: usize,
+    ) {
+        let is_locked_closed = self
+            .tree
+            .get(target)
+            .and_then(ilium_core::Node::is_locked_closed)
+            .unwrap_or(false);
+        if is_locked_closed {
+            // Unlock always stays offered, even with the feature disabled
+            // -- otherwise an entry locked before disabling would have no
+            // way back through the UI.
+            actions.insert(
+                insert_at,
+                ContextMenuAction::SetNodeLockedClosed {
+                    locked_closed: false,
+                },
+            );
+        } else {
+            actions.insert(insert_at, ContextMenuAction::ToggleGroup);
+            if self.ui_settings.lock_closed_enabled {
+                actions.insert(
+                    insert_at + 1,
+                    ContextMenuAction::SetNodeLockedClosed {
+                        locked_closed: true,
+                    },
+                );
+            }
+        }
+    }
+
     /// The node-appropriate command set for a context menu. `ROOT_ID`
     /// means the click landed on empty space below the tree entries
     /// rather than on a real node -- only the creation actions (plus
@@ -6801,9 +6840,9 @@ impl App {
             Some(node) if node.is_project() => {
                 actions.insert(0, ContextMenuAction::AddChatroom);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
-                actions.insert(0, ContextMenuAction::ToggleGroup);
+                self.insert_lock_actions(&mut actions, target, 0);
             }
-            Some(node) if node.is_group() => actions.insert(0, ContextMenuAction::ToggleGroup),
+            Some(node) if node.is_group() => self.insert_lock_actions(&mut actions, target, 0),
             Some(Node {
                 kind:
                     NodeKind::Pane {
@@ -6840,32 +6879,7 @@ impl App {
                 }
             }
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
-            Some(Node {
-                kind: NodeKind::Folder { locked_closed, .. },
-                ..
-            }) => {
-                if *locked_closed {
-                    // Unlock always stays offered, even with the feature
-                    // disabled -- otherwise a folder locked before
-                    // disabling would have no way back through the UI.
-                    actions.insert(
-                        0,
-                        ContextMenuAction::SetFolderLockedClosed {
-                            locked_closed: false,
-                        },
-                    );
-                } else {
-                    actions.insert(0, ContextMenuAction::ToggleGroup);
-                    if self.ui_settings.folder_lock_enabled {
-                        actions.insert(
-                            1,
-                            ContextMenuAction::SetFolderLockedClosed {
-                                locked_closed: true,
-                            },
-                        );
-                    }
-                }
-            }
+            Some(node) if node.is_folder() => self.insert_lock_actions(&mut actions, target, 0),
             Some(_) => {
                 return ContextMenuAction::GLOBAL_ACTIONS.to_vec();
             }
@@ -6933,12 +6947,12 @@ impl App {
                     "Bookmark removed".to_string()
                 });
             }
-            ContextMenuAction::SetFolderLockedClosed { locked_closed } => {
+            ContextMenuAction::SetNodeLockedClosed { locked_closed } => {
                 self.request_set_node_locked_closed(target, locked_closed);
                 self.status_message = Some(if locked_closed {
-                    "Folder locked closed".to_string()
+                    "Locked closed".to_string()
                 } else {
-                    "Folder unlocked".to_string()
+                    "Unlocked".to_string()
                 });
             }
             ContextMenuAction::Rename => self.action_start_rename(),
@@ -10191,7 +10205,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_context_menu_offers_lock_when_unlocked_and_only_unlock_when_locked() {
+    fn lock_context_menu_offers_lock_when_unlocked_and_only_unlock_when_locked() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let folder = app
@@ -10201,17 +10215,15 @@ mod tests {
 
         let actions = app.context_actions_for(folder);
         assert!(actions.contains(&ContextMenuAction::ToggleGroup));
-        assert!(actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+        assert!(actions.contains(&ContextMenuAction::SetNodeLockedClosed {
             locked_closed: true
         }));
-        assert!(
-            !actions.contains(&ContextMenuAction::SetFolderLockedClosed {
-                locked_closed: false
-            })
-        );
+        assert!(!actions.contains(&ContextMenuAction::SetNodeLockedClosed {
+            locked_closed: false
+        }));
 
         app.execute_context_action(
-            ContextMenuAction::SetFolderLockedClosed {
+            ContextMenuAction::SetNodeLockedClosed {
                 locked_closed: true,
             },
             folder,
@@ -10228,15 +10240,41 @@ mod tests {
         let locked_actions = app.context_actions_for(folder);
         assert!(!locked_actions.contains(&ContextMenuAction::ToggleGroup));
         assert!(
-            !locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+            !locked_actions.contains(&ContextMenuAction::SetNodeLockedClosed {
                 locked_closed: true
             })
         );
         assert!(
-            locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+            locked_actions.contains(&ContextMenuAction::SetNodeLockedClosed {
                 locked_closed: false
             })
         );
+    }
+
+    #[test]
+    fn every_lockable_node_kind_offers_lock_unlock_from_its_context_menu() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/lock-project"))
+            .unwrap();
+        let group = app.tree.add_group(ROOT_ID, "lockable-group").unwrap();
+
+        for lockable in [project, group] {
+            let actions = app.context_actions_for(lockable);
+            assert!(actions.contains(&ContextMenuAction::SetNodeLockedClosed {
+                locked_closed: true
+            }));
+
+            app.tree.set_node_locked_closed(lockable, true).unwrap();
+            let locked_actions = app.context_actions_for(lockable);
+            assert!(!locked_actions.contains(&ContextMenuAction::ToggleGroup));
+            assert!(
+                locked_actions.contains(&ContextMenuAction::SetNodeLockedClosed {
+                    locked_closed: false
+                })
+            );
+        }
     }
 
     #[test]
@@ -10248,13 +10286,13 @@ mod tests {
             .add_folder(group, std::path::PathBuf::from("/tmp/lock-menu-disabled"))
             .unwrap();
         let mut ui = app.ui_settings.clone();
-        ui.folder_lock_enabled = false;
+        ui.lock_closed_enabled = false;
         app.apply_and_persist_ui_settings(ui);
 
         let unlocked_actions = app.context_actions_for(folder);
         assert!(unlocked_actions.contains(&ContextMenuAction::ToggleGroup));
         assert!(
-            !unlocked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+            !unlocked_actions.contains(&ContextMenuAction::SetNodeLockedClosed {
                 locked_closed: true
             })
         );
@@ -10262,7 +10300,7 @@ mod tests {
         app.tree.set_node_locked_closed(folder, true).unwrap();
         let locked_actions = app.context_actions_for(folder);
         assert!(
-            locked_actions.contains(&ContextMenuAction::SetFolderLockedClosed {
+            locked_actions.contains(&ContextMenuAction::SetNodeLockedClosed {
                 locked_closed: false
             })
         );

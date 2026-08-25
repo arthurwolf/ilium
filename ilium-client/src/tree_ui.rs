@@ -608,13 +608,17 @@ fn build_item(
             let label = node_label(
                 Span::raw(icon.to_string()),
                 None,
-                Span::raw(title_with_bookmark(
-                    title_with_optional_icon(
-                        &node.name,
-                        node.inferred_icon.as_deref(),
-                        context.show_inferred_title_icons,
+                Span::raw(title_with_lock(
+                    title_with_bookmark(
+                        title_with_optional_icon(
+                            &node.name,
+                            node.inferred_icon.as_deref(),
+                            context.show_inferred_title_icons,
+                        ),
+                        node.is_bookmarked,
+                        context.icons,
                     ),
-                    node.is_bookmarked,
+                    container.locked_closed,
                     context.icons,
                 )),
             );
