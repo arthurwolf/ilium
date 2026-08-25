@@ -89,6 +89,15 @@ enum Command {
         #[command(subcommand)]
         command: ChatCommand,
     },
+    /// Reports (or clears) a long-running task's progress from inside the
+    /// pane running it. Unlike every other subcommand here, this one is
+    /// meant to be run by an agent CLI (or a script it wrote) from *inside*
+    /// an already-running pane, not from an arbitrary shell -- see
+    /// `pane_identity_from_env`.
+    Progress {
+        #[command(subcommand)]
+        command: ProgressCommand,
+    },
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -115,6 +124,31 @@ enum ChatCommand {
         #[arg(long, default_value_t = 100)]
         limit: usize,
     },
+}
+
+/// Local mirror of the `[percent, message]` contract every progress-monitor
+/// command's stdout must satisfy -- see `ilium-server`'s `progress_monitor`
+/// module doc for the full contract this subcommand's `Set` variant installs.
+#[derive(Subcommand, Debug)]
+enum ProgressCommand {
+    /// Starts (or replaces) this pane's server-run progress monitor:
+    /// `command` runs in this pane's shell every `interval-seconds` and its
+    /// stdout must be exactly one JSON object,
+    /// `{"percent": <0-100>, "message": <string>}`. Prefer more detail in
+    /// `message` over less -- it is clipped to fit, not rejected for being
+    /// long.
+    Set {
+        #[arg(long)]
+        command: String,
+        /// How often `command` re-runs. 1 second is the common case; ask
+        /// for more only if `command` itself is heavy enough that running
+        /// it every second would be wasteful.
+        #[arg(long, default_value_t = 1)]
+        interval_seconds: u32,
+    },
+    /// Stops this pane's active progress monitor, if any, and clears its
+    /// last reported progress.
+    Clear,
 }
 
 #[tokio::main]
@@ -150,6 +184,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             new_pane(&session_name, &cmd, &cli.cwd).await
         }
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
+        Some(Command::Progress { command }) => progress(command).await,
     }
 }
 
@@ -205,6 +240,101 @@ fn default_chatroom_author() -> String {
     std::env::var("ILIUM_CHATROOM_AUTHOR")
         .or_else(|_| std::env::var("AGENT_NAME"))
         .unwrap_or_else(|_| "agent".to_string())
+}
+
+/// This pane's identity, as injected by `ilium-server` at spawn time (see
+/// `ilium_ipc::pane_env`) -- what `progress` needs to address the exact pane
+/// and server this process happens to be running inside.
+struct PaneIdentity {
+    pane_id: ilium_core::NodeId,
+    session_name: String,
+    socket_path: PathBuf,
+}
+
+fn pane_identity_from_env() -> Result<PaneIdentity, CliError> {
+    let pane_id = std::env::var(ilium_ipc::pane_env::PANE_ID)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(ilium_core::NodeId)
+        .ok_or(CliError::NotInsideIliumPane(ilium_ipc::pane_env::PANE_ID))?;
+    let session_name = std::env::var(ilium_ipc::pane_env::SESSION_NAME)
+        .map_err(|_| CliError::NotInsideIliumPane(ilium_ipc::pane_env::SESSION_NAME))?;
+    let socket_path = std::env::var(ilium_ipc::pane_env::SESSION_SOCKET)
+        .map(PathBuf::from)
+        .map_err(|_| CliError::NotInsideIliumPane(ilium_ipc::pane_env::SESSION_SOCKET))?;
+    Ok(PaneIdentity {
+        pane_id,
+        session_name,
+        socket_path,
+    })
+}
+
+/// How long `progress` waits for a rejection before assuming its request was
+/// accepted. Neither `SetPaneProgressMonitor` nor `ClearPaneProgressMonitor`
+/// broadcasts a success confirmation -- the monitor's first tick may be
+/// seconds away, or never arrive at all if the command turns out to be bad
+/// -- so only a `ServerEvent::Error` is worth waiting for; a quiet window
+/// this short keeps the common case (an agent calling this once at the start
+/// of a long task) from feeling like it hung.
+const PROGRESS_REQUEST_QUIET_WINDOW: Duration = Duration::from_millis(750);
+
+async fn progress(command: ProgressCommand) -> Result<(), CliError> {
+    let identity = pane_identity_from_env()?;
+    let mut connection =
+        ilium_client::connection::Connection::connect(&identity.socket_path, identity.session_name)
+            .await?;
+
+    let (request, accepted_message) = match command {
+        ProgressCommand::Set {
+            command,
+            interval_seconds,
+        } => (
+            ilium_ipc::ClientRequest::SetPaneProgressMonitor {
+                pane_id: identity.pane_id,
+                command,
+                interval_seconds,
+            },
+            "progress monitor started",
+        ),
+        ProgressCommand::Clear => (
+            ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
+                pane_id: identity.pane_id,
+            },
+            "progress monitor cleared",
+        ),
+    };
+    connection
+        .requests
+        .send(request)
+        .await
+        .map_err(|_send_error| {
+            CliError::ServerReportedError(
+                "connection closed before the request was sent".to_string(),
+            )
+        })?;
+
+    let rejection = tokio::time::timeout(PROGRESS_REQUEST_QUIET_WINDOW, async {
+        while let Some(event) = connection.events.recv().await {
+            if let ilium_ipc::ServerEvent::Error { message } = event {
+                return Some(message);
+            }
+        }
+        None
+    })
+    .await;
+
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+
+    match rejection {
+        Ok(Some(message)) => Err(CliError::ServerReportedError(message)),
+        Ok(None) | Err(_) => {
+            println!("{accepted_message}");
+            Ok(())
+        }
+    }
 }
 
 /// The bare-invocation and `new-session` paths: ensure the session's
@@ -543,7 +673,9 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{chatroom_project_root, client_restart_args, session, shell_join};
+    use super::{
+        chatroom_project_root, client_restart_args, pane_identity_from_env, session, shell_join,
+    };
 
     fn project_session(name: &str) -> session::ProjectSession {
         session::ProjectSession {
@@ -619,5 +751,20 @@ mod tests {
         ilium_client::chatroom::initialize(project.path()).unwrap();
 
         assert_eq!(chatroom_project_root(&nested), project.path());
+    }
+
+    /// `ilium progress` only works run from inside a pane ilium itself
+    /// spawned (see `pane_env`'s doc comment) -- an ordinary shell, or a
+    /// test process, has none of `ILIUM_PANE_ID`/`ILIUM_SESSION_NAME`/
+    /// `ILIUM_SESSION_SOCKET` set. Deliberately does not call
+    /// `std::env::set_var`/`remove_var` (process-global and racy under
+    /// parallel tests) -- this only asserts the common "not set at all"
+    /// case, which is already the ambient state of any normal test run.
+    #[test]
+    fn progress_outside_a_pane_reports_the_missing_env_var() {
+        assert!(matches!(
+            pane_identity_from_env(),
+            Err(super::CliError::NotInsideIliumPane(_))
+        ));
     }
 }

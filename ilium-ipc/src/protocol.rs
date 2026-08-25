@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
-    BoardStorage, NodeActivityRevision, NodeId, PaneStatus, PaneTitleSource, PromptQueueDelivery,
-    RestructurePlan, SplitOrientation, Tree, TreeMoveDirection,
+    BoardStorage, NodeActivityRevision, NodeId, PaneProgress, PaneStatus, PaneTitleSource,
+    PromptQueueDelivery, RestructurePlan, SplitOrientation, Tree, TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -384,6 +384,31 @@ pub enum ClientRequest {
         expected_session_id: String,
         last_prompt: String,
     },
+    /// Starts (or replaces) `pane_id`'s server-run progress monitor:
+    /// `command` runs in the pane's shell every `interval_seconds` and its
+    /// stdout is parsed as `{"percent": <0-100>, "message": <string>}` (see
+    /// `ilium-server`'s progress-monitor loop). Sent by the `ilium progress
+    /// set` CLI subcommand run from inside the pane's own shell, not by the
+    /// TUI -- any connection may send it, so the server enforces
+    /// `UpdateProgressMonitorEnabled`'s live setting, replying with
+    /// `ServerEvent::Error` when disabled. Appended to preserve every
+    /// earlier bincode variant discriminant.
+    SetPaneProgressMonitor {
+        pane_id: NodeId,
+        command: String,
+        interval_seconds: u32,
+    },
+    /// Stops `pane_id`'s active progress monitor, if any, and clears its
+    /// last reported progress. Appended to preserve every earlier bincode
+    /// variant discriminant.
+    ClearPaneProgressMonitor { pane_id: NodeId },
+    /// Applies the Settings tab's progress-monitor toggle to the
+    /// already-running detached server -- same live-toggle shape as
+    /// `UpdateDebugLogging`. The client persists the same value before
+    /// sending it, so future server/client processes start with the
+    /// identical policy. Appended to preserve every earlier bincode variant
+    /// discriminant.
+    UpdateProgressMonitorEnabled { enabled: bool },
 }
 
 impl ClientRequest {
@@ -434,6 +459,9 @@ impl ClientRequest {
             Self::SetNodeExpanded { .. } => "set_node_expanded",
             Self::SetNodeLockedClosed { .. } => "set_node_locked_closed",
             Self::ReportLastPromptFromTranscript { .. } => "report_last_prompt_from_transcript",
+            Self::SetPaneProgressMonitor { .. } => "set_pane_progress_monitor",
+            Self::ClearPaneProgressMonitor { .. } => "clear_pane_progress_monitor",
+            Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
         }
     }
 
@@ -621,4 +649,19 @@ pub enum ServerEvent {
         pane_id: NodeId,
         last_prompt: Option<String>,
     },
+    /// A pane's progress-monitor report changed: a new tick was parsed, the
+    /// monitor was started (`Some` with an initial unknown-progress value is
+    /// never sent -- the first event only follows a successfully parsed
+    /// tick), or it was cleared (`None`) by `ClearPaneProgressMonitor`, pane
+    /// close, or the server's own progress-monitor setting being disabled
+    /// mid-run. Appended last to preserve every existing bincode
+    /// discriminant.
+    PaneProgressChanged {
+        pane_id: NodeId,
+        progress: Option<PaneProgress>,
+    },
+    /// The detached server accepted a live progress-monitor-enabled update --
+    /// same shape as `DebugLoggingChanged`. Appended last to preserve every
+    /// existing bincode discriminant.
+    ProgressMonitorEnabledChanged { enabled: bool },
 }

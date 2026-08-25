@@ -63,6 +63,11 @@ pub enum CliError {
     },
     #[error("chatroom operation failed: {0}")]
     Chatroom(#[from] anyhow::Error),
+    #[error(
+        "not running inside an ilium-managed pane: {0} is not set -- `ilium progress` only \
+         works when run from inside a pane ilium itself spawned"
+    )]
+    NotInsideIliumPane(&'static str),
     #[error(transparent)]
     Connection(#[from] ilium_client::connection::ConnectionError),
     #[error(transparent)]

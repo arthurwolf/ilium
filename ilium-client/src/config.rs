@@ -392,6 +392,9 @@ pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 20;
 pub const MIN_LAST_PROMPT_MAX_LINES: u8 = 1;
 pub const MAX_LAST_PROMPT_MAX_LINES: u8 = 20;
 pub const DEFAULT_LAST_PROMPT_MAX_LINES: u8 = 4;
+pub const MIN_PROGRESS_MAX_LINES: u8 = 1;
+pub const MAX_PROGRESS_MAX_LINES: u8 = 20;
+pub const DEFAULT_PROGRESS_MAX_LINES: u8 = 4;
 
 /// `[kanban_board]` settings, validated before they reach board layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -760,6 +763,18 @@ pub struct UiSettings {
     /// size the PTY only needs resizing for when this setting itself
     /// changes.
     pub last_prompt_max_lines: u8,
+    /// Live mirror of the server's `progress_monitor_enabled` setting (see
+    /// `ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled`) -- whether
+    /// the server accepts `ilium progress set` requests at all. Toggling
+    /// this in Settings sends the update to the server rather than only
+    /// affecting client-side rendering, since the thing being gated is an
+    /// agent-authored shell command running unattended on the server, not a
+    /// display choice.
+    pub progress_monitor_enabled: bool,
+    /// Maximum message rows the progress footer reserves below its percent
+    /// gauge -- same role as `last_prompt_max_lines`, see
+    /// `crate::progress_bar::reserved_height`.
+    pub progress_max_lines: u8,
     /// Claims left-button drag over a terminal pane's content as a local
     /// text selection (highlight plus clipboard copy) instead of forwarding
     /// the raw mouse event to the pane's PTY. On by default because the
@@ -796,6 +811,8 @@ impl Default for UiSettings {
             show_toolbar_labels: true,
             last_prompt_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
+            progress_monitor_enabled: true,
+            progress_max_lines: DEFAULT_PROGRESS_MAX_LINES,
             terminal_text_selection_enabled: true,
             lock_closed_enabled: true,
             icons: IconSettings::default(),
@@ -887,6 +904,8 @@ struct RawUiConfig {
     show_toolbar_labels: Option<bool>,
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
+    progress_monitor_enabled: Option<bool>,
+    progress_max_lines: Option<u8>,
     terminal_text_selection_enabled: Option<bool>,
     lock_closed_enabled: Option<bool>,
     #[serde(default)]
@@ -1021,6 +1040,11 @@ pub enum ConfigLoadError {
         "ui.last_prompt_max_lines = {0} must be between {MIN_LAST_PROMPT_MAX_LINES} and {MAX_LAST_PROMPT_MAX_LINES}"
     )]
     InvalidLastPromptMaxLines(u8),
+    /// `ui.progress_max_lines` is outside the supported range.
+    #[error(
+        "ui.progress_max_lines = {0} must be between {MIN_PROGRESS_MAX_LINES} and {MAX_PROGRESS_MAX_LINES}"
+    )]
+    InvalidProgressMaxLines(u8),
     #[error("voice.output_volume_percent = {0} must be between 0 and 100")]
     InvalidVoiceOutputVolume(u8),
 }
@@ -1296,6 +1320,16 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             }
             Some(lines) => return Err(ConfigLoadError::InvalidLastPromptMaxLines(lines)),
             None => defaults.last_prompt_max_lines,
+        },
+        progress_monitor_enabled: raw
+            .progress_monitor_enabled
+            .unwrap_or(defaults.progress_monitor_enabled),
+        progress_max_lines: match raw.progress_max_lines {
+            Some(lines) if (MIN_PROGRESS_MAX_LINES..=MAX_PROGRESS_MAX_LINES).contains(&lines) => {
+                lines
+            }
+            Some(lines) => return Err(ConfigLoadError::InvalidProgressMaxLines(lines)),
+            None => defaults.progress_max_lines,
         },
         terminal_text_selection_enabled: raw
             .terminal_text_selection_enabled
@@ -2064,6 +2098,14 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "last_prompt_max_lines".to_string(),
         toml::Value::Integer(i64::from(ui.last_prompt_max_lines)),
+    );
+    table.insert(
+        "progress_monitor_enabled".to_string(),
+        toml::Value::Boolean(ui.progress_monitor_enabled),
+    );
+    table.insert(
+        "progress_max_lines".to_string(),
+        toml::Value::Integer(i64::from(ui.progress_max_lines)),
     );
     table.insert(
         "terminal_text_selection_enabled".to_string(),
@@ -2846,6 +2888,8 @@ mod tests {
             show_toolbar_labels: false,
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
+            progress_monitor_enabled: false,
+            progress_max_lines: 9,
             terminal_text_selection_enabled: false,
             lock_closed_enabled: false,
             use_stable_glyphs: true,

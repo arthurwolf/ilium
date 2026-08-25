@@ -109,7 +109,7 @@ impl Default for NotificationsConfig {
 /// `AgentSignature` deliberately doesn't derive equality either (see its
 /// own doc comment). Nothing needs whole-`ServerConfig` equality; tests
 /// compare the individual fields that do support it instead.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub detection: DetectionConfig,
     pub notifications: NotificationsConfig,
@@ -123,6 +123,36 @@ pub struct ServerConfig {
     pub debug: DebugConfig,
     pub http_api: HttpApiConfig,
     pub agent_debug_menu_enabled: bool,
+    /// Whether the server accepts `SetPaneProgressMonitor` at all -- see
+    /// `ilium-server`'s progress-monitor loop. Defaults on: the command it
+    /// runs is agent-authored, but the agent already has equivalent shell
+    /// access in the same pane, so this gates an unattended *recurring*
+    /// execution rather than a new privilege. Live-toggleable from the
+    /// client's Settings tab without a server restart -- see
+    /// `ClientRequest::UpdateProgressMonitorEnabled`.
+    pub progress_monitor_enabled: bool,
+}
+
+impl Default for ServerConfig {
+    /// Hand-written rather than `#[derive(Default)]`: a bare `bool` field
+    /// defaults to `false` under the derive, which is wrong for
+    /// `progress_monitor_enabled` (defaults on -- see its own doc comment).
+    /// Every other field's own `Default` impl already gives the value
+    /// [`load`] would produce for a missing config file, so this mirrors
+    /// that field for field.
+    fn default() -> Self {
+        Self {
+            detection: DetectionConfig::default(),
+            notifications: NotificationsConfig::default(),
+            sound: SoundSettings::default(),
+            custom_signatures: Vec::new(),
+            session_recovery: SessionRecoveryConfig::default(),
+            debug: DebugConfig::default(),
+            http_api: HttpApiConfig::default(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -170,6 +200,7 @@ struct RawHttpApiConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawUiConfig {
     agent_debug_menu_enabled: Option<bool>,
+    progress_monitor_enabled: Option<bool>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
@@ -373,6 +404,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
             port: http_api_port,
         },
         agent_debug_menu_enabled: raw.ui.agent_debug_menu_enabled.unwrap_or(false),
+        progress_monitor_enabled: raw.ui.progress_monitor_enabled.unwrap_or(true),
     })
 }
 
@@ -403,10 +435,24 @@ mod tests {
         assert!(!config.debug.file_logging_enabled);
         assert_eq!(config.http_api, HttpApiConfig::default());
         assert!(!config.agent_debug_menu_enabled);
+        assert!(config.progress_monitor_enabled);
         assert_eq!(
             config.detection.working_poll_interval,
             Duration::from_secs(10)
         );
+    }
+
+    #[test]
+    fn progress_monitor_can_be_disabled_explicitly() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nprogress_monitor_enabled = false\n",
+        )
+        .unwrap();
+
+        let config = load(&dir).expect("valid UI config should load");
+        assert!(!config.progress_monitor_enabled);
     }
 
     #[test]

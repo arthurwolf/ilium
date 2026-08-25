@@ -22,6 +22,21 @@ pub enum PaneContentKind {
     Board,
 }
 
+/// One reported tick of a long-running task's progress, set by
+/// `Tree::set_pane_progress` from a server-run monitor command (see
+/// `ilium-server`'s progress-monitor loop) and cleared explicitly when the
+/// agent finishes or cancels it. `percent` is always clamped to `0.0..=100.0`
+/// by the setter so no renderer needs to defend against an out-of-range or
+/// NaN value from an agent-authored command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaneProgress {
+    pub percent: f32,
+    /// Free-form status text (file being worked on, ETA, sub-step, ...).
+    /// Kept unclipped here; the renderer truncates to fit available rows, the
+    /// same division of responsibility as `last_prompt`/`last_prompt_banner`.
+    pub message: String,
+}
+
 /// The user-owned document backing a kanban board.  The server persists this
 /// descriptor with the tree, while the client owns the local file I/O needed
 /// to render and mutate the board.
@@ -665,6 +680,11 @@ pub enum NodeKind {
         /// existing recovery snapshots compatible.
         #[serde(default)]
         last_prompt: Option<String>,
+        /// This terminal pane's active long-running-task progress, if a
+        /// monitor command is currently reporting one. `serde(default)`
+        /// keeps existing recovery snapshots compatible.
+        #[serde(default)]
+        progress: Option<PaneProgress>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -1560,6 +1580,7 @@ impl Tree {
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
                     last_prompt: None,
+                    progress: None,
                 },
             },
         );
@@ -1622,6 +1643,7 @@ impl Tree {
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
                     last_prompt: None,
+                    progress: None,
                 },
             },
         );
@@ -2530,6 +2552,42 @@ impl Tree {
         Ok(())
     }
 
+    /// Records (or, with `None`, clears) a terminal pane's active
+    /// long-running-task progress. Percent is clamped to `0.0..=100.0` here
+    /// so no renderer needs to defend against an out-of-range or NaN value
+    /// reported by an agent-authored monitor command.
+    pub fn set_pane_progress(
+        &mut self,
+        id: NodeId,
+        progress: Option<PaneProgress>,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            progress: field,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        *field = progress.map(|progress| PaneProgress {
+            // `f32::clamp` leaves NaN as NaN (NaN compares false against both
+            // bounds), so a malformed agent-authored monitor command could
+            // otherwise poison the value; `Ord`-style clamp isn't available
+            // for floats, so NaN is checked explicitly instead.
+            percent: if progress.percent.is_nan() {
+                0.0
+            } else {
+                progress.percent.clamp(0.0, 100.0)
+            },
+            message: progress.message,
+        });
+        Ok(())
+    }
+
     /// Returns the FIFO head without consuming it. The server writes it to
     /// the PTY before acknowledging delivery, so a failed write leaves it
     /// queued for the next genuine completion.
@@ -2607,6 +2665,15 @@ impl Tree {
     pub fn last_prompt(&self, id: NodeId) -> Option<&str> {
         match &self.get(id)?.kind {
             NodeKind::Pane { last_prompt, .. } => last_prompt.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Returns this terminal pane's active long-running-task progress, if
+    /// any monitor command is currently reporting one.
+    pub fn pane_progress(&self, id: NodeId) -> Option<&PaneProgress> {
+        match &self.get(id)?.kind {
+            NodeKind::Pane { progress, .. } => progress.as_ref(),
             NodeKind::Container(_) | NodeKind::Folder { .. } => None,
         }
     }
@@ -4224,6 +4291,79 @@ mod tests {
 
         assert!(matches!(
             tree.set_last_prompt(editor, Some("nope".to_string())),
+            Err(TreeError::NotATerminal(id)) if id == editor
+        ));
+    }
+
+    #[test]
+    fn set_pane_progress_round_trips_clamps_and_rejects_non_terminal_panes() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+
+        assert_eq!(tree.pane_progress(terminal), None);
+        tree.set_pane_progress(
+            terminal,
+            Some(PaneProgress {
+                percent: 42.0,
+                message: "frame 1200/3000".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            tree.pane_progress(terminal),
+            Some(&PaneProgress {
+                percent: 42.0,
+                message: "frame 1200/3000".to_string()
+            })
+        );
+
+        tree.set_pane_progress(
+            terminal,
+            Some(PaneProgress {
+                percent: 250.0,
+                message: "over budget".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 100.0);
+
+        tree.set_pane_progress(
+            terminal,
+            Some(PaneProgress {
+                percent: -10.0,
+                message: "under budget".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 0.0);
+
+        tree.set_pane_progress(
+            terminal,
+            Some(PaneProgress {
+                percent: f32::NAN,
+                message: "nan".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 0.0);
+
+        tree.set_pane_progress(terminal, None).unwrap();
+        assert_eq!(tree.pane_progress(terminal), None);
+
+        assert!(matches!(
+            tree.set_pane_progress(
+                editor,
+                Some(PaneProgress {
+                    percent: 10.0,
+                    message: "nope".to_string()
+                })
+            ),
             Err(TreeError::NotATerminal(id)) if id == editor
         ));
     }

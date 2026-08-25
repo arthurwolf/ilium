@@ -406,6 +406,25 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        ServerEvent::PaneProgressChanged { pane_id, progress } => {
+            match app.tree.set_pane_progress(pane_id, progress) {
+                Ok(()) => {
+                    // The progress footer's reserved height tracks how many
+                    // rows the current message wraps to (see
+                    // `progress_bar::reserved_height`), same rationale as
+                    // `PaneLastPromptChanged` above.
+                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+                }
+                Err(error) => {
+                    tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
+                }
+            }
+            None
+        }
+        ServerEvent::ProgressMonitorEnabledChanged { enabled } => {
+            app.ui_settings.progress_monitor_enabled = enabled;
+            None
+        }
     }
 }
 

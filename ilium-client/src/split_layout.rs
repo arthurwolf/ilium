@@ -68,6 +68,16 @@ pub struct PaneViewport {
     /// own idea of its size never drifts from what's actually drawn above
     /// it.
     pub last_prompt_area: Option<Rect>,
+    /// The reserved progress-footer rows, at the *bottom* of `content_area`
+    /// -- the opposite end from `last_prompt_area`, which sits at the top
+    /// (see `crate::progress_bar`'s module doc for the placement rationale).
+    /// `None` unless `App::pane_viewports` decided this pane shows it. Sized
+    /// dynamically by `progress_bar::reserved_height`, same "only as many
+    /// rows as the content actually needs" discipline as `last_prompt_area`,
+    /// and the same `App::resize_displayed_panes` obligation applies to
+    /// every caller that changes it -- see `render_cache::apply`'s
+    /// `PaneProgressChanged` arm.
+    pub progress_area: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -85,6 +95,7 @@ impl PaneViewport {
             slot_index,
             toolbar_area: None,
             last_prompt_area: None,
+            progress_area: None,
         }
     }
 
@@ -141,6 +152,35 @@ impl PaneViewport {
         Self {
             content_area,
             last_prompt_area: Some(last_prompt_area),
+            ..self
+        }
+    }
+
+    /// Reserves `rows` at the *bottom* of `content_area` for the progress
+    /// footer -- see [`Self::progress_area`]'s doc comment for why this is
+    /// the opposite end from [`Self::with_last_prompt_reserved`]. A no-op on
+    /// an already-empty content area or a zero-row request, for the same
+    /// underflow-safety reason as that method.
+    pub fn with_progress_reserved(self, rows: u16) -> Self {
+        if self.content_area.height == 0 || rows == 0 {
+            return self;
+        }
+        let rows = rows.min(self.content_area.height);
+        let progress_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y + self.content_area.height - rows,
+            self.content_area.width,
+            rows,
+        );
+        let content_area = Rect::new(
+            self.content_area.x,
+            self.content_area.y,
+            self.content_area.width,
+            self.content_area.height - rows,
+        );
+        Self {
+            content_area,
+            progress_area: Some(progress_area),
             ..self
         }
     }

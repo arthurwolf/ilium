@@ -994,12 +994,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("lag-repair.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(1);

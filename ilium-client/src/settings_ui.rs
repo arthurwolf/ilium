@@ -2434,6 +2434,8 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
         AppearanceRow::LastPrompt => "Last prompt banner",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
+        AppearanceRow::ProgressMonitor => "Progress monitor",
+        AppearanceRow::ProgressMonitorMaxLines => "Progress footer lines",
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
         AppearanceRow::LockClosedEnabled => "Lock-closed items",
     }
@@ -2493,6 +2495,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::LastPromptMaxLines => {
             "Maximum rows the last-prompt banner can grow to -- it only reserves as many as the prompt actually needs (wrapping long lines to fit), up to this ceiling. A prompt that still doesn't fit is truncated in the middle, keeping its first and last lines."
+        }
+        AppearanceRow::ProgressMonitor => {
+            "Let an agent report a long-running task's progress via `ilium progress set`, shown as a percent bar and status message in a footer below the pane. Turning this off also stops the server from accepting new progress-monitor commands and cancels every one already running -- it already has equivalent shell access in the pane, so this only gates unattended, recurring execution, not a new privilege."
+        }
+        AppearanceRow::ProgressMonitorMaxLines => {
+            "Maximum message rows the progress footer can grow to, below its percent bar -- same growth/truncation behavior as the last-prompt banner's line limit."
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
@@ -2583,6 +2591,14 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             }
         }
         AppearanceRow::LastPromptMaxLines => format!("{} lines", ui.last_prompt_max_lines),
+        AppearanceRow::ProgressMonitor => {
+            if ui.progress_monitor_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
         AppearanceRow::TerminalTextSelection => {
             if ui.terminal_text_selection_enabled {
                 "On".to_string()

@@ -26,6 +26,7 @@ mod notifications;
 mod pane;
 pub mod paths;
 mod persistence;
+mod progress_monitor;
 mod prompt_queue;
 mod scheduled_input;
 mod session_id;
@@ -94,6 +95,11 @@ pub struct ServerOptions {
     pub agent_debug_menu_enabled: bool,
     /// Loopback HTTP API listener configuration loaded from `[api]`.
     pub http_api: HttpApiConfig,
+    /// Initial policy loaded from `[ui]`, for whether the server accepts
+    /// `SetPaneProgressMonitor` at all. Live clients can update it without
+    /// restarting the detached server -- see
+    /// `ClientRequest::UpdateProgressMonitorEnabled`.
+    pub progress_monitor_enabled: bool,
 }
 
 /// How long `run` waits after a `KillSession` shutdown signal before
@@ -147,12 +153,14 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         session_cwd: options.session_cwd,
         home_dir: options.home_dir,
         snapshot_path: options.snapshot_path,
+        socket_path: options.socket_path.clone(),
         detection_config: options.detection_config,
         notifications_config: options.notifications_config,
         sound_settings: options.sound_settings,
         sound_requests,
         custom_signatures: options.custom_signatures,
         agent_debug_menu_enabled: options.agent_debug_menu_enabled,
+        progress_monitor_enabled: options.progress_monitor_enabled,
     }));
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
@@ -338,6 +346,17 @@ pub(crate) async fn restore_snapshot(
     {
         let mut tree = state.tree.write().await;
         *tree = snapshot.tree;
+        // A restored progress value can never update again: the monitor loop
+        // that was reporting it lived only in the previous process's memory
+        // and is not respawned by recovery (unlike a terminal pane itself,
+        // there is no persisted command/interval to resume it from). Leaving
+        // a stale percent/message on screen forever would be more
+        // misleading than showing nothing, so every pane's progress is
+        // cleared as part of applying this snapshot.
+        let pane_ids: Vec<ilium_core::NodeId> = tree.all_ids().collect();
+        for pane_id in pane_ids {
+            let _ = tree.set_pane_progress(pane_id, None);
+        }
         // Keep the write guard held across the unconditional pane-registry
         // drain below -- see `ipc::handlers::spawn_and_register_pane_in_directory`'s
         // doc comment for why this tree-overwrite-then-sweep pair must stay
@@ -647,6 +666,7 @@ mod restore_tests {
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled: true,
             http_api: HttpApiConfig { port: 0 },
+            progress_monitor_enabled: true,
         };
         let server_task = tokio::spawn(async move {
             let result = run(options).await;
@@ -791,12 +811,14 @@ mod restore_tests {
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("orphan-test.snapshot.json"),
+            socket_path: dir.path().join("orphan-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
 
         let orphan_pane_id = {
@@ -865,12 +887,14 @@ mod restore_tests {
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("collision-test.snapshot.json"),
+            socket_path: dir.path().join("collision-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
 
         // Same shape as the plain orphan-teardown test above: one launch
@@ -967,12 +991,14 @@ mod restore_tests {
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("new-pane-race-test.snapshot.json"),
+            socket_path: dir.path().join("new-pane-race-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
 
         let pane_id = {
@@ -1040,6 +1066,7 @@ mod restore_tests {
             session_recovery: SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled: false,
             http_api: HttpApiConfig { port: 0 },
+            progress_monitor_enabled: true,
         };
         let server_task = tokio::spawn(async move {
             let result = run(options).await;
@@ -1109,6 +1136,7 @@ mod socket_tests {
             session_recovery: SessionRecoveryConfig::StartFresh,
             agent_debug_menu_enabled: false,
             http_api: HttpApiConfig { port: 0 },
+            progress_monitor_enabled: true,
         }
     }
 

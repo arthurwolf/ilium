@@ -50,12 +50,20 @@ pub struct ServerStateOptions {
     pub session_cwd: PathBuf,
     pub home_dir: PathBuf,
     pub snapshot_path: PathBuf,
+    /// This session's Unix domain socket path. Injected as
+    /// `ILIUM_SESSION_SOCKET` into every spawned terminal pane's environment
+    /// (see `crate::pane::spawn_terminal_session`) so a process running
+    /// inside a pane -- e.g. the `ilium progress set` CLI subcommand -- can
+    /// address this exact server without the caller needing to already know
+    /// the session's runtime-directory layout.
+    pub socket_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
     pub sound_settings: ilium_sound::SoundSettings,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
     pub custom_signatures: Vec<AgentSignature>,
     pub agent_debug_menu_enabled: bool,
+    pub progress_monitor_enabled: bool,
 }
 
 pub struct ServerState {
@@ -65,6 +73,7 @@ pub struct ServerState {
     /// Home containing the local built-in provider transcript stores.
     pub home_dir: PathBuf,
     pub snapshot_path: PathBuf,
+    pub socket_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
     pub sound_settings: RwLock<ilium_sound::SoundSettings>,
@@ -148,6 +157,13 @@ pub struct ServerState {
     /// letting it grow unboundedly across a long-lived session with many
     /// short-lived connections.
     pub connection_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
+    /// Live policy for whether `SetPaneProgressMonitor` is accepted at all --
+    /// see `ClientRequest::UpdateProgressMonitorEnabled`. A plain
+    /// `AtomicBool` (rather than going through `tree`/`panes`) because this
+    /// is a session-wide switch with no per-pane state of its own, checked
+    /// on every `SetPaneProgressMonitor` and updated only by its own
+    /// handler.
+    progress_monitor_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl ServerState {
@@ -164,6 +180,7 @@ impl ServerState {
             session_cwd: options.session_cwd,
             home_dir: options.home_dir,
             snapshot_path: options.snapshot_path,
+            socket_path: options.socket_path,
             detection_config: options.detection_config,
             notifications_config: options.notifications_config,
             sound_settings: RwLock::new(options.sound_settings),
@@ -189,7 +206,25 @@ impl ServerState {
             terminal_subscription_revision: std::sync::atomic::AtomicU64::new(0),
             shutdown: Notify::new(),
             connection_tasks: std::sync::Mutex::new(Vec::new()),
+            progress_monitor_enabled: std::sync::atomic::AtomicBool::new(
+                options.progress_monitor_enabled,
+            ),
         }
+    }
+
+    /// Whether `SetPaneProgressMonitor` is currently accepted.
+    pub fn is_progress_monitor_enabled(&self) -> bool {
+        self.progress_monitor_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Applies a live `UpdateProgressMonitorEnabled` toggle. `Relaxed` is
+    /// sufficient: every accepting/rejecting read of this flag
+    /// (`handle_set_pane_progress_monitor`) has no other memory it must
+    /// stay ordered with, unlike `snapshot_state`'s kill/dirty pair.
+    pub fn set_progress_monitor_enabled(&self, enabled: bool) {
+        self.progress_monitor_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Registers a spawned connection task's handle for shutdown-time
@@ -414,12 +449,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("state-test.snapshot.json"),
+            socket_path: directory.path().join("state-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         })
     }
 

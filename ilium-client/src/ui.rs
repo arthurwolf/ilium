@@ -1204,6 +1204,18 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
         }
     }
 
+    if let Some(progress_area) = viewport.progress_area {
+        if matches!(runtime, PaneRuntime::Terminal(_)) {
+            crate::progress_bar::render(
+                frame,
+                progress_area,
+                app.tree.pane_progress(viewport.pane_id),
+                app.ui_settings.progress_max_lines.into(),
+                app.ui_settings.color_scheme,
+            );
+        }
+    }
+
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
     }

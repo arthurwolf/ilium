@@ -218,6 +218,23 @@ pub async fn handle_request(
                 .await;
             false
         }
+        ClientRequest::SetPaneProgressMonitor {
+            pane_id,
+            command,
+            interval_seconds,
+        } => {
+            handle_set_pane_progress_monitor(state, pane_id, command, interval_seconds, direct_tx)
+                .await;
+            false
+        }
+        ClientRequest::ClearPaneProgressMonitor { pane_id } => {
+            handle_clear_pane_progress_monitor(state, pane_id).await;
+            false
+        }
+        ClientRequest::UpdateProgressMonitorEnabled { enabled } => {
+            handle_update_progress_monitor_enabled(state, enabled).await;
+            false
+        }
         ClientRequest::RecordNodeActivity { node_id } => {
             if let Err(error) = record_node_activity(state, node_id).await {
                 send_direct_error(direct_tx, error).await;
@@ -1444,6 +1461,110 @@ async fn handle_last_prompt_from_transcript(
     }
 }
 
+/// Starts (or replaces) `pane_id`'s server-run progress monitor -- see
+/// `crate::progress_monitor`'s module doc for the full loop contract. Any
+/// connection may send this (a bare CLI connection has the same authority as
+/// the attached TUI -- see `ipc::connection`), so the server's own live
+/// `ServerState::is_progress_monitor_enabled` setting is the only gate.
+async fn handle_set_pane_progress_monitor(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    command: String,
+    interval_seconds: u32,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    if !state.is_progress_monitor_enabled() {
+        send_direct_error(
+            direct_tx,
+            "progress monitor is disabled by server settings".to_string(),
+        )
+        .await;
+        return;
+    }
+    if command.trim().is_empty() {
+        send_direct_error(
+            direct_tx,
+            "progress monitor command must not be empty".to_string(),
+        )
+        .await;
+        return;
+    }
+    let interval = std::time::Duration::from_secs(u64::from(interval_seconds.max(1)));
+    let task = crate::progress_monitor::spawn(Arc::clone(state), pane_id, command, interval);
+    let mut panes = state.panes.write().await;
+    match panes.get_mut(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => runtime.set_progress_monitor_task(task),
+        _ => {
+            drop(panes);
+            task.abort();
+            send_direct_error(
+                direct_tx,
+                format!("pane {pane_id:?} is not a live terminal pane"),
+            )
+            .await;
+        }
+    }
+}
+
+/// Stops `pane_id`'s active progress monitor, if any, and clears its last
+/// reported progress.
+async fn handle_clear_pane_progress_monitor(state: &Arc<ServerState>, pane_id: NodeId) {
+    {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            runtime.cancel_progress_monitor();
+        }
+    }
+    let cleared = {
+        let mut tree = state.tree.write().await;
+        tree.set_pane_progress(pane_id, None).is_ok()
+    };
+    if cleared {
+        state.broadcast(ServerEvent::PaneProgressChanged {
+            pane_id,
+            progress: None,
+        });
+    }
+}
+
+/// Applies a live `UpdateProgressMonitorEnabled` toggle. Disabling stops
+/// every currently running monitor task and clears every pane's reported
+/// progress -- a `false` setting must mean "no monitor commands are
+/// executing," not merely "no new ones may start."
+async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enabled: bool) {
+    state.set_progress_monitor_enabled(enabled);
+    state.broadcast(ServerEvent::ProgressMonitorEnabledChanged { enabled });
+    if enabled {
+        return;
+    }
+
+    let mut panes = state.panes.write().await;
+    for resource in panes.values_mut() {
+        if let PaneResource::Terminal(runtime) = resource {
+            runtime.cancel_progress_monitor();
+        }
+    }
+    drop(panes);
+
+    let cleared_pane_ids: Vec<NodeId> = {
+        let mut tree = state.tree.write().await;
+        let candidate_ids: Vec<NodeId> = tree.all_ids().collect();
+        candidate_ids
+            .into_iter()
+            .filter(|pane_id| {
+                tree.pane_progress(*pane_id).is_some()
+                    && tree.set_pane_progress(*pane_id, None).is_ok()
+            })
+            .collect()
+    };
+    for pane_id in cleared_pane_ids {
+        state.broadcast(ServerEvent::PaneProgressChanged {
+            pane_id,
+            progress: None,
+        });
+    }
+}
+
 /// Records whether the attached client currently has `pane_id` as its active
 /// view and forces an immediate (debounced) recheck on every focus transition.
 /// Entering a pane also acknowledges its completed turn: the bell is an
@@ -1902,7 +2023,12 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
     let resource = match kind {
         PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
         PaneSnapshotKind::Terminal(origin) => {
-            let spawned = pane::spawn_terminal_session(&origin, cwd)?;
+            let identity = pane::PaneIdentityEnv {
+                pane_id,
+                session_name: &state.session_name,
+                socket_path: &state.socket_path,
+            };
+            let spawned = pane::spawn_terminal_session(&origin, cwd, &identity)?;
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
             let forward_task = tokio::spawn(forward_output_bytes(
@@ -3146,12 +3272,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("bookmark.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let group_id = {
             let mut tree = state.tree.write().await;
@@ -3198,12 +3326,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("lock.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let folder_id = {
             let mut tree = state.tree.write().await;
@@ -3293,12 +3423,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("focus-activity.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let (project_id, pane_id) = {
             let mut tree = state.tree.write().await;
@@ -3374,12 +3506,14 @@ mod tests {
             snapshot_path: directory
                 .path()
                 .join("hidden-terminal-activity.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let pane_id = {
             let mut tree = state.tree.write().await;
@@ -3431,12 +3565,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("terminal-activity.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let pane_id = {
             let mut tree = state.tree.write().await;
@@ -3503,6 +3639,303 @@ mod tests {
         sound_task.abort();
     }
 
+    /// Builds a session with one live `cat` terminal pane, ready for
+    /// progress-monitor requests. Returns the state, that pane's id, and the
+    /// backing `TempDir` -- callers must keep the `TempDir` binding alive for
+    /// the rest of the test (dropping it early removes the pane's cwd) and
+    /// are responsible for draining `state.panes` at the end (see
+    /// `teardown_state_panes`); the sound actor needs no cleanup since
+    /// `NoopSoundPlayer` plays nothing.
+    async fn state_with_one_terminal_pane(
+        session_name: &str,
+    ) -> (Arc<ServerState>, NodeId, tempfile::TempDir) {
+        let directory = tempfile::tempdir().expect("create progress monitor test directory");
+        let (sound_requests, _sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: session_name.to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("progress-monitor.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            tree.add_pane(project_id, "cat", PaneContentKind::Terminal)
+                .expect("project accepts a terminal")
+        };
+        spawn_and_register_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await
+        .expect("spawn progress monitor fixture pane");
+        (state, pane_id, directory)
+    }
+
+    fn teardown_state_panes(state: &Arc<ServerState>) {
+        let resources: Vec<_> = state
+            .panes
+            .try_write()
+            .expect("no concurrent pane access at test teardown")
+            .drain()
+            .collect();
+        for (resource_pane_id, resource) in resources {
+            teardown_pane_resource(resource_pane_id, resource);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_pane_progress_monitor_runs_the_command_and_broadcasts_reported_progress() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-set-and-report").await;
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+
+        assert!(
+            !handle_request(
+                &state,
+                ClientRequest::SetPaneProgressMonitor {
+                    pane_id,
+                    command: r#"printf '%s' '{"percent": 42.5, "message": "frame 10/100"}'"#
+                        .to_string(),
+                    interval_seconds: 1,
+                },
+                &direct_tx,
+            )
+            .await
+        );
+        assert!(
+            direct_rx.try_recv().is_err(),
+            "a valid request sends no error"
+        );
+
+        let progress = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match events.recv().await {
+                    Ok(ServerEvent::PaneProgressChanged {
+                        pane_id: event_pane_id,
+                        progress: Some(progress),
+                    }) if event_pane_id == pane_id => break progress,
+                    Ok(_) => {}
+                    Err(error) => panic!("progress event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("the monitor command's first tick should report progress");
+        assert_eq!(progress.percent, 42.5);
+        assert_eq!(progress.message, "frame 10/100");
+        assert_eq!(
+            state.tree.read().await.pane_progress(pane_id),
+            Some(&progress)
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn clear_pane_progress_monitor_stops_the_loop_and_clears_reported_progress() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-clear-stops-loop").await;
+        let mut events = state.events.subscribe();
+        let (direct_tx, _direct_rx) = mpsc::channel(1);
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id,
+                command: r#"printf '%s' '{"percent": 10, "message": "starting"}'"#.to_string(),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(ServerEvent::PaneProgressChanged {
+                    progress: Some(_), ..
+                }) = events.recv().await
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the monitor's first tick should land before it is cleared");
+
+        handle_request(
+            &state,
+            ClientRequest::ClearPaneProgressMonitor { pane_id },
+            &direct_tx,
+        )
+        .await;
+
+        let cleared = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(ServerEvent::PaneProgressChanged {
+                    pane_id: event_pane_id,
+                    progress: None,
+                }) = events.recv().await
+                {
+                    if event_pane_id == pane_id {
+                        break true;
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(cleared, "clearing must broadcast a None progress event");
+        assert_eq!(state.tree.read().await.pane_progress(pane_id), None);
+
+        // The loop must actually have stopped, not merely have its last
+        // report cleared -- give it several intervals' worth of time and
+        // confirm no further report arrives.
+        let resurfaced = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if let Ok(ServerEvent::PaneProgressChanged {
+                    progress: Some(_), ..
+                }) = events.recv().await
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            !resurfaced,
+            "a cleared monitor must not keep reporting afterward"
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn set_pane_progress_monitor_rejects_an_empty_command_and_a_non_terminal_pane() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-rejects-bad-requests").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id,
+                command: "   ".to_string(),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(
+            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            "an empty command must be rejected with a direct error"
+        );
+
+        let missing_pane_id = NodeId(999_999);
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id: missing_pane_id,
+                command: "true".to_string(),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(
+            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            "a nonexistent pane must be rejected with a direct error"
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn disabling_progress_monitor_setting_rejects_new_requests_and_stops_running_ones() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-disable-setting").await;
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id,
+                command: r#"printf '%s' '{"percent": 5, "message": "running"}'"#.to_string(),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(ServerEvent::PaneProgressChanged {
+                    progress: Some(_), ..
+                }) = events.recv().await
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the monitor's first tick should land before the setting is disabled");
+
+        handle_request(
+            &state,
+            ClientRequest::UpdateProgressMonitorEnabled { enabled: false },
+            &direct_tx,
+        )
+        .await;
+
+        let cleared = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match events.recv().await {
+                    Ok(ServerEvent::ProgressMonitorEnabledChanged { enabled: false }) => {}
+                    Ok(ServerEvent::PaneProgressChanged {
+                        pane_id: event_pane_id,
+                        progress: None,
+                    }) if event_pane_id == pane_id => return true,
+                    Ok(_) => {}
+                    Err(error) => panic!("progress event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            cleared,
+            "disabling the setting must clear the running monitor's progress"
+        );
+        assert!(!state.is_progress_monitor_enabled());
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id,
+                command: "true".to_string(),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(
+            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            "a new request must be rejected while the setting is disabled"
+        );
+
+        teardown_state_panes(&state);
+    }
+
     #[tokio::test]
     async fn live_recovery_emits_only_the_missing_pane_tail() {
         let directory = tempfile::tempdir().expect("create recovery test directory");
@@ -3512,12 +3945,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("pane-scoped-recovery.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let (missing_pane_id, current_pane_id) = {
             let mut tree = state.tree.write().await;
@@ -3641,12 +4076,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("protected-split.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
         }));
         let (project_id, original_group, split_view, first, second) = {
             let mut tree = state.tree.write().await;
@@ -3833,12 +4270,14 @@ mod tests {
             session_cwd: directory.path().to_path_buf(),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("revert-orphan-debug.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: true,
+            progress_monitor_enabled: true,
         }));
 
         let project_id = state

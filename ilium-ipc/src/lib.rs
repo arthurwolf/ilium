@@ -26,6 +26,23 @@ pub use protocol::{
     NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
 };
 
+/// Environment variables `ilium-server` injects into every spawned terminal
+/// pane (see `ilium-server`'s `pane::spawn_terminal_session`), so a process
+/// running inside it -- e.g. the `ilium progress set`/`ilium progress clear`
+/// CLI subcommands -- can address this exact pane on this exact server
+/// without already knowing the session's runtime-directory layout. Defined
+/// here (rather than in `ilium-server`, which the `ilium` CLI binary
+/// deliberately never links in as a library -- see that binary's own module
+/// doc) so both the injecting side and the reading side share one contract.
+pub mod pane_env {
+    /// This pane's `NodeId` (its `.0`, formatted as a plain decimal string).
+    pub const PANE_ID: &str = "ILIUM_PANE_ID";
+    /// The session name this pane belongs to, as passed to `Connection::connect`.
+    pub const SESSION_NAME: &str = "ILIUM_SESSION_NAME";
+    /// This session's Unix domain socket path.
+    pub const SESSION_SOCKET: &str = "ILIUM_SESSION_SOCKET";
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -305,6 +322,13 @@ mod tests {
                 node_id: NodeId(2),
                 locked_closed: true,
             },
+            ClientRequest::SetPaneProgressMonitor {
+                pane_id: NodeId(2),
+                command: "/tmp/render_progress.sh".to_string(),
+                interval_seconds: 1,
+            },
+            ClientRequest::ClearPaneProgressMonitor { pane_id: NodeId(2) },
+            ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
         ]
     }
 
@@ -421,6 +445,18 @@ mod tests {
                 pane_id: NodeId(2),
                 last_prompt: None,
             },
+            ServerEvent::PaneProgressChanged {
+                pane_id: NodeId(2),
+                progress: Some(ilium_core::PaneProgress {
+                    percent: 42.5,
+                    message: "frame 1200/3000, ETA 8m".to_string(),
+                }),
+            },
+            ServerEvent::PaneProgressChanged {
+                pane_id: NodeId(2),
+                progress: None,
+            },
+            ServerEvent::ProgressMonitorEnabledChanged { enabled: false },
         ]
     }
 

@@ -30,7 +30,7 @@ serde_json = "1.0.149"
 serde_norway = "0.9.42"
 sysinfo = "0.39.6"
 thiserror = "2.0.18"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs", "signal", "process"] }
 toml = "0.8.23"
 tracing = "0.1.44"
 uuid = { version = "1.23.5", features = ["v4"] }

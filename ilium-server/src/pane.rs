@@ -8,7 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ilium_core::{AgentClass, AgentProvider, BuiltinAgentProvider, SessionIdentityTransitionRule};
+use ilium_core::{
+    AgentClass, AgentProvider, BuiltinAgentProvider, NodeId, SessionIdentityTransitionRule,
+};
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -157,6 +159,12 @@ pub struct TerminalPaneRuntime {
     /// the pane so closing the pane or manually typing into it cannot leave a
     /// delayed prompt writing into a reused terminal.
     initial_prompt_task: Option<JoinHandle<()>>,
+    /// This pane's active progress-monitor loop (see
+    /// `crate::progress_monitor`), if `SetPaneProgressMonitor` started one.
+    /// Owned here so replacing it (a fresh `SetPaneProgressMonitor` call) or
+    /// closing the pane has a single, unambiguous place to cancel the
+    /// previous run -- same rationale as `initial_prompt_task`.
+    progress_monitor_task: Option<JoinHandle<()>>,
 }
 
 impl TerminalPaneRuntime {
@@ -202,6 +210,7 @@ impl TerminalPaneRuntime {
             auto_answered_interstitial_prompt_for_pid: None,
             forward_task,
             initial_prompt_task: None,
+            progress_monitor_task: None,
         }
     }
 
@@ -220,6 +229,24 @@ impl TerminalPaneRuntime {
         }
     }
 
+    /// Installs this pane's progress-monitor loop task, aborting any
+    /// previous one -- a fresh `SetPaneProgressMonitor` call always replaces
+    /// rather than stacking a second concurrent loop on the same pane.
+    pub fn set_progress_monitor_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.progress_monitor_task.replace(task) {
+            previous_task.abort();
+        }
+    }
+
+    /// Cancels this pane's active progress-monitor loop, if any. Used by
+    /// `ClearPaneProgressMonitor` and by the server's own progress-monitor
+    /// setting being disabled mid-run.
+    pub fn cancel_progress_monitor(&mut self) {
+        if let Some(task) = self.progress_monitor_task.take() {
+            task.abort();
+        }
+    }
+
     /// Cancels this pane's background forwarder task. Called when the pane
     /// is closed; does not touch `session` itself (killing the child
     /// process is the caller's separate responsibility via
@@ -228,6 +255,7 @@ impl TerminalPaneRuntime {
     pub fn abort_background_tasks(&mut self) {
         self.forward_task.abort();
         self.cancel_initial_prompt_delivery();
+        self.cancel_progress_monitor();
     }
 }
 
@@ -432,9 +460,23 @@ fn shell_command() -> (String, &'static str) {
     }
 }
 
+/// This session's identity, injected as environment variables into every
+/// spawned terminal pane so a process running inside it -- e.g. the `ilium
+/// progress set` CLI subcommand -- can address this exact pane on this exact
+/// server without the caller needing to already know the session's
+/// runtime-directory layout. No existing feature needed a pane to identify
+/// itself this way (the file-backed chatroom feature is project-scoped, not
+/// pane-scoped, and deliberately avoids the server entirely).
+pub struct PaneIdentityEnv<'a> {
+    pub pane_id: NodeId,
+    pub session_name: &'a str,
+    pub socket_path: &'a Path,
+}
+
 pub fn spawn_terminal_session(
     origin: &TerminalOrigin,
     cwd: &Path,
+    identity: &PaneIdentityEnv<'_>,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin);
@@ -444,6 +486,13 @@ pub fn spawn_terminal_session(
             .arg(command_flag)
             .arg(command_line),
     };
+    let command = command
+        .env(ilium_ipc::pane_env::PANE_ID, identity.pane_id.0.to_string())
+        .env(ilium_ipc::pane_env::SESSION_NAME, identity.session_name)
+        .env(
+            ilium_ipc::pane_env::SESSION_SOCKET,
+            identity.socket_path.to_string_lossy().into_owned(),
+        );
     Ok(SpawnedTerminalSession {
         session: PtySession::spawn(command)?,
         session_id: launch_plan.session_id,

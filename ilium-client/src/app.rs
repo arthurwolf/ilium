@@ -536,12 +536,14 @@ pub enum AppearanceRow {
     ShowToolbarLabels,
     LastPrompt,
     LastPromptMaxLines,
+    ProgressMonitor,
+    ProgressMonitorMaxLines,
     TerminalTextSelection,
     LockClosedEnabled,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 16] = [
+    const GENERAL: [AppearanceRow; 18] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -556,6 +558,8 @@ impl AppearanceRow {
         Self::ShowToolbarLabels,
         Self::LastPrompt,
         Self::LastPromptMaxLines,
+        Self::ProgressMonitor,
+        Self::ProgressMonitorMaxLines,
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
     ];
@@ -1467,6 +1471,7 @@ pub struct App {
     pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
     pending_debug_logging_enabled: Option<bool>,
     pending_agent_debug_menu_enabled: Option<bool>,
+    pending_progress_monitor_enabled: Option<bool>,
     pending_inference_test: bool,
     pending_model_refresh: Option<ilium_inference::InferenceProviderKind>,
     /// Semantic icon searches are decided by the picker state but spawned by
@@ -1807,6 +1812,7 @@ impl App {
             pending_voice_interaction_requests: Vec::new(),
             pending_debug_logging_enabled: None,
             pending_agent_debug_menu_enabled: None,
+            pending_progress_monitor_enabled: None,
             pending_inference_test: false,
             pending_model_refresh: None,
             pending_icon_semantic_search: None,
@@ -2379,7 +2385,7 @@ impl App {
                 } else {
                     viewport
                 };
-                if self.shows_last_prompt_banner(viewport.pane_id) {
+                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
                     let text = self.tree.last_prompt(viewport.pane_id).unwrap_or("");
                     let rows = crate::last_prompt_banner::reserved_height(
                         text,
@@ -2387,6 +2393,17 @@ impl App {
                         self.ui_settings.last_prompt_max_lines.into(),
                     );
                     viewport.with_last_prompt_reserved(rows)
+                } else {
+                    viewport
+                };
+                if self.shows_progress_footer(viewport.pane_id) {
+                    let progress = self.tree.pane_progress(viewport.pane_id);
+                    let rows = crate::progress_bar::reserved_height(
+                        progress,
+                        viewport.content_area.width,
+                        self.ui_settings.progress_max_lines.into(),
+                    );
+                    viewport.with_progress_reserved(rows)
                 } else {
                     viewport
                 }
@@ -2433,6 +2450,20 @@ impl App {
                 .tree
                 .last_prompt(pane_id)
                 .is_some_and(|text| !text.is_empty())
+    }
+
+    /// Whether `pane_id` currently reserves the progress footer: the user
+    /// hasn't turned the feature off and the server has an active report for
+    /// this pane. Unlike the toolbar/last-prompt banner, this is not gated
+    /// on "detected agent" -- a progress monitor can be running in any
+    /// terminal pane, agent or not (see `ilium-server`'s `progress_monitor`
+    /// module doc). Gating on `ui_settings.progress_monitor_enabled` here
+    /// too (not only server-side) means a pane whose footer was still
+    /// showing at the instant the setting was toggled off disappears
+    /// immediately rather than lingering until the server's own clearing
+    /// broadcast arrives.
+    pub fn shows_progress_footer(&self, pane_id: NodeId) -> bool {
+        self.ui_settings.progress_monitor_enabled && self.tree.pane_progress(pane_id).is_some()
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -3182,6 +3213,20 @@ impl App {
         self.pending_agent_debug_menu_enabled.take()
     }
 
+    /// Asks the async owner to push this value to the detached server -- see
+    /// `request_agent_debug_menu_reconciliation`'s doc comment for the same
+    /// coalescing rationale. Unlike that setting, this one gates a server
+    /// *execution* policy (whether agent-authored monitor commands run at
+    /// all), not just client-side history capture, but the reconciliation
+    /// plumbing is identical.
+    pub fn request_progress_monitor_reconciliation(&mut self) {
+        self.pending_progress_monitor_enabled = Some(self.ui_settings.progress_monitor_enabled);
+    }
+
+    pub fn take_pending_progress_monitor_enabled(&mut self) -> Option<bool> {
+        self.pending_progress_monitor_enabled.take()
+    }
+
     /// Toggles complete session diagnostics immediately and persists the
     /// choice. The Debug tab explains that prompts/responses may contain
     /// private project and transcript context.
@@ -3414,9 +3459,14 @@ impl App {
     fn apply_and_persist_ui_settings(&mut self, ui: UiSettings) {
         let debug_menu_changed =
             self.ui_settings.agent_debug_menu_enabled != ui.agent_debug_menu_enabled;
+        let progress_monitor_changed =
+            self.ui_settings.progress_monitor_enabled != ui.progress_monitor_enabled;
         self.apply_ui_settings(ui);
         if debug_menu_changed {
             self.request_agent_debug_menu_reconciliation();
+        }
+        if progress_monitor_changed {
+            self.request_progress_monitor_reconciliation();
         }
         if let Some(config_dir) = self.config_dir.clone() {
             if let Err(error) = crate::config::save_ui_settings(&config_dir, &self.ui_settings) {
@@ -4407,6 +4457,37 @@ impl App {
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
+    /// Switches the progress-monitor feature on or off. Unlike every other
+    /// toggle in this section, this one is not purely a client-side render
+    /// choice: turning it off also asks the server to stop accepting new
+    /// `ilium progress set` requests and to cancel every one already
+    /// running (see `ClientRequest::UpdateProgressMonitorEnabled`), since
+    /// the thing being gated is an agent-authored shell command executing
+    /// unattended on the server. Resizes displayed panes for the same
+    /// reason `settings_toggle_last_prompt` does -- the footer's
+    /// reservation disappearing/reappearing changes `content_area`.
+    pub fn settings_toggle_progress_monitor(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.progress_monitor_enabled = !ui.progress_monitor_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
+    /// Adjusts the progress footer's maximum message-row budget by one line,
+    /// clamped to the supported range -- same rationale as
+    /// `settings_adjust_last_prompt_max_lines`.
+    pub fn settings_adjust_progress_max_lines(&mut self, delta: i32) {
+        let current = self.ui_settings.progress_max_lines;
+        let lines = (i32::from(current) + delta).clamp(
+            i32::from(crate::config::MIN_PROGRESS_MAX_LINES),
+            i32::from(crate::config::MAX_PROGRESS_MAX_LINES),
+        ) as u8;
+        let mut ui = self.ui_settings.clone();
+        ui.progress_max_lines = lines;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
     /// Switches whether a left-button drag over a terminal pane's content is
     /// claimed as a local text selection (see `crate::terminal_selection`)
     /// or forwarded to the pane's PTY like every other terminal mouse event.
@@ -4667,6 +4748,10 @@ impl App {
             AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
             AppearanceRow::LastPromptMaxLines => {
                 self.settings_adjust_last_prompt_max_lines(direction)
+            }
+            AppearanceRow::ProgressMonitor => self.settings_toggle_progress_monitor(),
+            AppearanceRow::ProgressMonitorMaxLines => {
+                self.settings_adjust_progress_max_lines(direction)
             }
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
             AppearanceRow::LockClosedEnabled => self.settings_toggle_lock_closed_enabled(),

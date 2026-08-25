@@ -68,6 +68,7 @@ pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;
+pub mod progress_bar;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
@@ -699,6 +700,7 @@ async fn run_inner(
         );
         reconcile_debug_logging(&mut app);
         reconcile_agent_debug_menu(&mut app);
+        reconcile_progress_monitor_enabled(&mut app);
         let is_voice_tool_shutdown = voice_tool_outputs_request_shutdown(&voice_tool_outputs);
         if is_voice_tool_shutdown {
             // A terminating result dominates any parallel tool call that may
@@ -826,6 +828,13 @@ fn reconcile_agent_debug_menu(app: &mut App) {
         return;
     };
     app.queue_request(ilium_ipc::ClientRequest::UpdateAgentDebugMenu { enabled });
+}
+
+fn reconcile_progress_monitor_enabled(app: &mut App) {
+    let Some(enabled) = app.take_pending_progress_monitor_enabled() else {
+        return;
+    };
+    app.queue_request(ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled { enabled });
 }
 
 fn start_voice_service(

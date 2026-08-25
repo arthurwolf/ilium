@@ -351,6 +351,7 @@ impl TestServer {
             session_recovery: ilium_server::config::SessionRecoveryConfig::RestoreAutomatically,
             agent_debug_menu_enabled,
             http_api: ilium_server::config::HttpApiConfig { port: 0 },
+            progress_monitor_enabled: true,
         };
 
         // Wrapped so a server that gives up *after* binding says so. Nothing
