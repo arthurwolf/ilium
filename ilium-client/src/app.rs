@@ -266,6 +266,9 @@ pub enum Mode {
     TerminalPaneContextMenu(TerminalPaneContextMenu),
     /// The agent toolbar's Codex Sol/Terra/Luna reasoning-strength submenu.
     AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
+    /// An immutable terminal snapshot is being semantically indexed for
+    /// point-and-click clipboard extraction.
+    SmartCopy,
     /// Full right-panel semantic history for one exact agent pane.
     AgentDebugLog(AgentDebugLogViewState),
     /// Destination path prompt layered over its exact debug-log view state.
@@ -872,6 +875,11 @@ pub enum ContextMenuAction {
     SchedulePaneInput,
     QueuePrompt,
     ClearPromptQueue,
+    /// Sends the fixed status-check prompt (see `App::ASK_FOR_UPDATE_PROMPT`)
+    /// to every idle/done agent pane under the menu's target -- a single
+    /// pane, every such pane in a project, or every such pane in the whole
+    /// tree from `ROOT_ID`.
+    AskForUpdate,
     ShowSplitView,
     ToggleGroup,
     NewTerminal,
@@ -925,6 +933,7 @@ impl ContextMenuAction {
             Self::SchedulePaneInput => IconTarget::WaitingBackground,
             Self::QueuePrompt => IconTarget::Goal,
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
+            Self::AskForUpdate => IconTarget::AskForUpdate,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
             Self::ToggleGroup | Self::NewGroup => IconTarget::Group,
             Self::NewAgent(BuiltinAgentProvider::Claude) => IconTarget::Claude,
@@ -953,6 +962,7 @@ impl ContextMenuAction {
             Self::SchedulePaneInput => "Hit key(s) X time from now".to_string(),
             Self::QueuePrompt => "Queue prompt…".to_string(),
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
+            Self::AskForUpdate => "Ask for update".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
@@ -1474,6 +1484,8 @@ pub struct App {
     pending_progress_monitor_enabled: Option<bool>,
     pending_inference_test: bool,
     pending_model_refresh: Option<ilium_inference::InferenceProviderKind>,
+    pending_smart_copy_request: Option<crate::smart_copy_workers::SmartCopyWorkerRequest>,
+    smart_copy_cancel_requested: bool,
     /// Semantic icon searches are decided by the picker state but spawned by
     /// `crate::run`, which is the only layer that owns background workers.
     pending_icon_semantic_search: Option<IconSearchRequest>,
@@ -1498,11 +1510,10 @@ pub struct App {
     tree_drag_source: Option<NodeId>,
     tree_drag_in_progress: bool,
     /// The tree row and time of the last left-click accepted as the first
-    /// half of a possible double-click, used only to detect a folder
-    /// double-click (lock/unlock closed) -- see `crate::mouse`. `None` once
-    /// consumed by a completed double-click, so a third rapid click starts
-    /// a fresh pair instead of re-triggering.
-    pub(crate) last_tree_left_click: Option<(NodeId, Instant)>,
+    /// half of a possible rename double-click -- see `crate::mouse`. `None`
+    /// once consumed by a completed double-click, so a third rapid click
+    /// starts a fresh pair instead of re-triggering.
+    pub(crate) last_tree_click: Option<(NodeId, Instant)>,
     pub hovered_tree_node: Option<TreeNodeHit>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
@@ -1520,6 +1531,9 @@ pub struct App {
     /// the hover tooltip. Scoped by pane so more than one visible toolbar
     /// (a split view) can't leave a stale hover on an unrelated pane.
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
+    /// Active frozen viewport and progressively validated semantic regions.
+    pub smart_copy_session: Option<crate::smart_copy::SmartCopySession>,
+    next_smart_copy_generation: u64,
     /// A multi-write PTY keystroke sequence still being drained by
     /// `tick::on_tick`, one stage per tick past its own delay -- see
     /// `PendingStagedKeystrokes`'s doc comment for why Codex's model picker
@@ -1815,6 +1829,8 @@ impl App {
             pending_progress_monitor_enabled: None,
             pending_inference_test: false,
             pending_model_refresh: None,
+            pending_smart_copy_request: None,
+            smart_copy_cancel_requested: false,
             pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
             kilo_gateway_models: ilium_inference::kilo_gateway_fallback_models(),
@@ -1826,13 +1842,15 @@ impl App {
             is_terminal_focused: true,
             tree_drag_source: None,
             tree_drag_in_progress: false,
-            last_tree_left_click: None,
+            last_tree_click: None,
             hovered_tree_node: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
+            smart_copy_session: None,
+            next_smart_copy_generation: 1,
             pending_staged_keystrokes: None,
             terminal_selection: None,
             help_leader_pending: false,
@@ -2053,6 +2071,22 @@ impl App {
             .unwrap_or(&self.session_cwd)
             .to_path_buf();
         Some((class, session_id, project_path))
+    }
+
+    /// Resolves the paste-ready JSONL history path for one detected pane.
+    ///
+    /// The server owns session identity and the client owns clipboard access.
+    /// Verifying the file here ensures a copied path belongs to this pane's
+    /// current agent session and project.
+    fn history_file_path_for_pane(&self, pane_id: NodeId, home_dir: &Path) -> Option<PathBuf> {
+        let (agent_class, session_id, project_path) =
+            self.last_prompt_transcript_context(pane_id)?;
+        crate::agent_history_path::verified_jsonl_history_path(
+            home_dir,
+            &project_path,
+            &agent_class,
+            &session_id,
+        )
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
@@ -4539,6 +4573,7 @@ impl App {
                     "Visible terminal copied to clipboard",
                 );
             }
+            AgentToolbarAction::SmartCopy => self.start_smart_copy(pane_id),
             AgentToolbarAction::CycleEffort => {
                 let next = self
                     .agent_toolbar_effort
@@ -4570,6 +4605,123 @@ impl App {
                 self.send_staged_terminal_keystrokes(pane_id, stages);
             }
         }
+    }
+
+    fn start_smart_copy(&mut self, pane_id: NodeId) {
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+            return;
+        };
+        let snapshot = view.with_screen(crate::smart_copy::SmartCopySnapshot::capture);
+        let user_prompt = match crate::smart_copy::user_prompt(&snapshot) {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                self.status_message = Some(format!("Could not prepare Smart Copy: {error}"));
+                return;
+            }
+        };
+        let generation = self.next_smart_copy_generation;
+        self.next_smart_copy_generation = self.next_smart_copy_generation.wrapping_add(1).max(1);
+        self.smart_copy_session = Some(crate::smart_copy::SmartCopySession::new(
+            generation, pane_id, snapshot,
+        ));
+        self.pending_smart_copy_request = Some(crate::smart_copy_workers::SmartCopyWorkerRequest {
+            generation,
+            pane_id,
+            inference_settings: self.inference_settings.clone(),
+            request: ilium_inference::InferenceRequest {
+                system_prompt: crate::smart_copy::system_prompt().to_string(),
+                user_prompt,
+                max_tokens: ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+            },
+        });
+        self.smart_copy_cancel_requested = false;
+        self.terminal_selection = None;
+        self.mode = Mode::SmartCopy;
+    }
+
+    pub(crate) fn take_pending_smart_copy_request(
+        &mut self,
+    ) -> Option<crate::smart_copy_workers::SmartCopyWorkerRequest> {
+        self.pending_smart_copy_request.take()
+    }
+
+    pub(crate) fn take_smart_copy_cancel_requested(&mut self) -> bool {
+        std::mem::take(&mut self.smart_copy_cancel_requested)
+    }
+
+    pub fn exit_smart_copy(&mut self) {
+        self.smart_copy_cancel_requested = true;
+        self.pending_smart_copy_request = None;
+        self.smart_copy_session = None;
+        self.mode = Mode::Normal;
+    }
+
+    pub fn apply_smart_copy_worker_event(
+        &mut self,
+        event: crate::smart_copy_workers::SmartCopyWorkerEvent,
+    ) {
+        use crate::smart_copy::SmartCopyPhase;
+        use crate::smart_copy_workers::SmartCopyWorkerUpdate;
+
+        let Some(session) = self.smart_copy_session.as_mut() else {
+            return;
+        };
+        if session.generation != event.generation || session.pane_id != event.pane_id {
+            return;
+        }
+        match event.update {
+            SmartCopyWorkerUpdate::ResponseStarted => session.phase = SmartCopyPhase::Streaming,
+            SmartCopyWorkerUpdate::Progress {
+                received_characters,
+            } => session.received_characters = received_characters,
+            SmartCopyWorkerUpdate::JsonLine(line) => {
+                if let Err(error) = session.apply_json_line(&line) {
+                    tracing::warn!(generation = session.generation, %error, "rejected Smart Copy candidate");
+                }
+            }
+            SmartCopyWorkerUpdate::ExactOutputTokens(tokens) => {
+                session.exact_output_tokens = Some(tokens)
+            }
+            SmartCopyWorkerUpdate::Finished => session.phase = SmartCopyPhase::Complete,
+            SmartCopyWorkerUpdate::Failed(error) => session.phase = SmartCopyPhase::Failed(error),
+        }
+    }
+
+    pub fn smart_copy_set_hover(&mut self, position: Position) {
+        let Some(pane_id) = self
+            .smart_copy_session
+            .as_ref()
+            .map(|session| session.pane_id)
+        else {
+            return;
+        };
+        let Some(content_area) = self
+            .pane_viewport(pane_id)
+            .map(|viewport| viewport.content_area)
+        else {
+            return;
+        };
+        if let Some(session) = self.smart_copy_session.as_mut() {
+            session.set_hover(content_area, position);
+        }
+    }
+
+    pub fn smart_copy_cycle_overlap(&mut self, direction: i32) {
+        if let Some(session) = self.smart_copy_session.as_mut() {
+            session.cycle_overlap(direction);
+        }
+    }
+
+    pub fn smart_copy_copy_current(&mut self) {
+        let selection = self.smart_copy_session.as_ref().and_then(|session| {
+            session
+                .current_candidate()
+                .map(|candidate| (candidate.text.clone(), candidate.label.clone()))
+        });
+        let Some((text, label)) = selection else {
+            return;
+        };
+        self.copy_terminal_text_to_clipboard(text, &format!("Copied {label}"));
     }
 
     /// Writes a keystroke sequence to `pane_id`'s PTY, one stage at a time.
@@ -4915,6 +5067,31 @@ impl App {
         let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
         let mut requirements = AnimationRequirements::default();
 
+        if let Some(session) = &self.smart_copy_session {
+            use crate::smart_copy::SmartCopyPhase;
+            let is_request_active = matches!(
+                session.phase,
+                SmartCopyPhase::Connecting | SmartCopyPhase::Streaming
+            );
+            if is_request_active {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_semantic_delay,
+                    Duration::from_millis(100),
+                );
+            }
+            for candidate in &session.candidates {
+                let age = now.saturating_duration_since(candidate.arrived_at);
+                if age < crate::smart_copy::ARRIVAL_FLASH_DURATION {
+                    requirements.is_active = true;
+                    retain_minimum_delay(
+                        &mut requirements.next_semantic_delay,
+                        crate::smart_copy::ARRIVAL_FLASH_DURATION - age,
+                    );
+                }
+            }
+        }
+
         if self.is_project_name_loading
             || !self.titles_loading.is_empty()
             || self.structure_loading
@@ -4980,7 +5157,9 @@ impl App {
                             Some(tree_ui::BACKGROUND_FRAME_MS as u64)
                         }
                         AgentActivity::Done => Some(tree_ui::DONE_PULSE_MS as u64),
-                        AgentActivity::Idle | AgentActivity::WaitingApproval => None,
+                        AgentActivity::Idle
+                        | AgentActivity::WaitingApproval
+                        | AgentActivity::BackgroundTaskStillRunning => None,
                     }
                 }
                 PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
@@ -5293,11 +5472,10 @@ impl App {
 
     /// Requests the server lock or unlock a project, group, or folder
     /// row's closed state -- see `ilium_core::Tree::set_node_locked_closed`.
-    /// Both the tree panel's double-click gesture and the right-click
-    /// "Lock closed"/"Unlock" menu action call this same method, so the two
-    /// can never diverge. Unlocking always re-opens the entry (the
-    /// server-side method forces `expanded = true`), matching the
-    /// double-click gesture's documented "unlock and re-open" behavior.
+    /// The right-click "Lock closed"/"Unlock" menu is the explicit UI for
+    /// this setting; tree double-clicks are reserved for Rename. Unlocking
+    /// always re-opens the entry because the server-side method forces
+    /// `expanded = true`.
     pub(crate) fn request_set_node_locked_closed(&mut self, node_id: NodeId, locked_closed: bool) {
         self.queue_request(ClientRequest::SetNodeLockedClosed {
             node_id,
@@ -6304,7 +6482,7 @@ impl App {
                 .and_then(|url| crate::open_target::resolve_url(&url))
         });
         let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
-        let mut actions = Vec::with_capacity(6 + screen_transfer_actions.len());
+        let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
         // Preserve the existing agent-debug entry point and its first-row
         // activation contract when the user has explicitly enabled it. The
         // activation itself still verifies that this exact pane is an agent.
@@ -6316,6 +6494,13 @@ impl App {
                 currently_visible: self.shows_agent_toolbar(pane_id),
             });
         }
+        if let Some(history_path) = home_dir
+            .as_deref()
+            .and_then(|home_dir| self.history_file_path_for_pane(pane_id, home_dir))
+        {
+            actions
+                .push(TerminalContextAction::CopyHistoryFilePathToClipboard { path: history_path });
+        }
         if selection_text.is_some() {
             actions.push(TerminalContextAction::CopySelectionToClipboard);
         }
@@ -6326,6 +6511,11 @@ impl App {
             TerminalContextAction::PasteClipboard,
         ]);
         if let Some(open_target) = open_target {
+            if let Some(path) = open_target.file_path() {
+                actions.push(TerminalContextAction::OpenInEditor {
+                    path: path.to_path_buf(),
+                });
+            }
             actions.push(TerminalContextAction::OpenExternally(open_target));
         }
         actions.extend(screen_transfer_actions);
@@ -6378,6 +6568,11 @@ impl App {
                     menu.full_history,
                     "Full terminal history copied to clipboard",
                 ),
+            TerminalContextAction::CopyHistoryFilePathToClipboard { path } => self
+                .copy_terminal_text_to_clipboard(
+                    path.display().to_string(),
+                    "History file path copied to clipboard",
+                ),
             TerminalContextAction::PasteClipboard => self.paste_clipboard_to_terminal(menu.pane_id),
             TerminalContextAction::PasteScreenInto {
                 destination_pane_id,
@@ -6394,6 +6589,9 @@ impl App {
                 self.settings_toggle_agent_toolbar()
             }
             TerminalContextAction::OpenExternally(target) => self.open_target_externally(target),
+            TerminalContextAction::OpenInEditor { path } => {
+                self.open_file_in_editor_from_context(menu.pane_id, path)
+            }
         }
     }
 
@@ -6415,6 +6613,18 @@ impl App {
             Ok(()) => format!("Opening {display}"),
             Err(error) => format!("Could not open {display}: {error}"),
         });
+    }
+
+    /// Opens a context-menu file beside the originating pane instead of the
+    /// currently selected tree node, which may have changed while the menu
+    /// was open.
+    fn open_file_in_editor_from_context(&mut self, source_pane_id: NodeId, path: PathBuf) {
+        let parent_group = self
+            .tree
+            .parent_of(source_pane_id)
+            .unwrap_or_else(|| self.group_for_new_node());
+        self.request_new_editor(parent_group, path.clone());
+        self.status_message = Some(format!("Opening {} in editor", path.display()));
     }
 
     /// Builds the context-menu entries from the same separator model used by
@@ -6697,21 +6907,8 @@ impl App {
                     Err(message) => self.status_message = Some(message),
                 }
             }
-            EditorLineContextAction::OpenFileInEditor => {
-                let Some(path) = crate::editor_line_path::project_file_from_line(
-                    &source.text,
-                    &self.session_cwd,
-                ) else {
-                    self.status_message =
-                        Some("The line no longer identifies a file under this project".to_string());
-                    return;
-                };
-                let parent_group = self
-                    .tree
-                    .parent_of(source.pane_id)
-                    .unwrap_or_else(|| self.group_for_new_node());
-                self.request_new_editor(parent_group, path.clone());
-                self.status_message = Some(format!("Opening {}", path.display()));
+            EditorLineContextAction::OpenInEditor { path } => {
+                self.open_file_in_editor_from_context(source.pane_id, path)
             }
             EditorLineContextAction::OpenExternally(target) => self.open_target_externally(target),
             EditorLineContextAction::CreateAgentFromLine => {
@@ -6736,11 +6933,6 @@ impl App {
         click_column: usize,
     ) -> Vec<EditorLineContextAction> {
         let mut actions = vec![EditorLineContextAction::CopyLineToClipboard];
-        if crate::editor_line_path::project_file_from_line(&source.text, &self.session_cwd)
-            .is_some()
-        {
-            actions.push(EditorLineContextAction::OpenFileInEditor);
-        }
         if self
             .editor_contents_for_context_source(source)
             .is_some_and(|contents| {
@@ -6764,6 +6956,11 @@ impl App {
             &self.session_cwd,
             home_dir.as_deref(),
         ) {
+            if let Some(path) = target.file_path() {
+                actions.push(EditorLineContextAction::OpenInEditor {
+                    path: path.to_path_buf(),
+                });
+            }
             actions.push(EditorLineContextAction::OpenExternally(target));
         }
         actions
@@ -6787,7 +6984,7 @@ impl App {
     ) -> Result<String, String> {
         match action {
             EditorLineContextAction::CopyLineToClipboard => Ok(source.text.clone()),
-            EditorLineContextAction::OpenFileInEditor => {
+            EditorLineContextAction::OpenInEditor { .. } => {
                 Err("Open in editor does not copy text".to_string())
             }
             EditorLineContextAction::CopyEntireFileToClipboard => self
@@ -6827,7 +7024,7 @@ impl App {
             Ok(()) => {
                 let message = match action {
                     EditorLineContextAction::CopyLineToClipboard => "Line copied to clipboard",
-                    EditorLineContextAction::OpenFileInEditor => {
+                    EditorLineContextAction::OpenInEditor { .. } => {
                         unreachable!("only clipboard actions reach the clipboard adapter")
                     }
                     EditorLineContextAction::CopyChapterToClipboard => {
@@ -6924,6 +7121,9 @@ impl App {
                 ContextMenuAction::NewFolder,
             ];
             actions.extend(ContextMenuAction::new_agent_actions());
+            if !self.tree.panes_eligible_for_update(ROOT_ID).is_empty() {
+                actions.push(ContextMenuAction::AskForUpdate);
+            }
             actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
             return actions;
         }
@@ -6949,6 +7149,9 @@ impl App {
                 actions.insert(0, ContextMenuAction::AddChatroom);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 self.insert_lock_actions(&mut actions, target, 0);
+                if !self.tree.panes_eligible_for_update(target).is_empty() {
+                    actions.insert(0, ContextMenuAction::AskForUpdate);
+                }
             }
             Some(node) if node.is_group() => self.insert_lock_actions(&mut actions, target, 0),
             Some(Node {
@@ -6962,8 +7165,13 @@ impl App {
                 actions.insert(0, ContextMenuAction::FocusPane);
                 actions.insert(1, ContextMenuAction::SchedulePaneInput);
                 actions.insert(2, ContextMenuAction::QueuePrompt);
+                let mut insert_at = 3;
                 if self.tree.prompt_queue_len(target).unwrap_or(0) > 0 {
-                    actions.insert(3, ContextMenuAction::ClearPromptQueue);
+                    actions.insert(insert_at, ContextMenuAction::ClearPromptQueue);
+                    insert_at += 1;
+                }
+                if self.tree.is_agent_pane_idle_for_update(target) {
+                    actions.insert(insert_at, ContextMenuAction::AskForUpdate);
                 }
             }
             Some(Node {
@@ -7030,6 +7238,7 @@ impl App {
                 self.queue_request(ClientRequest::ClearPromptQueue { pane_id: target });
                 self.status_message = Some("Prompt queue cleared".to_string());
             }
+            ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
@@ -7079,6 +7288,35 @@ impl App {
             }
             ContextMenuAction::Settings => self.action_open_settings(),
         }
+    }
+
+    /// Fixed status-check prompt sent by the "ask for update" tree action.
+    const ASK_FOR_UPDATE_PROMPT: &'static str = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+
+    /// Sends `ASK_FOR_UPDATE_PROMPT` followed by Enter to every eligible pane
+    /// under `target` -- see `Tree::panes_eligible_for_update`. `target` may be a
+    /// single pane, a project/group (every eligible pane inside it), or
+    /// `ROOT_ID` (every eligible pane in the whole tree).
+    pub fn action_ask_for_update(&mut self, target: NodeId) {
+        let pane_ids = self.tree.panes_eligible_for_update(target);
+        if pane_ids.is_empty() {
+            self.status_message = Some("No idle agent to ask for an update".to_string());
+            return;
+        }
+        let bytes = format!("{}\r", Self::ASK_FOR_UPDATE_PROMPT).into_bytes();
+        let pane_count = pane_ids.len();
+        for pane_id in pane_ids {
+            self.send_terminal_bytes(
+                pane_id,
+                bytes.clone(),
+                Some(PromptSubmissionSource::AskForUpdate),
+            );
+        }
+        self.status_message = Some(if pane_count == 1 {
+            "Asked for an update".to_string()
+        } else {
+            format!("Asked {pane_count} agents for an update")
+        });
     }
 
     /// Validates the complete form before queueing one atomic request. An
@@ -10598,6 +10836,109 @@ mod tests {
     }
 
     #[test]
+    fn ask_for_update_menu_entry_only_appears_where_an_eligible_pane_exists() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-menu"))
+            .unwrap();
+        let idle_pane = app
+            .tree
+            .add_pane(project, "agent", PaneContentKind::Terminal)
+            .unwrap();
+
+        // No pane is idle/done yet: the entry is offered nowhere.
+        app.tree
+            .set_pane_status(
+                idle_pane,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        for target in [ROOT_ID, project, idle_pane] {
+            assert!(!app
+                .context_actions_for(target)
+                .contains(&ContextMenuAction::AskForUpdate));
+        }
+
+        // Once idle, the entry appears for the pane itself, its project, and
+        // the whole-tree root -- but never for an unrelated empty group.
+        app.tree
+            .set_pane_status(
+                idle_pane,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            )
+            .unwrap();
+        let unrelated_group = app.tree.add_group(ROOT_ID, "empty").unwrap();
+        for target in [ROOT_ID, project, idle_pane] {
+            assert!(app
+                .context_actions_for(target)
+                .contains(&ContextMenuAction::AskForUpdate));
+        }
+        assert!(!app
+            .context_actions_for(unrelated_group)
+            .contains(&ContextMenuAction::AskForUpdate));
+    }
+
+    #[test]
+    fn ask_for_update_sends_the_fixed_prompt_to_every_idle_agent_pane_only() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-send"))
+            .unwrap();
+        let idle_pane = app
+            .tree
+            .add_pane(project, "idle-agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                idle_pane,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            )
+            .unwrap();
+        let done_pane = app
+            .tree
+            .add_pane(project, "done-agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                done_pane,
+                PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done),
+            )
+            .unwrap();
+        let working_pane = app
+            .tree
+            .add_pane(project, "working-agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                working_pane,
+                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            )
+            .unwrap();
+        // A plain shell is never a candidate, even when technically idle.
+        app.tree
+            .add_pane(project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        app.execute_context_action(ContextMenuAction::AskForUpdate, project);
+
+        let expected_bytes = format!("{}\r", App::ASK_FOR_UPDATE_PROMPT).into_bytes();
+        let requests = app.take_outbound_requests();
+        assert_eq!(requests.len(), 2, "only the idle and done panes are asked");
+        for (pane_id, request) in [idle_pane, done_pane].into_iter().zip(requests) {
+            assert_eq!(
+                request,
+                ClientRequest::KeyInput {
+                    pane_id,
+                    bytes: expected_bytes.clone(),
+                    submission: Some(PromptSubmissionSource::AskForUpdate),
+                }
+            );
+        }
+    }
+
+    #[test]
     fn manual_move_and_reparent_restore_and_persist_manual_tree_order() {
         let config_dir = std::env::temp_dir()
             .join("ilium-app-tree-order-tests")
@@ -12259,6 +12600,55 @@ mod tests {
     }
 
     #[test]
+    fn resolved_codex_agent_history_path_is_ready_for_the_context_menu_clipboard_action() {
+        let home = tempfile::tempdir().unwrap();
+        let project_path = home.path().join("project");
+        let session_id = "44444444-4444-4444-8444-444444444444";
+        let transcript_directory = home.path().join(".codex/sessions/2026/09/05");
+        let transcript_path =
+            transcript_directory.join(format!("rollout-2026-09-05T12-00-00-{session_id}.jsonl"));
+        std::fs::create_dir_all(&project_path).unwrap();
+        std::fs::create_dir_all(&transcript_directory).unwrap();
+        std::fs::write(
+            &transcript_path,
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {"id": session_id, "cwd": project_path}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut app = App::new("test-session".to_string(), project_path);
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, session_id.to_string());
+
+        let history_path = app
+            .history_file_path_for_pane(pane_id, home.path())
+            .expect("the detected Codex session should expose its verified JSONL path");
+        let action = TerminalContextAction::CopyHistoryFilePathToClipboard { path: history_path };
+
+        assert_eq!(action.label(), "Copy path to history file");
+        assert_eq!(
+            action,
+            TerminalContextAction::CopyHistoryFilePathToClipboard {
+                path: transcript_path
+            }
+        );
+    }
+
+    #[test]
     fn left_drag_over_terminal_content_creates_a_local_selection_instead_of_forwarding() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
@@ -12431,7 +12821,8 @@ mod tests {
         };
 
         app.handle_pane_mouse(right_click, position);
-        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
             panic!("right click should open the terminal menu");
         };
         assert!(!menu
@@ -12445,7 +12836,8 @@ mod tests {
             cursor: crate::terminal_selection::SelectionPoint::new(0, 4),
         });
         app.handle_pane_mouse(right_click, position);
-        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
             panic!("right click should open the terminal menu");
         };
         assert_eq!(
@@ -12522,6 +12914,55 @@ mod tests {
                 submission: None,
             }]
         );
+    }
+
+    #[test]
+    fn smart_copy_freezes_the_visible_screen_and_accepts_the_first_streamed_record() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"curl https://example.test/api\r\n");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::SmartCopy);
+
+        assert!(matches!(app.mode, Mode::SmartCopy));
+        let request = app
+            .take_pending_smart_copy_request()
+            .expect("toolbar action should queue inference");
+        assert_eq!(
+            request.request.max_tokens,
+            ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
+        );
+        assert!(request
+            .request
+            .user_prompt
+            .contains("https://example.test/api"));
+
+        let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) else {
+            panic!("terminal pane should remain available");
+        };
+        view.feed(b"live output changed after capture\r\n");
+        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+            generation: request.generation,
+            pane_id,
+            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
+                r#"{"label":"command","kind":"command","parts":[{"lines":[1]}]}"#.to_string(),
+            ),
+        });
+
+        let session = app
+            .smart_copy_session
+            .as_ref()
+            .expect("selection session should remain active");
+        assert_eq!(session.candidates.len(), 1);
+        assert_eq!(session.candidates[0].text, "curl https://example.test/api");
+        assert!(!session.candidates[0].text.contains("live output changed"));
     }
 
     fn codex_pane(app: &mut App) -> NodeId {
@@ -12805,7 +13246,7 @@ mod tests {
     }
 
     #[test]
-    fn right_click_on_an_existing_file_offers_open_externally() {
+    fn right_click_on_an_existing_file_offers_editor_and_external_open_actions() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
         let project = tempfile::tempdir().unwrap();
@@ -12844,16 +13285,44 @@ mod tests {
             position,
         );
 
-        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
             panic!("right click should open the terminal menu");
         };
         assert!(
+            menu.actions.contains(&TerminalContextAction::OpenInEditor {
+                path: resolved_path.clone()
+            }),
+            "menu should offer to open the existing file in an ilium editor: {:?}",
+            menu.actions
+        );
+        assert!(
             menu.actions
                 .contains(&TerminalContextAction::OpenExternally(
-                    crate::open_target::OpenTarget::File(resolved_path)
+                    crate::open_target::OpenTarget::File(resolved_path.clone())
                 )),
             "menu should offer to open the existing file the click resolved to: {:?}",
             menu.actions
+        );
+        app.execute_terminal_context_action(
+            TerminalContextAction::OpenInEditor {
+                path: resolved_path.clone(),
+            },
+            menu,
+        );
+        assert_eq!(
+            app.take_outbound_requests()
+                .into_iter()
+                .find(|request| matches!(request, ClientRequest::NewPane { .. })),
+            Some(ClientRequest::NewPane {
+                parent_group: group,
+                kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+            })
+        );
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some(format!("Opening {} in editor", resolved_path.display()).as_str())
         );
     }
 
@@ -13353,9 +13822,11 @@ mod tests {
             menu.actions,
             vec![
                 EditorLineContextAction::CopyLineToClipboard,
-                EditorLineContextAction::OpenFileInEditor,
                 EditorLineContextAction::CopyEntireFileToClipboard,
                 EditorLineContextAction::CreateAgentFromLine,
+                EditorLineContextAction::OpenInEditor {
+                    path: target_path.clone(),
+                },
                 EditorLineContextAction::OpenExternally(crate::open_target::OpenTarget::File(
                     target_path
                 )),
@@ -13450,15 +13921,22 @@ mod tests {
             app.editor_line_context_actions(&source, 5),
             vec![
                 EditorLineContextAction::CopyLineToClipboard,
-                EditorLineContextAction::OpenFileInEditor,
                 EditorLineContextAction::CopyEntireFileToClipboard,
                 EditorLineContextAction::CreateAgentFromLine,
+                EditorLineContextAction::OpenInEditor {
+                    path: target_path.clone(),
+                },
                 EditorLineContextAction::OpenExternally(crate::open_target::OpenTarget::File(
                     target_path.clone()
                 )),
             ]
         );
-        app.execute_editor_line_context_action(EditorLineContextAction::OpenFileInEditor, source);
+        app.execute_editor_line_context_action(
+            EditorLineContextAction::OpenInEditor {
+                path: target_path.clone(),
+            },
+            source,
+        );
 
         assert_eq!(
             app.take_outbound_requests(),
@@ -13468,7 +13946,7 @@ mod tests {
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
             }]
         );
-        let status_message = format!("Opening {}", target_path.display());
+        let status_message = format!("Opening {} in editor", target_path.display());
         assert_eq!(app.status_message.as_deref(), Some(status_message.as_str()));
     }
 

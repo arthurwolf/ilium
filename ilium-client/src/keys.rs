@@ -35,6 +35,13 @@ fn is_escape(event: &Event) -> bool {
 /// Top-level per-mode dispatch, called for every non-mouse `Event` (key
 /// presses, resizes are handled by the caller before reaching here).
 pub fn handle_event(app: &mut App, event: Event) {
+    // A tree double-click is two consecutive mouse presses. Any intervening
+    // keyboard, paste, or other non-mouse event makes it a separate
+    // interaction and must cancel the pending rename pair.
+    if !matches!(event, Event::Mouse(_)) {
+        app.last_tree_click = None;
+    }
+
     if handle_voice_shortcut(app, &event) {
         return;
     }
@@ -96,6 +103,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::AgentToolbarModelSubmenu(state) => {
             handle_agent_toolbar_model_submenu_event(app, state, &event)
         }
+        Mode::SmartCopy => handle_smart_copy_event(app, &event),
         Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
         Mode::CreateSplitOrientation(state) => {
@@ -142,6 +150,23 @@ pub fn handle_event(app: &mut App, event: Event) {
             app.mode = Mode::NavigationLeaderPending;
             handle_normal_or_leader(app, event);
         }
+    }
+}
+
+fn handle_smart_copy_event(app: &mut App, event: &Event) {
+    app.mode = Mode::SmartCopy;
+    let Event::Key(key) = event else {
+        return;
+    };
+    if !is_press(key) {
+        return;
+    }
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => app.exit_smart_copy(),
+        KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => app.smart_copy_cycle_overlap(1),
+        KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => app.smart_copy_cycle_overlap(-1),
+        KeyCode::Enter => app.smart_copy_copy_current(),
+        _ => {}
     }
 }
 

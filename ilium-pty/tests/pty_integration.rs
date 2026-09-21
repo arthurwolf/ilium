@@ -95,21 +95,26 @@ mod unix_only {
 
     #[test]
     fn spawned_child_receives_only_the_emulated_terminal_identity() {
+        // The fixture interrogates exactly the variables set below, generated
+        // from the single list above rather than restated as a second
+        // hand-maintained copy. A name that existed in only one of two copies
+        // would be set on the child but never asked about, so the leak
+        // assertion at the end would pass without having tested that name at
+        // all -- the failure mode a test can never report on itself.
+        let interrogated_variables = OUTER_TERMINAL_IDENTITY_ENVIRONMENT_VARIABLES.join(" ");
+        let environment_probe_script = format!(
+            "for variable in {interrogated_variables}; do \
+                 printenv \"$variable\" >/dev/null && printf 'LEAK:%s\\n' \"$variable\"; \
+             done; \
+             printf 'TERM:%s\\nENVIRONMENT-CHECK-COMPLETE\\n' \"$TERM\""
+        );
+
         // Set every forbidden variable on the command itself rather than
         // mutating this test process's environment, which keeps the test safe
         // under Cargo's parallel test runner.
         let mut command = PtyCommand::new("sh", std::env::temp_dir(), 24, 100)
             .arg("-c")
-            .arg(
-                "for variable in TERM_PROGRAM TERM_PROGRAM_VERSION WEZTERM_EXECUTABLE \
-                 WEZTERM_EXECUTABLE_DIR WEZTERM_CONFIG_DIR WEZTERM_CONFIG_FILE WEZTERM_PANE \
-                 WEZTERM_UNIX_SOCKET WEZTERM_VERSION KITTY_WINDOW_ID KITTY_PID KITTY_LISTEN_ON \
-                 KITTY_PUBLIC_KEY TMUX TMUX_PANE TMUX_PLUGIN_MANAGER_PATH TMUX_TMPDIR ZELLIJ \
-                 ZELLIJ_SESSION_NAME ZELLIJ_VERSION ZELLIJ_PANE_ID; do \
-                     printenv \"$variable\" >/dev/null && printf 'LEAK:%s\\n' \"$variable\"; \
-                 done; \
-                 printf 'TERM:%s\\nENVIRONMENT-CHECK-COMPLETE\\n' \"$TERM\"",
-            );
+            .arg(environment_probe_script);
         for variable in OUTER_TERMINAL_IDENTITY_ENVIRONMENT_VARIABLES {
             command = command.env(*variable, "must-not-reach-child");
         }
@@ -357,7 +362,6 @@ mod unix_only {
             .expect("killing an already-exited child should be a no-op, not an error");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn reader_thread_stops_after_drop_even_when_a_descendant_still_holds_the_tty() {
         // Reproduces the scenario `impl Drop for PtySession` exists to bound.

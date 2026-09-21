@@ -138,6 +138,78 @@ impl Screen {
         self.grid().write_contents(contents);
     }
 
+    /// Returns the text contents of the entire scrollback buffer plus the
+    /// current on-screen rows, independent of the live scroll position set
+    /// by `set_scrollback`. Unlike [`contents`](Self::contents), which
+    /// windows on wherever the terminal is currently scrolled to, this
+    /// never omits history the user has scrolled away from -- useful for a
+    /// caller that wants everything the pane has ever shown rather than
+    /// only its present viewport.
+    #[must_use]
+    pub fn full_history_contents(&self) -> String {
+        let mut contents = String::new();
+        let mut wrapping = false;
+        let cols = self.size().1;
+        for row in self.grid().full_history_rows() {
+            row.write_contents(&mut contents, 0, cols, wrapping);
+            if !row.wrapped() {
+                contents.push('\n');
+            }
+            wrapping = row.wrapped();
+        }
+        while contents.ends_with('\n') {
+            contents.truncate(contents.len() - 1);
+        }
+        contents
+    }
+
+    /// Same as [`full_history_contents`](Self::full_history_contents), but
+    /// when the accumulated history holds more than `head_rows + tail_rows`
+    /// rows, only the first `head_rows` and last `tail_rows` are read and
+    /// stitched together around a placeholder line naming how many were
+    /// skipped -- the rest are never visited at all. A caller that only
+    /// ever keeps a small head/tail slice of the result (for example after
+    /// a further character-level clip) gains nothing from a full read: on
+    /// a long-lived pane the history can run to hundreds of MiB
+    /// (`scrollback_len`), and building that whole string happens while
+    /// holding the same lock a concurrent PTY reader thread needs to make
+    /// progress.
+    #[must_use]
+    pub fn full_history_contents_capped(&self, head_rows: usize, tail_rows: usize) -> String {
+        let total_rows = self.grid().full_history_row_count();
+        let cap = head_rows.saturating_add(tail_rows);
+        if total_rows <= cap {
+            return self.full_history_contents();
+        }
+
+        let cols = self.size().1;
+        let mut contents = String::new();
+        let mut wrapping = false;
+        for row in self.grid().full_history_rows().take(head_rows) {
+            row.write_contents(&mut contents, 0, cols, wrapping);
+            if !row.wrapped() {
+                contents.push('\n');
+            }
+            wrapping = row.wrapped();
+        }
+
+        let omitted = total_rows - head_rows - tail_rows;
+        contents.push_str(&format!("\n... [{omitted} rows omitted] ...\n"));
+
+        wrapping = false;
+        for row in self.grid().full_history_rows().skip(total_rows - tail_rows) {
+            row.write_contents(&mut contents, 0, cols, wrapping);
+            if !row.wrapped() {
+                contents.push('\n');
+            }
+            wrapping = row.wrapped();
+        }
+        while contents.ends_with('\n') {
+            contents.truncate(contents.len() - 1);
+        }
+        contents
+    }
+
     /// Returns the text contents of the terminal by row, restricted to the
     /// given subset of columns.
     ///
@@ -1351,5 +1423,84 @@ fn u16_to_u8(i: u16) -> Option<u8> {
     } else {
         // safe because we just ensured that the value fits in a u8
         Some(i.try_into().unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn full_history_contents_survives_scrolling_the_earliest_line_off_screen() {
+        let mut parser = crate::Parser::new(2, 20, 100);
+        for line in 0..5 {
+            parser.process(format!("line {line}\r\n").as_bytes());
+        }
+        let screen = parser.screen();
+
+        // The 2-row viewport only shows the tail -- the earliest lines have
+        // scrolled out of `contents()`.
+        assert!(!screen.contents().contains("line 0"));
+
+        // `full_history_contents` must still see everything, regardless of
+        // the live scroll position.
+        let history = screen.full_history_contents();
+        assert!(history.contains("line 0"));
+        assert!(history.contains("line 4"));
+        assert!(
+            history.find("line 0").unwrap() < history.find("line 4").unwrap(),
+            "history must stay in chronological order"
+        );
+    }
+
+    #[test]
+    fn full_history_contents_is_unaffected_by_the_live_scroll_position() {
+        let mut parser = crate::Parser::new(2, 20, 100);
+        for line in 0..5 {
+            parser.process(format!("line {line}\r\n").as_bytes());
+        }
+        parser.screen_mut().set_scrollback(3);
+
+        let history = parser.screen().full_history_contents();
+        assert!(history.contains("line 0"));
+        assert!(history.contains("line 4"));
+    }
+
+    #[test]
+    fn capped_history_contents_matches_full_when_under_the_cap() {
+        let mut parser = crate::Parser::new(2, 20, 100);
+        for line in 0..5 {
+            parser.process(format!("line {line}\r\n").as_bytes());
+        }
+        let screen = parser.screen();
+
+        assert_eq!(
+            screen.full_history_contents_capped(10, 10),
+            screen.full_history_contents(),
+        );
+    }
+
+    #[test]
+    fn capped_history_contents_keeps_only_head_and_tail_when_over_the_cap() {
+        let mut parser = crate::Parser::new(2, 20, 100);
+        for line in 0..20 {
+            parser.process(format!("line {line}\r\n").as_bytes());
+        }
+        let screen = parser.screen();
+
+        // tail_rows is 3, not 2, because the cursor sits on a fresh blank
+        // row after the last "\r\n" -- that blank row is the true last row
+        // of accumulated history, so a 2-row tail would only catch "line
+        // 19" and the blank, missing "line 18".
+        let capped = screen.full_history_contents_capped(2, 3);
+        assert!(capped.contains("line 0"));
+        assert!(capped.contains("line 1"));
+        assert!(capped.contains("line 18"));
+        assert!(capped.contains("line 19"));
+        assert!(!capped.contains("line 10"));
+        assert!(capped.contains("rows omitted"));
+        assert!(
+            capped.find("line 1").unwrap() < capped.find("rows omitted").unwrap()
+                && capped.find("rows omitted").unwrap() < capped.find("line 18").unwrap(),
+            "head, then the omitted marker, then tail, in that order"
+        );
     }
 }

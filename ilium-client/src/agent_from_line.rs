@@ -59,7 +59,11 @@ pub struct EditorSourceLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorLineContextAction {
     CopyLineToClipboard,
-    OpenFileInEditor,
+    /// Opens the exact regular-file target captured at the right-click cell
+    /// beside the originating editor pane.
+    OpenInEditor {
+        path: PathBuf,
+    },
     CopyChapterToClipboard,
     CopyEntireFileToClipboard,
     CreateAgentFromLine,
@@ -77,7 +81,7 @@ impl EditorLineContextAction {
             Self::CopyLineToClipboard
             | Self::CopyChapterToClipboard
             | Self::CopyEntireFileToClipboard
-            | Self::OpenFileInEditor => IconTarget::Editor,
+            | Self::OpenInEditor { .. } => IconTarget::Editor,
             Self::CreateAgentFromLine => IconTarget::OtherAgent,
             Self::OpenExternally(crate::open_target::OpenTarget::Directory(_)) => {
                 IconTarget::Folder
@@ -91,7 +95,7 @@ impl EditorLineContextAction {
     pub fn label(&self) -> String {
         match self {
             Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
-            Self::OpenFileInEditor => "Open in editor".to_string(),
+            Self::OpenInEditor { .. } => "Open in editor".to_string(),
             Self::CopyChapterToClipboard => "Copy chapter to clipboard".to_string(),
             Self::CopyEntireFileToClipboard => "Copy entire file to clipboard".to_string(),
             Self::CreateAgentFromLine => "Create agent from line\u{2026}".to_string(),

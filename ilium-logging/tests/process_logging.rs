@@ -66,7 +66,7 @@ fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
     let log_path = log_directory.join("log-2026-07-19_12-00-00.000.txt");
 
     ilium_logging::initialize(&log_path, false, "integration-test").expect("initialize");
-    tracing::error!(message = %expensive_field(), "diagnostic test event");
+    tracing::error!(request_body = %expensive_field(), "diagnostic test event");
     emit_repeated_diagnostic();
     assert!(!log_path.exists());
     assert_eq!(FORMATTED_FIELDS.load(Ordering::Relaxed), 0);
@@ -96,7 +96,7 @@ fn tracing_events_follow_the_live_setting_and_keep_private_permissions() {
     assert_owner_only(&log_directory, &log_path);
 
     ilium_logging::set_enabled(false).expect("disable");
-    tracing::error!(message = "disabled again", "diagnostic test event");
+    tracing::error!(response_body = "disabled again", "diagnostic test event");
     let disabled_log = std::fs::read_to_string(&log_path).expect("disabled log");
     assert!(!disabled_log.contains("disabled again"));
 

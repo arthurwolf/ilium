@@ -2,13 +2,14 @@
 //! features. Every backend implements [`InferenceProvider`], insulating the
 //! client from individual HTTP envelopes and authentication details.
 
+use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ilium_kilo_gateway::{
-    choose_random_paid_proxy, ChatMessage, CompletionRequest, GatewayError, KiloGatewayClient,
-    PaidProxy, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
+    choose_random_paid_proxy, ChatMessage, CompletionRequest, CompletionStreamEvent, GatewayError,
+    KiloGatewayClient, PaidProxy, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
     DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
     FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
 };
@@ -22,6 +23,11 @@ pub const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const MAXIMUM_PROVIDER_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
+const MAXIMUM_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Used only when the configured provider/model exposes no authoritative
+/// maximum-output capability. Requests should never silently fall back to a
+/// small convenience budget that truncates a valid structured response.
+pub const UNKNOWN_MODEL_MAX_OUTPUT_TOKENS: u32 = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -216,9 +222,7 @@ impl InferenceRequest {
         Self {
             system_prompt: "Return concise, valid JSON only.".to_string(),
             user_prompt: user_prompt.into(),
-            // Free routers may spend a large part of this allowance on
-            // invisible reasoning before emitting a tiny JSON object.
-            max_tokens: 4096,
+            max_tokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
         }
     }
 }
@@ -226,6 +230,15 @@ impl InferenceRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InferenceResponse {
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InferenceStreamEvent {
+    TextDelta(String),
+    /// Exact provider-reported output-token usage. Providers commonly emit
+    /// this only in the terminal event; callers must not infer exact token
+    /// counts from transport chunks.
+    OutputTokens(u64),
 }
 
 #[derive(Debug, Error)]
@@ -248,6 +261,18 @@ pub trait InferenceProvider: Send + Sync {
         None
     }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError>;
+    /// Streams one completion. Returning `false` from `on_event` cancels the
+    /// request by dropping its response body. Implementations must not replay
+    /// an already-observed prefix through an automatic retry.
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        let response = self.complete(request)?;
+        let _ = on_event(InferenceStreamEvent::TextDelta(response.text));
+        Ok(())
+    }
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
         Ok(Vec::new())
     }
@@ -345,6 +370,49 @@ impl InferenceProvider for DiagnosticProvider {
         result
     }
 
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        let operation_id = next_operation_id();
+        let provider = self.inner.kind();
+        let selected_model = self.inner.selected_model().unwrap_or("<not configured>");
+        let started_at = Instant::now();
+        let mut response_characters = 0usize;
+        tracing::info!(
+            operation_id,
+            ?provider,
+            selected_model,
+            max_tokens = request.max_tokens,
+            "LLM inference stream started"
+        );
+        let result = self.inner.stream(request, &mut |event| {
+            if let InferenceStreamEvent::TextDelta(text) = &event {
+                response_characters = response_characters.saturating_add(text.chars().count());
+            }
+            on_event(event)
+        });
+        match &result {
+            Ok(()) => tracing::info!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                response_characters,
+                "LLM inference stream completed"
+            ),
+            Err(error) => tracing::error!(
+                operation_id,
+                ?provider,
+                elapsed_milliseconds = started_at.elapsed().as_millis(),
+                response_characters,
+                error_kind = inference_error_kind(error),
+                "LLM inference stream failed"
+            ),
+        }
+        result
+    }
+
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
         let operation_id = next_operation_id();
         let provider = self.inner.kind();
@@ -411,6 +479,35 @@ impl InferenceProvider for KiloGatewayProvider {
             .map_err(map_gateway_error)
     }
 
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        require(
+            &self.0.model,
+            "Select a Kilo Gateway model before using inference",
+        )?;
+        let request = CompletionRequest::new(
+            &self.0.model,
+            vec![
+                ChatMessage::system(request.system_prompt.as_str()),
+                ChatMessage::user(request.user_prompt.as_str()),
+            ],
+            request.max_tokens,
+        );
+        kilo_gateway_client(&self.0)
+            .stream_text(&request, &mut |event| match event {
+                CompletionStreamEvent::TextDelta(text) => {
+                    on_event(InferenceStreamEvent::TextDelta(text))
+                }
+                CompletionStreamEvent::OutputTokens(tokens) => {
+                    on_event(InferenceStreamEvent::OutputTokens(tokens))
+                }
+            })
+            .map_err(map_gateway_error)
+    }
+
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
         let models = kilo_gateway_client(&self.0)
             .list_free_models()
@@ -471,6 +568,23 @@ impl InferenceProvider for OllamaProvider {
         )?;
         response_text(&response, &["message", "content"])
     }
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        require(
+            &self.0.model,
+            "Select an Ollama model before using inference",
+        )?;
+        post_stream(
+            &format_url(&self.0.base_url, "api/chat"),
+            &[],
+            serde_json::json!({"model":self.0.model,"stream":true,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"options":{"temperature":0.0,"num_predict":request.max_tokens}}),
+            StreamProtocol::OllamaJsonLines,
+            on_event,
+        )
+    }
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
         let response = get_json(&format_url(&self.0.base_url, "api/tags"), &[])?;
         Ok(response
@@ -509,6 +623,24 @@ fn complete_openai_compatible(
     openai_compatible_response_text(&response)
 }
 
+fn stream_openai_compatible(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    request: &InferenceRequest,
+    on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+) -> Result<(), InferenceError> {
+    require(api_key, "Enter an API key before using inference")?;
+    require(model, "Enter a model before using inference")?;
+    post_stream(
+        &format_url(base_url, "chat/completions"),
+        &[("Authorization", format!("Bearer {api_key}"))],
+        serde_json::json!({"model":model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":true,"stream_options":{"include_usage":true}}),
+        StreamProtocol::OpenAiSse,
+        on_event,
+    )
+}
+
 struct OpenAiProvider(Arc<ApiKeyProviderSettings>);
 impl InferenceProvider for OpenAiProvider {
     fn kind(&self) -> InferenceProviderKind {
@@ -523,6 +655,19 @@ impl InferenceProvider for OpenAiProvider {
             &self.0.api_key,
             &self.0.model,
             request,
+        )
+    }
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        stream_openai_compatible(
+            resolve_base_url(&self.0.base_url, DEFAULT_OPENAI_URL),
+            &self.0.api_key,
+            &self.0.model,
+            request,
+            on_event,
         )
     }
 }
@@ -540,6 +685,19 @@ impl InferenceProvider for OpenRouterProvider {
             &self.0.api_key,
             &self.0.model,
             request,
+        )
+    }
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        stream_openai_compatible(
+            DEFAULT_OPENROUTER_URL,
+            &self.0.api_key,
+            &self.0.model,
+            request,
+            on_event,
         )
     }
 }
@@ -572,6 +730,27 @@ impl InferenceProvider for AnthropicProvider {
             serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0}),
         )?;
         anthropic_response_text(&response)
+    }
+    fn stream(
+        &self,
+        request: &InferenceRequest,
+        on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+    ) -> Result<(), InferenceError> {
+        require(&self.0.api_key, "Enter an API key before using inference")?;
+        require(&self.0.model, "Enter a model before using inference")?;
+        post_stream(
+            &format_url(
+                resolve_base_url(&self.0.base_url, DEFAULT_ANTHROPIC_URL),
+                "v1/messages",
+            ),
+            &[
+                ("x-api-key", self.0.api_key.clone()),
+                ("anthropic-version", "2023-06-01".to_string()),
+            ],
+            serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0,"stream":true}),
+            StreamProtocol::AnthropicSse,
+            on_event,
+        )
     }
 }
 
@@ -698,6 +877,144 @@ fn send(
         );
         InferenceError::InvalidResponse(error.to_string())
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StreamProtocol {
+    OpenAiSse,
+    AnthropicSse,
+    OllamaJsonLines,
+}
+
+fn post_stream(
+    url: &str,
+    headers: &[(&str, String)],
+    body: serde_json::Value,
+    protocol: StreamProtocol,
+    on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
+) -> Result<(), InferenceError> {
+    let diagnostic_url = ilium_logging::redacted_url(url);
+    tracing::info!(method = "POST", url = %diagnostic_url, headers = ?redacted_headers(headers), request_characters = body.to_string().chars().count(), "HTTP stream request started");
+    tracing::debug!(method = "POST", url = %diagnostic_url, request_body = %body, "HTTP stream request payload");
+    let mut request = agent().post(url).header("Content-Type", "application/json");
+    for (name, value) in headers {
+        request = request.header(*name, value);
+    }
+    let mut response = request.send_json(&body).map_err(|error| {
+        InferenceError::Transport(error.to_string().replace(url, &diagnostic_url))
+    })?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        let message = response
+            .body_mut()
+            .with_config()
+            .limit(MAXIMUM_PROVIDER_RESPONSE_BYTES)
+            .read_to_string()
+            .map_err(|error| InferenceError::Transport(error.to_string()))?;
+        return Err(InferenceError::Http { status, message });
+    }
+
+    let mut reader = BufReader::new(response.body_mut().as_reader());
+    let mut line = String::new();
+    let mut received_bytes = 0usize;
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|error| InferenceError::Transport(error.to_string()))?;
+        if read == 0 {
+            return Ok(());
+        }
+        received_bytes = received_bytes.saturating_add(read);
+        if received_bytes > MAXIMUM_STREAM_RESPONSE_BYTES {
+            return Err(InferenceError::InvalidResponse(
+                "stream exceeded the 16 MiB response limit".to_string(),
+            ));
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let data = match protocol {
+            StreamProtocol::OllamaJsonLines => trimmed,
+            StreamProtocol::OpenAiSse | StreamProtocol::AnthropicSse => {
+                let Some(data) = trimmed.strip_prefix("data:").map(str::trim) else {
+                    continue;
+                };
+                if data == "[DONE]" {
+                    return Ok(());
+                }
+                data
+            }
+        };
+        let value: serde_json::Value = serde_json::from_str(data)
+            .map_err(|error| InferenceError::InvalidResponse(error.to_string()))?;
+        if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
+            return Err(InferenceError::InvalidResponse(format!(
+                "provider returned an error event: {error}"
+            )));
+        }
+        match protocol {
+            StreamProtocol::OpenAiSse => {
+                if let Some(tokens) = value
+                    .get("usage")
+                    .and_then(|usage| usage.get("completion_tokens"))
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    if !on_event(InferenceStreamEvent::OutputTokens(tokens)) {
+                        return Ok(());
+                    }
+                }
+                if let Some(text) = value
+                    .pointer("/choices/0/delta/content")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    if !text.is_empty()
+                        && !on_event(InferenceStreamEvent::TextDelta(text.to_string()))
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            StreamProtocol::AnthropicSse => {
+                if let Some(tokens) = value
+                    .pointer("/usage/output_tokens")
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    if !on_event(InferenceStreamEvent::OutputTokens(tokens)) {
+                        return Ok(());
+                    }
+                }
+                if let Some(text) = value
+                    .pointer("/delta/text")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    if !text.is_empty()
+                        && !on_event(InferenceStreamEvent::TextDelta(text.to_string()))
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            StreamProtocol::OllamaJsonLines => {
+                if let Some(tokens) = value.get("eval_count").and_then(serde_json::Value::as_u64) {
+                    if !on_event(InferenceStreamEvent::OutputTokens(tokens)) {
+                        return Ok(());
+                    }
+                }
+                if let Some(text) = value
+                    .pointer("/message/content")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    if !text.is_empty()
+                        && !on_event(InferenceStreamEvent::TextDelta(text.to_string()))
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Retains useful non-secret header values while making credential leakage
@@ -866,11 +1183,113 @@ mod tests {
         );
         assert_eq!(settings.kilo_gateway.model, "kilo-auto/free");
         assert_eq!(settings.openrouter.model, DEFAULT_OPENROUTER_MODEL);
-        assert_eq!(InferenceRequest::json_only("{}").max_tokens, 4096);
+        assert_eq!(
+            InferenceRequest::json_only("{}").max_tokens,
+            UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
+        );
         // Hidden power-user flag: safe/off by default, never exposed by the
         // settings UI, only reachable by hand-editing config.toml.
         assert!(!settings.kilo_gateway.paid_proxies_enabled);
         assert!(settings.kilo_gateway.paid_proxies.is_empty());
+    }
+
+    #[test]
+    fn openai_stream_emits_text_and_exact_usage() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"first\\n\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"second\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"completion_tokens\":17}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (url, request_receiver) = spawn_http_response("200 OK", body);
+        let mut events = Vec::new();
+
+        post_stream(
+            &url,
+            &[],
+            serde_json::json!({"stream": true}),
+            StreamProtocol::OpenAiSse,
+            &mut |event| {
+                events.push(event);
+                true
+            },
+        )
+        .expect("parse OpenAI stream");
+        request_receiver.recv().expect("captured request");
+
+        assert_eq!(
+            events,
+            vec![
+                InferenceStreamEvent::TextDelta("first\n".to_string()),
+                InferenceStreamEvent::TextDelta("second".to_string()),
+                InferenceStreamEvent::OutputTokens(17),
+            ]
+        );
+    }
+
+    #[test]
+    fn anthropic_stream_emits_incremental_text_and_usage() {
+        let body = concat!(
+            "event: content_block_delta\n",
+            "data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"usage\":{\"output_tokens\":9}}\n\n"
+        );
+        let (url, request_receiver) = spawn_http_response("200 OK", body);
+        let mut events = Vec::new();
+
+        post_stream(
+            &url,
+            &[],
+            serde_json::json!({"stream": true}),
+            StreamProtocol::AnthropicSse,
+            &mut |event| {
+                events.push(event);
+                true
+            },
+        )
+        .expect("parse Anthropic stream");
+        request_receiver.recv().expect("captured request");
+
+        assert_eq!(
+            events,
+            vec![
+                InferenceStreamEvent::TextDelta("hello".to_string()),
+                InferenceStreamEvent::OutputTokens(9),
+            ]
+        );
+    }
+
+    #[test]
+    fn ollama_stream_emits_text_and_final_usage() {
+        let body = concat!(
+            "{\"message\":{\"content\":\"alpha\"},\"done\":false}\n",
+            "{\"message\":{\"content\":\" beta\"},\"done\":true,\"eval_count\":6}\n"
+        );
+        let (url, request_receiver) = spawn_http_response("200 OK", body);
+        let mut events = Vec::new();
+
+        post_stream(
+            &url,
+            &[],
+            serde_json::json!({"stream": true}),
+            StreamProtocol::OllamaJsonLines,
+            &mut |event| {
+                events.push(event);
+                true
+            },
+        )
+        .expect("parse Ollama stream");
+        request_receiver.recv().expect("captured request");
+
+        assert_eq!(
+            events,
+            vec![
+                InferenceStreamEvent::TextDelta("alpha".to_string()),
+                InferenceStreamEvent::OutputTokens(6),
+                InferenceStreamEvent::TextDelta(" beta".to_string()),
+            ]
+        );
     }
 
     #[test]

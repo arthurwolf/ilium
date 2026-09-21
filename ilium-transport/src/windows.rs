@@ -66,6 +66,28 @@ impl AsyncWrite for Stream {
         }
     }
 
+    // Forwarded rather than left to the trait defaults: `stream.rs` delegates
+    // both of these straight to this type so the frame writer's single
+    // header+payload write stays one write. The default `poll_write_vectored`
+    // would quietly submit only the first slice, splitting every frame in two.
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffers: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Client(pipe) => Pin::new(pipe).poll_write_vectored(context, buffers),
+            Self::Server(pipe) => Pin::new(pipe).poll_write_vectored(context, buffers),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Client(pipe) => pipe.is_write_vectored(),
+            Self::Server(pipe) => pipe.is_write_vectored(),
+        }
+    }
+
     fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
             Self::Client(pipe) => Pin::new(pipe).poll_flush(context),
@@ -132,14 +154,19 @@ pub(crate) async fn accept(listener: &mut Listener) -> io::Result<Stream> {
         // instance. Without the reset, the caller's retry would spin forever
         // on the same wedged instance while every client is turned away with
         // `ERROR_PIPE_BUSY` -- the liveness probe's connect-and-drop makes
-        // this an everyday occurrence, not a corner case. If even the reset
-        // fails, the instance is abandoned for a freshly created one; if that
-        // also fails, the original error is still returned and the caller's
-        // non-transient path shuts the session down rather than spinning.
+        // this an everyday occurrence, not a corner case.
+        //
+        // If even the reset fails, the wedged instance is abandoned for a
+        // freshly created one. Failing to create *that* is the one outcome
+        // with no way back: the listener would be left holding an instance
+        // that can never accept again, and the transient `BrokenPipe` the
+        // connect produced would send the caller straight back into a hot
+        // retry loop on it. So the creation error is returned in its place --
+        // it is not in the transient set, so the caller shuts the session
+        // down instead of spinning.
         if listener.next_instance.disconnect().is_err() {
-            if let Ok(replacement) = ServerOptions::new().create(&listener.pipe_name) {
-                listener.next_instance = replacement;
-            }
+            let replacement = ServerOptions::new().create(&listener.pipe_name)?;
+            listener.next_instance = replacement;
         }
         return Err(connect_error);
     }

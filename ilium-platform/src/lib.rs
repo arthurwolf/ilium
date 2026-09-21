@@ -12,29 +12,35 @@
 //!   read, which the log file, the session snapshot, and the start lock all
 //!   need for the same reason.
 //! - [`file_lock`] -- one cross-process exclusive lock, used to serialize
-//!   competing first-attach processes and chatroom appends.
+//!   competing first-attach processes so two clients cannot start rival
+//!   servers for one project.
 //! - [`paths`] -- resolving a path to its real location without leaving a
-//!   Windows extended-length prefix in front of it.
+//!   Windows extended-length prefix in front of it, and locating the user-wide
+//!   configuration directory.
 //! - [`process_control`] -- stopping a server process and asking whether one
 //!   is still alive, the CLI's fallback when a graceful IPC shutdown cannot be
-//!   delivered.
+//!   delivered, plus replacing the current process in place when the client
+//!   restarts itself.
 //! - [`process_info`] -- a live process's working directory and open files,
 //!   which agent detection uses to identify a running CLI's session.
 //! - [`runtime_dir`] -- where sockets and debug logs live, kept short enough
 //!   that a Unix-domain socket path cannot overflow `sockaddr_un`.
 //! - [`detached`] -- spawning a server process that outlives its parent.
-//! - [`interruptible_reader`] (Unix only) -- blocking file-descriptor reads a
-//!   dropped owner can wake immediately via a private pipe, so background
-//!   reader threads stop without polling timers.
+//! - `interruptible_reader` (Unix only, and therefore not linked -- the module
+//!   does not exist to link to when documenting any other platform) --
+//!   blocking file-descriptor reads a dropped owner can wake immediately via a
+//!   private pipe, so background reader threads stop without polling timers.
 //! - [`thread_priority`] -- lowering one background worker thread so CPU-heavy
 //!   work never competes with keystrokes and rendering.
 //! - [`open_external`] -- handing a URL or path to the OS's own default
 //!   browser/file-manager handler.
 //!
-//! Where a platform genuinely cannot answer a question ([`process_info`] on
-//! Windows, which has no cheap unprivileged equivalent of `/proc/<pid>/fd`),
-//! the API returns "unknown" rather than an error, and callers already treat
-//! that as a normal condition instead of a failure.
+//! Where a question genuinely cannot be answered -- [`process_info`] outside
+//! Linux, macOS and Windows, where no implementation exists at all, or on any
+//! of them when the target process exits between the caller's decision to
+//! inspect it and the inspection itself -- the API returns "unknown" rather
+//! than an error, and callers already treat that as a normal condition instead
+//! of a failure.
 
 pub mod detached;
 pub mod file_lock;

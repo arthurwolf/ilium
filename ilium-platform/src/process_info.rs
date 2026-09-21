@@ -163,7 +163,10 @@ pub fn working_directory(process_id: u32) -> Option<PathBuf> {
         // separator stays on a bare drive letter.
         let text = path.to_string_lossy();
         let trimmed = text.trim_end_matches('\\');
-        let normalized = if trimmed.len() == 2 && trimmed.ends_with(':') {
+        // A path made only of separators is the other case where trimming
+        // would destroy the answer rather than normalize it, so it keeps its
+        // text too.
+        let normalized = if trimmed.is_empty() || (trimmed.len() == 2 && trimmed.ends_with(':')) {
             text.into_owned()
         } else {
             trimmed.to_string()
@@ -330,6 +333,12 @@ pub fn executable_path(process_id: u32) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf16_lossy(&buffer)))
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub fn executable_path(process_id: u32) -> Option<PathBuf> {
+    let _ = process_id;
+    None
+}
+
 /// Every path the process currently holds open.
 ///
 /// Descriptors with no filesystem path (sockets, pipes, the terminal itself)
@@ -383,12 +392,17 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
             0,
         )
     };
-    // Round the hint up to whole descriptors, and never let it reach zero: a
+    // Round the hint up to whole descriptors, and clamp it into the same range
+    // the growth loop is allowed to reach. The lower bound matters because a
     // zero-descriptor buffer would re-run the sizing form (which reports a
     // positive byte count), trip the "buffer full, grow" branch, and double
-    // zero forever.
+    // zero forever; the upper bound matters because a hint is not a promise,
+    // and an enormous or corrupt one would otherwise allocate far past the cap
+    // on the first try, before the growth branch ever gets a say.
     let mut count = if hinted > 0 {
-        (hinted as usize).div_ceil(descriptor_size).max(1)
+        (hinted as usize)
+            .div_ceil(descriptor_size)
+            .clamp(1, MAXIMUM_DESCRIPTOR_CAPACITY)
     } else {
         INITIAL_DESCRIPTOR_CAPACITY
     };
@@ -617,8 +631,10 @@ fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option
         )
     };
     // A second call returning zero, or a length that no longer fits, means the
-    // answer changed underneath us; no answer beats a truncated one.
-    if written == 0 || written as usize >= buffer.len() + 1 {
+    // answer changed underneath us; no answer beats a truncated one. Success
+    // reports the units written *excluding* the terminator, so a count that
+    // reaches the buffer's own length is already one too many.
+    if written == 0 || written as usize >= buffer.len() {
         return None;
     }
     let path = std::ffi::OsString::from_wide(&buffer[..written as usize]);
@@ -735,10 +751,17 @@ fn system_handle_table() -> Option<SystemHandleTable> {
         };
         // Trust the byte count over the stated handle count: a reply claiming
         // more entries than it delivered would make `entries()` read past the
-        // allocation.
+        // allocation. The reported count is itself clamped to the allocation,
+        // and a kernel that reports nothing falls back to the allocation, so
+        // neither an over-report nor a silent zero can be believed.
         let header_bytes = std::mem::size_of::<usize>() * 2;
         let entry_bytes = std::mem::size_of::<SystemHandleTableEntry>();
-        let deliverable = (bytes.saturating_sub(header_bytes)) / entry_bytes;
+        let filled = if written == 0 {
+            bytes
+        } else {
+            (written as usize).min(bytes)
+        };
+        let deliverable = (filled.saturating_sub(header_bytes)) / entry_bytes;
         return Some(SystemHandleTable {
             buffer,
             handle_count: handle_count.min(deliverable),
@@ -892,6 +915,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn the_current_process_executable_is_readable() {
         let expected = std::env::current_exe().expect("current exe");

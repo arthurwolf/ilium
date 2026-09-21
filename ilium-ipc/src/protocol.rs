@@ -1,7 +1,7 @@
 //! Wire types shared by `ilium-client` and `ilium-server`. Nothing in
 //! this module does I/O -- it's message shapes only, framed onto a stream
 //! by [`crate::framing`]. Tree-structural types (`NodeId`,
-//! `TreeMoveDirection`, `PaneStatus`) are re-exported from `ilium-core`
+//! `TreeMoveDirection`, `PaneStatus`) are used directly from `ilium-core`
 //! rather than redefined here, so the client and server always agree on
 //! what a "move" or a "pane status" means; this crate never invents a
 //! second copy of a domain concept ilium-core already owns.
@@ -96,6 +96,10 @@ pub enum PromptSubmissionSource {
     /// Appended last to preserve every earlier variant's bincode
     /// discriminant, matching `ClientRequest`'s own append-only convention.
     ToolbarAction,
+    /// The "ask for update" tree action: a fixed status-check prompt sent to
+    /// one or more idle/done agent panes. Appended last for the same reason
+    /// as `ToolbarAction`.
+    AskForUpdate,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here

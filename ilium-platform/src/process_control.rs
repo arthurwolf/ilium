@@ -15,11 +15,18 @@ use std::io;
 
 /// Asks the process to terminate.
 ///
-/// On Unix this is `SIGTERM`, which the server handles to shut down cleanly.
-/// Windows has no signal equivalent for a detached, console-less process, so
-/// this is `TerminateProcess` -- abrupt by necessity. That difference is
-/// acceptable precisely because this is the fallback: the graceful path is the
-/// IPC shutdown request the caller already tried.
+/// This is abrupt on every platform, and acceptably so precisely because it is
+/// the fallback: the graceful path is the IPC shutdown request the caller
+/// already tried. On Unix it is `SIGTERM`, for which the server installs no
+/// handler, so the default disposition ends it without running the shutdown
+/// cleanup `ilium_server::run` performs on its own (final snapshot flush,
+/// session endpoint removal). On Windows it is `TerminateProcess`, there being
+/// no signal equivalent for a detached, console-less process. A caller that
+/// needs the server's own cleanup to run has to reach it over IPC, not here.
+///
+/// Process id 0 is rejected as invalid input on both platforms rather than
+/// treated as "already gone", so a corrupted on-disk pid cannot be mistaken
+/// for a successfully stopped server.
 #[cfg(unix)]
 pub fn terminate(process_id: u32) -> io::Result<()> {
     // `kill(0, ...)` signals the caller's *entire process group* -- delivered
@@ -62,6 +69,16 @@ pub fn terminate(process_id: u32) -> io::Result<()> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
+    // Zero is never a pid this process tracks; it reaches here only from a
+    // corrupted on-disk ready marker. Refusing it keeps the contract identical
+    // to the Unix build, where zero would otherwise signal a whole process
+    // group -- reporting a stop nobody performed would be worse than an error.
+    if process_id == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id 0 is not a process this session can stop",
+        ));
+    }
     // Asking whether the process still exists is more reliable than reading
     // the error code from a failed open. Windows reports an exited process
     // inconsistently -- `ERROR_INVALID_PARAMETER` when the id is gone entirely,

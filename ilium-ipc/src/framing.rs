@@ -62,6 +62,13 @@ where
     /// Serializes and submits one complete frame with a single write path,
     /// flushing before returning so the frame is actually delivered even
     /// when the underlying stream buffers writes.
+    ///
+    /// Not cancel safe: dropping this future after the first partial write
+    /// leaves a half-written frame on the wire, which desynchronizes the
+    /// peer's reader for the rest of the connection. Never use it directly
+    /// as a `select!` branch -- awaiting it inside a branch *body* (which
+    /// runs after the select has already resolved) is fine, and is what
+    /// every caller does today.
     pub async fn write<T>(&mut self, value: &T) -> Result<(), IpcError>
     where
         T: Serialize,
@@ -129,6 +136,11 @@ where
     }
 
     /// Reads and decodes one frame, retaining payload capacity for the next.
+    ///
+    /// Not cancel safe: bytes already consumed from the stream are lost if
+    /// this future is dropped mid-frame, so a caller that races it in a
+    /// `select!` must abandon the stream when another branch wins rather
+    /// than calling `read` again on it.
     pub async fn read<T>(&mut self) -> Result<T, IpcError>
     where
         T: DeserializeOwned,
@@ -252,7 +264,7 @@ mod tests {
         }
         let elapsed = started_at.elapsed();
         println!(
-            "PERF ipc.frame_write median_equivalent_ns={} write_calls_per_frame={} flush_calls_per_frame={}",
+            "PERF ipc.frame_write mean_ns={} write_calls_per_frame={} flush_calls_per_frame={}",
             elapsed.as_nanos() / ITERATIONS as u128,
             writer.write_calls / ITERATIONS,
             writer.flush_calls / ITERATIONS,

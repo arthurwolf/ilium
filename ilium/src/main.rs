@@ -93,7 +93,9 @@ enum Command {
     /// pane running it. Unlike every other subcommand here, this one is
     /// meant to be run by an agent CLI (or a script it wrote) from *inside*
     /// an already-running pane, not from an arbitrary shell -- see
-    /// `pane_identity_from_env`.
+    /// `pane_identity_from_env`. See `ProgressCommand::Set` for the working-
+    /// directory caveat: the polled `command` does NOT run with the pane's
+    /// live shell cwd.
     Progress {
         #[command(subcommand)]
         command: ProgressCommand,
@@ -132,17 +134,42 @@ enum ChatCommand {
 #[derive(Subcommand, Debug)]
 enum ProgressCommand {
     /// Starts (or replaces) this pane's server-run progress monitor:
-    /// `command` runs in this pane's shell every `interval-seconds` and its
-    /// stdout must be exactly one JSON object,
-    /// `{"percent": <0-100>, "message": <string>}`. Prefer more detail in
-    /// `message` over less -- it is clipped to fit, not rejected for being
-    /// long.
+    /// `command` runs every `interval-seconds` and its stdout must be
+    /// exactly one JSON object, `{"percent": <0-100>, "message": <string>}`.
+    /// Prefer more detail in `message` over less -- it is clipped to fit,
+    /// not rejected for being long.
+    ///
+    /// WORKING DIRECTORY: `command` is spawned by the ilium SERVER process,
+    /// not by the pane's own shell -- despite running "in the pane", it does
+    /// NOT inherit the pane's live cwd (wherever an agent or user has since
+    /// `cd`'d to), your own shell's cwd, or any of the pane's exported
+    /// variables/aliases. It only inherits the server's own working
+    /// directory, which is fixed at the session's project root for the
+    /// lifetime of the server process. A relative path in `command` is
+    /// therefore silently wrong the moment the pane's actual cwd diverges
+    /// from that project root (the common failure mode: a plausible-looking
+    /// command that spawns fine, produces valid JSON, and just always
+    /// reports 0%/empty because every relative path it touches resolves
+    /// against the wrong directory). Always use absolute paths inside
+    /// `command`, or an explicit unconditional `cd /abs/path && ...` at its
+    /// start -- never rely on inherited relative-path resolution.
+    ///
+    /// PERFORMANCE: this command is spawned as a brand-new shell process on
+    /// every tick (default every 1 second, `MIN_INTERVAL` floors it at
+    /// 500ms), for as long as the pane exists. It must be cheap: prefer O(1)
+    /// or cached state reads over recursive filesystem walks, avoid
+    /// spawning further heavy subprocesses from within it, and avoid network
+    /// calls unless truly necessary. If the underlying check is inherently
+    /// expensive, raise `--interval-seconds` rather than letting an
+    /// expensive command run every second -- a stale-by-a-few-seconds
+    /// number beats a pane that is constantly forking work to answer it.
     Set {
         #[arg(long)]
         command: String,
         /// How often `command` re-runs. 1 second is the common case; ask
         /// for more only if `command` itself is heavy enough that running
-        /// it every second would be wasteful.
+        /// it every second would be wasteful. See the working-directory and
+        /// performance notes above.
         #[arg(long, default_value_t = 1)]
         interval_seconds: u32,
     },

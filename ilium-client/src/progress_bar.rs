@@ -16,6 +16,7 @@
 use ilium_core::PaneProgress;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
+use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{LineGauge, Paragraph};
 use ratatui::Frame;
@@ -75,11 +76,21 @@ pub fn render(
     // an earlier guard some other way.
     let ratio = (f64::from(progress.percent) / 100.0).clamp(0.0, 1.0);
     let label = format!("{:.0}%", progress.percent.clamp(0.0, 100.0));
+    // Distinct glyphs (solid vs. light shade) rather than same-character
+    // filled/unfilled runs distinguished only by color/`Modifier::DIM` --
+    // `DIM` renders inconsistently across terminals (often not at all), which
+    // left the unfilled run looking identical to the filled one in practice.
     let gauge = LineGauge::default()
         .ratio(ratio)
         .label(label)
-        .filled_style(Style::new().fg(theme::accent_bg()))
-        .unfilled_style(Style::new().add_modifier(Modifier::DIM));
+        .filled_symbol(symbols::shade::FULL)
+        .unfilled_symbol(symbols::shade::LIGHT)
+        .filled_style(
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )
+        .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
     frame.render_widget(gauge, gauge_area);
 
     if !progress.message.is_empty() {
@@ -133,5 +144,42 @@ mod tests {
     fn a_long_message_is_capped_at_the_gauge_plus_max_message_lines() {
         let message = "one two three four five six seven eight nine ten eleven twelve";
         assert_eq!(reserved_height(Some(&progress(50.0, message)), 4, 3), 4);
+    }
+
+    /// The filled and unfilled runs of the gauge must be told apart by glyph
+    /// (solid block vs. light shade), not merely by color/`Modifier::DIM` --
+    /// `DIM` renders inconsistently across terminals, which previously left
+    /// both runs using the same `─` character and reading as one solid,
+    /// undifferentiated line.
+    #[test]
+    fn the_gauge_row_uses_a_solid_glyph_up_to_the_ratio_and_a_light_glyph_after() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut terminal = Terminal::new(TestBackend::new(24, 1)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(&progress(50.0, "")),
+                    2,
+                    ColorScheme::Dark,
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        // "50% " occupies the first 4 columns, leaving 20 for the bar itself
+        // -- half filled, half not, at a 50% ratio.
+        let bar_symbols: String = (4..24).map(|x| buf[(x, 0)].symbol()).collect();
+        assert_eq!(
+            bar_symbols,
+            format!(
+                "{}{}",
+                symbols::shade::FULL.repeat(10),
+                symbols::shade::LIGHT.repeat(10)
+            )
+        );
+        assert_eq!(buf[(4, 0)].fg, theme::accent_bg());
+        assert_eq!(buf[(23, 0)].fg, theme::muted_accent_bg(ColorScheme::Dark));
     }
 }

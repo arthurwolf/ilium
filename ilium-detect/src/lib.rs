@@ -118,7 +118,7 @@ pub enum ActivityEvidence {
     ClaudeLiveStatus,
     CodexLiveStatus,
     BackgroundWait,
-    BackgroundShellWait,
+    BackgroundTaskWait,
     ConfirmationPrompt,
     SelectionPrompt,
     NoActiveMarker,
@@ -149,15 +149,17 @@ const WORKING_MARKER: &str = "esc to interrupt";
 ///
 /// Precedence: a "working" signal is checked first because a confirmation
 /// prompt never coexists with it in practice, but checking it first keeps
-/// the rule unambiguous either way. Next, a background-wait line (see
-/// `looks_like_background_wait_line` and `looks_like_background_shell_wait_line`)
-/// means the agent dispatched subagents/background tasks -- or a background
-/// shell command via its own bash tool -- and is waiting on them, not
-/// actively streaming foreground output. This matters because Claude Code's
-/// completed-turn summary line (e.g. "Cogitated for 3m 11s") reads as
-/// finished/idle on its own, but the same line grows a
-/// "· 1 shell still running" suffix while a background shell it started is
-/// still executing -- without this check that pane would misreport as
+/// the rule unambiguous either way. Next, a background-wait line
+/// (`looks_like_background_wait_line`) means the agent dispatched
+/// subagents/background tasks and is actively blocked mid-turn waiting on
+/// them, not streaming foreground output. Distinct from that,
+/// `looks_like_background_task_wait_line` catches Claude Code's
+/// completed-turn summary line (e.g. "Cogitated for 3m 11s") growing a
+/// "· 1 shell still running" (or "monitor", or any other noun the CLI's
+/// wording uses) suffix while something it started in the background is
+/// still executing -- the turn itself already wrapped up, so this reads as
+/// `BackgroundTaskStillRunning` rather than the actively-blocked
+/// `WaitingBackground`; without this check that pane would misreport as
 /// finished (and the server's `promote_to_done` would mark it `Done`) while
 /// real work is still in flight. Absent both, either a y/n-style
 /// confirmation box or a general multiple-choice/question prompt (see
@@ -169,38 +171,7 @@ pub fn classify_activity(screen_text: &str) -> AgentActivity {
 }
 
 pub fn classify_activity_detailed(screen_text: &str) -> ActivityClassification {
-    let (activity, evidence) = if screen_text.contains(WORKING_MARKER) {
-        (AgentActivity::Working, ActivityEvidence::InterruptMarker)
-    } else if looks_like_live_status_line(screen_text) {
-        (AgentActivity::Working, ActivityEvidence::GenericLiveStatus)
-    } else if looks_like_background_wait_line(screen_text) {
-        (
-            AgentActivity::WaitingBackground,
-            ActivityEvidence::BackgroundWait,
-        )
-    } else if looks_like_background_shell_wait_line(screen_text) {
-        (
-            AgentActivity::WaitingBackground,
-            ActivityEvidence::BackgroundShellWait,
-        )
-    } else if looks_like_confirmation_prompt(screen_text) {
-        (
-            AgentActivity::WaitingApproval,
-            ActivityEvidence::ConfirmationPrompt,
-        )
-    } else if looks_like_selection_prompt(screen_text) {
-        (
-            AgentActivity::WaitingApproval,
-            ActivityEvidence::SelectionPrompt,
-        )
-    } else {
-        (AgentActivity::Idle, ActivityEvidence::NoActiveMarker)
-    };
-    ActivityClassification {
-        activity,
-        evidence,
-        matched_line: activity_evidence_line(evidence, screen_text),
-    }
+    classify_screen_activity(None, screen_text)
 }
 
 /// Classifies activity with the detected provider's status-line vocabulary.
@@ -218,21 +189,33 @@ pub fn classify_activity_for_agent_detailed(
     class: &AgentClass,
     screen_text: &str,
 ) -> ActivityClassification {
+    classify_screen_activity(Some(class), screen_text)
+}
+
+/// The single activity-precedence chain both public entry points run.
+///
+/// `class` is `None` when no agent CLI has been identified for the pane.
+/// Everything except the live-status rule is provider-independent, so the
+/// precedence order lives here once: duplicating the chain per entry point is
+/// exactly how the generic and provider-aware paths would silently drift apart
+/// when a new marker family is added to one of them.
+fn classify_screen_activity(
+    class: Option<&AgentClass>,
+    screen_text: &str,
+) -> ActivityClassification {
     let (activity, evidence) = if screen_text.contains(WORKING_MARKER) {
         (AgentActivity::Working, ActivityEvidence::InterruptMarker)
-    } else if matches!(class, AgentClass::Claude) && looks_like_live_status_line(screen_text) {
-        (AgentActivity::Working, ActivityEvidence::ClaudeLiveStatus)
-    } else if matches!(class, AgentClass::Codex) && looks_like_codex_live_status_line(screen_text) {
-        (AgentActivity::Working, ActivityEvidence::CodexLiveStatus)
+    } else if let Some(live_status) = live_status_evidence(class, screen_text) {
+        (AgentActivity::Working, live_status)
     } else if looks_like_background_wait_line(screen_text) {
         (
             AgentActivity::WaitingBackground,
             ActivityEvidence::BackgroundWait,
         )
-    } else if looks_like_background_shell_wait_line(screen_text) {
+    } else if looks_like_background_task_wait_line(screen_text) {
         (
-            AgentActivity::WaitingBackground,
-            ActivityEvidence::BackgroundShellWait,
+            AgentActivity::BackgroundTaskStillRunning,
+            ActivityEvidence::BackgroundTaskWait,
         )
     } else if looks_like_confirmation_prompt(screen_text) {
         (
@@ -254,45 +237,55 @@ pub fn classify_activity_for_agent_detailed(
     }
 }
 
+/// Which "this agent is mid-turn" status-line rule applies, given what is
+/// known about the provider rendering the screen.
+///
+/// The generic ellipsis-plus-elapsed-time shape is the right default when no
+/// agent CLI has been identified, but it must never be applied to Codex: Codex
+/// keeps completed timing summaries (which carry both an ellipsis and an
+/// elapsed-time token) on screen, so the generic shape would turn every
+/// finished Codex pane back into `Working`. Providers with no recognized live
+/// status line fall through to the shared marker families instead of guessing.
+fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option<ActivityEvidence> {
+    match class {
+        None => {
+            looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
+        }
+        Some(AgentClass::Claude) => {
+            looks_like_live_status_line(screen_text).then_some(ActivityEvidence::ClaudeLiveStatus)
+        }
+        Some(AgentClass::Codex) => looks_like_codex_live_status_line(screen_text)
+            .then_some(ActivityEvidence::CodexLiveStatus),
+        Some(AgentClass::Antigravity | AgentClass::Other(_)) => None,
+    }
+}
+
 /// Recovers the exact short terminal-chrome line behind a positive evidence
 /// code. This intentionally runs after the cheap classifier has selected one
 /// rule, keeping the public evidence complete without making every predicate
 /// allocate while it searches.
+///
+/// Every arm reuses the very predicate the classifier ran, so the reported
+/// evidence line can never describe a different rule than the one that
+/// actually fired -- re-stating a predicate inline here is how the two copies
+/// drift apart.
 fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Option<String> {
-    let matched_line = match evidence {
-        ActivityEvidence::InterruptMarker => screen_text
-            .lines()
-            .find(|line| line.contains(WORKING_MARKER)),
-        ActivityEvidence::GenericLiveStatus | ActivityEvidence::ClaudeLiveStatus => screen_text
-            .lines()
-            .find(|line| looks_like_live_status_line(line)),
-        ActivityEvidence::CodexLiveStatus => screen_text
-            .lines()
-            .find(|line| looks_like_codex_live_status_line(line)),
-        ActivityEvidence::BackgroundWait => screen_text.lines().find(|line| {
-            let lower = line.to_ascii_lowercase();
-            lower.contains("waiting for")
-                && lower.contains("background")
-                && (lower.contains("agent") || lower.contains("task"))
-        }),
-        ActivityEvidence::BackgroundShellWait => screen_text
-            .lines()
-            .find(|line| looks_like_background_shell_wait_line(line)),
-        ActivityEvidence::ConfirmationPrompt => screen_text
-            .lines()
-            .find(|line| looks_like_confirmation_prompt(line)),
-        ActivityEvidence::SelectionPrompt => screen_text.lines().find(|line| {
-            let lower = line.to_ascii_lowercase();
-            let is_footer = (lower.contains("to select")
-                || lower.contains("to confirm")
-                || lower.contains("to choose"))
-                && lower.contains("cancel");
-            is_footer
-                || (line.trim_start().starts_with('\u{276f}') && is_numbered_option_line(line))
-        }),
-        ActivityEvidence::NoActiveMarker => None,
-    }?;
-    Some(bounded_terminal_evidence(matched_line))
+    let line_matches_evidence: fn(&str) -> bool = match evidence {
+        ActivityEvidence::InterruptMarker => is_interrupt_marker_line,
+        ActivityEvidence::GenericLiveStatus | ActivityEvidence::ClaudeLiveStatus => {
+            is_live_status_line
+        }
+        ActivityEvidence::CodexLiveStatus => is_codex_live_status_line,
+        ActivityEvidence::BackgroundWait => is_background_wait_line,
+        ActivityEvidence::BackgroundTaskWait => is_background_task_wait_line,
+        ActivityEvidence::ConfirmationPrompt => is_confirmation_prompt_line,
+        ActivityEvidence::SelectionPrompt => is_selection_prompt_line,
+        ActivityEvidence::NoActiveMarker => return None,
+    };
+    screen_text
+        .lines()
+        .find(|line| line_matches_evidence(line))
+        .map(bounded_terminal_evidence)
 }
 
 /// Keeps durable diagnostic excerpts useful and safe for terminal rendering.
@@ -517,13 +510,19 @@ pub fn goal_evidence_for_agent_detailed(
     class: &AgentClass,
     screen_text: &str,
 ) -> GoalClassification {
+    let inconclusive = GoalClassification {
+        evidence: GoalEvidence::Unknown,
+        matched_line: None,
+    };
+    // Resolved once per screen rather than once per line: a provider with no
+    // goal surface would otherwise normalize (and allocate) every visible line
+    // of every one of its panes, on every detection tick, only to conclude
+    // `Unknown` for each of them.
+    let Some(goal_evidence_of_line) = provider_goal_vocabulary(class) else {
+        return inconclusive;
+    };
     for original_line in screen_text.lines().rev() {
-        let line = normalize_goal_status_line(original_line);
-        let evidence = match class {
-            AgentClass::Codex => codex_goal_evidence(&line),
-            AgentClass::Claude => claude_goal_evidence(&line),
-            AgentClass::Antigravity | AgentClass::Other(_) => GoalEvidence::Unknown,
-        };
+        let evidence = goal_evidence_of_line(&normalize_goal_status_line(original_line));
         if evidence != GoalEvidence::Unknown {
             return GoalClassification {
                 evidence,
@@ -531,9 +530,17 @@ pub fn goal_evidence_for_agent_detailed(
             };
         }
     }
-    GoalClassification {
-        evidence: GoalEvidence::Unknown,
-        matched_line: None,
+    inconclusive
+}
+
+/// The provider-owned goal-footer vocabulary, or `None` for a provider that
+/// renders no goal status at all. Keeping this a lookup rather than a branch
+/// inside the scan loop is what lets the scan be skipped entirely.
+fn provider_goal_vocabulary(class: &AgentClass) -> Option<fn(&str) -> GoalEvidence> {
+    match class {
+        AgentClass::Codex => Some(codex_goal_evidence),
+        AgentClass::Claude => Some(claude_goal_evidence),
+        AgentClass::Antigravity | AgentClass::Other(_) => None,
     }
 }
 
@@ -611,9 +618,10 @@ fn has_elapsed_status_suffix(line: &str, marker: &str) -> bool {
                 || character.is_ascii_whitespace()
                 || matches!(character, '.' | ':' | 'd' | 'h' | 'm' | 's')
         })
-        && trailing
-            .chars()
-            .all(|character| character.is_whitespace() || !character.is_alphanumeric())
+        // Nothing but chrome may follow the closing parenthesis: whitespace is
+        // already covered by "not alphanumeric", so the rule is simply that no
+        // further word may appear after the status segment.
+        && !trailing.chars().any(char::is_alphanumeric)
 }
 
 /// Matches an exact terminal status suffix after optional shared-footer chrome.
@@ -652,38 +660,62 @@ fn has_status_boundary_before(line: &str, marker_index: usize) -> bool {
 /// equivalent status line) that renders this combination is classified the
 /// same way, per this crate's registry-over-branching convention.
 fn looks_like_background_wait_line(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
-        let lower = line.to_ascii_lowercase();
-        lower.contains("waiting for")
-            && lower.contains("background")
-            && (lower.contains("agent") || lower.contains("task"))
-    })
+    screen_text.lines().any(is_background_wait_line)
 }
 
-/// True if a line reads as Claude Code's own "N background shell(s) still
+/// The single-line rule behind [`looks_like_background_wait_line`], shared
+/// with `activity_evidence_line` so the reported evidence line is always the
+/// line the classifier itself matched.
+fn is_background_wait_line(line: &str) -> bool {
+    // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
+    let lower = line.to_ascii_lowercase();
+    lower.contains("waiting for")
+        && lower.contains("background")
+        && (lower.contains("agent") || lower.contains("task"))
+}
+
+/// The `WORKING_MARKER` rule as a per-line predicate, so evidence recovery
+/// runs the same test the classifier ran over the whole screen. The marker
+/// contains no newline, so a screen-wide `contains` match always lies inside
+/// exactly one line.
+fn is_interrupt_marker_line(line: &str) -> bool {
+    line.contains(WORKING_MARKER)
+}
+
+/// True if a line reads as Claude Code's own "N background thing(s) still
 /// executing" indicator -- e.g. `"✻ Cogitated for 3m 11s · 1 shell still
+/// running"`, or `"✻ Cooked for 3m 6s · done 7:00 PM · 1 monitor still
 /// running"`. Claude Code appends this suffix to its completed-turn summary
-/// line when a background shell command (its own `run_in_background` bash
-/// tool) is still executing after the foreground turn ended; that summary
-/// line otherwise reads as finished/idle (see `looks_like_live_status_line`'s
-/// doc comment on the same "Cogitated for Ns" shape). Without this check a
-/// pane with real work still in flight would misreport as idle, and the
-/// server's `promote_to_done` would mark it `Done` -- exactly the "shows
-/// finished in the sidebar while still running" report this exists to fix.
+/// line when something it started in the background (a shell command, a
+/// monitor, ...) is still executing after the foreground turn ended; that
+/// summary line otherwise reads as finished/idle (see
+/// `looks_like_live_status_line`'s doc comment on the same "Cogitated for
+/// Ns" shape). Without this check a pane with real work still in flight
+/// would misreport as idle, and the server's `promote_to_done` would mark
+/// it `Done` -- exactly the "shows finished in the sidebar while still
+/// running" report this exists to fix.
 ///
-/// Requires the literal phrase "still running" together with "shell"
-/// (singular or plural via substring) rather than either word alone, since
-/// each word alone appears constantly in ordinary agent prose. The
-/// combination could in principle appear in an agent's own unrelated prose
-/// (e.g. "the old shell is still running the migration"), same residual
-/// risk already accepted by `looks_like_background_wait_line` for its own
+/// Deliberately noun-agnostic (checks for a bare digit count alongside
+/// "still running", not a specific word like "shell") rather than a
+/// hardcoded keyword list: Claude Code has already been observed using more
+/// than one noun for this same shape ("shell", "monitor"), and a fixed
+/// keyword list would need a code change every time its wording drifts
+/// again. Requires the literal phrase "still running" together with a bare
+/// numeric token (e.g. "1", "3") rather than either alone, since "running"
+/// alone appears constantly in ordinary agent prose -- same residual-risk
+/// tradeoff `looks_like_background_wait_line` already accepts for its own
 /// word combination.
-fn looks_like_background_shell_wait_line(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        let lower = line.to_ascii_lowercase();
-        lower.contains("still running") && lower.contains("shell")
-    })
+fn looks_like_background_task_wait_line(screen_text: &str) -> bool {
+    screen_text.lines().any(is_background_task_wait_line)
+}
+
+/// The single-line rule behind [`looks_like_background_task_wait_line`].
+fn is_background_task_wait_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("still running")
+        && lower
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|token| !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// True if any line looks like an in-progress status line: contains an
@@ -698,13 +730,15 @@ fn looks_like_background_shell_wait_line(screen_text: &str) -> bool {
 /// `"✻ Cogitated for 10s"`), which uses past tense "for Ns" with no
 /// ellipsis, so it won't be mistaken for still-working.
 fn looks_like_live_status_line(screen_text: &str) -> bool {
-    screen_text
-        .lines()
-        .filter(|line| line.contains('…'))
-        .any(|line| {
-            line.split(|c: char| c.is_whitespace() || c == '·')
-                .any(is_elapsed_time_token)
-        })
+    screen_text.lines().any(is_live_status_line)
+}
+
+/// The single-line rule behind [`looks_like_live_status_line`].
+fn is_live_status_line(line: &str) -> bool {
+    line.contains('…')
+        && line
+            .split(|character: char| character.is_whitespace() || character == '·')
+            .any(is_elapsed_time_token)
 }
 
 /// True when Codex's visible status line explicitly names an active turn.
@@ -723,27 +757,30 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 /// catches both while still rejecting the word mid-sentence or embedded in a
 /// longer word (e.g. "regenerating").
 fn looks_like_codex_live_status_line(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
-        let lower = line.trim().to_ascii_lowercase();
-        let names_active_turn = ["thinking", "working", "generating", "planning", "running"]
-            .iter()
-            .any(|marker| {
-                // Every occurrence is checked, not just the first: prose earlier
-                // on the same line can legitimately contain the activity word
-                // without a segment boundary ("tests are running fine ·
-                // Running… (5m)"), and stopping at that first failed occurrence
-                // would misclassify a live turn as idle.
-                lower
-                    .match_indices(*marker)
-                    .any(|(marker_index, _)| has_status_boundary_before(&lower, marker_index))
-            });
-        names_active_turn
-            && (lower.contains("…") || lower.contains("..."))
-            && lower
-                .split(|character: char| character.is_whitespace() || character == '·')
-                .any(is_elapsed_time_token)
-    })
+    screen_text.lines().any(is_codex_live_status_line)
+}
+
+/// The single-line rule behind [`looks_like_codex_live_status_line`].
+fn is_codex_live_status_line(line: &str) -> bool {
+    // Use to_ascii_lowercase() for ASCII terminal output; cache once per line
+    let lower = line.trim().to_ascii_lowercase();
+    let names_active_turn = ["thinking", "working", "generating", "planning", "running"]
+        .iter()
+        .any(|marker| {
+            // Every occurrence is checked, not just the first: prose earlier
+            // on the same line can legitimately contain the activity word
+            // without a segment boundary ("tests are running fine ·
+            // Running… (5m)"), and stopping at that first failed occurrence
+            // would misclassify a live turn as idle.
+            lower
+                .match_indices(*marker)
+                .any(|(marker_index, _)| has_status_boundary_before(&lower, marker_index))
+        });
+    names_active_turn
+        && (lower.contains('…') || lower.contains("..."))
+        && lower
+            .split(|character: char| character.is_whitespace() || character == '·')
+            .any(is_elapsed_time_token)
 }
 
 /// True if `token` looks like an elapsed-time reading: one or more ASCII
@@ -770,30 +807,45 @@ fn is_elapsed_time_token(token: &str) -> bool {
 /// `looks_like_selection_prompt`, which additionally requires a selection
 /// cursor.
 fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        let trimmed = line.trim_end();
-        if !trimmed.ends_with('?') {
-            return false;
-        }
-        // Split on non-alphanumeric boundaries so "yes"/"no" are matched as whole
-        // words -- a naive substring check (" yes"/" no") false-positives on
-        // ordinary words like "yesterday" or "nothing"/"not"/"now"/"north".
-        let mut has_yes_word = false;
-        let mut has_no_word = false;
-        for word in trimmed.split(|character: char| !character.is_alphanumeric()) {
-            if word.eq_ignore_ascii_case("yes") {
-                has_yes_word = true;
-            } else if word.eq_ignore_ascii_case("no") {
-                has_no_word = true;
-            }
-        }
-        has_yes_word && has_no_word
-    })
+    screen_text.lines().any(is_confirmation_prompt_line)
 }
+
+/// The single-line rule behind [`looks_like_confirmation_prompt`].
+fn is_confirmation_prompt_line(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    if !trimmed.ends_with('?') {
+        return false;
+    }
+    // Split on non-alphanumeric boundaries so "yes"/"no" are matched as whole
+    // words -- a naive substring check (" yes"/" no") false-positives on
+    // ordinary words like "yesterday" or "nothing"/"not"/"now"/"north".
+    let mut has_yes_word = false;
+    let mut has_no_word = false;
+    for word in trimmed.split(|character: char| !character.is_alphanumeric()) {
+        if word.eq_ignore_ascii_case("yes") {
+            has_yes_word = true;
+        } else if word.eq_ignore_ascii_case("no") {
+            has_no_word = true;
+        }
+    }
+    has_yes_word && has_no_word
+}
+
+/// Every glyph an agent CLI marks its currently-selected option with.
+///
+/// `❯` (U+276F) is what Claude Code and Codex's approval dialogs render;
+/// `›` (U+203A) is what Codex's numbered-choice modals use -- the same glyph
+/// its composer draws, which is precisely why a numbered option line has to be
+/// distinguished from a composer line rather than from the cursor alone (see
+/// `screen_has_codex_composer_cursor`). Recognizing only the first glyph left a
+/// whole family of real Codex modals classified `Idle`, i.e. silently not
+/// reported as blocked on the user, whenever their footer hint was absent or
+/// scrolled away.
+const SELECTION_CURSORS: &[char] = &['\u{276f}', '\u{203a}'];
 
 /// True if the screen looks like a general multiple-choice / selection
 /// prompt -- not necessarily yes/no -- e.g. Claude Code's numbered option
-/// menus with a `❯` cursor on the currently-selected line and a footer
+/// menus with a selection cursor on the currently-selected line and a footer
 /// hint like "Enter to select · ↑/↓ to navigate · Esc to cancel". Either
 /// of two independent signals is enough:
 ///
@@ -801,8 +853,8 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
 ///   action -- that exact combination of phrasing only shows up as
 ///   interactive-prompt chrome, never in normal command output.
 /// - At least two numbered option lines (e.g. "1. Source only", "  2. Write
-///   full list to file") where at least one of them is itself prefixed by
-///   the `❯` selection cursor -- matching how the fixtures actually render
+///   full list to file") where at least one of them is itself prefixed by a
+///   [`SELECTION_CURSORS`] cursor -- matching how the fixtures actually render
 ///   it (`"❯ 1. Source only"`). Requiring the cursor to prefix an option
 ///   line specifically (not merely appear *somewhere* on screen) keeps
 ///   this from firing when an agent's own numbered analysis (e.g. "1.
@@ -811,38 +863,59 @@ fn looks_like_confirmation_prompt(screen_text: &str) -> bool {
 ///   that exact character, and it doesn't mean the numbered lines above it
 ///   are a selection menu.
 fn looks_like_selection_prompt(screen_text: &str) -> bool {
-    // Check for selection footer first (early exit, avoids Vec collection if found)
-    if screen_text.lines().any(|line| {
-        let lower = line.to_lowercase();
-        let names_a_confirm_action = lower.contains("to select")
-            || lower.contains("to confirm")
-            || lower.contains("to choose");
-        names_a_confirm_action && lower.contains("cancel")
-    }) {
+    // Check for the selection footer first: it is a single-line signal, so it
+    // can answer without counting option lines across the whole screen.
+    if screen_text.lines().any(is_selection_footer_line) {
         return true;
     }
 
-    // Only collect lines if footer wasn't found
-    let lines: Vec<&str> = screen_text.lines().collect();
-    let numbered_option_lines = lines
-        .iter()
-        .filter(|line| is_numbered_option_line(line))
-        .count();
-    let has_cursor_on_option_line = lines
-        .iter()
-        .any(|line| line.trim_start().starts_with('\u{276f}') && is_numbered_option_line(line));
+    let mut numbered_option_lines = 0_usize;
+    let mut has_cursor_on_option_line = false;
+    for line in screen_text.lines() {
+        if !is_numbered_option_line(line) {
+            continue;
+        }
+        numbered_option_lines += 1;
+        has_cursor_on_option_line |= starts_with_selection_cursor(line);
+    }
     numbered_option_lines >= 2 && has_cursor_on_option_line
 }
 
-/// True if `line` starts (after an optional `❯` cursor and leading
+/// The per-line half of [`looks_like_selection_prompt`]: either signal, on
+/// this one line. Used to recover the evidence line for a
+/// `SelectionPrompt` classification.
+fn is_selection_prompt_line(line: &str) -> bool {
+    is_selection_footer_line(line)
+        || (is_numbered_option_line(line) && starts_with_selection_cursor(line))
+}
+
+/// True if `line` is an interactive prompt's footer hint -- it names both a
+/// confirm/select action and a cancel action.
+fn is_selection_footer_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let names_a_confirm_action =
+        lower.contains("to select") || lower.contains("to confirm") || lower.contains("to choose");
+    names_a_confirm_action && lower.contains("cancel")
+}
+
+/// True if `line`'s first non-blank character is a selection cursor.
+fn starts_with_selection_cursor(line: &str) -> bool {
+    line.trim_start().starts_with(SELECTION_CURSORS)
+}
+
+/// True if `line` starts (after an optional selection cursor and leading
 /// whitespace) with a small integer followed by `". "` -- e.g. "1. Source
 /// only" or "  2. Write full list to file".
 fn is_numbered_option_line(line: &str) -> bool {
     let trimmed = line
         .trim_start()
-        .trim_start_matches('\u{276f}')
+        .trim_start_matches(SELECTION_CURSORS)
         .trim_start();
-    let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
+    // `None` here means the line is nothing but digits, which cannot be
+    // followed by ". " either -- both cases correctly answer "not an option".
+    let digits_end = trimmed
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(0);
     if digits_end == 0 {
         return false;
     }
@@ -926,7 +999,10 @@ impl ProcessChildrenIndex {
 /// user's shell), walks the process tree looking for a descendant process
 /// whose name matches a known agent CLI signature (see
 /// `BuiltinAgentProvider::ALL` and [`GENERIC_AGENT_SIGNATURES`]), and
-/// returns the first match found.
+/// returns the best-ranked match: the shallowest one, preferring a process
+/// recognized by its own kernel name over one recognized only through an
+/// interpreter's argv, and breaking a remaining tie by lowest pid. See
+/// [`identify_agent_with_extra`] for exactly how that ranking bounds the walk.
 ///
 /// Returns `None` if no descendant process matches.
 ///
@@ -1112,10 +1188,19 @@ fn expand_shell_command_line(arguments: &[String]) -> Vec<String> {
 /// `sh`. Matching the kernel name alone therefore recognises the same installed
 /// `claude` or `codex` on Linux and silently misses it on macOS.
 ///
-/// The first command-line argument closes that gap, because it is the path the
-/// process was actually invoked as. Only its file name is considered, and it is
-/// only consulted when the kernel name matched nothing, so `sh -c "codex …"`
-/// cannot masquerade as the agent: its first argument is the shell itself.
+/// The command line closes that gap. `argv[0]`'s file name is the path the
+/// process was actually invoked as, and when that name is itself an
+/// interpreter, the program it was handed (see `interpreted_program_name`,
+/// which reduces `sh -c "vim codex.md"` to `vim` rather than to the whole
+/// command line) is a candidate too -- that is the only thing left to
+/// recognise a shebang-installed `claude` or `codex` by on macOS.
+///
+/// Both are strictly *fallback* candidates: the kernel name is returned first,
+/// and the caller stops at the first candidate that matches, so an
+/// interpreter-inferred name is only ever consulted when the kernel name
+/// matched nothing. [`identify_agent_with_extra`] additionally treats such a
+/// match as weaker evidence than a natively-named descendant, because the
+/// launcher a shim runs is usually not the process actually doing the work.
 pub fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
     let arguments = process.cmd();
     let invoked = argument_file_name(arguments, 0);
@@ -1435,15 +1520,28 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_completed_turn_with_shell_still_running_is_waiting_background() {
+    fn claude_code_completed_turn_with_shell_still_running_is_background_task_still_running() {
         let fixture_text = fixture("claude_code_shell_still_running.txt");
         assert_eq!(
             classify_activity(&fixture_text),
-            AgentActivity::WaitingBackground
+            AgentActivity::BackgroundTaskStillRunning
         );
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Claude, &fixture_text),
-            AgentActivity::WaitingBackground
+            AgentActivity::BackgroundTaskStillRunning
+        );
+    }
+
+    #[test]
+    fn claude_code_completed_turn_with_monitor_still_running_is_background_task_still_running() {
+        let fixture_text = fixture("claude_code_monitor_still_running.txt");
+        assert_eq!(
+            classify_activity(&fixture_text),
+            AgentActivity::BackgroundTaskStillRunning
+        );
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, &fixture_text),
+            AgentActivity::BackgroundTaskStillRunning
         );
     }
 
@@ -1668,6 +1766,43 @@ mod tests {
     fn codex_numbered_choice_cursor_is_not_a_free_form_composer() {
         let screen = "Select a mode\n› 1. Read only\n  2. Full access";
         assert!(!is_agent_prompt_ready(&AgentClass::Codex, screen));
+    }
+
+    /// Codex marks the highlighted entry of its numbered modals with `›`, not
+    /// with Claude Code's `❯`. Recognizing only the latter left that whole
+    /// family of dialogs classified `Idle` -- the sidebar never reported the
+    /// agent as blocked on the user -- unless a footer hint happened to be
+    /// visible too.
+    #[test]
+    fn a_numbered_modal_using_codex_own_cursor_glyph_is_waiting_approval() {
+        let screen = "Select a mode\n› 1. Read only\n  2. Full access";
+
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Codex, screen),
+            AgentActivity::WaitingApproval
+        );
+        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
+        assert_eq!(
+            classify_activity_for_agent_detailed(&AgentClass::Codex, screen)
+                .matched_line
+                .as_deref(),
+            Some("› 1. Read only"),
+            "the evidence line must be the cursor-marked option the rule matched"
+        );
+    }
+
+    /// The same glyph opens Codex's free-form composer, where it introduces a
+    /// rotating placeholder rather than a menu entry. An idle composer must
+    /// stay idle.
+    #[test]
+    fn codex_composer_placeholder_is_not_a_selection_prompt() {
+        assert_eq!(
+            classify_activity_for_agent(
+                &AgentClass::Codex,
+                &fixture("codex_dynamic_placeholder_idle.txt")
+            ),
+            AgentActivity::Idle
+        );
     }
 
     #[test]

@@ -398,6 +398,9 @@ fn context_summary(entry: &AgentDebugEntry) -> Option<String> {
                 ilium_core::AgentActivity::Working => "working",
                 ilium_core::AgentActivity::WaitingApproval => "waiting for approval",
                 ilium_core::AgentActivity::WaitingBackground => "waiting for background work",
+                ilium_core::AgentActivity::BackgroundTaskStillRunning => {
+                    "a background task is still finishing up"
+                }
                 ilium_core::AgentActivity::Idle => "idle",
                 ilium_core::AgentActivity::Done => "done",
             }

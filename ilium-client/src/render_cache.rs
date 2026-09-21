@@ -556,6 +556,14 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     {
         app.hovered_agent_toolbar_action = None;
     }
+    if app
+        .smart_copy_session
+        .as_ref()
+        .is_some_and(|session| !live_pane_ids.contains(&session.pane_id))
+    {
+        app.exit_smart_copy();
+        app.status_message = Some("Smart Copy stopped because its pane closed".to_string());
+    }
 
     let (rows, cols) = app.last_known_pane_size;
     // Editors and boards already need a local runtime before they can be

@@ -19,6 +19,10 @@ pub enum TerminalContextAction {
     CopyLineToClipboard,
     CopyVisibleTerminalToClipboard,
     CopyFullTerminalHistoryToClipboard,
+    /// A locally verified absolute JSONL path captured when this menu opened.
+    CopyHistoryFilePathToClipboard {
+        path: std::path::PathBuf,
+    },
     PasteClipboard,
     PasteScreenInto {
         destination_pane_id: NodeId,
@@ -37,6 +41,11 @@ pub enum TerminalContextAction {
     /// or a path that exists on disk right now (see
     /// `crate::open_target::resolve_at`).
     OpenExternally(OpenTarget),
+    /// Opens the already-verified file target in an ilium editor pane beside
+    /// the terminal where the menu was opened.
+    OpenInEditor {
+        path: std::path::PathBuf,
+    },
 }
 
 impl TerminalContextAction {
@@ -45,9 +54,9 @@ impl TerminalContextAction {
         use crate::icon_settings::IconTarget;
         match self {
             Self::CopySelectionToClipboard => IconTarget::AgentToolbarCopyScreen,
-            Self::CopyLineToClipboard | Self::CopyFullTerminalHistoryToClipboard => {
-                IconTarget::Editor
-            }
+            Self::CopyLineToClipboard
+            | Self::CopyFullTerminalHistoryToClipboard
+            | Self::CopyHistoryFilePathToClipboard { .. } => IconTarget::Editor,
             Self::CopyVisibleTerminalToClipboard => IconTarget::Terminal,
             Self::PasteClipboard => IconTarget::ScreenTransferDown,
             Self::PasteScreenInto { direction, .. } => match direction {
@@ -62,6 +71,7 @@ impl TerminalContextAction {
             Self::OpenExternally(OpenTarget::Url(_) | OpenTarget::File(_)) => {
                 IconTarget::OpenExternal
             }
+            Self::OpenInEditor { .. } => IconTarget::Editor,
         }
     }
 
@@ -74,6 +84,7 @@ impl TerminalContextAction {
                 "Copy visible terminal to clipboard".to_string()
             }
             Self::CopyFullTerminalHistoryToClipboard => "Copy full terminal history".to_string(),
+            Self::CopyHistoryFilePathToClipboard { .. } => "Copy path to history file".to_string(),
             Self::PasteClipboard => "Paste clipboard".to_string(),
             Self::PasteScreenInto {
                 direction,
@@ -91,6 +102,7 @@ impl TerminalContextAction {
             }
             .to_string(),
             Self::OpenExternally(target) => target.menu_label().to_string(),
+            Self::OpenInEditor { .. } => "Open in editor".to_string(),
         }
     }
 }

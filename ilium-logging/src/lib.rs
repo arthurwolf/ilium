@@ -85,8 +85,13 @@ impl LoggerState {
                     source,
                 })?;
             // The open above only sets the mode when it creates the file, so
-            // an existing log from an older build is tightened here.
-            secure_fs::restrict_file_to_owner(&self.path).map_err(|source| {
+            // an existing log from an older build is tightened here. This
+            // tightens the descriptor that was just opened rather than the
+            // path: a path-based chmod would follow whatever sits at
+            // `self.path` at that later instant, which is exactly the swap
+            // `O_NOFOLLOW` refused a line earlier, and would hand a widened
+            // mode to an attacker-planted replacement instead of to the log.
+            secure_fs::restrict_open_file_to_owner(&opened_file).map_err(|source| {
                 LoggingError::PrepareFile {
                     path: self.path.clone(),
                     source,
@@ -256,47 +261,62 @@ pub fn log_path() -> Option<&'static Path> {
     PROCESS_LOGGER.get().map(|logger| logger.path.as_path())
 }
 
-/// Removes URL user-info and every query value before an endpoint enters a
-/// diagnostic event. Provider URLs are user-configurable and may embed tokens
-/// even when the normal built-in endpoints do not.
+/// Removes URL user-info, every query value, and any fragment before an
+/// endpoint enters a diagnostic event. Provider and proxy URLs are
+/// user-configurable and may embed tokens in all three places even when the
+/// normal built-in endpoints do not.
 pub fn redacted_url(url: &str) -> String {
-    let (without_query, had_query) = match url.split_once('?') {
-        Some((base, _query)) => (base, true),
+    // A fragment follows the query in a well-formed URL, so it has to come off
+    // first -- and it has to come off at all, because a redirect URL carrying
+    // `#access_token=...` has no `?` for the query branch below to catch.
+    let (before_fragment, had_fragment) = match url.split_once('#') {
+        Some((base, _fragment)) => (base, true),
         None => (url, false),
     };
-    let without_user_info = match without_query.split_once("://") {
-        Some((scheme, remainder)) => {
-            let authority_end = remainder.find('/').unwrap_or(remainder.len());
-            let (authority, path) = remainder.split_at(authority_end);
-            match authority.rsplit_once('@') {
-                Some((_user_info, host)) => format!("{scheme}://<redacted>@{host}{path}"),
-                None => without_query.to_owned(),
-            }
-        }
-        None => without_query.to_owned(),
+    let (without_query, had_query) = match before_fragment.split_once('?') {
+        Some((base, _query)) => (base, true),
+        None => (before_fragment, false),
     };
+    let mut redacted = redacted_user_info(without_query);
     if had_query {
-        format!("{without_user_info}?<redacted>")
-    } else {
-        without_user_info
+        redacted.push_str("?<redacted>");
+    }
+    if had_fragment {
+        redacted.push_str("#<redacted>");
+    }
+    redacted
+}
+
+/// Replaces a `user:password@` prefix on the authority of a URL whose query
+/// and fragment have already been removed.
+///
+/// The authority is redacted whether or not a scheme is present. A
+/// user-configured proxy is the one endpoint that routinely carries
+/// credentials there, it is commonly written scheme-less
+/// (`user:password@proxy.example:8080`), and a scheme-less proxy string is
+/// also the shape most likely to be rejected and end up quoted verbatim in a
+/// `GatewayError::InvalidProxy` message.
+fn redacted_user_info(url_without_query: &str) -> String {
+    let (scheme_prefix, authority_and_path) = match url_without_query.split_once("://") {
+        Some((scheme, remainder)) => (format!("{scheme}://"), remainder),
+        None => (String::new(), url_without_query),
+    };
+    // `/` is ASCII, so this byte index is always a character boundary and the
+    // split below cannot land inside a multi-byte character.
+    let authority_end = authority_and_path
+        .find('/')
+        .unwrap_or(authority_and_path.len());
+    let (authority, path) = authority_and_path.split_at(authority_end);
+    match authority.rsplit_once('@') {
+        Some((_user_info, host)) => format!("{scheme_prefix}<redacted>@{host}{path}"),
+        None => url_without_query.to_owned(),
     }
 }
 
 /// Redacts credential-bearing HTTP header values while leaving request IDs,
 /// rate-limit state, content metadata, and other debugging headers intact.
 pub fn redacted_header_value(name: &str, value: &str) -> String {
-    if matches!(
-        name.to_ascii_lowercase().as_str(),
-        "authorization"
-            | "proxy-authorization"
-            | "cookie"
-            | "set-cookie"
-            | "api-key"
-            | "x-api-key"
-            | "x-goog-api-key"
-            | "x-auth-token"
-            | "x-access-token"
-    ) {
+    if is_credential_name(name) {
         "<redacted>".to_owned()
     } else {
         value.to_owned()
@@ -369,7 +389,7 @@ pub fn redacted_json_credentials(value: &serde_json::Value) -> serde_json::Value
 /// so passing the enclosing JSON through [`redacted_json_credentials`] cannot
 /// infer that a generic `value` belongs to an `api_key` label.
 pub fn redacted_diagnostic_field_value(label: &str, value: &str) -> String {
-    if is_credential_field(label) {
+    if is_credential_name(label) {
         "<redacted>".to_string()
     } else {
         value.to_string()
@@ -403,7 +423,7 @@ fn redact_json_credentials_in_place(value: &mut serde_json::Value) {
             }
 
             for (field, nested_value) in object {
-                if is_credential_field(field) {
+                if is_credential_name(field) {
                     *nested_value = serde_json::Value::String("<redacted>".to_owned());
                     continue;
                 }
@@ -434,28 +454,56 @@ fn redact_json_credentials_in_place(value: &mut serde_json::Value) {
 fn is_credential_path(path: &str) -> bool {
     path.rsplit(['.', '/'])
         .next()
-        .is_some_and(is_credential_field)
+        .is_some_and(is_credential_name)
 }
 
-fn is_credential_field(field: &str) -> bool {
-    let normalized = field.to_ascii_lowercase().replace(['-', ' '], "_");
-    matches!(
-        normalized.as_str(),
-        "api_key"
-            | "apikey"
-            | "authorization"
-            | "proxy_authorization"
-            | "password"
-            | "secret"
-            | "client_secret"
-            | "access_token"
-            | "refresh_token"
-            | "id_token"
-            | "token"
-            | "cookie"
-            | "set_cookie"
-            | "x_api_key"
-    )
+/// Every name whose *value* is a credential, written in the normalized form
+/// [`is_credential_name`] produces: lowercase, with every separator removed.
+///
+/// One registry serves all four surfaces that ask the question -- JSON fields,
+/// settings-path segments, HTTP header names, and human-readable diagnostic
+/// labels -- so that a name is never redacted on one surface and logged in
+/// full on another. Two separate lists had already drifted apart that way:
+/// `x-auth-token` was redacted as a header while an `auth_token` JSON field
+/// was not, and `password` was redacted as a field while a `password` header
+/// was not.
+const CREDENTIAL_NAMES: &[&str] = &[
+    "apikey",
+    "authorization",
+    "proxyauthorization",
+    "password",
+    "secret",
+    "clientsecret",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "authtoken",
+    "token",
+    "cookie",
+    "setcookie",
+    "xapikey",
+    "xgoogapikey",
+    "xauthtoken",
+    "xaccesstoken",
+];
+
+/// True when `name` itself names a credential, in any spelling the same secret
+/// is written in across a JSON field, a settings path, an HTTP header, and a
+/// diagnostic label: `api_key`, `api-key`, `apiKey`, `API key`, `APIKEY`.
+///
+/// Dropping separators entirely, rather than folding them onto `_`, is what
+/// makes the camelCase spelling match -- and camelCase is the dominant one in
+/// JSON bodies, so `accessToken`, `refreshToken`, and `clientSecret` were
+/// previously written to the log in full because only their snake_case
+/// spellings were listed. Separator-free comparison keeps the registry to one
+/// entry per secret instead of one entry per spelling.
+fn is_credential_name(name: &str) -> bool {
+    let normalized: String = name
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect();
+    CREDENTIAL_NAMES.contains(&normalized.as_str())
 }
 
 /// Records panics in detached/server and alternate-screen/client processes,
@@ -613,6 +661,19 @@ mod tests {
             redacted_url("http://127.0.0.1:11434/api/tags"),
             "http://127.0.0.1:11434/api/tags"
         );
+        // A rejected proxy string is quoted into `GatewayError::InvalidProxy`,
+        // and the shape most likely to be rejected is the scheme-less one --
+        // which is also where a proxy password lives.
+        assert_eq!(
+            redacted_url("user:secret@proxy.example:8080"),
+            "<redacted>@proxy.example:8080"
+        );
+        // A fragment carries no diagnostic value in an API endpoint and can
+        // carry an implicit-flow token, so it is never echoed.
+        assert_eq!(
+            redacted_url("https://example.test/callback#access_token=hidden"),
+            "https://example.test/callback#<redacted>"
+        );
     }
 
     #[test]
@@ -632,6 +693,13 @@ mod tests {
         assert_eq!(
             redacted_header_value("x-request-id", "request-42"),
             "request-42"
+        );
+        // Names the JSON-field list carried but the header list did not, back
+        // when the two lists were maintained separately.
+        assert_eq!(redacted_header_value("Password", "secret"), "<redacted>");
+        assert_eq!(
+            redacted_header_value("x-ratelimit-remaining-tokens", "17"),
+            "17"
         );
     }
 
@@ -671,6 +739,11 @@ mod tests {
                 "arguments": "{\"path\":\"voice.api_key\",\"value\":\"path-secret\",\"action\":\"kept\"}"
             },
             "nested": [{"access-token": "nested-secret", "message": "complete text"}],
+            // camelCase is the dominant spelling in JSON bodies, and every one
+            // of these used to be logged verbatim.
+            "accessToken": "camel-secret",
+            "clientSecret": "camel-client-secret",
+            "max_tokens": 512,
         });
 
         let redacted = redacted_json_credentials(&payload);
@@ -679,9 +752,14 @@ mod tests {
         assert!(!diagnostic.contains("direct-secret"));
         assert!(!diagnostic.contains("path-secret"));
         assert!(!diagnostic.contains("nested-secret"));
+        assert!(!diagnostic.contains("camel-secret"));
+        assert!(!diagnostic.contains("camel-client-secret"));
         assert!(diagnostic.contains("<redacted>"));
         assert!(diagnostic.contains("kept"));
         assert!(diagnostic.contains("complete text"));
+        // A name that merely contains a credential word is not one: token
+        // budgets must stay readable in the log.
+        assert!(diagnostic.contains("512"));
     }
 
     #[test]

@@ -147,6 +147,22 @@ impl Grid {
         self.rows.iter()
     }
 
+    /// Every accumulated row -- the full scrollback buffer followed by the
+    /// current on-screen rows -- independent of the live scroll position
+    /// (`scrollback_offset`). Unlike `visible_rows`, which windows on
+    /// wherever the user has scrolled to, this never omits history the user
+    /// has scrolled away from.
+    pub fn full_history_rows(&self) -> impl Iterator<Item = &crate::row::Row> {
+        self.scrollback.iter().chain(self.rows.iter())
+    }
+
+    /// The row count `full_history_rows` would yield, without iterating --
+    /// lets a caller decide whether a head/tail cap applies before reading
+    /// any row contents.
+    pub fn full_history_row_count(&self) -> usize {
+        self.scrollback.len() + self.rows.len()
+    }
+
     pub fn drawing_rows_mut(
         &mut self,
     ) -> impl Iterator<Item = &mut crate::row::Row> {

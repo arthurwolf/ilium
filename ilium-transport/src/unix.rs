@@ -86,12 +86,26 @@ pub(crate) fn remove_stale(identity: &Path) -> io::Result<()> {
     }
 }
 
+/// The peer's process id, or `None` when the kernel cannot name it.
+///
+/// `SO_PEERCRED` answers with the peer's id *translated into this process's PID
+/// namespace*, and reports `0` when there is no such translation -- a server
+/// bound inside a container whose runtime directory is shared with a client on
+/// the host is exactly that case. Zero is a sentinel meaning "not nameable
+/// here", never a process: `kill(0, ...)` signals the caller's own process
+/// group and `kill(0, 0)` reports it as alive forever, so a caller handed
+/// `Some(0)` would either signal itself or wait for an exit that never comes.
+/// Reporting it as unavailable is the honest answer, and the one callers
+/// already handle.
 pub(crate) fn peer_process_id(stream: &Stream) -> Option<u32> {
     stream
         .peer_cred()
         .ok()
         .and_then(|credentials| credentials.pid())
-        .and_then(|pid| u32::try_from(pid).ok())
+        // `try_from` drops a negative id, which is no more a single process
+        // than zero is; the filter drops the untranslatable-peer sentinel.
+        .and_then(|process_id| u32::try_from(process_id).ok())
+        .filter(|process_id| *process_id != 0)
 }
 
 pub(crate) fn is_transient_accept_error(error: &io::Error) -> bool {

@@ -4,6 +4,8 @@
 //! active. It consumes the shared animated `App::layout`; everything it
 //! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
 
+use std::time::Instant;
+
 use ilium_core::{AgentClass, AgentProvider, NodeId, NodeKind, PaneStatus, ROOT_ID};
 use ratatui::layout::{Alignment, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -150,6 +152,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         }
         Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu, &app.ui_settings),
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
+        Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
             modal::render_text_prompt(frame, area, "Save agent debug log", state, "Save");
@@ -1129,16 +1132,29 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
             frame.render_widget(block, viewport.outer_area);
             let terminal_area = completed_agent_close_action
                 .map_or(viewport.content_area, |action| action.terminal_area);
-            term.render_screen(terminal_area, frame.buffer_mut());
-            term.with_screen(|screen| {
-                // Highlight against the same rect the screen was just drawn
-                // into -- when a completed-agent close action reserves the
-                // bottom row, `terminal_area` is shorter than
-                // `viewport.content_area`, and mapping the selection to the
-                // full content area would let it claim a row of cells that
-                // were never actually painted with terminal content.
-                draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
-            });
+            let smart_copy = app
+                .smart_copy_session
+                .as_ref()
+                .filter(|session| session.pane_id == viewport.pane_id);
+            if let Some(session) = smart_copy {
+                terminal_view::render_frozen_screen(
+                    &session.snapshot.screen,
+                    terminal_area,
+                    frame.buffer_mut(),
+                );
+                draw_smart_copy_highlights(frame, terminal_area, session);
+            } else {
+                term.render_screen(terminal_area, frame.buffer_mut());
+                term.with_screen(|screen| {
+                    // Highlight against the same rect the screen was just drawn
+                    // into -- when a completed-agent close action reserves the
+                    // bottom row, `terminal_area` is shorter than
+                    // `viewport.content_area`, and mapping the selection to the
+                    // full content area would let it claim a row of cells that
+                    // were never actually painted with terminal content.
+                    draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
+                });
+            }
             draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
         }
         PaneRuntime::Editor(editor) => {
@@ -1163,6 +1179,17 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
+            if let Some(session) = app
+                .smart_copy_session
+                .as_ref()
+                .filter(|session| session.pane_id == viewport.pane_id)
+            {
+                draw_smart_copy_toolbar(frame, toolbar_area, session);
+                if session.candidates.is_empty() {
+                    draw_smart_copy_progress_dialog(frame, viewport.content_area, session);
+                }
+                return;
+            }
             let below_row = Rect::new(
                 viewport.content_area.x,
                 viewport.content_area.y,
@@ -1218,6 +1245,138 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
 
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
+    }
+}
+
+fn draw_smart_copy_toolbar(
+    frame: &mut Frame,
+    area: Rect,
+    session: &crate::smart_copy::SmartCopySession,
+) {
+    use crate::smart_copy::SmartCopyPhase;
+
+    let phase = match &session.phase {
+        SmartCopyPhase::Connecting => "connecting",
+        SmartCopyPhase::Streaming => "streaming",
+        SmartCopyPhase::Complete => "complete",
+        SmartCopyPhase::Failed(_) => "failed",
+    };
+    let usage = session.exact_output_tokens.map_or_else(
+        || format!("~{} tokens", session.estimated_output_tokens()),
+        |tokens| format!("{tokens} tokens"),
+    );
+    let current = session
+        .current_candidate()
+        .map_or_else(String::new, |candidate| {
+            let overlap = session
+                .overlap_position()
+                .map_or_else(String::new, |(index, count)| format!(" · {index}/{count}"));
+            format!(" · {}{overlap}", candidate.label)
+        });
+    let exit = crate::smart_copy::exit_button_rect(area);
+    let elapsed = session.started_at.elapsed().as_secs_f32();
+    let progress_area = Rect::new(area.x, area.y, exit.x.saturating_sub(area.x), area.height);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "🧲 Smart copy · {phase} · {elapsed:.1}s · {} selections · {usage}{current}",
+            session.candidates.len()
+        )),
+        progress_area,
+    );
+    frame.render_widget(
+        Paragraph::new("[ Exit ]")
+            .alignment(Alignment::Center)
+            .style(Style::new().add_modifier(Modifier::BOLD)),
+        exit,
+    );
+}
+
+fn draw_smart_copy_progress_dialog(
+    frame: &mut Frame,
+    content_area: Rect,
+    session: &crate::smart_copy::SmartCopySession,
+) {
+    use crate::smart_copy::SmartCopyPhase;
+
+    if content_area.width < 4 || content_area.height < 4 {
+        return;
+    }
+    let width = content_area.width.min(64);
+    let height = content_area.height.min(7);
+    let area = Rect::new(
+        content_area.x + (content_area.width - width) / 2,
+        content_area.y + (content_area.height - height) / 2,
+        width,
+        height,
+    );
+    let state = match &session.phase {
+        SmartCopyPhase::Connecting => "Waiting for the model to answer…".to_string(),
+        SmartCopyPhase::Streaming => {
+            "Response started; waiting for the first valid block…".to_string()
+        }
+        SmartCopyPhase::Complete => "The model returned no valid selectable blocks.".to_string(),
+        SmartCopyPhase::Failed(error) => format!("Request failed: {error}"),
+    };
+    let usage = session.exact_output_tokens.map_or_else(
+        || {
+            format!(
+                "Estimated output: ~{} tokens",
+                session.estimated_output_tokens()
+            )
+        },
+        |tokens| format!("Output: {tokens} tokens"),
+    );
+    let elapsed = session.started_at.elapsed().as_secs_f32();
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(state),
+            Line::from(usage),
+            Line::from(format!("Elapsed: {elapsed:.1}s")),
+            Line::from(format!(
+                "Received characters: {} · rejected records: {}",
+                session.received_characters, session.invalid_lines
+            )),
+        ])
+        .block(theme::block(true).title(theme::chrome_title("🧲 Smart copy")))
+        .alignment(Alignment::Center),
+        area,
+    );
+}
+
+fn draw_smart_copy_highlights(
+    frame: &mut Frame,
+    content_area: Rect,
+    session: &crate::smart_copy::SmartCopySession,
+) {
+    let now = Instant::now();
+    for candidate in &session.candidates {
+        let is_current = session
+            .current_candidate()
+            .is_some_and(|current| std::ptr::eq(current, candidate));
+        let is_flashing =
+            now.duration_since(candidate.arrived_at) < crate::smart_copy::ARRIVAL_FLASH_DURATION;
+        if !is_current && !is_flashing {
+            continue;
+        }
+        for span in &candidate.spans {
+            if span.row >= content_area.height {
+                continue;
+            }
+            let last_column = span.end_column.min(content_area.width.saturating_sub(1));
+            for column in span.start_column..=last_column {
+                let position = Position::new(
+                    content_area.x.saturating_add(column),
+                    content_area.y.saturating_add(span.row),
+                );
+                if let Some(cell) = frame.buffer_mut().cell_mut(position) {
+                    cell.modifier.insert(Modifier::REVERSED);
+                    if is_flashing {
+                        cell.modifier.insert(Modifier::BOLD);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1460,6 +1619,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
+        Mode::SmartCopy => "SMART COPY",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
@@ -1661,7 +1821,7 @@ mod tests {
 
         assert_eq!(
             pane_title(&app, pane_id),
-            "« [done] » Review authentication — Codex"
+            "[done] Review authentication — Codex"
         );
         assert_eq!(app.tree.get(pane_id).unwrap().name, "Review authentication");
 

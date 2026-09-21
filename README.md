@@ -31,6 +31,7 @@ Like tmux, ilium keeps your terminals alive in a background server you can detac
 - **Real detach/reattach.** A background server owns the PTYs. Close your terminal, come back, everything is still running.
 - **Per-project sessions.** Sessions are scoped to the directory you launch from, so `ilium` in two different projects gives you two independent workspaces.
 - **Mouse support that passes through.** Clicks, drags, and scrolls reach `vim`, `htop`, or `lazygit` in whatever xterm encoding they negotiated.
+- **Smart Copy.** The agent toolbar's 🧲 **Smart copy** action freezes the visible character grid while the configured inference model streams ranked semantic regions such as URLs, commands, paragraphs, code, tables, cells, and box contents. Hover to preview a region, use the wheel when regions overlap, click to copy, and use **Exit** or `Esc` to return to the live screen.
 
 ### Pane states in the sidebar
 
@@ -144,7 +145,7 @@ Two prefixes, both remappable:
 
 ### Mouse and history
 
-Click either panel to focus it. Tree rows support expand/collapse, hover reorder arrows, drag-and-drop reparenting, and right-click context menus.
+Click either panel to focus it. Tree rows support expand/collapse, double-click rename, hover reorder arrows, drag-and-drop reparenting, and right-click context menus.
 
 Terminal history scrolls with the wheel or `Shift+PgUp`/`Shift+PgDn`. `Shift+End` jumps back to live output. `Ctrl+End` is forwarded to full-screen applications that handle it themselves (such as Claude Code).
 
@@ -170,7 +171,7 @@ Session snapshots are stored per project in `<project>/.ilium/sessions/<name>.js
 
 ### Optional LLM features
 
-ilium can use an LLM to auto-name sessions and panes and to reorganize the tree. This is **optional and off the critical path** — every core feature (multiplexing, detection, splits, persistence) works without any credentials. Providers supported: Kilo Gateway (default, has a free tier), local Ollama, OpenAI-compatible endpoints, Anthropic, and OpenRouter. Configure under Settings → Inference, or turn the behavior off under Settings → Triggers.
+ilium can use an LLM to auto-name sessions and panes, reorganize the tree, and identify semantic regions for Smart Copy. This is **optional and off the critical path** — every core feature (multiplexing, detection, splits, persistence) works without any credentials. Providers supported: Kilo Gateway (default, has a free tier), local Ollama, OpenAI-compatible endpoints, Anthropic, and OpenRouter. Configure under Settings → Inference, or turn automatic naming/organization behavior off under Settings → Triggers.
 
 Voice control is a separate opt-in feature requiring an OpenAI Realtime key; it is disabled unless you configure it.
 

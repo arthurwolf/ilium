@@ -29,11 +29,17 @@ pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -
     };
     matches!(
         previous,
-        PaneStatus::Agent(_, AgentActivity::Working | AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(
-                _,
-                AgentActivity::Working | AgentActivity::WaitingBackground
-            )
+        PaneStatus::Agent(
+            _,
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::BackgroundTaskStillRunning
+        ) | PaneStatus::AgentWithGoal(
+            _,
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::BackgroundTaskStillRunning
+        )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
@@ -159,6 +165,12 @@ mod tests {
     fn waiting_background() -> PaneStatus {
         PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground)
     }
+    fn background_task_still_running() -> PaneStatus {
+        PaneStatus::Agent(
+            AgentClass::Claude,
+            AgentActivity::BackgroundTaskStillRunning,
+        )
+    }
     fn plain_shell() -> PaneStatus {
         PaneStatus::PlainShell
     }
@@ -207,6 +219,22 @@ mod tests {
     #[test]
     fn waiting_background_to_idle_notifies() {
         assert!(is_finished_transition(Some(&waiting_background()), &idle()));
+    }
+
+    #[test]
+    fn working_to_background_task_still_running_does_not_notify() {
+        assert!(!is_finished_transition(
+            Some(&working()),
+            &background_task_still_running()
+        ));
+    }
+
+    #[test]
+    fn background_task_still_running_to_idle_notifies() {
+        assert!(is_finished_transition(
+            Some(&background_task_still_running()),
+            &idle()
+        ));
     }
 
     #[test]

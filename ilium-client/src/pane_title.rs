@@ -4,7 +4,7 @@
 
 use ilium_core::{AgentActivity, PaneStatus};
 
-pub const DONE_TITLE_MARKER: &str = "« [done] »";
+pub const DONE_TITLE_MARKER: &str = "[done]";
 
 /// Prepends the completed-turn marker only while an agent is `Done`.
 pub fn decorate_agent_title(activity: AgentActivity, title: &str) -> String {
@@ -41,14 +41,14 @@ mod tests {
                 &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
                 "Fix authentication"
             ),
-            "« [done] » Fix authentication"
+            "[done] Fix authentication"
         );
         assert_eq!(
             decorate_pane_title(
                 &PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done),
-                "« [done] » Goal"
+                "[done] Goal"
             ),
-            "« [done] » Goal"
+            "[done] Goal"
         );
         assert_eq!(
             decorate_pane_title(
@@ -61,6 +61,6 @@ mod tests {
             decorate_pane_title(&PaneStatus::PlainShell, "shell"),
             "shell"
         );
-        assert_eq!(decorate_agent_title(AgentActivity::Done, ""), "« [done] »");
+        assert_eq!(decorate_agent_title(AgentActivity::Done, ""), "[done]");
     }
 }

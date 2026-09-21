@@ -4,6 +4,7 @@
 //! discovery contracts. It never needs to know about Kilo's HTTP endpoints,
 //! retryable status codes, or OpenAI-compatible response envelopes.
 
+use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time::Duration;
 
@@ -14,10 +15,14 @@ use thiserror::Error;
 pub const DEFAULT_BASE_URL: &str = "https://api.kilo.ai/api/gateway";
 /// Kilo's stable native free router, selected on a clean installation.
 pub const DEFAULT_FREE_MODEL: &str = "kilo-auto/free";
+/// Used when the selected provider/model does not publish a reliable output
+/// limit. Callers control response length through the prompt.
+pub const UNKNOWN_MODEL_MAX_OUTPUT_TOKENS: u32 = 1_000_000;
 /// Stable virtual routes retained when live model discovery is unavailable.
 pub const FALLBACK_FREE_MODELS: [&str; 2] = ["kilo-auto/free", "openrouter/free"];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAXIMUM_COMPLETION_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
+const MAXIMUM_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAXIMUM_MODEL_CATALOG_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// One paid egress proxy used to reach Kilo Gateway instead of calling it
@@ -104,6 +109,15 @@ pub struct CompletionRequest {
     pub temperature: f32,
 }
 
+/// Provider-neutral facts emitted while an OpenAI-compatible completion is
+/// streaming. The callback controls cancellation: returning `false` closes
+/// the response body immediately and ends the request successfully.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompletionStreamEvent {
+    TextDelta(String),
+    OutputTokens(u64),
+}
+
 impl CompletionRequest {
     /// Builds a deterministic, non-streaming request with the caller's exact
     /// output budget. Provider-neutral callers own that budget because a
@@ -121,21 +135,7 @@ impl CompletionRequest {
         Self::new(
             DEFAULT_FREE_MODEL,
             messages,
-            // Free routers can select reasoning-capable models. 256 was not
-            // enough headroom in practice: verified live against a real
-            // Codex session-title prompt (~3.4k chars of structured task
-            // instructions) routed through `kilo-auto/free` to
-            // `tencent/hy3-.../free`, which spent its entire budget on
-            // invisible reasoning tokens and returned `finish_reason:
-            // "length"` with a null visible `content` -- surfaced as
-            // `GatewayError::InvalidResponse("missing non-empty assistant
-            // content")`, not a parse failure. The same prompt succeeded at
-            // 1024; 1536 keeps margin for longer or more structured inputs
-            // (a full agentic task prompt, not just a short human-typed
-            // one) without being needlessly large for the tiny JSON reply
-            // this is actually asking for. `openrouter/free` is also a
-            // dynamic router, so the same headroom applies.
-            1536,
+            UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
         )
     }
 }
@@ -239,6 +239,92 @@ impl KiloGatewayClient {
         self.complete_text_with_sender(request, |payload| self.send_once(payload))
     }
 
+    /// Streams assistant text as Kilo's OpenAI-compatible SSE response
+    /// arrives. A streaming request is deliberately not retried after the
+    /// response starts: replaying an unknown prefix would duplicate semantic
+    /// records at the caller.
+    pub fn stream_text(
+        &self,
+        request: &CompletionRequest,
+        on_event: &mut dyn FnMut(CompletionStreamEvent) -> bool,
+    ) -> Result<(), GatewayError> {
+        let payload = ChatCompletionPayload {
+            model: &request.model,
+            messages: &request.messages,
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            stream: true,
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
+        };
+        let url = format!("{}/chat/completions", self.base_url);
+        let diagnostic_url = ilium_logging::redacted_url(&url);
+        let agent = self.build_agent()?;
+        let mut response = agent
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .send_json(&payload)
+            .map_err(|error| {
+                GatewayError::Transport(error.to_string().replace(&url, &diagnostic_url))
+            })?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            let message = response
+                .body_mut()
+                .with_config()
+                .limit(MAXIMUM_COMPLETION_RESPONSE_BYTES)
+                .read_to_string()
+                .map_err(|error| GatewayError::Transport(error.to_string()))?;
+            return Err(GatewayError::Http { status, message });
+        }
+
+        let mut reader = BufReader::new(response.body_mut().as_reader());
+        let mut line = String::new();
+        let mut received_bytes = 0usize;
+        loop {
+            line.clear();
+            let read = reader
+                .read_line(&mut line)
+                .map_err(|error| GatewayError::Transport(error.to_string()))?;
+            if read == 0 {
+                return Ok(());
+            }
+            received_bytes = received_bytes.saturating_add(read);
+            if received_bytes > MAXIMUM_STREAM_RESPONSE_BYTES {
+                return Err(GatewayError::InvalidResponse(
+                    "stream exceeded the 16 MiB response limit".to_string(),
+                ));
+            }
+            let Some(data) = line.trim().strip_prefix("data:").map(str::trim) else {
+                continue;
+            };
+            if data == "[DONE]" {
+                return Ok(());
+            }
+            let value: serde_json::Value = serde_json::from_str(data)
+                .map_err(|error| GatewayError::InvalidResponse(error.to_string()))?;
+            if let Some(tokens) = value
+                .get("usage")
+                .and_then(|usage| usage.get("completion_tokens"))
+                .and_then(serde_json::Value::as_u64)
+            {
+                if !on_event(CompletionStreamEvent::OutputTokens(tokens)) {
+                    return Ok(());
+                }
+            }
+            if let Some(text) = value
+                .pointer("/choices/0/delta/content")
+                .and_then(serde_json::Value::as_str)
+            {
+                if !text.is_empty() && !on_event(CompletionStreamEvent::TextDelta(text.to_string()))
+                {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     /// Fetches Kilo's unauthenticated live catalog and returns only free,
     /// text-generating models that accept `max_tokens`.
     pub fn list_free_models(&self) -> Result<Vec<String>, GatewayError> {
@@ -260,6 +346,7 @@ impl KiloGatewayClient {
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             stream: false,
+            stream_options: None,
         };
         let attempts = self.retry_policy.max_attempts.max(1);
         // Clamp up front, not just on the doubling step below: a caller-built
@@ -493,6 +580,13 @@ struct ChatCompletionPayload<'a> {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -707,6 +801,46 @@ mod tests {
     #[test]
     fn uses_kilo_auto_free_by_default() {
         assert_eq!(request().model, DEFAULT_FREE_MODEL);
+        assert_eq!(request().max_tokens, UNKNOWN_MODEL_MAX_OUTPUT_TOKENS);
+    }
+
+    #[test]
+    fn streaming_completion_emits_each_delta_and_usage() {
+        let response_body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"one\\n\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"completion_tokens\":11}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (base_url, request_receiver) = spawn_http_response("200 OK", response_body);
+        let client = KiloGatewayClient::new(base_url, RetryPolicy::default());
+        let mut events = Vec::new();
+
+        client
+            .stream_text(&request(), &mut |event| {
+                events.push(event);
+                true
+            })
+            .expect("stream fixture request");
+
+        assert_eq!(
+            events,
+            vec![
+                CompletionStreamEvent::TextDelta("one\n".to_string()),
+                CompletionStreamEvent::TextDelta("two".to_string()),
+                CompletionStreamEvent::OutputTokens(11),
+            ]
+        );
+        let captured_request = request_receiver.recv().expect("captured HTTP request");
+        let request_body = captured_request
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .expect("captured HTTP body");
+        let request_json: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid request JSON");
+        assert_eq!(request_json["stream"], true);
+        assert_eq!(request_json["stream_options"]["include_usage"], true);
+        assert_eq!(request_json["max_tokens"], UNKNOWN_MODEL_MAX_OUTPUT_TOKENS);
     }
 
     #[test]

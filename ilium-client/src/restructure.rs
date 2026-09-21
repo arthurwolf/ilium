@@ -24,16 +24,16 @@ use ilium_core::{
     AgentActivity, AgentClass, NodeId, NodeKind, PaneStatus, RestructureNode, RestructurePlan,
     SplitOrientation, Tree,
 };
-use ilium_inference::{InferenceRequest, InferenceSettings};
+use ilium_inference::{InferenceRequest, InferenceSettings, UNKNOWN_MODEL_MAX_OUTPUT_TOKENS};
 use serde::{Deserialize, Serialize};
 
 use crate::app::PaneRuntime;
 
-/// Output budget for a project-scoped reply (every existing pane/folder
-/// retitled, plus any new groups/split-views) -- much larger than the
-/// single-title pipeline's 1536 (`ilium_inference::InferenceRequest::json_only`),
-/// which is sized for a 1-7-word title, not a full nested JSON tree.
-const RESTRUCTURE_MAX_TOKENS: u32 = 8192;
+/// Provider settings currently do not retain a selected model's advertised
+/// output limit, so the inference-wide unknown-model fallback applies. This
+/// deliberately leaves response length control to the prompt instead of an
+/// arbitrary convenience cap.
+const RESTRUCTURE_MAX_TOKENS: u32 = UNKNOWN_MODEL_MAX_OUTPUT_TOKENS;
 
 /// The complete rendered request must remain small enough that an inference
 /// backend can spend its output allowance on the replacement tree rather than
@@ -74,11 +74,14 @@ Each entry in "children" (and in any nested "children") is exactly one of:
 - {"kind":"pane","id":<number>,"title":"...","short_title":"...","icon":"...","command_hint":"..."} -- an existing pane, referenced by id
 - {"kind":"folder","id":<number>,"title":"...","short_title":"...","icon":"..."} -- an existing folder, referenced by id
 - {"kind":"group","title":"...","short_title":"...","icon":"...","children":[...]} -- a brand-new group; never has an id
+- {"kind":"existing_group","id":<existing-group-id>,"children":[...]} -- an existing group marked name-fixed in the current structure; keep its id and omit title/icon because they remain unchanged
 - {"kind":"split_view","id":<existing-split-id>,"children":[...]} -- one existing protected split view listed below; its "children" must be the exact listed pane ids in the exact listed order
 
 "title" is the full descriptive title and must use at most 7 words; this is a maximum, not a target or a minimum. "short_title" is a short form of 2 to 3 words; "icon" is one compact UTF-8 icon/emoticon. Choose the most accurate title first, then keep it within its limit. A one- or two-word "title" is correct when it best names the item; never add filler merely to make it longer. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
 
 Split views are user-created presentation layouts and are immutable structural units during AI restructure. Every split in <protected-split-views> must appear exactly once using its existing id. Never invent, omit, duplicate, dissolve, or nest a split view. Never add, remove, replace, duplicate, or reorder its pane children. The split's orientation, container title, icon, expanded state, and layout are deliberately absent from the output shape because they remain unchanged. You may move the whole split as one indivisible entry inside a new ordinary group, and you may change the title fields of its existing pane children.
+
+Any entry marked name-fixed="true" has a user-owned title, short title, and icon. Keep every such pane or folder's title fields exactly as shown. Every name-fixed ordinary group must appear exactly once as an "existing_group" using its listed id; you may move it and freely reorganize its children, but its presentation remains unchanged.
 
 Every "pane" entry whose item below has kind="Plain shell" (a plain terminal, not an agent/editor/board) must also carry a "command_hint": the short form of whichever single command is currently running, most recently finished, or whose output is what's currently in that item's content -- or "" if none is clearly identifiable. Rules for "command_hint":
 - Keep only the program name, plus its first argument when that argument is a subcommand (e.g. "git commit", "cargo build", "docker ps", "npm run"), or its short flags when the flags are essential to what the command does (e.g. "ps faux", "ls -la").
@@ -98,7 +101,7 @@ The following complete list is a hard structural constraint, not advisory contex
 </protected-split-views>
 <items>
 {{#each items}}
-<item id="{{id}}" kind={{kind_label}}>
+<item id="{{id}}" kind={{kind_label}} name-fixed="{{is_name_fixed}}">
     <current-title>{{current_title}}</current-title>
     <current-icon>{{current_icon}}</current-icon>
     {{#if filename}}<filename>{{filename}}</filename>{{/if}}
@@ -126,6 +129,7 @@ pub struct LeafContext {
     pub kind_label: String,
     pub current_title: String,
     pub current_icon: Option<String>,
+    pub is_name_fixed: bool,
     pub filename: Option<String>,
     pub content_extract: String,
     /// Compact identity of the local evidence available before the worker
@@ -191,6 +195,7 @@ pub fn gather_leaf_contexts(
             kind_label: describe_pane_status(status),
             current_title: node.name.clone(),
             current_icon: node.inferred_icon.clone(),
+            is_name_fixed: node.is_name_fixed,
             filename: None,
             content_extract: String::new(),
             automatic_content_fingerprint: 0,
@@ -243,6 +248,7 @@ pub fn gather_leaf_contexts(
                 kind_label: "Folder".to_string(),
                 current_title: node.name.clone(),
                 current_icon: node.inferred_icon.clone(),
+                is_name_fixed: node.is_name_fixed,
                 filename: None,
                 content_extract: String::new(),
                 automatic_content_fingerprint: 0,
@@ -424,13 +430,14 @@ fn render_structure_children(
             NodeKind::Container(_) => "container".to_string(),
         };
         lines.push(format!(
-            "{}{} id=\"{}\" title=\"{}\" icon=\"{}\" source=\"{}\"",
+            "{}{} id=\"{}\" title=\"{}\" icon=\"{}\" source=\"{}\" name-fixed=\"{}\"",
             "  ".repeat(depth),
             kind,
             child.id.0,
             child.name,
             child.inferred_icon.as_deref().unwrap_or(""),
             child.structure_source.prompt_label(),
+            child.is_name_fixed,
         ));
         if child.is_container() {
             render_structure_children(tree, *child_id, depth + 1, lines)?;
@@ -493,6 +500,7 @@ fn describe_activity(activity: &AgentActivity) -> &'static str {
     match activity {
         AgentActivity::Working => "working",
         AgentActivity::WaitingBackground => "waiting on background tasks",
+        AgentActivity::BackgroundTaskStillRunning => "a background task is still finishing up",
         AgentActivity::WaitingApproval => "waiting for your approval",
         AgentActivity::Done => "done",
         AgentActivity::Idle => "idle",
@@ -527,6 +535,7 @@ struct PromptLeafContext {
     kind_label: String,
     current_title: String,
     current_icon: Option<String>,
+    is_name_fixed: bool,
     filename: Option<String>,
     content_extract: String,
 }
@@ -621,6 +630,7 @@ impl PromptLeafContext {
                     icon_budget,
                 ))
             }),
+            is_name_fixed: item.is_name_fixed,
             filename: item.filename.as_deref().map(|filename| {
                 crate::naming::encode_untrusted_context(&clip_restructure_evidence(
                     filename,
@@ -734,6 +744,11 @@ enum LlmRestructureNode {
         title: String,
         short_title: Option<String>,
         icon: Option<String>,
+        #[serde(default)]
+        children: Vec<LlmRestructureNode>,
+    },
+    ExistingGroup {
+        id: NodeId,
         #[serde(default)]
         children: Vec<LlmRestructureNode>,
     },
@@ -1032,6 +1047,21 @@ fn validate_model_contract(
                     &node_path,
                 )?;
             }
+            LlmRestructureNode::ExistingGroup { children, .. } => {
+                if in_split_view {
+                    anyhow::bail!(
+                        "restructure response {node_path} placed an existing group inside a split view"
+                    );
+                }
+                validate_model_contract(
+                    children,
+                    expected_kinds,
+                    expected_split_views,
+                    referenced_split_views,
+                    false,
+                    &node_path,
+                )?;
+            }
             LlmRestructureNode::SplitView { id, children } => {
                 if in_split_view {
                     anyhow::bail!(
@@ -1054,6 +1084,7 @@ fn validate_model_contract(
                         LlmRestructureNode::Pane { id, .. } => Ok(*id),
                         LlmRestructureNode::Folder { .. }
                         | LlmRestructureNode::Group { .. }
+                        | LlmRestructureNode::ExistingGroup { .. }
                         | LlmRestructureNode::SplitView { .. } => anyhow::bail!(
                             "restructure response {node_path} placed a non-pane inside protected split view {id:?}"
                         ),
@@ -1106,6 +1137,7 @@ fn preserve_leaf_icons_recursive(
                 }
             }
             LlmRestructureNode::Group { children, .. }
+            | LlmRestructureNode::ExistingGroup { children, .. }
             | LlmRestructureNode::SplitView { children, .. } => {
                 preserve_leaf_icons_recursive(children, existing_icons);
             }
@@ -1123,6 +1155,9 @@ fn normalize_generated_icons(nodes: &mut [LlmRestructureNode]) {
                 *icon = icon.as_deref().and_then(crate::naming::normalize_icon);
                 normalize_generated_icons(children);
             }
+            LlmRestructureNode::ExistingGroup { children, .. } => {
+                normalize_generated_icons(children);
+            }
             LlmRestructureNode::SplitView { children, .. } => {
                 normalize_generated_icons(children);
             }
@@ -1137,6 +1172,7 @@ fn collect_referenced_ids(nodes: &[LlmRestructureNode], out: &mut Vec<NodeId>) {
                 out.push(*id)
             }
             LlmRestructureNode::Group { children, .. }
+            | LlmRestructureNode::ExistingGroup { children, .. }
             | LlmRestructureNode::SplitView { children, .. } => {
                 collect_referenced_ids(children, out)
             }
@@ -1164,6 +1200,9 @@ fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
             } => {
                 validate_title_field(title)?;
                 validate_optional_title_field(short_title)?;
+                validate_titles(children)?;
+            }
+            LlmRestructureNode::ExistingGroup { children, .. } => {
                 validate_titles(children)?;
             }
             LlmRestructureNode::SplitView { children, .. } => {
@@ -1258,6 +1297,13 @@ fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -
                 .map(|child| convert_node(child, terminal_pane_ids))
                 .collect(),
         },
+        LlmRestructureNode::ExistingGroup { id, children } => RestructureNode::ExistingGroup {
+            id,
+            children: children
+                .into_iter()
+                .map(|child| convert_node(child, terminal_pane_ids))
+                .collect(),
+        },
         LlmRestructureNode::SplitView { id, children } => RestructureNode::ExistingSplitView {
             id,
             children: children
@@ -1324,6 +1370,7 @@ mod tests {
             kind_label: "Plain shell".to_string(),
             current_title: title.to_string(),
             current_icon: None,
+            is_name_fixed: false,
             filename: None,
             content_extract: "$ cargo build".to_string(),
             automatic_content_fingerprint: 0,
@@ -2030,6 +2077,7 @@ mod tests {
             kind_label: "Claude agent (working)".to_string(),
             current_title: "shell".to_string(),
             current_icon: None,
+            is_name_fixed: false,
             filename: None,
             content_extract: String::new(),
             automatic_content_fingerprint: 0,

@@ -11,65 +11,71 @@
 //! symptom this fixes. A real terminal emulator answers these immediately,
 //! which is why the same command run directly in e.g. Ghostty or the VS
 //! Code terminal doesn't show the pause.
-
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+//!
+//! This module performs no I/O of its own. [`TerminalQueryResponder`] only
+//! *composes* reply bytes into a buffer while `vt100::Parser::process` runs;
+//! the owning `PtySession` reader thread drains that buffer with
+//! [`TerminalQueryResponder::take_pending_replies`] once it has released the
+//! parser lock, and it is that thread -- not the parser callback -- that
+//! writes the bytes down the pty. Keeping the write outside the callback is
+//! what guarantees a child whose stdin buffer is full can never stall the
+//! parser lock (and with it every screen read, resize, and teardown) behind
+//! a blocking `write_all`.
 
 /// Upper bound on how many capability-query replies [`TerminalQueryResponder`]
-/// will write per PTY read chunk (see [`TerminalQueryResponder::reset_reply_budget`]).
+/// will queue per PTY read chunk (see
+/// [`TerminalQueryResponder::take_pending_replies`]).
 ///
-/// `unhandled_csi` runs synchronously inside `vt100::Parser::process`, which
-/// `PtySession`'s reader thread calls while holding the parser's write lock.
-/// Without a cap, a child that floods its own stdout with query escape
-/// sequences (e.g. repeated `CSI 6n`) without draining its stdin between
-/// them -- buggy, or attacker-controlled output the agent is merely relaying
-/// -- could accumulate enough synchronous `write_all` calls in one chunk to
-/// fill the kernel's pty input buffer and block. That block would happen
-/// while the parser's write lock is held, stalling every other consumer of
-/// it (screen reads, resize, teardown) along with the reader thread itself.
-/// Sixty-four is far above what any legitimate startup probe sends (one or
-/// two queries), so this never engages in normal use.
+/// `unhandled_csi` runs synchronously inside `vt100::Parser::process`, so
+/// every queued reply is memory held while that one chunk is parsed. Without
+/// a cap, a child that floods its own stdout with query escape sequences
+/// (e.g. repeated `CSI 6n`) -- buggy, or attacker-controlled output the agent
+/// is merely relaying -- would have every one of them answered: a single
+/// 64 KiB read chunk of nothing but `CSI 6n` is over twenty thousand queries,
+/// so the queue (and the unsolicited input pushed at the child afterwards)
+/// would grow with the flood instead of staying bounded. Sixty-four is far
+/// above what any legitimate startup probe sends (one or two queries), so
+/// this never engages in normal use.
 const MAX_REPLIES_PER_READ_CHUNK: u32 = 64;
 
 /// Callback target installed on a [`vt100::Parser`] to answer capability
-/// queries by writing replies back down the pty's write half.
+/// queries. It never writes to the pty itself -- it accumulates the reply
+/// bytes for the chunk currently being parsed, and the reader thread that
+/// drove `process()` sends them on afterwards.
+#[derive(Default)]
 pub(crate) struct TerminalQueryResponder {
-    // Same channel `PtySession::write` writes down; a reply here lands on
-    // the child's stdin exactly like a keystroke would.
-    reply_writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    replies_sent_in_current_chunk: u32,
+    // Reply bytes composed during the current `Parser::process` call, in the
+    // order the queries arrived. Drained (and thereby reset) by
+    // `take_pending_replies` once per chunk.
+    pending_replies: Vec<u8>,
+    replies_queued_in_current_chunk: u32,
 }
 
 impl TerminalQueryResponder {
-    pub(crate) fn new(reply_writer: Arc<Mutex<Box<dyn Write + Send>>>) -> Self {
-        Self {
-            reply_writer,
-            replies_sent_in_current_chunk: 0,
-        }
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
-    /// Resets the per-chunk reply budget. The owning `PtySession` calls this
-    /// immediately before each `Parser::process` call so the budget tracks
-    /// "replies within this one read chunk" rather than "replies over the
-    /// pane's whole lifetime" -- a burst is capped, but the responder still
-    /// answers normally on the next chunk.
-    pub(crate) fn reset_reply_budget(&mut self) {
-        self.replies_sent_in_current_chunk = 0;
+    /// Hands the caller every reply queued while parsing the chunk that just
+    /// finished, and resets the per-chunk reply budget along with it.
+    ///
+    /// The owning `PtySession` calls this immediately after each
+    /// `Parser::process` call and writes the returned bytes to the pty's
+    /// write half, so a reply lands on the child's stdin exactly like a
+    /// keystroke would. Draining *is* the budget reset, which is why the
+    /// budget cannot drift out of step with the chunk boundary: a burst is
+    /// capped, but the responder still answers normally on the next chunk.
+    pub(crate) fn take_pending_replies(&mut self) -> Vec<u8> {
+        self.replies_queued_in_current_chunk = 0;
+        std::mem::take(&mut self.pending_replies)
     }
 
-    fn reply(&mut self, bytes: &[u8]) {
-        if self.replies_sent_in_current_chunk >= MAX_REPLIES_PER_READ_CHUNK {
+    fn queue_reply(&mut self, bytes: &[u8]) {
+        if self.replies_queued_in_current_chunk >= MAX_REPLIES_PER_READ_CHUNK {
             return;
         }
-        self.replies_sent_in_current_chunk += 1;
-        // Best-effort: a query reply that fails to send is no worse than
-        // the unanswered query this responder exists to fix, and a
-        // poisoned lock here would mean the pane is already being torn
-        // down.
-        if let Ok(mut writer) = self.reply_writer.lock() {
-            let _ = writer.write_all(bytes);
-            let _ = writer.flush();
-        }
+        self.replies_queued_in_current_chunk += 1;
+        self.pending_replies.extend_from_slice(bytes);
     }
 }
 
@@ -115,21 +121,31 @@ impl vt100::Callbacks for TerminalQueryResponder {
                     .and_then(|p| p.first())
                     .is_none_or(|v| *v == 0) =>
             {
-                self.reply(b"\x1b[?1;2c");
+                self.queue_reply(b"\x1b[?1;2c");
             }
             // Device Status Report (`CSI 5n`): "terminal OK".
             (None, 'n') if params.first().and_then(|p| p.first()) == Some(&5) => {
-                self.reply(b"\x1b[0n");
+                self.queue_reply(b"\x1b[0n");
             }
             // Cursor Position Report (`CSI 6n`), answered with the real
             // cursor position so apps that poll it for cursor-relative
             // rendering (e.g. bracketed prompts) get a correct reply
             // instead of hanging.
             (None, 'n') if params.first().and_then(|p| p.first()) == Some(&6) => {
+                let (rows, cols) = screen.size();
                 let (row, col) = screen.cursor_position();
-                self.reply(
-                    format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1)).as_bytes(),
-                );
+                // CPR is 1-indexed and must name a cell that exists. vt100
+                // parks the cursor one column *past* the last one while a
+                // wrap is pending -- the ordinary state after any line
+                // filled to the right edge -- which would otherwise report
+                // column `cols + 1` and put the querying app's idea of the
+                // cursor off the screen. Real terminals report the last
+                // column in that state, so clamp to the screen. `max(1)`
+                // keeps a degenerate zero-sized screen from producing the
+                // invalid row/column 0.
+                let reported_row = row.saturating_add(1).min(rows.max(1));
+                let reported_col = col.saturating_add(1).min(cols.max(1));
+                self.queue_reply(format!("\x1b[{reported_row};{reported_col}R").as_bytes());
             }
             _ => {}
         }
@@ -140,38 +156,24 @@ impl vt100::Callbacks for TerminalQueryResponder {
 mod tests {
     use super::*;
 
-    /// In-memory `Write` sink standing in for the pty writer, so these
-    /// tests exercise `TerminalQueryResponder` directly through
-    /// `vt100::Parser::process` without spawning a real pty or child
-    /// process.
-    #[derive(Clone, Default)]
-    struct RecordingSink(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for RecordingSink {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+    /// Builds a parser wired to a real [`TerminalQueryResponder`], so these
+    /// tests exercise the responder through `vt100::Parser::process` without
+    /// spawning a real pty or child process.
+    fn parser_with_responder() -> vt100::Parser<TerminalQueryResponder> {
+        vt100::Parser::new_with_callbacks(24, 80, 0, TerminalQueryResponder::new())
     }
 
-    fn parser_with_recording_responder() -> (vt100::Parser<TerminalQueryResponder>, RecordingSink) {
-        let sink = RecordingSink::default();
-        let reply_writer: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(sink.clone())));
-        let parser =
-            vt100::Parser::new_with_callbacks(24, 80, 0, TerminalQueryResponder::new(reply_writer));
-        (parser, sink)
+    /// Feeds one read chunk through a fresh parser and returns exactly the
+    /// bytes `PtySession`'s reader thread would write back to the child.
+    fn replies_to(chunk: &[u8]) -> Vec<u8> {
+        let mut parser = parser_with_responder();
+        parser.process(chunk);
+        parser.callbacks_mut().take_pending_replies()
     }
 
     #[test]
     fn primary_device_attributes_query_gets_a_reply() {
-        let (mut parser, sink) = parser_with_recording_responder();
-        parser.process(b"\x1b[c");
-        assert_eq!(sink.0.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+        assert_eq!(replies_to(b"\x1b[c").as_slice(), b"\x1b[?1;2c");
     }
 
     #[test]
@@ -185,17 +187,22 @@ mod tests {
         // Answering only the Primary Device Attributes query still resolves
         // crossterm's probe promptly (no 2-second timeout) while reporting
         // "not supported", which is the truthful answer for this pty.
-        let (mut parser, sink) = parser_with_recording_responder();
-        parser.process(b"\x1b[?u\x1b[c");
-        assert_eq!(sink.0.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+        assert_eq!(replies_to(b"\x1b[?u\x1b[c").as_slice(), b"\x1b[?1;2c");
     }
 
     #[test]
     fn cursor_position_report_reflects_the_real_cursor() {
-        let (mut parser, sink) = parser_with_recording_responder();
         // Move the cursor to row 3, col 5 (1-indexed CUP), then ask for it.
-        parser.process(b"\x1b[3;5H\x1b[6n");
-        assert_eq!(sink.0.lock().unwrap().as_slice(), b"\x1b[3;5R");
+        assert_eq!(replies_to(b"\x1b[3;5H\x1b[6n").as_slice(), b"\x1b[3;5R");
+    }
+
+    #[test]
+    fn cursor_position_report_clamps_a_pending_wrap_to_the_last_column() {
+        // Writing at the last column leaves vt100's cursor at column `cols`
+        // (0-indexed), one past the last cell, with the wrap deferred until
+        // the next printable character. The report must still name a real
+        // column -- `80` on this 80-column screen, not `81`.
+        assert_eq!(replies_to(b"\x1b[1;80Hx\x1b[6n").as_slice(), b"\x1b[1;80R");
     }
 
     #[test]
@@ -204,12 +211,8 @@ mod tests {
         // attributes request, so answering it would push unsolicited reply
         // bytes onto the child's stdin; the explicit `CSI 0 c` form must
         // still get the normal reply.
-        let (mut parser, sink) = parser_with_recording_responder();
-        parser.process(b"\x1b[5c");
-        assert!(sink.0.lock().unwrap().is_empty());
-
-        parser.process(b"\x1b[0c");
-        assert_eq!(sink.0.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+        assert!(replies_to(b"\x1b[5c").is_empty());
+        assert_eq!(replies_to(b"\x1b[0c").as_slice(), b"\x1b[?1;2c");
     }
 
     #[test]
@@ -223,39 +226,41 @@ mod tests {
         // (`CSI ? row ; col ; page R`) than the plain CPR this responder
         // sends. Answering with the wrong shape would be worse than not
         // answering at all, so both must produce no reply.
-        let (mut parser, sink) = parser_with_recording_responder();
-        parser.process(b"\x1b[?c\x1b[?6n");
-        assert!(sink.0.lock().unwrap().is_empty());
+        assert!(replies_to(b"\x1b[?c\x1b[?6n").is_empty());
     }
 
     #[test]
     fn reply_flood_within_one_chunk_is_capped() {
         // A child that emits far more query escape sequences than any
         // legitimate startup probe would, all within a single `process()`
-        // call, must not get a synchronous reply for every single one --
-        // see `MAX_REPLIES_PER_READ_CHUNK`'s doc comment for why an
-        // unbounded reply count here is a liveness hazard, not just noise.
-        let (mut parser, sink) = parser_with_recording_responder();
+        // call, must not get a reply queued for every single one -- see
+        // `MAX_REPLIES_PER_READ_CHUNK`'s doc comment for why an unbounded
+        // reply count here is a resource hazard, not just noise.
         let flood = b"\x1b[c".repeat(MAX_REPLIES_PER_READ_CHUNK as usize + 50);
-        parser.process(&flood);
-        let replies_written = sink.0.lock().unwrap().len() / b"\x1b[?1;2c".len();
-        assert_eq!(replies_written, MAX_REPLIES_PER_READ_CHUNK as usize);
+        let replies = replies_to(&flood);
+        assert_eq!(
+            replies.len(),
+            MAX_REPLIES_PER_READ_CHUNK as usize * b"\x1b[?1;2c".len()
+        );
     }
 
     #[test]
     fn reply_budget_resets_for_the_next_chunk() {
-        // Mirrors what `PtySession`'s reader thread does: reset the budget
-        // immediately before each `process()` call. A capped burst on one
-        // chunk must not permanently silence the responder.
-        let (mut parser, sink) = parser_with_recording_responder();
+        // Mirrors what `PtySession`'s reader thread does: drain the queued
+        // replies after each `process()` call. A capped burst on one chunk
+        // must not permanently silence the responder.
+        let mut parser = parser_with_responder();
         let flood = b"\x1b[c".repeat(MAX_REPLIES_PER_READ_CHUNK as usize + 10);
         parser.process(&flood);
-        let bytes_after_flood = sink.0.lock().unwrap().len();
+        assert_eq!(
+            parser.callbacks_mut().take_pending_replies().len(),
+            MAX_REPLIES_PER_READ_CHUNK as usize * b"\x1b[?1;2c".len()
+        );
 
-        parser.callbacks_mut().reset_reply_budget();
         parser.process(b"\x1b[c");
-
-        let total_bytes = sink.0.lock().unwrap().len();
-        assert_eq!(total_bytes - bytes_after_flood, b"\x1b[?1;2c".len());
+        assert_eq!(
+            parser.callbacks_mut().take_pending_replies().as_slice(),
+            b"\x1b[?1;2c"
+        );
     }
 }

@@ -72,16 +72,25 @@ const EMULATED_TERMINAL_TYPE: &str = "xterm-256color";
 const OUTER_TERMINAL_IDENTITY_ENVIRONMENT_PREFIXES: &[&str] =
     &["WEZTERM_", "KITTY_", "TMUX_", "ZELLIJ_"];
 
-/// Returns whether an environment key describes an outer terminal or
-/// multiplexer rather than Ilium's direct `vt100` emulation boundary.
-fn is_outer_terminal_identity_environment_variable(key: &OsStr) -> bool {
+/// Returns whether an environment key must never cross this pty boundary,
+/// whatever the outer process or the caller set. Two distinct reasons share
+/// one filter so both are decided from the same normalized key:
+///
+/// - Outer terminal/multiplexer identity, which would make a child infer
+///   capabilities Ilium's `vt100` emulator does not implement.
+/// - `NO_COLOR`, a monochrome policy inherited by the Ilium process that must
+///   not follow into its fully color-capable child PTYs.
+fn is_environment_variable_filtered_at_pty_boundary(key: &OsStr) -> bool {
     // Environment names are conventionally ASCII, while normalizing here
-    // also covers Windows' case-insensitive environment semantics.
+    // also covers Windows' case-insensitive environment semantics -- an
+    // inherited `no_color` suppresses color there exactly like `NO_COLOR`,
+    // so both filters must read the same normalized key rather than one
+    // comparing the raw one.
     let normalized_key = key.to_string_lossy().to_ascii_uppercase();
 
     if matches!(
         normalized_key.as_str(),
-        "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "TMUX" | "ZELLIJ"
+        "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "TMUX" | "ZELLIJ" | "NO_COLOR"
     ) {
         return true;
     }
@@ -104,7 +113,7 @@ fn configure_emulated_terminal_environment(
     // including variables introduced by future emulator versions.
     command.env_clear();
     for (key, value) in std::env::vars_os() {
-        if key != "NO_COLOR" && !is_outer_terminal_identity_environment_variable(&key) {
+        if !is_environment_variable_filtered_at_pty_boundary(&key) {
             command.env(key, value);
         }
     }
@@ -112,7 +121,7 @@ fn configure_emulated_terminal_environment(
     // Caller overrides remain supported for normal variables, but cannot
     // contradict the terminal capability contract at this boundary.
     for (key, value) in caller_environment {
-        if key != "NO_COLOR" && !is_outer_terminal_identity_environment_variable(key.as_ref()) {
+        if !is_environment_variable_filtered_at_pty_boundary(key.as_ref()) {
             command.env(key, value);
         }
     }
@@ -179,9 +188,10 @@ pub struct PtySession {
     /// return text and a revision that describe exactly the same frame.
     screen_generation: Arc<AtomicU64>,
     // The pty master's write half; writing here sends bytes to the child's
-    // stdin (as seen through the pty). Shared with the reader thread's
-    // `TerminalQueryResponder`, which writes terminal capability-query
-    // replies back down the same channel.
+    // stdin (as seen through the pty). Shared with the reader thread, which
+    // uses it to send the terminal capability-query replies
+    // `TerminalQueryResponder` composed while parsing a chunk back down the
+    // same channel.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     // The pty master's control handle; used for resizing. Wrapped in a
     // `Mutex` (rather than a bare field) because `portable_pty::PtyPair`
@@ -241,8 +251,9 @@ pub struct PtySession {
 pub struct PtyOutputChunk {
     pub sequence: u64,
     /// Shared by the replay journal and every live subscriber. The reader
-    /// allocates each PTY chunk once; cloning a journal/broadcast entry only
-    /// advances a reference count instead of copying up to 8 KiB.
+    /// allocates each PTY chunk once, straight from its read buffer; cloning a
+    /// journal/broadcast entry then only advances a reference count instead of
+    /// copying up to one whole 64 KiB read.
     pub bytes: Arc<[u8]>,
 }
 
@@ -291,7 +302,11 @@ impl OutputJournal {
     /// than ordinary 10,000-line agent transcripts.
     const MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
 
-    fn append(&mut self, bytes: Vec<u8>) -> PtyOutputChunk {
+    /// Takes the reader's borrowed slice rather than an owned `Vec` so the
+    /// chunk really is allocated once: `Arc<[u8]>` cannot adopt a `Vec`'s
+    /// allocation (it needs room for the reference count in front of the
+    /// bytes), so handing one in would copy the chunk a second time.
+    fn append(&mut self, bytes: &[u8]) -> PtyOutputChunk {
         self.next_sequence = self.next_sequence.saturating_add(1);
         let chunk = PtyOutputChunk {
             sequence: self.next_sequence,
@@ -814,16 +829,19 @@ impl PtySession {
             rows,
             cols,
             0,
-            TerminalQueryResponder::new(Arc::clone(&writer)),
+            TerminalQueryResponder::new(),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
         let (screen_changed_tx, screen_changed_rx) = watch::channel(());
-        // Capacity is chunks-buffered, not bytes: at 8KiB per chunk this
-        // comfortably absorbs a slow/momentarily-disconnected subscriber
-        // (e.g. `ilium-server`'s forwarder task between polls) without
-        // unbounded memory growth. A lagging subscriber gets
-        // `RecvError::Lagged` rather than silently missing data forever --
-        // the caller decides how to handle that (see `subscribe_output_bytes`).
+        // Capacity is chunks-buffered, not bytes: at up to one 64 KiB read per
+        // chunk this comfortably absorbs a slow/momentarily-disconnected
+        // subscriber (e.g. `ilium-server`'s forwarder task between polls)
+        // without unbounded memory growth -- and each buffered chunk is an
+        // `Arc` the journal below usually holds anyway, so the buffer's own
+        // added cost is only whatever the journal has already discarded. A
+        // lagging subscriber gets `RecvError::Lagged` rather than silently
+        // missing data forever -- the caller decides how to handle that (see
+        // `subscribe_output_bytes`).
         const OUTPUT_BYTES_CHANNEL_CAPACITY: usize = 256;
         let (output_bytes_tx, _) = broadcast::channel(OUTPUT_BYTES_CHANNEL_CAPACITY);
         let output_journal = Arc::new(Mutex::new(OutputJournal {
@@ -840,6 +858,9 @@ impl PtySession {
             let output_journal = Arc::clone(&output_journal);
             let child = Arc::clone(&child);
             let reader_should_stop = Arc::clone(&reader_should_stop);
+            // Needed so this thread can send the terminal-query replies that
+            // `process()` composes -- see the drain below.
+            let writer = Arc::clone(&writer);
             // Not keeping the `JoinHandle` around, but this thread is not
             // fire-and-forget: `reader_should_stop` (set by `Drop` below) is
             // its cancellation path, checked by `CancellableReader::read_next`
@@ -875,22 +896,34 @@ impl PtySession {
                     // so a concurrent `with_screen`/`resize` never waits on
                     // us longer than one chunk's worth of parsing.
                     //
-                    // `process()` may itself write terminal-query replies
-                    // back to `writer` via `TerminalQueryResponder` (a
-                    // different lock than this one), so this never
-                    // deadlocks against the reply path.
-                    {
+                    // `process()` may answer terminal capability queries the
+                    // child sent (`TerminalQueryResponder`), but it only
+                    // *composes* those replies into a buffer -- taking them
+                    // out is a `mem::take`, and the actual pty write happens
+                    // below, after this guard is dropped. That ordering is
+                    // deliberate: writing to a child that is not draining its
+                    // own stdin can block indefinitely, and doing that under
+                    // the parser lock would stall every screen read, resize,
+                    // and teardown behind it.
+                    let pending_query_replies = {
                         // The lock is only ever held by this thread (here)
                         // and the owning `PtySession` (read/resize); a
                         // poisoned lock means one of those panicked, which
                         // we treat as unrecoverable for this pane.
                         let mut parser = parser.write().unwrap();
-                        // Bounds how many query replies `process()` can write
-                        // synchronously from this one chunk -- see
-                        // `TerminalQueryResponder::reset_reply_budget`.
-                        parser.callbacks_mut().reset_reply_budget();
                         parser.process(&buf[..bytes_read]);
                         screen_generation.fetch_add(1, Ordering::Release);
+                        parser.callbacks_mut().take_pending_replies()
+                    };
+                    if !pending_query_replies.is_empty() {
+                        // Best-effort: a capability-query reply that fails to
+                        // send is no worse than the unanswered query the
+                        // responder exists to fix, and a poisoned lock here
+                        // means the pane is already being torn down.
+                        if let Ok(mut writer) = writer.lock() {
+                            let _ = writer.write_all(&pending_query_replies);
+                            let _ = writer.flush();
+                        }
                     }
                     // Best-effort: `send` only errors once every receiver
                     // (including the one kept alive by this `PtySession`)
@@ -902,10 +935,7 @@ impl PtySession {
                     // errors when there are currently zero receivers (no
                     // client attached right now), which is a normal state
                     // for a detached pane, not a failure.
-                    let output_chunk = output_journal
-                        .lock()
-                        .unwrap()
-                        .append(buf[..bytes_read].to_vec());
+                    let output_chunk = output_journal.lock().unwrap().append(&buf[..bytes_read]);
                     let _ = output_bytes_tx.send(output_chunk);
                 }
                 // The read loop above ends once the pty's slave side is
@@ -985,8 +1015,8 @@ impl PtySession {
     pub fn write(&self, bytes: &[u8]) -> Result<(), PtyError> {
         // Poisoned-lock panic is an invariant violation (see `spawn`).
         let mut writer = self.writer.lock().unwrap();
-        writer.write_all(bytes)?;
-        writer.flush()?;
+        writer.write_all(bytes).map_err(PtyError::Write)?;
+        writer.flush().map_err(PtyError::Write)?;
         Ok(())
     }
 
@@ -1018,13 +1048,29 @@ impl PtySession {
     /// are clamped to [`MINIMUM_PTY_DIMENSION`] before use -- see that
     /// constant's doc comment for why a `0` here must never reach the
     /// `vt100` parser.
+    ///
+    /// Both sizes are updated under one continuous hold of the `master`
+    /// mutex, because they must never disagree. `ilium-server` resizes a pane
+    /// from whichever connection task handled the request while holding only a
+    /// *read* lock on its pane registry, so two attached clients with
+    /// different window sizes genuinely can call this concurrently. Taking the
+    /// mutex per statement would let their updates interleave -- pty set to A
+    /// then B, parser set to B then A -- leaving the child rendering for one
+    /// geometry into a grid sized for the other until some unrelated later
+    /// resize happened to line them back up.
+    ///
+    /// This is the crate's only nested lock acquisition, and it fixes the
+    /// order as `master` -> `parser`. It cannot deadlock and must not be
+    /// "simplified" back: every other holder takes exactly one of this
+    /// session's locks at a time (the reader thread takes `parser`, releases
+    /// it, then `writer`, then `output_journal`), so no path anywhere takes
+    /// `parser` or `writer` before `master`.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), PtyError> {
         let rows = clamp_pty_dimension(rows);
         let cols = clamp_pty_dimension(cols);
         // Poisoned-lock panic is an invariant violation (see `spawn`).
-        self.master
-            .lock()
-            .unwrap()
+        let master = self.master.lock().unwrap();
+        master
             .resize(PtySize {
                 rows,
                 cols,
@@ -1034,7 +1080,9 @@ impl PtySession {
             .map_err(PtyError::Resize)?;
         // See the comment in `spawn`'s reader thread: a poisoned lock here
         // means some other holder already panicked, which we can't recover
-        // from anyway.
+        // from anyway. A failed OS resize returned above without reaching
+        // this, so both sides simply keep the previous size instead of ending
+        // up half-applied.
         let mut parser = self.parser.write().unwrap();
         parser.screen_mut().set_size(rows, cols);
         self.screen_generation.fetch_add(1, Ordering::Release);
@@ -1042,6 +1090,13 @@ impl PtySession {
     }
 
     /// Runs `f` with a read lock on the current `vt100::Screen`.
+    ///
+    /// `f` runs while this session's parser lock is held, so it must not call
+    /// back into any other method on the same session: `resize` alone would
+    /// deadlock on the parser's own write lock, and it also holds `master`
+    /// while waiting for that write lock, which is the reverse of the order a
+    /// closure reaching for `shell_owns_terminal` would take (see `resize`).
+    /// Read the screen here, do everything else after returning.
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
         // Poisoned-lock panic is an invariant violation (see `spawn`).
         let guard = self.parser.read().unwrap();
@@ -1293,9 +1348,9 @@ mod tests {
     #[test]
     fn output_recovery_returns_only_the_contiguous_missing_tail() {
         let mut journal = journal();
-        journal.append(b"first".to_vec());
-        journal.append(b"-second".to_vec());
-        journal.append(b"-third".to_vec());
+        journal.append(b"first");
+        journal.append(b"-second");
+        journal.append(b"-third");
 
         assert_eq!(
             journal.recovery_after(1),
@@ -1310,8 +1365,8 @@ mod tests {
     #[test]
     fn output_recovery_falls_back_to_replay_after_retained_history_was_lost() {
         let mut journal = journal();
-        journal.append(b"discarded".to_vec());
-        journal.append(b"retained".to_vec());
+        journal.append(b"discarded");
+        journal.append(b"retained");
         let removed = journal.chunks.pop_front().unwrap();
         journal.retained_bytes = journal.retained_bytes.saturating_sub(removed.bytes.len());
         journal.is_complete = false;

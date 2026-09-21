@@ -29,7 +29,7 @@ pub fn open_url(url: &str) -> io::Result<()> {
 /// double-click in a graphical file manager would trigger.
 #[cfg(unix)]
 pub fn open_path(path: &Path) -> io::Result<()> {
-    spawn_and_release(OPEN_COMMAND, path.as_os_str())
+    spawn_and_release(OPEN_COMMAND, &opener_path_argument(path))
 }
 
 #[cfg(windows)]
@@ -43,9 +43,41 @@ const OPEN_COMMAND: &str = "xdg-open";
 #[cfg(target_os = "macos")]
 const OPEN_COMMAND: &str = "open";
 
-/// Spawns `command arg` and reaps it on a detached thread. The opener process
-/// hands off to the real browser/file-manager and exits almost immediately,
-/// but a dropped `Child` is never reaped on Unix -- without this it stays a
+/// Makes `path` unmistakably a filename rather than an option.
+///
+/// Both `xdg-open` and macOS's `open` parse a leading `-` as the start of an
+/// option, so a relative path whose first character is `-` -- a perfectly
+/// legal filename, and one a user can click straight out of terminal output --
+/// would be rejected as bad syntax by `xdg-open` or swallowed as a flag by
+/// `open` instead of being opened. Prefixing `./` names the very same file
+/// while removing the leading `-`. An absolute path can never begin with one,
+/// so the common case borrows and allocates nothing.
+///
+/// A URL needs no equivalent guard: callers must already have restricted it
+/// to an allowed scheme, and a scheme has to start with a letter.
+#[cfg(unix)]
+fn opener_path_argument(path: &Path) -> std::borrow::Cow<'_, std::ffi::OsStr> {
+    use std::borrow::Cow;
+    use std::ffi::OsString;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    // Inspected as bytes rather than through `to_str`: a non-UTF-8 filename is
+    // still a filename and has to open exactly like any other.
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.first() != Some(&b'-') {
+        return Cow::Borrowed(path.as_os_str());
+    }
+    let mut prefixed: Vec<u8> = Vec::with_capacity(bytes.len() + 2);
+    prefixed.extend_from_slice(b"./");
+    prefixed.extend_from_slice(bytes);
+    Cow::Owned(OsString::from_vec(prefixed))
+}
+
+/// Spawns `command arg` and reaps it on a detached thread. The opener usually
+/// hands the target to an already-running browser or file manager and exits
+/// within milliseconds, but it can equally become the parent of a freshly
+/// started handler and live exactly as long as that handler does. Either way a
+/// dropped `Child` is never reaped on Unix -- without this thread it stays a
 /// zombie in the process table for the rest of this long-lived TUI process.
 ///
 /// Stdio is explicitly nulled rather than inherited: the parent is a raw-mode
@@ -55,6 +87,16 @@ const OPEN_COMMAND: &str = "open";
 /// TUI's own screen.
 #[cfg(unix)]
 fn spawn_and_release(command: &'static str, arg: &std::ffi::OsStr) -> io::Result<()> {
+    // An empty target can never open anything, and the opener's non-zero exit
+    // arrives long after this function has returned `Ok` -- the caller would
+    // report an "Opening" that never happened. Refuse while a real error can
+    // still travel back to it.
+    if arg.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing to hand {command} an empty target"),
+        ));
+    }
     let mut child = std::process::Command::new(command)
         .arg(arg)
         .stdin(std::process::Stdio::null())
@@ -94,6 +136,16 @@ fn shell_execute_open(target: &std::ffi::OsStr) -> io::Result<()> {
 
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    // Same contract as the Unix path: an empty target is a caller mistake, not
+    // a shell-level failure, and both platforms must reject it identically so
+    // callers never have to branch on the operating system.
+    if target.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "refusing to hand ShellExecuteW an empty target",
+        ));
+    }
 
     // Encoded straight from the caller's `OsStr` -- never round-tripped
     // through `str`, which would silently mangle a path containing an
@@ -145,6 +197,13 @@ fn shell_execute_error(code: usize) -> io::Error {
             "access denied (SE_ERR_ACCESSDENIED)",
         ),
         8 => (ErrorKind::OutOfMemory, "out of memory (SE_ERR_OOM)"),
+        // Documented alongside the `SE_ERR_*` codes, and returned for a target
+        // that resolves to a malformed executable. Without this arm it fell
+        // into the catch-all and was reported as an unknown failure.
+        11 => (
+            ErrorKind::InvalidData,
+            "the executable file is invalid (ERROR_BAD_FORMAT)",
+        ),
         26 => (ErrorKind::Other, "sharing violation (SE_ERR_SHARE)"),
         27 => (
             ErrorKind::Other,
@@ -170,4 +229,32 @@ fn shell_execute_error(code: usize) -> io::Error {
         kind,
         format!("ShellExecuteW failed: {description} (code {code})"),
     )
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_starting_with_a_dash_is_rewritten_so_it_cannot_read_as_an_option() {
+        assert_eq!(
+            &*opener_path_argument(Path::new("-weird name.txt")),
+            std::ffi::OsStr::new("./-weird name.txt")
+        );
+    }
+
+    #[test]
+    fn an_ordinary_path_reaches_the_opener_byte_for_byte() {
+        assert_eq!(
+            &*opener_path_argument(Path::new("/home/user/notes.md")),
+            std::ffi::OsStr::new("/home/user/notes.md")
+        );
+    }
+
+    #[test]
+    fn an_empty_target_fails_instead_of_reporting_a_launch_that_cannot_happen() {
+        let error = spawn_and_release(OPEN_COMMAND, std::ffi::OsStr::new(""))
+            .expect_err("an empty target must never reach the system opener");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
 }

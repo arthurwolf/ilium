@@ -31,6 +31,16 @@ pub struct ReaderInterrupt {
 
 impl InterruptibleReader {
     /// Duplicates `data_fd` and creates a private close-on-exec wake pipe.
+    ///
+    /// The duplicate is deliberately left exactly as the caller configured its
+    /// descriptor. `dup`/`F_DUPFD_CLOEXEC` produces a second descriptor onto
+    /// the *same* open file description, and `O_NONBLOCK` lives on that shared
+    /// description -- so switching this duplicate to nonblocking mode would
+    /// also switch the caller's own descriptor, and every writer cloned from
+    /// it. For a pty master that turns a momentarily full input buffer into a
+    /// failed `write_all` and silently dropped user input. `read` therefore
+    /// bounds its drain with a zero-timeout `poll` instead of relying on
+    /// `EAGAIN` (see `data_has_queued_bytes`).
     pub fn duplicate(data_fd: RawFd) -> io::Result<(Self, ReaderInterrupt)> {
         // SAFETY: `data_fd` is borrowed only for `fcntl`; successful `dup`
         // returns an independently owned descriptor.
@@ -39,27 +49,11 @@ impl InterruptibleReader {
             return Err(io::Error::last_os_error());
         }
         // SAFETY: the successful `fcntl` above returned exclusive ownership.
+        // `F_DUPFD_CLOEXEC` already set close-on-exec atomically, so no further
+        // `fcntl` on this descriptor is needed -- or wanted, per the note above.
         let data = unsafe { File::from_raw_fd(duplicated_fd) };
-        // The initial poll below remains the idle wait. Nonblocking mode only
-        // affects the bounded drain after that wake, letting one consumer
-        // collapse every byte already queued by the kernel into one logical
-        // read without ever waiting for a future byte.
-        set_descriptor_flags(&data)?;
 
-        let mut wake_fds = [-1; 2];
-        // SAFETY: `wake_fds` points to two writable descriptor slots.
-        if unsafe { libc::pipe(wake_fds.as_mut_ptr()) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: successful `pipe` returned two independently owned fds.
-        let wake_read = unsafe { File::from_raw_fd(wake_fds[0]) };
-        // SAFETY: same invariant as `wake_read` for the other pipe end.
-        let wake_write = unsafe { File::from_raw_fd(wake_fds[1]) };
-        // Nonblocking so `read`'s wake handler can drain every queued byte
-        // (see `interrupt`'s doc comment on coalescing) without risking a
-        // block on the final read once the pipe is actually empty.
-        set_descriptor_flags(&wake_read)?;
-        set_descriptor_flags(&wake_write)?;
+        let (wake_read, wake_write) = create_wake_pipe()?;
 
         Ok((
             Self { data, wake_read },
@@ -71,6 +65,13 @@ impl InterruptibleReader {
 
     /// Waits indefinitely for data or an explicit owner interruption.
     pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<InterruptibleRead> {
+        // Mirrors `Read::read`: a zero-length buffer can hold no bytes, which
+        // is not the same thing as the descriptor having reached end of file.
+        // Reporting `Eof` here would tell a caller its pty had hung up.
+        if buffer.is_empty() {
+            return Ok(InterruptibleRead::Data(0));
+        }
+
         loop {
             let mut poll_fds = [
                 libc::pollfd {
@@ -94,6 +95,10 @@ impl InterruptibleReader {
                 }
                 return Err(error);
             }
+            // Also fires on `POLLHUP`, i.e. once every `ReaderInterrupt` clone
+            // has been dropped. Reporting `Interrupted` is exactly right then:
+            // nobody is left who could ever wake this reader again, so the
+            // owner has effectively asked it to stop.
             if poll_fds[1].revents != 0 {
                 // Drains every byte the wake pipe has queued, not just the
                 // one that woke this poll: `interrupt` writes are only
@@ -119,7 +124,11 @@ impl InterruptibleReader {
             if poll_fds[0].revents != 0 {
                 let mut total_bytes_read = 0;
                 loop {
-                    match self.data.read(&mut buffer[total_bytes_read..]) {
+                    // Bound as its own statement so the borrow of `self.data`
+                    // ends before an arm re-borrows `self` for the readiness
+                    // check below.
+                    let read_result = self.data.read(&mut buffer[total_bytes_read..]);
+                    match read_result {
                         Ok(0) if total_bytes_read == 0 => return Ok(InterruptibleRead::Eof),
                         Ok(0) => return Ok(InterruptibleRead::Data(total_bytes_read)),
                         Ok(bytes_read) => {
@@ -127,8 +136,21 @@ impl InterruptibleReader {
                             if total_bytes_read == buffer.len() {
                                 return Ok(InterruptibleRead::Data(total_bytes_read));
                             }
+                            // The descriptor keeps whatever blocking mode the
+                            // caller gave it, so a second `read` is only safe
+                            // while the kernel still holds queued bytes. This
+                            // collapses one already-arrived burst into a single
+                            // logical read without ever waiting for a byte that
+                            // has not arrived yet.
+                            if !self.data_has_queued_bytes() {
+                                return Ok(InterruptibleRead::Data(total_bytes_read));
+                            }
                         }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        // Reachable only when the caller's own open file
+                        // description is already nonblocking; the readiness
+                        // check above otherwise keeps this drain off the
+                        // `EAGAIN` path entirely.
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                             if total_bytes_read > 0 {
                                 return Ok(InterruptibleRead::Data(total_bytes_read));
@@ -149,6 +171,33 @@ impl InterruptibleReader {
                     }
                 }
             }
+        }
+    }
+
+    /// Zero-timeout readiness check bounding `read`'s drain loop.
+    ///
+    /// A poll failure ends the drain instead of being reported: the bytes
+    /// already sitting in the caller's buffer must not be discarded, and the
+    /// next `read` call polls the same descriptor indefinitely and surfaces
+    /// the very same failure there.
+    fn data_has_queued_bytes(&self) -> bool {
+        loop {
+            let mut poll_fds = [libc::pollfd {
+                fd: self.data.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            }];
+            // SAFETY: the array contains exactly one valid poll descriptor and
+            // remains alive for the complete call, which returns immediately
+            // because the timeout is zero.
+            let poll_result = unsafe { libc::poll(poll_fds.as_mut_ptr(), 1, 0) };
+            if poll_result < 0 {
+                if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return false;
+            }
+            return poll_result > 0 && poll_fds[0].revents != 0;
         }
     }
 }
@@ -184,7 +233,53 @@ impl ReaderInterrupt {
     }
 }
 
-fn set_descriptor_flags(file: &File) -> io::Result<()> {
+/// Creates the private wake pipe.
+///
+/// Both ends are close-on-exec, so a pty spawned on another thread can never
+/// inherit them, and both are nonblocking: the write end so `interrupt` cannot
+/// stall an owner on a full pipe, the read end so `read`'s drain can stop on
+/// `EAGAIN` once the pipe is actually empty.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn create_wake_pipe() -> io::Result<(File, File)> {
+    let mut wake_fds = [-1; 2];
+    // SAFETY: `wake_fds` points to two writable descriptor slots. `pipe2`
+    // applies both flags atomically, leaving no window in which a concurrent
+    // `fork`/`exec` on another thread could inherit these descriptors.
+    if unsafe { libc::pipe2(wake_fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: successful `pipe2` returned two independently owned fds.
+    let wake_read = unsafe { File::from_raw_fd(wake_fds[0]) };
+    // SAFETY: same invariant as `wake_read` for the other pipe end.
+    let wake_write = unsafe { File::from_raw_fd(wake_fds[1]) };
+    Ok((wake_read, wake_write))
+}
+
+/// Fallback for the Unix targets without `pipe2`, which have to set the same
+/// two flags in a second step and therefore keep a small inheritance window.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn create_wake_pipe() -> io::Result<(File, File)> {
+    let mut wake_fds = [-1; 2];
+    // SAFETY: `wake_fds` points to two writable descriptor slots.
+    if unsafe { libc::pipe(wake_fds.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: successful `pipe` returned two independently owned fds.
+    let wake_read = unsafe { File::from_raw_fd(wake_fds[0]) };
+    // SAFETY: same invariant as `wake_read` for the other pipe end.
+    let wake_write = unsafe { File::from_raw_fd(wake_fds[1]) };
+    set_close_on_exec_and_nonblocking(&wake_read)?;
+    set_close_on_exec_and_nonblocking(&wake_write)?;
+    Ok((wake_read, wake_write))
+}
+
+/// Marks one *privately owned* descriptor close-on-exec and nonblocking.
+///
+/// Only ever called on the wake pipe: `O_NONBLOCK` is a property of the open
+/// file description, so this must never be pointed at a descriptor whose
+/// description is shared with a caller (see [`InterruptibleReader::duplicate`]).
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn set_close_on_exec_and_nonblocking(file: &File) -> io::Result<()> {
     let descriptor = file.as_raw_fd();
     // SAFETY: `descriptor` is live for this call and `F_SETFD` mutates only
     // its close-on-exec flag.
@@ -249,5 +344,53 @@ mod tests {
             reader.read(&mut [0_u8; 1]).unwrap(),
             InterruptibleRead::Data(1)
         );
+    }
+
+    #[test]
+    fn duplicating_leaves_the_callers_own_descriptor_blocking() {
+        let (data_source, _idle_peer) = UnixStream::pair().unwrap();
+        let original_fd = data_source.as_raw_fd();
+        // SAFETY: `original_fd` is owned by the live `data_source` and
+        // `F_GETFL` only reads its status flags.
+        let flags_before = unsafe { libc::fcntl(original_fd, libc::F_GETFL) };
+        assert!(flags_before >= 0);
+        assert_eq!(flags_before & libc::O_NONBLOCK, 0);
+
+        let (_reader, _interrupt) = InterruptibleReader::duplicate(original_fd).unwrap();
+
+        // `F_SETFL` acts on the shared open file description, so a duplicate
+        // that made itself nonblocking would drag the caller's descriptor --
+        // and, for a pty master, every writer cloned from it -- along too.
+        // SAFETY: same live descriptor, same read-only `fcntl`.
+        let flags_after = unsafe { libc::fcntl(original_fd, libc::F_GETFL) };
+        assert!(flags_after >= 0);
+        assert_eq!(flags_after & libc::O_NONBLOCK, 0);
+    }
+
+    #[test]
+    fn a_partly_filled_buffer_returns_the_queued_burst_without_waiting_for_more() {
+        let (data_source, mut peer) = UnixStream::pair().unwrap();
+        let (mut reader, _interrupt) =
+            InterruptibleReader::duplicate(data_source.as_raw_fd()).unwrap();
+        peer.write_all(b"abc").unwrap();
+
+        // The descriptor stays blocking, so draining until `EAGAIN` would
+        // park this thread on the fourth byte, which nobody will ever send.
+        let mut buffer = [0_u8; 64];
+        let started_at = Instant::now();
+        assert_eq!(
+            reader.read(&mut buffer).unwrap(),
+            InterruptibleRead::Data(3)
+        );
+        assert_eq!(&buffer[..3], b"abc");
+        assert!(started_at.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn an_empty_buffer_reports_no_bytes_rather_than_end_of_file() {
+        let (data_source, _idle_peer) = UnixStream::pair().unwrap();
+        let (mut reader, _interrupt) =
+            InterruptibleReader::duplicate(data_source.as_raw_fd()).unwrap();
+        assert_eq!(reader.read(&mut []).unwrap(), InterruptibleRead::Data(0));
     }
 }

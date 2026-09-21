@@ -111,9 +111,11 @@ const TOOLBAR_BUTTON_WIDTH: u16 = 4;
 /// controls cannot reveal the title that previously occupied the same cells.
 pub(crate) const ROW_ACTION_WIDTH: u16 = 3;
 const ROW_ACTION_TOTAL_WIDTH: u16 = ROW_ACTION_WIDTH * ROW_ACTION_COUNT;
-/// Edit, up, down, close, then retitle -- reserved as the trailing cells of
-/// a hovered row (see `row_action_at`/`draw_row_actions`).
-pub(crate) const ROW_ACTION_COUNT: u16 = 6;
+/// Edit, up, down, close, retitle, project-restructure, then ask-for-update
+/// -- reserved as the trailing cells of a hovered row (see
+/// `row_action_at`/`draw_row_actions`). Must match `TreeRowAction::ALL`'s
+/// length.
+pub(crate) const ROW_ACTION_COUNT: u16 = 7;
 
 /// Actions available from the tree toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,17 +238,22 @@ pub enum TreeRowAction {
     Retitle,
     /// Restructures exactly one project with a separate AI call.
     ProjectRestructure,
+    /// Project-row shortcut for `App::execute_context_action`'s
+    /// `ContextMenuAction::AskForUpdate` fan-out: sends the fixed
+    /// status-check prompt to every idle/done agent pane in this project.
+    AskForUpdate,
 }
 
 impl TreeRowAction {
     /// Ordered set used for both rendering and hit testing -- left to right.
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Rename,
         Self::MoveUp,
         Self::MoveDown,
         Self::Close,
         Self::Retitle,
         Self::ProjectRestructure,
+        Self::AskForUpdate,
     ];
 
     /// The default, expressive UTF-8 icon for this action. These remain the
@@ -260,6 +267,7 @@ impl TreeRowAction {
             Self::Close => IconTarget::RowClose,
             Self::Retitle => IconTarget::RowRetitle,
             Self::ProjectRestructure => IconTarget::RowProjectRestructure,
+            Self::AskForUpdate => IconTarget::AskForUpdate,
         }
     }
 
@@ -274,6 +282,7 @@ impl TreeRowAction {
             Self::Close => "×",
             Self::Retitle => "↻",
             Self::ProjectRestructure => "⟳",
+            Self::AskForUpdate => "?",
         }
     }
 
@@ -637,6 +646,7 @@ fn build_item(
             status,
             scheduled_input,
             prompt_queue,
+            progress,
             ..
         } => {
             let editor_filename = context
@@ -656,6 +666,13 @@ fn build_item(
                     display_title(node, context.panel_width),
                     prompt_queue.len()
                 )
+            };
+            let display_name = match progress {
+                Some(progress) => format!(
+                    "[{:.0}%] {display_name}",
+                    progress.percent.clamp(0.0, 100.0)
+                ),
+                None => display_name,
             };
             let display_name = title_with_bookmark(
                 title_with_optional_icon(
@@ -1301,6 +1318,16 @@ fn agent_pane_label(
                 Span::raw(agent_title(class, &title, agent_identifiers.mode)),
             )
         }
+        AgentActivity::BackgroundTaskStillRunning => agent_node_label(
+            node_icon,
+            Some(Span::raw(
+                icons
+                    .glyph(IconTarget::BackgroundTaskStillRunning)
+                    .to_string(),
+            )),
+            has_goal,
+            Span::raw(agent_title(class, &title, agent_identifiers.mode)),
+        ),
         AgentActivity::Done => {
             let style = if (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2) {
                 Style::new().add_modifier(Modifier::BOLD)
@@ -1655,8 +1682,11 @@ fn applicable_row_actions(
 ) -> &'static [TreeRowAction] {
     const HIDDEN_PANE: [TreeRowAction; 2] = [TreeRowAction::Close, TreeRowAction::Retitle];
     const HIDDEN_BASIC: [TreeRowAction; 1] = [TreeRowAction::Close];
-    const HIDDEN_PROJECT: [TreeRowAction; 2] =
-        [TreeRowAction::Close, TreeRowAction::ProjectRestructure];
+    const HIDDEN_PROJECT: [TreeRowAction; 3] = [
+        TreeRowAction::Close,
+        TreeRowAction::ProjectRestructure,
+        TreeRowAction::AskForUpdate,
+    ];
     const MANAGEMENT_BASIC: [TreeRowAction; 4] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
@@ -1670,12 +1700,13 @@ fn applicable_row_actions(
         TreeRowAction::Close,
         TreeRowAction::Retitle,
     ];
-    const MANAGEMENT_PROJECT: [TreeRowAction; 5] = [
+    const MANAGEMENT_PROJECT: [TreeRowAction; 6] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
         TreeRowAction::MoveDown,
         TreeRowAction::Close,
         TreeRowAction::ProjectRestructure,
+        TreeRowAction::AskForUpdate,
     ];
     if !show_management_actions {
         if tree.get(id).is_some_and(Node::is_project) {
@@ -2622,7 +2653,7 @@ mod tests {
             None,
         );
 
-        assert!(line_text(&line).ends_with("« [done] » X: Review auth"));
+        assert!(line_text(&line).ends_with("[done] X: Review auth"));
         assert!(!line_text(&line).contains("— done"));
     }
 
@@ -2879,6 +2910,39 @@ mod tests {
         assert_eq!(
             TreeRowAction::ProjectRestructure.glyph(&icons, false),
             icons.glyph(IconTarget::RowProjectRestructure)
+        );
+    }
+
+    #[test]
+    fn background_task_still_running_renders_its_own_configured_activity_icon() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::BackgroundTaskStillRunning, "🧵".to_string());
+        let agent_identifiers = AgentIdentifierSettings::default();
+
+        let label = pane_label_with_icons(
+            &PaneStatus::Agent(
+                AgentClass::Claude,
+                AgentActivity::BackgroundTaskStillRunning,
+            ),
+            "agent",
+            PaneLabelContext {
+                elapsed_ms: 0,
+                is_title_loading: false,
+                terminal_activity_phase: None,
+                agent_identifiers: &agent_identifiers,
+                icons: &icons,
+                editor_filename: None,
+            },
+        );
+
+        // Activity icon lives in the second fixed-width column (no goal
+        // flag present here), distinct from both `WaitingBackground`'s
+        // clock and the goal flag -- never reused for this state.
+        assert_eq!(label.spans[1].content.trim_end(), "🧵");
+        assert_ne!(label.spans[1].content.trim_end(), "🏁");
+        assert_ne!(
+            label.spans[1].content.trim_end(),
+            icons.glyph(IconTarget::WaitingBackground)
         );
     }
 
@@ -3866,6 +3930,34 @@ mod tests {
             row_action_at(&tree, shell, area, 5, Position::new(close_x, 5), false),
             Some(TreeRowAction::Close),
         );
+    }
+
+    #[test]
+    fn ask_for_update_row_action_is_offered_only_for_project_rows() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-row"))
+            .unwrap();
+        let group = tree.add_group(ROOT_ID, "group").unwrap();
+        let shell = tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+
+        for show_management_actions in [false, true] {
+            assert!(
+                applicable_row_actions(&tree, project, show_management_actions)
+                    .contains(&TreeRowAction::AskForUpdate),
+                "a project row always offers the shortcut, management toggle notwithstanding"
+            );
+            assert!(
+                !applicable_row_actions(&tree, group, show_management_actions)
+                    .contains(&TreeRowAction::AskForUpdate)
+            );
+            assert!(
+                !applicable_row_actions(&tree, shell, show_management_actions)
+                    .contains(&TreeRowAction::AskForUpdate)
+            );
+        }
     }
 
     #[test]

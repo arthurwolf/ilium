@@ -2,10 +2,12 @@
 //! transcripts. The provider-specific JSONL shapes stay contained here;
 //! `session_naming` only sees typed user, assistant, and tool-output entries.
 //!
-//! Each entry kind keeps its own recent window. A tool-heavy turn therefore
-//! cannot evict every user request or assistant answer before the prompt is
-//! rendered. Actual character clipping belongs to `crate::naming`, the shared
-//! LLM-boundary module, so every dynamic session-title field follows one rule.
+//! Each entry kind keeps its earliest entries pinned plus its own recent
+//! window; when the window evicts something, a synthetic marker entry
+//! records how many were dropped so a long session doesn't read as
+//! continuous when it isn't. Actual character clipping belongs to
+//! `crate::naming`, the shared LLM-boundary module, so every dynamic
+//! session-title field follows one rule.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
@@ -20,6 +22,16 @@ use serde_json::Value;
 /// enough of the actual back-and-forth to tell what the session is really
 /// about, not just its most recent couple of turns.
 pub const RECENT_ENTRY_COUNT_PER_KIND: usize = 15;
+
+/// The earliest entries retained independently for each semantic kind,
+/// pinned for the life of the transcript read and never evicted by later
+/// activity. A long session's original request is what best answers "what
+/// is this session about in general" -- naming a pane after only its most
+/// recent turns describes whatever it happened to be doing last, not what
+/// it was for. Without this, a session past `RECENT_ENTRY_COUNT_PER_KIND`
+/// user turns would lose the opening request entirely, leaving only
+/// recent, specific activity to title from.
+pub const EARLIEST_ENTRY_COUNT_PER_KIND: usize = 3;
 
 /// One transcript item with an explicit role so the title model never has to
 /// infer whether a JSONL fragment came from the user, the agent, or a tool.
@@ -54,14 +66,73 @@ struct SequencedEntry {
     entry: TranscriptEntry,
 }
 
-/// Three bounded queues preserve recent context from every role while the
-/// transcript is streamed. Only the final merge allocates the combined list.
+/// One kind's retained entries: the first `EARLIEST_ENTRY_COUNT_PER_KIND`
+/// ever seen, pinned permanently, plus a separate rolling window of the
+/// latest `RECENT_ENTRY_COUNT_PER_KIND`. The two never overlap -- an entry
+/// lands in `earliest` only while it isn't yet full, and every later entry
+/// goes to `recent` instead, so a short transcript's entries all end up in
+/// `earliest` without ever being double-counted in `recent`.
+#[derive(Debug, Default)]
+struct KindEntries {
+    earliest: VecDeque<SequencedEntry>,
+    recent: VecDeque<SequencedEntry>,
+    dropped_count: usize,
+}
+
+impl KindEntries {
+    fn push(&mut self, sequence: u64, entry: TranscriptEntry) {
+        if self.earliest.len() < EARLIEST_ENTRY_COUNT_PER_KIND {
+            self.earliest.push_back(SequencedEntry { sequence, entry });
+            return;
+        }
+        if self.recent.len() == RECENT_ENTRY_COUNT_PER_KIND {
+            self.recent.pop_front();
+            self.dropped_count += 1;
+        }
+        self.recent.push_back(SequencedEntry { sequence, entry });
+    }
+
+    /// Earliest entries, then -- if any recent entries were evicted -- a
+    /// synthetic marker entry naming exactly how many, then the surviving
+    /// recent window. The marker's sequence sits strictly between the last
+    /// earliest entry and the first recent one: `dropped_count > 0` only
+    /// once `recent` has received `RECENT_ENTRY_COUNT_PER_KIND + 1` pushes
+    /// of this kind, so the first surviving recent entry's sequence is at
+    /// least two past the last earliest entry's, leaving room.
+    fn into_entries(self) -> impl Iterator<Item = SequencedEntry> {
+        let gap_marker = (self.dropped_count > 0).then(|| {
+            let last_earliest = self
+                .earliest
+                .back()
+                .expect("dropped_count > 0 implies earliest filled before recent started evicting");
+            SequencedEntry {
+                sequence: last_earliest.sequence + 1,
+                entry: TranscriptEntry {
+                    kind: last_earliest.entry.kind,
+                    content: format!(
+                        "[{} earlier {} entries omitted]",
+                        self.dropped_count,
+                        last_earliest.entry.kind.prompt_label()
+                    ),
+                },
+            }
+        });
+        self.earliest
+            .into_iter()
+            .chain(gap_marker)
+            .chain(self.recent)
+    }
+}
+
+/// Three bounded per-kind queues preserve both the opening and the recent
+/// context from every role while the transcript is streamed. Only the final
+/// merge allocates the combined list.
 #[derive(Debug, Default)]
 struct RecentEntries {
     next_sequence: u64,
-    user: VecDeque<SequencedEntry>,
-    assistant: VecDeque<SequencedEntry>,
-    tool: VecDeque<SequencedEntry>,
+    user: KindEntries,
+    assistant: KindEntries,
+    tool: KindEntries,
 }
 
 impl RecentEntries {
@@ -77,25 +148,22 @@ impl RecentEntries {
             TranscriptEntryKind::Assistant => &mut self.assistant,
             TranscriptEntryKind::Tool => &mut self.tool,
         };
-        if queue.len() == RECENT_ENTRY_COUNT_PER_KIND {
-            queue.pop_front();
-        }
-        queue.push_back(SequencedEntry {
-            sequence: self.next_sequence,
-            entry: TranscriptEntry {
+        queue.push(
+            self.next_sequence,
+            TranscriptEntry {
                 kind,
                 content: content.to_string(),
             },
-        });
+        );
         self.next_sequence = self.next_sequence.wrapping_add(1);
     }
 
     fn finish(self) -> Vec<TranscriptEntry> {
         let mut entries: Vec<SequencedEntry> = self
             .user
-            .into_iter()
-            .chain(self.assistant)
-            .chain(self.tool)
+            .into_entries()
+            .chain(self.assistant.into_entries())
+            .chain(self.tool.into_entries())
             .collect();
         entries.sort_unstable_by_key(|entry| entry.sequence);
         entries.into_iter().map(|entry| entry.entry).collect()
@@ -414,12 +482,84 @@ mod tests {
         }
 
         let entries = codex_entries(lines.into_iter());
-        assert_eq!(entries.len(), RECENT_ENTRY_COUNT_PER_KIND * 3);
-        assert!(!entries.iter().any(|entry| entry.content.ends_with(" 0")));
-        assert!(!entries.iter().any(|entry| entry.content.ends_with(" 1")));
+        // Every pushed entry after the pinned earliest ones fits inside the
+        // recent window here (RECENT_ENTRY_COUNT_PER_KIND + 2 pushed, minus
+        // EARLIEST_ENTRY_COUNT_PER_KIND pinned, is still <=
+        // RECENT_ENTRY_COUNT_PER_KIND), so nothing is evicted at all --
+        // eviction is covered by `earliest_entries_survive_being_evicted_from_the_recent_window`
+        // below instead.
+        assert_eq!(entries.len(), (RECENT_ENTRY_COUNT_PER_KIND + 2) * 3);
+        assert!(entries.iter().any(|entry| entry.content == "user 0"));
         assert!(entries.iter().any(|entry| entry.content == "user 2"));
         assert!(entries.iter().any(|entry| entry.content == "assistant 2"));
         assert!(entries.iter().any(|entry| entry.content == "tool 2"));
+    }
+
+    #[test]
+    fn earliest_entries_survive_being_evicted_from_the_recent_window() {
+        let total = EARLIEST_ENTRY_COUNT_PER_KIND + RECENT_ENTRY_COUNT_PER_KIND + 2;
+        let mut lines = Vec::new();
+        for index in 0..total {
+            lines.push(format!(
+                r#"{{"type":"event_msg","payload":{{"type":"user_message","message":"user {index}"}}}}"#
+            ));
+        }
+
+        let entries = codex_entries(lines.into_iter());
+        // The earliest EARLIEST_ENTRY_COUNT_PER_KIND are pinned and always
+        // survive, even though enough later entries pushed the rolling
+        // recent window past its cap to evict the entries right after them.
+        for index in 0..EARLIEST_ENTRY_COUNT_PER_KIND {
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry.content == format!("user {index}")),
+                "earliest entry {index} should have been pinned"
+            );
+        }
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.content == format!("user {EARLIEST_ENTRY_COUNT_PER_KIND}")));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.content == format!("user {}", total - 1)));
+        // Chronological order survives the earliest/recent split: the merge
+        // sorts by the same global sequence every push used. The synthetic
+        // gap marker doesn't match "user <index>" so it's excluded here and
+        // checked separately below.
+        let positions: Vec<usize> = entries
+            .iter()
+            .filter(|entry| entry.content.starts_with("user "))
+            .map(|entry| {
+                entry.content["user ".len()..]
+                    .parse::<usize>()
+                    .expect("content is \"user <index>\"")
+            })
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        // total pushes total = EARLIEST_ENTRY_COUNT_PER_KIND + RECENT_ENTRY_COUNT_PER_KIND + 2;
+        // 3 are pinned as earliest, so RECENT_ENTRY_COUNT_PER_KIND + 2 - 0 = 17 flow
+        // through `recent` against its cap of RECENT_ENTRY_COUNT_PER_KIND (15), evicting 2.
+        let expected_dropped = total - EARLIEST_ENTRY_COUNT_PER_KIND - RECENT_ENTRY_COUNT_PER_KIND;
+        assert!(
+            entries.iter().any(|entry| entry.content
+                == format!("[{expected_dropped} earlier user entries omitted]")),
+            "expected a gap marker naming exactly the {expected_dropped} evicted entries"
+        );
+    }
+
+    #[test]
+    fn no_gap_marker_appears_when_nothing_was_evicted() {
+        let mut lines = Vec::new();
+        for index in 0..(RECENT_ENTRY_COUNT_PER_KIND + 2) {
+            lines.push(format!(
+                r#"{{"type":"event_msg","payload":{{"type":"user_message","message":"user {index}"}}}}"#
+            ));
+        }
+        let entries = codex_entries(lines.into_iter());
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.content.contains("omitted")));
     }
 
     #[test]

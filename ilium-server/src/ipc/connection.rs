@@ -52,6 +52,14 @@ enum StreamControl {
     SetVisiblePanes(Vec<ilium_core::NodeId>),
 }
 
+/// Returns whether request intake must wait until the connection writer has
+/// applied this control change. Attach controls establish the replay cutover,
+/// whereas a subsequent visible-pane selection only changes output demand and
+/// must never delay PTY input behind that output.
+fn stream_control_requires_request_barrier(control: &StreamControl) -> bool {
+    !matches!(control, StreamControl::SetVisiblePanes(_))
+}
+
 struct StreamControlCommand {
     control: StreamControl,
     applied: oneshot::Sender<()>,
@@ -280,6 +288,12 @@ async fn read_requests<R>(
             _ => None,
         };
         if let Some(stream_control) = stream_control {
+            // A visible-pane change can require replaying the whole retained
+            // terminal journal.  The writer owns that ordered replay, but a
+            // following KeyInput must reach the PTY while the user's terminal
+            // is still draining it; waiting for `applied_rx` here used to
+            // make keyboard latency proportional to replay size.
+            let requires_request_barrier = stream_control_requires_request_barrier(&stream_control);
             let (applied_tx, applied_rx) = oneshot::channel();
             if stream_control_tx
                 .send(StreamControlCommand {
@@ -288,12 +302,18 @@ async fn read_requests<R>(
                 })
                 .await
                 .is_err()
-                || applied_rx.await.is_err()
             {
                 break;
             }
-            if matches!(&request, ClientRequest::SetVisiblePanes { .. }) {
+            if !requires_request_barrier {
+                // The writer still applies selections in FIFO order and
+                // repairs their journals before live bytes resume.  Only the
+                // request reader proceeds independently, so keyboard input
+                // is not a hostage to output bandwidth.
                 continue;
+            }
+            if applied_rx.await.is_err() {
+                break;
             }
         }
 
@@ -811,6 +831,19 @@ mod tests {
     use tokio::time::{timeout, Duration};
 
     use super::*;
+
+    #[test]
+    fn visible_pane_selection_does_not_block_request_intake() {
+        assert!(!stream_control_requires_request_barrier(
+            &StreamControl::SetVisiblePanes(vec![NodeId(7)]),
+        ));
+        assert!(stream_control_requires_request_barrier(
+            &StreamControl::StreamAllTerminals,
+        ));
+        assert!(stream_control_requires_request_barrier(
+            &StreamControl::StreamNoTerminals,
+        ));
+    }
 
     /// A live chunk produced during Attach must remain behind the replay
     /// cutover even when it reaches the broadcast receiver first. If it

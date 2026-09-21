@@ -17,8 +17,9 @@ pub enum PtyError {
     #[error("failed to spawn command in pty: {0}")]
     Spawn(#[source] anyhow::Error),
 
-    /// Cloning the pty master's reader or taking its writer failed after a
-    /// successful spawn.
+    /// Setting up the pty master's io halves failed after a successful
+    /// spawn: duplicating or cloning its read half (including a master that
+    /// exposes no raw fd to duplicate) or taking its writer.
     #[error("failed to set up pty io: {0}")]
     Io(#[source] anyhow::Error),
 
@@ -29,9 +30,14 @@ pub enum PtyError {
     Resize(#[source] anyhow::Error),
 
     /// Writing bytes to the pty's write half (child stdin) failed -- e.g.
-    /// the child already exited and closed its end.
+    /// the child already exited and closed its end. Deliberately `#[source]`
+    /// rather than `#[from]`: a blanket `From<std::io::Error>` would let any
+    /// `?` anywhere in this crate silently relabel an unrelated OS failure
+    /// as a write failure, which is exactly the "which lifecycle step failed"
+    /// distinction this enum exists to preserve (see `Kill` below). Call
+    /// sites name the variant explicitly instead.
     #[error("failed to write to pty: {0}")]
-    Write(#[from] std::io::Error),
+    Write(#[source] std::io::Error),
 
     /// Terminating the spawned child process failed. Kept distinct from
     /// `Write` (both ultimately wrap `std::io::Error`) so callers -- e.g.

@@ -19,6 +19,17 @@ use crate::terminal_naming::TerminalTitleInput;
 /// pane -- "once every 2 commands," per the product requirement.
 pub const RETITLE_ENTER_INTERVAL: u32 = 2;
 
+/// Rows read from each end of a terminal pane's accumulated scrollback
+/// before the shared LLM-context character clip runs. Generous enough that
+/// the character clip (`crate::naming::clip_llm_context_value`, ~4,000
+/// characters per side) is almost always the binding limit in practice --
+/// this row cap exists only so `full_history_contents_capped` never has to
+/// read every row of a huge scrollback (up to `terminal.scrollback_budget_mib`,
+/// configurable up to 512 MiB) while holding the pane's shared parser lock,
+/// which a concurrent PTY reader thread is waiting on.
+const TERMINAL_HISTORY_HEAD_ROWS: usize = 200;
+const TERMINAL_HISTORY_TAIL_ROWS: usize = 200;
+
 /// Hashes a captured terminal screen for `App::terminal_retitle_content_hashes`
 /// -- lets the automatic trigger router skip the LLM call when the
 /// pane's visible content hasn't materially changed since the last automatic
@@ -60,7 +71,26 @@ pub fn terminal_title_input(app: &App, pane_id: NodeId) -> Option<TerminalTitleI
     let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {
         return None;
     };
-    let screen_text = view.with_screen(|screen| screen.contents());
+    // `full_history_contents_capped` (unlike `contents`) covers the pane's
+    // entire scrollback, not just its current viewport -- naming a terminal
+    // after only what's presently visible describes whatever it happened to
+    // be doing last, not what it's generally for. The row cap keeps this
+    // from reading every row of an untouched long-lived pane's scrollback
+    // (which can run to hundreds of MiB, `terminal.scrollback_budget_mib`)
+    // while holding the parser lock a concurrent PTY reader thread is
+    // waiting on. The character clip that follows
+    // (`crate::naming::clip_llm_context_value`, keeping both ends) applies
+    // immediately rather than at the prompt-build boundary like
+    // `session_naming` does: this value is hashed on every retitle-eligible
+    // checkpoint (`App::queue_automatic_terminal_retitle`), and clipping here
+    // keeps that hash, and every later clone of this input, bounded.
+    let screen_text =
+        view.with_screen(|screen| {
+            crate::naming::clip_llm_context_value(&screen.full_history_contents_capped(
+                TERMINAL_HISTORY_HEAD_ROWS,
+                TERMINAL_HISTORY_TAIL_ROWS,
+            ))
+        });
     let node = app.tree.get(pane_id)?;
     let project_name = app
         .tree

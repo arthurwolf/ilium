@@ -95,7 +95,17 @@ impl SessionEndpoint {
     /// intervention: a Unix socket file outlives the process that bound it, so
     /// a server that died without unbinding would otherwise block every future
     /// bind with `EADDRINUSE`. Debris is only removed once a probe has proven
-    /// nothing is actually listening, so this can never displace a live server.
+    /// nothing is listening, so a server that was already live when this was
+    /// called is never displaced.
+    ///
+    /// That probe and the removal are two syscalls, not one, and no filesystem
+    /// primitive can fuse them: a *second* binder that probed the same debris
+    /// concurrently could unlink the socket this one has just bound, leaving
+    /// two servers owning one session. Serializing session starts is therefore
+    /// the caller's job, not this function's -- `ilium`'s CLI holds its
+    /// per-session `ExclusiveFileLock` from before its liveness check until
+    /// after the spawned server is observed listening, which closes exactly
+    /// that window. Any new caller of `bind` must do the same.
     pub async fn bind(&self) -> Result<SessionListener, TransportError> {
         if self.probe_liveness() == Liveness::StaleListener {
             // A failure here (permissions, a read-only filesystem) must not be

@@ -14,6 +14,16 @@ pub enum IpcError {
     /// callers reading a stream in a loop should treat an `Io` error whose
     /// `ErrorKind` is `UnexpectedEof` as "the other side hung up" rather
     /// than a corrupt payload.
+    ///
+    /// Note the one ambiguity this collapses: a peer that dies after
+    /// delivering only part of a length header (1-3 of the 4 bytes) also
+    /// surfaces here as `UnexpectedEof`, indistinguishable from a clean
+    /// between-frames hangup, because the header is read with a single
+    /// `read_exact` that doesn't report how many bytes did arrive. Both
+    /// callers act identically on the two cases (stop reading, close the
+    /// connection), so the distinction is deliberately not made; once a
+    /// full header *has* been read, a short payload is reported precisely,
+    /// as [`IpcError::TruncatedFrame`].
     #[error("ipc stream io error: {0}")]
     Io(#[from] std::io::Error),
 

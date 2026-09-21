@@ -1,9 +1,9 @@
 //! One cross-process exclusive lock, held for a guard's lifetime.
 //!
-//! Two places need the same thing: the CLI serializes competing first-attach
-//! processes so two clients cannot start rival servers for one project, and
-//! the chatroom serializes appends so concurrent writers cannot interleave
-//! half-written message lines.
+//! The CLI serializes competing first-attach processes with it: the socket
+//! recheck, the log-path publication, and the detached server spawn have to
+//! run as one step, or two clients racing to attach to the same project start
+//! rival servers writing different logs.
 //!
 //! `std::fs::File::lock` provides this on every supported platform (`flock` on
 //! Unix, `LockFileEx` on Windows), so no dependency and no `#[cfg]` is needed
@@ -34,7 +34,13 @@ impl ExclusiveFileLock {
     /// truncating one would momentarily disturb a concurrent holder's view of
     /// a file it is entitled to assume is stable.
     pub fn acquire(path: &Path) -> io::Result<Self> {
-        if let Some(parent) = path.parent() {
+        // A bare relative path (`start.lock`) yields an empty parent, which is
+        // the current directory and already exists: creating "" would fail on
+        // the follow-up chmod rather than do anything useful.
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty());
+        if let Some(parent) = parent {
             secure_fs::create_private_directory(parent)?;
         }
         let file = secure_fs::private_open_options()
@@ -44,8 +50,11 @@ impl ExclusiveFileLock {
             .truncate(false)
             .open(path)?;
         // An older build may have left the lock file world-readable; tighten
-        // it now rather than trusting whatever mode it was created with.
-        secure_fs::restrict_file_to_owner(path)?;
+        // it now rather than trusting whatever mode it was created with. This
+        // goes through the open handle, not the path: a path-based chmod would
+        // reopen the name and so reintroduce exactly the swap-in race the
+        // `O_NOFOLLOW` open above just refused.
+        secure_fs::restrict_open_file_to_owner(&file)?;
         file.lock()?;
         Ok(Self { file })
     }
@@ -132,7 +141,9 @@ mod tests {
     #[test]
     #[ignore = "helper process invoked by the contention test"]
     fn lock_child_helper() {
-        let path = std::env::var("ILIUM_LOCK_TEST_PATH").expect("lock path from parent");
+        // `var_os`, not `var`: a temporary directory under a non-UTF-8
+        // `TMPDIR` is a perfectly ordinary path this helper must still handle.
+        let path = std::env::var_os("ILIUM_LOCK_TEST_PATH").expect("lock path from parent");
         let lock = ExclusiveFileLock::acquire(Path::new(&path)).expect("child acquires");
         drop(lock);
     }

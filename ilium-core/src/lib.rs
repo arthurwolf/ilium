@@ -424,6 +424,15 @@ pub enum AgentActivity {
     /// spinner. Parallels `WaitingApproval` (blocked on the user) as
     /// "blocked on background work" rather than "blocked on you".
     WaitingBackground,
+    /// The turn's own completion summary reports one or more background
+    /// things (a shell command, a monitor, ...) still running after the
+    /// turn otherwise wrapped up -- e.g. "Cogitated for 3m 11s · 1 shell
+    /// still running". Distinct from `WaitingBackground`: that variant is
+    /// the agent *actively* blocked mid-turn on dispatched subagents, while
+    /// this one is calmer -- the turn is done, something leftover just
+    /// hasn't settled yet -- so it must not be promoted to `Done`/`Idle`
+    /// until the summary line stops naming anything still running.
+    BackgroundTaskStillRunning,
     WaitingApproval,
     /// A working turn just finished and the user has not opened that pane or
     /// submitted newer terminal input. Distinct from `Idle` so every client
@@ -460,10 +469,12 @@ impl PaneTitleSource {
     }
 }
 
-/// Identifies who last established a node's current place and label in the
-/// workspace tree. For groups and split views this is also their creation
-/// source; panes and folders already exist before an AI restructure, so the
-/// value instead records who last arranged or retitled that existing item.
+/// Identifies who last established a node's position in the workspace tree.
+/// For groups and split views this is also their creation source; panes and
+/// folders already exist before an AI restructure, so the value instead
+/// records who last arranged that existing item. Name ownership is tracked
+/// independently by [`Node::is_name_fixed`], because a user can preserve a
+/// label while allowing an LLM to move the entry.
 ///
 /// This stays on the domain node rather than in the client prompt code so it
 /// survives snapshots, undo, and every attached client seeing the same tree.
@@ -722,6 +733,12 @@ pub struct Node {
     /// preference enables inferred title icons.
     #[serde(default)]
     pub inferred_icon: Option<String>,
+    /// Set only by an explicit user rename. A fixed name and its associated
+    /// short form/icon survive every automatic title or restructure update,
+    /// while the entry remains free to move in the tree. `serde(default)`
+    /// leaves snapshots from before this distinction unlocked.
+    #[serde(default)]
+    pub is_name_fixed: bool,
     /// User-owned sidebar bookmark. It belongs to the durable domain node so
     /// every node kind has one consistent right-click action and restored
     /// sessions keep the user's navigation landmarks.
@@ -926,10 +943,14 @@ pub enum TreeError {
     RestructureDuplicateLeaf(NodeId),
     #[error("restructure plan referenced node {node:?} outside project {project:?}")]
     RestructureLeafOutsideProject { node: NodeId, project: NodeId },
+    #[error("restructure plan referenced group {group:?} outside project {project:?}")]
+    RestructureGroupOutsideProject { group: NodeId, project: NodeId },
     #[error(
         "restructure plan referenced {actual} existing pane/folder(s), expected exactly {expected}"
     )]
     RestructureLeafSetMismatch { expected: usize, actual: usize },
+    #[error("restructure plan referenced {actual} fixed group(s), expected exactly {expected}")]
+    RestructureFixedGroupSetMismatch { expected: usize, actual: usize },
     /// Raised only by [`Tree::validate`]: the tree's `nodes`/`next_id`
     /// shape violates an invariant every other method on this type assumes
     /// holds (e.g. every mutation method that reads a node's parent
@@ -973,6 +994,13 @@ pub enum RestructureNode {
         icon: Option<String>,
         children: Vec<RestructureNode>,
     },
+    /// A user-renamed ordinary group. Unlike AI-authored groups, it keeps
+    /// its identity and presentation while a restructure may freely move it
+    /// and replace its child membership.
+    ExistingGroup {
+        id: NodeId,
+        children: Vec<RestructureNode>,
+    },
     ExistingSplitView {
         id: NodeId,
         /// Enforced to equal the split view's current pane ids and order by
@@ -999,6 +1027,7 @@ enum RestructureParentKind {
 #[derive(Default)]
 struct RestructureReferences {
     leaves: HashSet<NodeId>,
+    groups: HashSet<NodeId>,
     split_views: HashSet<NodeId>,
 }
 
@@ -1043,6 +1072,7 @@ impl Tree {
                 name: "session".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: Some(0),
@@ -1309,33 +1339,79 @@ impl Tree {
     }
 
     pub fn pane_ids_in_tree_order(&self) -> Vec<NodeId> {
-        fn collect(tree: &Tree, parent: NodeId, pane_ids: &mut Vec<NodeId>) {
-            let Ok(children) = tree.children_of(parent) else {
-                return;
-            };
-            for child in children {
-                match tree.get(*child) {
-                    Some(node) if node.is_pane() => pane_ids.push(*child),
-                    Some(node) if node.is_container() => collect(tree, *child, pane_ids),
-                    _ => {}
+        self.pane_ids_in_subtree(ROOT_ID)
+    }
+
+    /// All pane ids descending from `root` (inclusive of `root` itself if it
+    /// is a pane), in tree order. `root` may be [`ROOT_ID`] to cover the
+    /// whole session, or any project/group/split-view id to scope the walk.
+    pub fn pane_ids_in_subtree(&self, root: NodeId) -> Vec<NodeId> {
+        fn collect(tree: &Tree, id: NodeId, pane_ids: &mut Vec<NodeId>) {
+            match tree.get(id) {
+                Some(node) if node.is_pane() => pane_ids.push(id),
+                Some(node) if node.is_container() => {
+                    let Ok(children) = tree.children_of(id) else {
+                        return;
+                    };
+                    for child in children {
+                        collect(tree, *child, pane_ids);
+                    }
                 }
+                _ => {}
             }
         }
 
         let mut pane_ids = Vec::new();
-        collect(self, ROOT_ID, &mut pane_ids);
+        collect(self, root, &mut pane_ids);
         pane_ids
     }
 
-    /// Finds the ordinary group that owns `node_id`. Split views are a
-    /// presentation container rather than a folder boundary, so a pane inside
-    /// one belongs to the nearest enclosing `Group`; projects and the session
-    /// root are skipped unless the root itself is the legacy group owner.
+    /// Whether `pane_id` is a detected agent pane currently `Idle` or `Done`
+    /// -- i.e. not mid-turn, not blocked on background work, and not waiting
+    /// on an approval prompt where injected text could land inside the
+    /// pending prompt instead of a fresh turn. Backs `ilium-client`'s "ask
+    /// for update" tree action, shared so its eligibility check cannot drift
+    /// between the context menu and the tree row's shortcut button.
+    pub fn is_agent_pane_idle_for_update(&self, pane_id: NodeId) -> bool {
+        self.get(pane_id).is_some_and(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    status: PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
+                        | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done),
+                    ..
+                }
+            )
+        })
+    }
+
+    /// All panes under `root` (inclusive) eligible for "ask for update" --
+    /// see [`Self::is_agent_pane_idle_for_update`].
+    pub fn panes_eligible_for_update(&self, root: NodeId) -> Vec<NodeId> {
+        self.pane_ids_in_subtree(root)
+            .into_iter()
+            .filter(|&pane_id| self.is_agent_pane_idle_for_update(pane_id))
+            .collect()
+    }
+
+    /// Finds the container that directly owns `node_id` as an ordinary
+    /// entry -- a normal `Group` or the `Project` itself. Split views are a
+    /// presentation container rather than a folder boundary, so a pane
+    /// inside one belongs to the nearest enclosing group/project.
+    ///
+    /// Projects deliberately count: a pane may legitimately sit directly
+    /// under its project (that is where `Tree::add_pane` puts a pane whose
+    /// requested parent was the launch project, and where
+    /// [`Self::reset_terminal_pane_for_fresh_conversation`] moves one), so
+    /// stopping only at `Group` would walk past the real owner and return
+    /// the session root, which owns no panes at all and therefore reports
+    /// an empty [`Self::navigable_panes_in_group`] for every such pane.
     pub fn containing_group(&self, node_id: NodeId) -> Option<NodeId> {
         let mut current = Some(node_id);
         while let Some(candidate) = current {
             let node = self.get(candidate)?;
-            if node.is_group() {
+            if node.accepts_normal_children() {
                 return Some(candidate);
             }
             current = node.parent;
@@ -1343,12 +1419,18 @@ impl Tree {
         None
     }
 
-    /// Returns the focusable panes owned by one ordinary group in its visible
-    /// child order. Direct pane children and direct split-view members are one
-    /// group-level sequence; nested groups deliberately remain separate
-    /// folders, reached by group-jump navigation rather than by cycling.
+    /// Returns the focusable panes owned by one group or project in its
+    /// visible child order. Direct pane children and direct split-view
+    /// members are one group-level sequence; nested groups deliberately
+    /// remain separate folders, reached by group-jump navigation rather
+    /// than by cycling. The accepted container set is exactly
+    /// [`Self::containing_group`]'s, so cycling always finds the panes of
+    /// whatever container that lookup reported.
     pub fn navigable_panes_in_group(&self, group_id: NodeId) -> Vec<NodeId> {
-        if !self.get(group_id).is_some_and(Node::is_group) {
+        if !self
+            .get(group_id)
+            .is_some_and(Node::accepts_normal_children)
+        {
             return Vec::new();
         }
         let Ok(children) = self.children_of(group_id) else {
@@ -1447,6 +1529,7 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1531,6 +1614,7 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1567,6 +1651,7 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1630,6 +1715,7 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1675,6 +1761,7 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1738,6 +1825,7 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -1877,6 +1965,31 @@ impl Tree {
                 });
             }
         }
+        for group_id in &referenced.groups {
+            if self.project_ancestor(*group_id) != Some(project_id) {
+                return Err(TreeError::RestructureGroupOutsideProject {
+                    group: *group_id,
+                    project: project_id,
+                });
+            }
+        }
+
+        let fixed_group_ids = self
+            .nodes
+            .values()
+            .filter(|node| {
+                node.is_group()
+                    && node.is_name_fixed
+                    && self.project_ancestor(node.id) == Some(project_id)
+            })
+            .map(|node| node.id)
+            .collect::<HashSet<_>>();
+        if fixed_group_ids != referenced.groups {
+            return Err(TreeError::RestructureFixedGroupSetMismatch {
+                expected: fixed_group_ids.len(),
+                actual: referenced.groups.len(),
+            });
+        }
 
         let existing_leaf_count = self
             .nodes
@@ -1913,6 +2026,7 @@ impl Tree {
                 node.id != project_id
                     && node.is_group()
                     && updated.is_ancestor_of(project_id, node.id)
+                    && !referenced.groups.contains(&node.id)
             })
             .map(|node| node.id)
             .collect();
@@ -2083,6 +2197,23 @@ impl Tree {
                         referenced,
                     )?;
                 }
+                RestructureNode::ExistingGroup { id, children } => {
+                    if parent_kind == RestructureParentKind::SplitView {
+                        return Err(TreeError::SplitViewOnlyAcceptsPanes);
+                    }
+                    let existing = self.get(*id).ok_or(TreeError::NodeNotFound(*id))?;
+                    if !existing.is_group() {
+                        return Err(TreeError::NotAGroup(*id));
+                    }
+                    if !referenced.groups.insert(*id) {
+                        return Err(TreeError::RestructureDuplicateLeaf(*id));
+                    }
+                    self.validate_restructure_children(
+                        children,
+                        RestructureParentKind::Group,
+                        referenced,
+                    )?;
+                }
                 RestructureNode::ExistingSplitView { id, children } => {
                     if parent_kind == RestructureParentKind::SplitView {
                         return Err(TreeError::SplitViewOnlyAcceptsPanes);
@@ -2100,6 +2231,7 @@ impl Tree {
                             RestructureNode::Pane { id, .. } => Ok(*id),
                             RestructureNode::Folder { .. }
                             | RestructureNode::Group { .. }
+                            | RestructureNode::ExistingGroup { .. }
                             | RestructureNode::ExistingSplitView { .. } => {
                                 Err(TreeError::SplitViewOnlyAcceptsPanes)
                             }
@@ -2158,9 +2290,11 @@ impl Tree {
                 } => {
                     let existing = tree.get_mut(*id)?;
                     existing.parent = Some(parent);
-                    existing.name = title.clone();
-                    existing.short_name = short_title.clone();
-                    existing.inferred_icon = icon.clone();
+                    if !existing.is_name_fixed {
+                        existing.name = title.clone();
+                        existing.short_name = short_title.clone();
+                        existing.inferred_icon = icon.clone();
+                    }
                     existing.structure_source = StructureSource::LlmRestructure;
                     // A restructure-authored title is curated, not a
                     // per-turn automatic guess: freeze it the same way a
@@ -2179,9 +2313,11 @@ impl Tree {
                 } => {
                     let existing = tree.get_mut(*id)?;
                     existing.parent = Some(parent);
-                    existing.name = title.clone();
-                    existing.short_name = short_title.clone();
-                    existing.inferred_icon = icon.clone();
+                    if !existing.is_name_fixed {
+                        existing.name = title.clone();
+                        existing.short_name = short_title.clone();
+                        existing.inferred_icon = icon.clone();
+                    }
                     existing.structure_source = StructureSource::LlmRestructure;
                     *id
                 }
@@ -2200,6 +2336,7 @@ impl Tree {
                             name: title.clone(),
                             short_name: short_title.clone(),
                             inferred_icon: icon.clone(),
+                            is_name_fixed: false,
                             is_bookmarked: false,
                             activity_revision: 0,
                             last_restructure_activity_revision: None,
@@ -2210,6 +2347,20 @@ impl Tree {
                     );
                     Self::rebuild_restructure_children(tree, group_id, children)?;
                     group_id
+                }
+                RestructureNode::ExistingGroup { id, children } => {
+                    let existing = tree.get_mut(*id)?;
+                    let NodeKind::Container(container) = &mut existing.kind else {
+                        return Err(TreeError::NotAGroup(*id));
+                    };
+                    if !container.is_group() {
+                        return Err(TreeError::NotAGroup(*id));
+                    }
+                    existing.parent = Some(parent);
+                    existing.structure_source = StructureSource::LlmRestructure;
+                    container.children.clear();
+                    Self::rebuild_restructure_children(tree, *id, children)?;
+                    *id
                 }
                 RestructureNode::ExistingSplitView { id, children } => {
                     let existing = tree.get_mut(*id)?;
@@ -2265,9 +2416,9 @@ impl Tree {
         Ok(())
     }
 
-    /// Unconditionally renames a group or pane; for a pane this also
-    /// permanently marks it `UserSpecified`, so no automatic titler
-    /// overwrites it again. `short_name` is the short-form alternative
+    /// Unconditionally renames an entry and permanently fixes its complete
+    /// presentation bundle, so no automatic titler or restructure overwrites
+    /// it. For a pane this also marks its title `UserSpecified`. `short_name` is the short-form alternative
     /// shown when the tree panel is narrow (`None` when the new name has
     /// no distinct short form, e.g. a user-typed rename).
     pub fn rename_node(
@@ -2282,10 +2433,12 @@ impl Tree {
         let did_change = node.name != name
             || node.short_name != short_name
             || node.inferred_icon != inferred_icon
+            || !node.is_name_fixed
             || node.structure_source != StructureSource::Manual;
         node.name = name;
         node.short_name = short_name;
         node.inferred_icon = inferred_icon;
+        node.is_name_fixed = true;
         node.structure_source = StructureSource::Manual;
         if let NodeKind::Pane { title_source, .. } = &mut node.kind {
             *title_source = PaneTitleSource::UserSpecified;
@@ -2374,14 +2527,20 @@ impl Tree {
         Ok(changed || placement_changed)
     }
 
+    /// Flips a container's or folder's expand/collapse state. This reads the
+    /// current state and then delegates the write to
+    /// [`Self::set_node_expanded`], so exactly one mutation site owns the
+    /// expand rules: a node locked closed (see
+    /// [`Self::set_node_locked_closed`]) still refuses to expand -- a toggle
+    /// must never become a back door around a lock -- and folders toggle
+    /// exactly like containers instead of being rejected outright.
     pub fn toggle_expanded(&mut self, id: NodeId) -> Result<(), TreeError> {
-        match &mut self.get_mut(id)?.kind {
-            NodeKind::Container(container) => {
-                container.expanded = !container.expanded;
-                Ok(())
-            }
-            NodeKind::Pane { .. } | NodeKind::Folder { .. } => Err(TreeError::NotAContainer(id)),
-        }
+        let expanded = self
+            .get(id)
+            .ok_or(TreeError::NodeNotFound(id))?
+            .is_expanded()
+            .ok_or(TreeError::NotAContainer(id))?;
+        self.set_node_expanded(id, !expanded)
     }
 
     pub fn set_pane_status(&mut self, id: NodeId, status: PaneStatus) -> Result<(), TreeError> {
@@ -2831,11 +2990,15 @@ impl Tree {
         self.add_group(project_id, name)
     }
 
-    /// Every group in the tree (Panes excluded), pre-order, in the exact
-    /// order they render in the tree panel, prefixed with a `ROOT_ID` entry
-    /// standing for "the top level" itself. Used by the "create group"
-    /// destination picker, so a user choosing where to nest a new group sees
-    /// the same structure and ordering the tree panel already shows them.
+    /// Every container in the tree that can own an ordinary entry -- normal
+    /// groups *and* projects, since a new group may be nested directly under
+    /// a project heading -- pre-order, in the exact order they render in the
+    /// tree panel, prefixed with a `ROOT_ID` entry standing for "the top
+    /// level" itself. Panes, folders, and split views are excluded because
+    /// none of them can be a create-group destination. Used by the "create
+    /// group" destination picker, so a user choosing where to nest a new
+    /// group sees the same structure and ordering the tree panel already
+    /// shows them.
     pub fn list_groups(&self) -> Vec<GroupListing> {
         let mut destinations = vec![GroupListing {
             id: ROOT_ID,
@@ -3020,9 +3183,13 @@ impl Tree {
     }
 
     /// Validates the structural invariants every other method on this type
-    /// assumes: the root is a parent-less group, every non-root node's
-    /// `parent` names a container that lists it back exactly once, every
-    /// node is reachable from the root (so parent-walking methods like
+    /// assumes: every node is stored under its own `id` (methods freely mix
+    /// map keys and `Node::id` -- `all_ids` reads keys while
+    /// `restore_project_from` and the restructure paths read `Node::id` --
+    /// so the two drifting apart silently addresses the wrong node), the
+    /// root is a parent-less group, every non-root node's `parent` names a
+    /// container that lists it back exactly once, every node is reachable
+    /// from the root (so parent-walking methods like
     /// [`Self::project_ancestor`] and [`Self::is_ancestor_of`] cannot loop
     /// forever on a cycle disconnected from the root), and `next_id` is
     /// past every id already in use (so the next [`Self::alloc_id`] cannot
@@ -3038,6 +3205,15 @@ impl Tree {
     /// must call this immediately after deserializing and reject the
     /// snapshot on error rather than trust it.
     pub fn validate(&self) -> Result<(), TreeError> {
+        for (stored_id, node) in &self.nodes {
+            if node.id != *stored_id {
+                return Err(TreeError::InvalidStructure(format!(
+                    "node stored under {stored_id:?} reports its own id as {:?}",
+                    node.id
+                )));
+            }
+        }
+
         let root = self
             .nodes
             .get(&ROOT_ID)
@@ -3940,6 +4116,39 @@ mod tests {
     }
 
     #[test]
+    fn toggling_expansion_respects_a_lock_and_covers_folders() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let folder = tree
+            .add_folder(group, PathBuf::from("/tmp/toggle"))
+            .unwrap();
+
+        // A folder toggles exactly like a container rather than being
+        // rejected as "not a container".
+        assert!(!tree.get(folder).unwrap().is_expanded().unwrap());
+        tree.toggle_expanded(folder).unwrap();
+        assert!(tree.get(folder).unwrap().is_expanded().unwrap());
+        tree.toggle_expanded(folder).unwrap();
+        assert!(!tree.get(folder).unwrap().is_expanded().unwrap());
+
+        // Toggling must never be a back door around a closed lock, for
+        // either node kind.
+        for locked in [folder, group] {
+            tree.set_node_locked_closed(locked, true).unwrap();
+            assert!(matches!(
+                tree.toggle_expanded(locked),
+                Err(TreeError::NodeLockedClosed(id)) if id == locked
+            ));
+            assert!(!tree.get(locked).unwrap().is_expanded().unwrap());
+        }
+
+        assert!(matches!(
+            tree.toggle_expanded(NodeId(u64::MAX)),
+            Err(TreeError::NodeNotFound(NodeId(u64::MAX)))
+        ));
+    }
+
+    #[test]
     fn create_split_view_moves_selected_panes_in_order() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
@@ -4648,6 +4857,136 @@ mod tests {
     }
 
     #[test]
+    fn restructure_moves_fixed_entries_without_replacing_their_presentations() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/fixed-entry-project"))
+            .unwrap();
+        let fixed_group = tree.add_group(project, "draft group").unwrap();
+        let fixed_pane = tree
+            .add_pane(fixed_group, "draft pane", PaneContentKind::Terminal)
+            .unwrap();
+        let fixed_folder = tree
+            .add_folder(fixed_group, PathBuf::from("/tmp/fixed-entry-project/docs"))
+            .unwrap();
+
+        tree.rename_node(
+            fixed_group,
+            "Pinned Research",
+            Some("Research".to_string()),
+            Some("📌".to_string()),
+        )
+        .unwrap();
+        tree.rename_node(
+            fixed_pane,
+            "Do Not Retitle",
+            Some("Pinned Pane".to_string()),
+            Some("🧷".to_string()),
+        )
+        .unwrap();
+        tree.rename_node(
+            fixed_folder,
+            "Stable Notes",
+            Some("Notes".to_string()),
+            Some("📚".to_string()),
+        )
+        .unwrap();
+
+        let plan = RestructurePlan {
+            children: vec![RestructureNode::Group {
+                title: "AI-created parent".to_string(),
+                short_title: Some("AI Parent".to_string()),
+                icon: Some("🤖".to_string()),
+                children: vec![RestructureNode::ExistingGroup {
+                    id: fixed_group,
+                    children: vec![
+                        RestructureNode::Pane {
+                            id: fixed_pane,
+                            title: "AI replacement pane title".to_string(),
+                            short_title: Some("AI pane".to_string()),
+                            icon: Some("🤖".to_string()),
+                        },
+                        RestructureNode::Folder {
+                            id: fixed_folder,
+                            title: "AI replacement folder title".to_string(),
+                            short_title: Some("AI folder".to_string()),
+                            icon: Some("🤖".to_string()),
+                        },
+                    ],
+                }],
+            }],
+        };
+
+        tree.apply_project_restructure(project, plan.clone())
+            .unwrap();
+        let ai_parent = tree.children_of(project).unwrap()[0];
+        assert_eq!(tree.parent_of(fixed_group), Some(ai_parent));
+        assert_eq!(
+            tree.children_of(fixed_group).unwrap(),
+            &[fixed_pane, fixed_folder]
+        );
+        for (id, expected_name, expected_short_name, expected_icon) in [
+            (fixed_group, "Pinned Research", Some("Research"), Some("📌")),
+            (
+                fixed_pane,
+                "Do Not Retitle",
+                Some("Pinned Pane"),
+                Some("🧷"),
+            ),
+            (fixed_folder, "Stable Notes", Some("Notes"), Some("📚")),
+        ] {
+            let entry = tree.get(id).unwrap();
+            assert!(entry.is_name_fixed);
+            assert_eq!(entry.name, expected_name);
+            assert_eq!(entry.short_name.as_deref(), expected_short_name);
+            assert_eq!(entry.inferred_icon.as_deref(), expected_icon);
+            assert_eq!(entry.structure_source, StructureSource::LlmRestructure);
+        }
+
+        tree.apply_project_restructure(project, plan).unwrap();
+        assert_eq!(tree.get(fixed_pane).unwrap().name, "Do Not Retitle");
+        assert_eq!(tree.get(fixed_folder).unwrap().name, "Stable Notes");
+    }
+
+    #[test]
+    fn restructure_rejects_omitting_a_fixed_group_without_mutating_the_tree() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/fixed-group-rejection"))
+            .unwrap();
+        let fixed_group = tree.add_group(project, "draft group").unwrap();
+        let pane = tree
+            .add_pane(fixed_group, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        tree.rename_node(fixed_group, "Pinned Group", None, None)
+            .unwrap();
+        let before = tree.clone();
+
+        let error = tree
+            .apply_project_restructure(
+                project,
+                RestructurePlan {
+                    children: vec![RestructureNode::Pane {
+                        id: pane,
+                        title: "AI pane".to_string(),
+                        short_title: None,
+                        icon: None,
+                    }],
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            TreeError::RestructureFixedGroupSetMismatch {
+                expected: 1,
+                actual: 0,
+            }
+        ));
+        assert_eq!(tree, before);
+    }
+
+    #[test]
     fn apply_restructure_preserves_split_views_and_folders() {
         let mut tree = Tree::new();
         let project = tree
@@ -5194,6 +5533,41 @@ mod tests {
     }
 
     #[test]
+    fn panes_owned_directly_by_a_project_cycle_within_that_project() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/project-level-panes"))
+            .unwrap();
+        let first = tree
+            .add_pane(project, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = tree
+            .add_pane(project, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let nested_group = tree.add_group(project, "nested").unwrap();
+        let nested_pane = tree
+            .add_pane(nested_group, "nested pane", PaneContentKind::Terminal)
+            .unwrap();
+
+        // The project, not the pane-less session root, owns these panes --
+        // otherwise cycling reports "no panes in this group" for the very
+        // placement `resolve_parent_group` and a fresh-conversation reset
+        // both produce.
+        assert_eq!(tree.containing_group(first), Some(project));
+        assert_eq!(tree.containing_group(second), Some(project));
+        assert_eq!(tree.navigable_panes_in_group(project), vec![first, second]);
+
+        // A nested group is still its own separate folder of panes, and the
+        // root still owns none.
+        assert_eq!(tree.containing_group(nested_pane), Some(nested_group));
+        assert_eq!(
+            tree.navigable_panes_in_group(nested_group),
+            vec![nested_pane]
+        );
+        assert!(tree.navigable_panes_in_group(ROOT_ID).is_empty());
+    }
+
+    #[test]
     fn validate_accepts_every_tree_built_through_the_public_api() {
         let mut tree = Tree::new();
         let project = tree.add_project(PathBuf::from("/tmp/validate")).unwrap();
@@ -5252,6 +5626,7 @@ mod tests {
                 name: "orphaned under a pane".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -5305,5 +5680,115 @@ mod tests {
             tree.validate(),
             Err(TreeError::InvalidStructure(_))
         ));
+    }
+
+    #[test]
+    fn validate_rejects_a_node_stored_under_an_id_that_is_not_its_own() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        // A corrupted snapshot can key a node by one id while the node
+        // reports another; every method that reads `Node::id` (the
+        // restructure and restore paths) would then address the wrong node
+        // from the one `Tree::get` returns.
+        tree.nodes.get_mut(&group).unwrap().id = NodeId(u64::MAX);
+
+        assert!(matches!(
+            tree.validate(),
+            Err(TreeError::InvalidStructure(_))
+        ));
+    }
+
+    #[test]
+    fn ask_for_update_eligibility_covers_only_idle_or_done_agent_panes() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        let working = tree
+            .add_pane(project, "working", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            working,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+        )
+        .unwrap();
+        let waiting_approval = tree
+            .add_pane(project, "waiting-approval", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            waiting_approval,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingApproval),
+        )
+        .unwrap();
+        let idle = tree
+            .add_pane(project, "idle", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            idle,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+        )
+        .unwrap();
+        let done = tree
+            .add_pane(project, "done", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            done,
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done),
+        )
+        .unwrap();
+        let plain_shell = tree
+            .add_pane(project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        assert!(!tree.is_agent_pane_idle_for_update(working));
+        assert!(!tree.is_agent_pane_idle_for_update(waiting_approval));
+        assert!(tree.is_agent_pane_idle_for_update(idle));
+        assert!(tree.is_agent_pane_idle_for_update(done));
+        assert!(!tree.is_agent_pane_idle_for_update(plain_shell));
+
+        assert_eq!(
+            tree.panes_eligible_for_update(project),
+            vec![idle, done],
+            "only the idle/done agent panes are eligible, in tree order"
+        );
+    }
+
+    #[test]
+    fn panes_eligible_for_update_scopes_to_the_requested_subtree() {
+        let mut tree = Tree::new();
+        let first_project = tree.add_project(PathBuf::from("/tmp/first")).unwrap();
+        let nested_group = tree.add_group(first_project, "nested").unwrap();
+        let first_idle_pane = tree
+            .add_pane(nested_group, "idle-1", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            first_idle_pane,
+            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+        )
+        .unwrap();
+
+        let second_project = tree.add_project(PathBuf::from("/tmp/second")).unwrap();
+        let second_idle_pane = tree
+            .add_pane(second_project, "idle-2", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_status(
+            second_idle_pane,
+            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+        )
+        .unwrap();
+
+        // Scoped to one project: only that project's eligible pane comes back.
+        assert_eq!(
+            tree.panes_eligible_for_update(first_project),
+            vec![first_idle_pane]
+        );
+        // Scoped to the whole tree: both projects' eligible panes come back.
+        assert_eq!(
+            tree.panes_eligible_for_update(ROOT_ID),
+            vec![first_idle_pane, second_idle_pane]
+        );
+        // Scoped directly to a pane: itself, if eligible.
+        assert_eq!(
+            tree.panes_eligible_for_update(first_idle_pane),
+            vec![first_idle_pane]
+        );
     }
 }

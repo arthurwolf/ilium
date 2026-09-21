@@ -1,13 +1,14 @@
 //! Shared IPC contract between `ilium-client` and `ilium-server`.
 //!
-//! This crate owns exactly two things: the message shapes exchanged over
-//! the client/server Unix domain socket ([`protocol`]) and the
-//! length-prefixed bincode framing used to put those messages on any async
-//! byte stream ([`framing`]). It has no knowledge of Unix domain sockets
-//! specifically -- that belongs to `ilium-server`, which owns the actual
-//! `UnixListener`/`UnixStream` -- so it depends on `tokio` only for the
-//! `AsyncRead`/`AsyncWrite` trait bounds its framing functions are generic
-//! over, keeping it reusable over any stream type (including an
+//! This crate owns the message shapes exchanged between the two processes
+//! ([`protocol`]), the length-prefixed bincode framing used to put those
+//! messages on any async byte stream ([`framing`]), and the pane
+//! environment-variable names both sides address a pane by ([`pane_env`]).
+//! It has no knowledge of where those bytes actually travel -- the Unix
+//! domain socket / Windows named pipe, and the `UnixListener`/`UnixStream`
+//! behind it, belong to `ilium-transport` -- so it depends on `tokio` only
+//! for the `AsyncRead`/`AsyncWrite` trait bounds its framing functions are
+//! generic over, keeping it reusable over any stream type (including an
 //! in-memory buffer in tests).
 
 mod error;
@@ -321,6 +322,11 @@ mod tests {
             ClientRequest::SetNodeLockedClosed {
                 node_id: NodeId(2),
                 locked_closed: true,
+            },
+            ClientRequest::ReportLastPromptFromTranscript {
+                pane_id: NodeId(2),
+                expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
+                last_prompt: "fix the login bug".to_string(),
             },
             ClientRequest::SetPaneProgressMonitor {
                 pane_id: NodeId(2),

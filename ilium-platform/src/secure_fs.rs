@@ -24,12 +24,48 @@ use std::path::Path;
 
 /// Creates `path` and any missing parents, restricted to the current user.
 ///
-/// Re-running this on an existing directory re-applies the restriction, which
-/// matters because the directory may have been created by an older build (or
-/// by a user's own `mkdir`) with looser permissions.
+/// Every directory this creates -- the leaf *and* each intermediate parent --
+/// is owner-only from the moment `mkdir` returns, never for a window
+/// afterwards. Re-running this on an existing directory re-applies the
+/// restriction to the leaf, which matters because the directory may have been
+/// created by an older build (or by a user's own `mkdir`) with looser
+/// permissions.
 pub fn create_private_directory(path: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(path)?;
+    create_directory_tree_privately(path)?;
     restrict_directory_to_owner(path)
+}
+
+/// Creates `path` and any missing parents, passing the owner-only mode to
+/// `mkdir` itself rather than chmod'ing afterwards.
+///
+/// Two things go wrong when the tree is created with a plain
+/// `std::fs::create_dir_all` and only the leaf is chmod'd afterwards. The leaf
+/// exists at the process umask's default mode (typically `0o755`) for the
+/// whole window between `mkdir` and that `chmod`, so anyone can read it -- or,
+/// in a world-writable parent, plant files inside it -- for as long as the
+/// window lasts. And the intermediate parents are never narrowed at all: a
+/// project's `<project>/.ilium` on the way to `.ilium/sessions`, or the
+/// per-user root on the way to its `logs` subdirectory, stayed world-listable
+/// forever. Handing the mode to `mkdir` fixes both: the mode applies to every
+/// component this call creates, and it applies atomically at creation.
+///
+/// `umask` can only clear bits, so the result is never wider than `0o700`.
+#[cfg(unix)]
+fn create_directory_tree_privately(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+}
+
+/// Windows has no mode argument to hand `mkdir`: directories created here
+/// live under the user's own profile and inherit its ACL, which is what makes
+/// them private in the first place. See the module comment.
+#[cfg(not(unix))]
+fn create_directory_tree_privately(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)
 }
 
 /// Restricts an existing directory to the current user.
@@ -63,8 +99,8 @@ pub fn restrict_file_to_owner(path: &Path) -> io::Result<()> {
 
 /// Refuses to act on a symlink already sitting at `path`.
 ///
-/// `std::fs::set_permissions` follows symlinks, and so does
-/// `std::fs::create_dir_all`'s "does this already exist" check (it falls
+/// `std::fs::set_permissions` follows symlinks, and so does the recursive
+/// directory creation's "does this already exist" check (it falls
 /// back to `path.is_dir()`, which resolves through a symlink and reports
 /// success without creating anything). Together those two facts mean a
 /// symlink pre-planted at a deterministic path in a world-writable directory
@@ -198,6 +234,34 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o700);
         }
+    }
+
+    /// Regression test: only the leaf used to be restricted, so the
+    /// intermediate directories `create_dir_all` made on the way to it -- a
+    /// project's `.ilium` on the way to `.ilium/sessions`, the per-user root
+    /// on the way to its `logs` -- kept whatever world-listable mode the
+    /// umask gave them, exposing session and log *names* to every other user
+    /// on the machine even though the files inside were `0o600`.
+    #[cfg(unix)]
+    #[test]
+    fn create_private_directory_restricts_the_parents_it_creates_too() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temp dir");
+        let outer = root.path().join("outer");
+        let nested = outer.join("inner");
+
+        create_private_directory(&nested).expect("creation");
+
+        let outer_mode = std::fs::metadata(&outer)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            outer_mode, 0o700,
+            "an intermediate directory created on the way to the leaf must be owner-only too"
+        );
     }
 
     #[test]

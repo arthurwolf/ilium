@@ -35,6 +35,15 @@ use tui_term::widget::PseudoTerminal;
 pub const DEFAULT_ROWS: u16 = 24;
 pub const DEFAULT_COLS: u16 = 80;
 
+/// Renders an immutable screen without consulting or mutating a live
+/// `TerminalView`. Smart Copy uses this while live PTY output continues to be
+/// applied behind the frozen viewport.
+pub fn render_frozen_screen(screen: &vt100::Screen, area: Rect, destination: &mut Buffer) {
+    if !area.is_empty() {
+        PseudoTerminal::new(screen).render(area, destination);
+    }
+}
+
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

@@ -151,6 +151,7 @@ fn agent_activity_key(activity: &AgentActivity) -> &'static str {
     match activity {
         AgentActivity::Working => "working",
         AgentActivity::WaitingBackground => "waiting_background",
+        AgentActivity::BackgroundTaskStillRunning => "background_task_still_running",
         AgentActivity::WaitingApproval => "waiting_approval",
         AgentActivity::Done => "done",
         AgentActivity::Idle => "idle",
@@ -403,6 +404,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ContextMenu(_) => "context_menu",
         Mode::TerminalPaneContextMenu(_) => "terminal_pane_context_menu",
         Mode::AgentToolbarModelSubmenu(_) => "agent_toolbar_model_submenu",
+        Mode::SmartCopy => "smart_copy",
         Mode::AgentDebugLog(_) => "agent_debug_log",
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",

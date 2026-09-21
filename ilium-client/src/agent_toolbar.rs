@@ -42,6 +42,9 @@ pub enum AgentToolbarAction {
     /// Copies the pane's currently visible screen text to the clipboard.
     /// Entirely client-side -- nothing is sent to the agent.
     CopyScreen,
+    /// Freezes the visible screen and streams semantic copy regions from the
+    /// configured inference provider. Entirely client-side.
+    SmartCopy,
     CopyLastMessage,
     Compact,
     Clear,
@@ -319,6 +322,7 @@ pub fn command_for(
         AgentToolbarAction::Close
         | AgentToolbarAction::Stop
         | AgentToolbarAction::CopyScreen
+        | AgentToolbarAction::SmartCopy
         | AgentToolbarAction::CycleEffort
         | AgentToolbarAction::ToggleTextSelection
         | AgentToolbarAction::CodexModelTier(_)
@@ -363,6 +367,7 @@ pub const fn action_label(action: AgentToolbarAction) -> &'static str {
         AgentToolbarAction::Close => "Close",
         AgentToolbarAction::Stop => "Stop",
         AgentToolbarAction::CopyScreen => "Screen",
+        AgentToolbarAction::SmartCopy => "Smart copy",
         AgentToolbarAction::CopyLastMessage => "Copy",
         AgentToolbarAction::Compact => "Compact",
         AgentToolbarAction::Clear => "Clear",
@@ -401,6 +406,9 @@ pub fn tooltip_for(
         }
         AgentToolbarAction::Stop => "Send Escape (interrupt the agent)".to_string(),
         AgentToolbarAction::CopyScreen => "Copy the visible screen to the clipboard".to_string(),
+        AgentToolbarAction::SmartCopy => {
+            "Freeze the screen and discover semantic copy targets".to_string()
+        }
         AgentToolbarAction::CopyLastMessage => {
             "Copy the agent's last message (sends /copy)".to_string()
         }
@@ -485,6 +493,14 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
                 icons.glyph(IconTarget::AgentToolbarCopyScreen),
                 AgentToolbarAction::CopyScreen,
                 show_labels,
+            ),
+        },
+        Button {
+            action: AgentToolbarAction::SmartCopy,
+            text: button_text(
+                icons.glyph(IconTarget::AgentToolbarSmartCopy),
+                AgentToolbarAction::SmartCopy,
+                true,
             ),
         },
         Button {
@@ -841,7 +857,14 @@ mod tests {
         let icons = IconSettings::default();
         let area = Rect::new(0, 0, 80, 1);
         let texts = rendered_texts(area, None, &icons, EffortLevel::Auto, false);
-        assert!(texts.len() >= 4); // Stop, CopyScreen, ToggleTextSelection, Close
+        assert!(texts.len() >= 5); // Stop, CopyScreen, SmartCopy, ToggleTextSelection, Close
+        assert!(texts.iter().any(|text| text.contains("Smart copy")));
+        let rects = button_rects(area, ctx(None, &icons, EffortLevel::Auto, false));
+        assert!(rects.iter().any(|(action, _, text)| {
+            *action == AgentToolbarAction::SmartCopy
+                && text.contains(icons.glyph(IconTarget::AgentToolbarSmartCopy))
+                && text.contains("Smart copy")
+        }));
         assert_eq!(
             action_at(
                 area,

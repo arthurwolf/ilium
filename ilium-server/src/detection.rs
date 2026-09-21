@@ -1490,8 +1490,8 @@ fn explain_activity_decision(
         Some(ilium_detect::ActivityEvidence::BackgroundWait) => {
             "the visible terminal says the agent is waiting for background agents or tasks"
         }
-        Some(ilium_detect::ActivityEvidence::BackgroundShellWait) => {
-            "the visible terminal shows a background shell command is still running"
+        Some(ilium_detect::ActivityEvidence::BackgroundTaskWait) => {
+            "the visible terminal shows a background task is still running after the turn finished"
         }
         Some(ilium_detect::ActivityEvidence::ConfirmationPrompt) => {
             "the visible terminal contains a yes/no confirmation question"
@@ -1585,6 +1585,7 @@ const fn activity_name(activity: AgentActivity) -> &'static str {
         AgentActivity::Working => "working",
         AgentActivity::WaitingApproval => "waiting for your approval",
         AgentActivity::WaitingBackground => "waiting for background work",
+        AgentActivity::BackgroundTaskStillRunning => "a background task is still finishing up",
         AgentActivity::Idle => "idle",
         AgentActivity::Done => "done",
     }
@@ -1840,6 +1841,8 @@ fn promote_to_done(
             | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingApproval)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingBackground)
             | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingBackground)
+            | PaneStatus::Agent(_, ilium_core::AgentActivity::BackgroundTaskStillRunning)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::BackgroundTaskStillRunning)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::Done)
             | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Done),
         ) => ilium_core::AgentActivity::Done,
@@ -1889,12 +1892,14 @@ fn interval_for(
             _,
             ilium_core::AgentActivity::Working
             | ilium_core::AgentActivity::WaitingBackground
+            | ilium_core::AgentActivity::BackgroundTaskStillRunning
             | ilium_core::AgentActivity::WaitingApproval,
         )
         | PaneStatus::AgentWithGoal(
             _,
             ilium_core::AgentActivity::Working
             | ilium_core::AgentActivity::WaitingBackground
+            | ilium_core::AgentActivity::BackgroundTaskStillRunning
             | ilium_core::AgentActivity::WaitingApproval,
         ) => detection_config.working_poll_interval,
         _ => detection_config.idle_poll_interval,
@@ -2116,6 +2121,19 @@ mod tests {
     }
 
     #[test]
+    fn background_task_still_running_polls_on_the_fast_tier_like_working() {
+        let config = config();
+        let background_task_still_running = PaneStatus::Agent(
+            AgentClass::Claude,
+            AgentActivity::BackgroundTaskStillRunning,
+        );
+        assert_eq!(
+            interval_for(&background_task_still_running, false, &config),
+            config.working_poll_interval
+        );
+    }
+
+    #[test]
     fn idle_done_and_plain_shell_poll_on_the_slow_tier() {
         let config = config();
         let idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
@@ -2255,6 +2273,13 @@ mod tests {
         assert_eq!(
             promote_to_done(
                 Some(&agent(AgentActivity::WaitingBackground)),
+                AgentActivity::Idle
+            ),
+            AgentActivity::Done
+        );
+        assert_eq!(
+            promote_to_done(
+                Some(&agent(AgentActivity::BackgroundTaskStillRunning)),
                 AgentActivity::Idle
             ),
             AgentActivity::Done

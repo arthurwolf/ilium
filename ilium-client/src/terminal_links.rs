@@ -135,12 +135,10 @@ fn parse_file_reference(value: &str) -> Option<(PathBuf, Option<u32>, Option<u32
         },
         None => (value, None, None),
     };
-    (path.starts_with('/')
-        || path.starts_with("./")
-        || path.starts_with("../")
-        || path.starts_with("~/")
-        || path.contains('/'))
-    .then(|| (PathBuf::from(path), line, column))
+    // A bare token can still name a project-local file. Resolution and the
+    // caller's final existence/confinement check decide whether it is
+    // actionable, so this admits `STYLE.md` without opening arbitrary paths.
+    (!path.is_empty()).then(|| (PathBuf::from(path), line, column))
 }
 
 #[cfg(test)]
@@ -253,6 +251,24 @@ mod tests {
         assert_eq!(
             link,
             Some(TerminalLink::Url("https://example.test/docs".to_string()))
+        );
+    }
+
+    #[test]
+    fn recognizes_a_bare_project_local_file_with_trailing_prose_punctuation() {
+        let link = link_at(
+            "Read STYLE.md, before continuing",
+            6,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/STYLE.md"),
+                line: None,
+                column: None,
+            })
         );
     }
 

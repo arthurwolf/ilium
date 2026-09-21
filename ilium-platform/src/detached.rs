@@ -20,10 +20,18 @@ use std::process::Command;
 ///
 /// # Unix
 ///
-/// Double-forks so the eventual server is orphaned to `init` and calls
-/// `setsid` so it leads a brand-new session with no controlling terminal. The
-/// intermediate process is reaped before returning, so no zombie outlives this
-/// call.
+/// Runs the textbook daemon sequence -- fork, `setsid`, fork again -- so the
+/// exec'd binary ends up orphaned to `init`, in a brand-new session with no
+/// controlling terminal, and *not* that session's leader. The order matters:
+/// only a session leader without a controlling terminal can acquire one by
+/// opening a tty device, so relinquishing leadership in the second fork is
+/// what makes "no controlling terminal" permanent rather than merely true at
+/// startup. The intermediate process is reaped before returning, so no zombie
+/// outlives this call.
+///
+/// The caller must not also ask for an explicit process group
+/// (`Command::process_group`): this function decides the group itself, and a
+/// group leader cannot call `setsid`.
 #[cfg(unix)]
 pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
     use std::os::unix::process::CommandExt;
@@ -35,22 +43,31 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
     // lock, or touches Rust-level global state, and `last_os_error` only reads
     // `errno`.
     unsafe {
-        command.pre_exec(|| match libc::fork() {
-            -1 => Err(io::Error::last_os_error()),
-            0 => {
-                // Grandchild: leave the middle process's session and group so
-                // it can never reacquire a controlling terminal, then fall
-                // through to `execve` for the real binary.
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
+        command.pre_exec(|| {
+            // Middle process: start the new session here rather than after the
+            // second fork. `Command`'s own fork already made this process a
+            // non-leader of its group, which is precisely the precondition
+            // `setsid` needs, so this cannot fail with `EPERM` for any command
+            // that respects the no-explicit-process-group contract above.
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
             }
-            _ => {
-                // Middle process: exit without unwinding. `std::process::exit`
-                // is not async-signal-safe this soon after `fork()`; `_exit`
-                // is. The parent reaps this pid immediately below.
-                libc::_exit(0);
+
+            match libc::fork() {
+                -1 => Err(io::Error::last_os_error()),
+                0 => {
+                    // Grandchild: inherits the terminal-less session without
+                    // leading it, so no later `open` of a tty can make that
+                    // device its controlling terminal. Falls through to
+                    // `execve` for the real binary.
+                    Ok(())
+                }
+                _ => {
+                    // Middle process: exit without unwinding. `std::process::exit`
+                    // is not async-signal-safe this soon after `fork()`; `_exit`
+                    // is. The parent reaps this pid immediately below.
+                    libc::_exit(0);
+                }
             }
         });
     }
@@ -65,6 +82,11 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
+/// Starts `command` fully detached from this process.
+///
+/// Returns once the child is running. The caller keeps no handle, because a
+/// detached process is by definition not this process's to wait on.
+///
 /// # Windows
 ///
 /// `DETACHED_PROCESS` starts the child with no console at all, which is the
@@ -121,16 +143,31 @@ mod tests {
 
     #[cfg(unix)]
     fn shell_command_writing(marker: &std::path::Path) -> Command {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        // Build the script as bytes rather than through `to_string_lossy`: a
+        // Unix path is arbitrary bytes, and a lossy conversion of a `TMPDIR`
+        // that is not valid UTF-8 would substitute replacement characters and
+        // silently redirect the write to a path that is not `marker`.
+        //
         // Single-quote the path for the shell, escaping any embedded single
         // quote as `'\''` (close the quoted string, an escaped literal
         // quote, reopen it) -- the only fully general way to quote a
         // filesystem path for `sh -c`. Stripping quotes instead of escaping
-        // them would silently redirect to a different path than `marker`.
-        let quoted_marker = format!("'{}'", marker.to_string_lossy().replace('\'', r"'\''"));
+        // them would fail the same way.
+        let mut script = b"printf started > '".to_vec();
+        for &byte in marker.as_os_str().as_bytes() {
+            if byte == b'\'' {
+                script.extend_from_slice(br"'\''");
+            } else {
+                script.push(byte);
+            }
+        }
+        script.push(b'\'');
+
         let mut command = Command::new("/bin/sh");
-        command
-            .arg("-c")
-            .arg(format!("printf started > {quoted_marker}"));
+        command.arg("-c").arg(OsString::from_vec(script));
         command
     }
 

@@ -208,11 +208,17 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
 
     if matches!(
         previous,
-        PaneStatus::Agent(_, AgentActivity::Working | AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(
-                _,
-                AgentActivity::Working | AgentActivity::WaitingBackground
-            )
+        PaneStatus::Agent(
+            _,
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::BackgroundTaskStillRunning
+        ) | PaneStatus::AgentWithGoal(
+            _,
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::BackgroundTaskStillRunning
+        )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
@@ -250,14 +256,30 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
         return Some(SoundEvent::AgentStarted);
     }
 
+    // `BackgroundTaskStillRunning` reuses the same sound event as
+    // `WaitingBackground` rather than getting its own -- both mean "the
+    // agent is now blocked on something running in the background" from a
+    // notification-sound perspective, and moving directly between the two
+    // (e.g. dispatched subagents finish just as a leftover shell is still
+    // reported running) must not refire the chime.
     if !matches!(
         previous,
-        PaneStatus::Agent(_, AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingBackground)
+        PaneStatus::Agent(
+            _,
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+        ) | PaneStatus::AgentWithGoal(
+            _,
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+        )
     ) && matches!(
         new,
-        PaneStatus::Agent(_, AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingBackground)
+        PaneStatus::Agent(
+            _,
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+        ) | PaneStatus::AgentWithGoal(
+            _,
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+        )
     ) {
         return Some(SoundEvent::WaitingBackground);
     }
@@ -412,21 +434,29 @@ fn existing_sound_directories() -> Vec<SoundDirectory> {
 #[cfg(target_os = "linux")]
 fn platform_sound_directories() -> Vec<SoundDirectory> {
     let mut directories = Vec::new();
-    if let Some(data_home) = non_empty(std::env::var_os("XDG_DATA_HOME")) {
-        directories.push(sound_directory(
-            PathBuf::from(data_home).join("sounds"),
-            "User sounds",
-        ));
-    } else if let Some(home) = non_empty(std::env::var_os("HOME")) {
-        directories.push(sound_directory(
-            PathBuf::from(&home).join(".local/share/sounds"),
-            "User sounds",
-        ));
+    // One fall-through chain rather than `if let ... else if let ...`: an
+    // `XDG_DATA_HOME` that is set but unusable (empty or relative) must still
+    // fall back to the spec's `$HOME/.local/share` default, whereas the
+    // `else if` form treats "set" as "usable" and would drop user sounds
+    // entirely.
+    let user_data_home = absolute_directory(std::env::var_os("XDG_DATA_HOME")).or_else(|| {
+        absolute_directory(std::env::var_os("HOME")).map(|home| home.join(".local/share"))
+    });
+    if let Some(data_home) = user_data_home {
+        directories.push(sound_directory(data_home.join("sounds"), "User sounds"));
     }
 
-    let xdg_data_dirs = non_empty(std::env::var_os("XDG_DATA_DIRS"))
+    let xdg_data_dirs = std::env::var_os("XDG_DATA_DIRS")
+        .filter(|value| !value.is_empty())
         .unwrap_or_else(|| OsStr::new("/usr/local/share:/usr/share").to_os_string());
-    for base in std::env::split_paths(&xdg_data_dirs) {
+    // Every entry of the list must be absolute for the same reason a single
+    // directory variable must be, and an empty segment is the realistic case:
+    // `XDG_DATA_DIRS="$XDG_DATA_DIRS:/opt/share"` written while the variable
+    // was unset yields a leading empty component, and `PathBuf::from("")
+    // .join("sounds")` resolves against ilium's working directory -- which
+    // would present a checked-out repository's own `sounds/` folder as a
+    // legitimate system sound theme.
+    for base in std::env::split_paths(&xdg_data_dirs).filter(|base| base.is_absolute()) {
         directories.push(sound_directory(base.join("sounds"), "XDG sound themes"));
     }
 
@@ -451,11 +481,8 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
         sound_directory("/System/Library/Sounds", "macOS system sounds"),
         sound_directory("/Library/Sounds", "Shared macOS sounds"),
     ];
-    if let Some(home) = non_empty(std::env::var_os("HOME")) {
-        directories.push(sound_directory(
-            PathBuf::from(home).join("Library/Sounds"),
-            "User sounds",
-        ));
+    if let Some(home) = absolute_directory(std::env::var_os("HOME")) {
+        directories.push(sound_directory(home.join("Library/Sounds"), "User sounds"));
     }
     directories
 }
@@ -463,27 +490,27 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
 #[cfg(target_os = "windows")]
 fn platform_sound_directories() -> Vec<SoundDirectory> {
     let mut directories = Vec::new();
-    if let Some(windows) =
-        non_empty(std::env::var_os("WINDIR")).or_else(|| non_empty(std::env::var_os("SystemRoot")))
+    if let Some(windows) = absolute_directory(std::env::var_os("WINDIR"))
+        .or_else(|| absolute_directory(std::env::var_os("SystemRoot")))
     {
         directories.push(sound_directory(
-            PathBuf::from(windows).join("Media"),
+            windows.join("Media"),
             "Windows system sounds",
         ));
     }
-    if let Some(local_app_data) = non_empty(std::env::var_os("LOCALAPPDATA")) {
+    if let Some(local_app_data) = absolute_directory(std::env::var_os("LOCALAPPDATA")) {
         directories.push(sound_directory(
-            PathBuf::from(&local_app_data).join("Microsoft/Windows/Sounds"),
+            local_app_data.join("Microsoft/Windows/Sounds"),
             "User Windows sounds",
         ));
         directories.push(sound_directory(
-            PathBuf::from(local_app_data).join("Microsoft/Windows/Themes"),
+            local_app_data.join("Microsoft/Windows/Themes"),
             "Local Windows themes",
         ));
     }
-    if let Some(app_data) = non_empty(std::env::var_os("APPDATA")) {
+    if let Some(app_data) = absolute_directory(std::env::var_os("APPDATA")) {
         directories.push(sound_directory(
-            PathBuf::from(app_data).join("Microsoft/Windows/Themes"),
+            app_data.join("Microsoft/Windows/Themes"),
             "Roaming Windows themes",
         ));
     }
@@ -502,14 +529,25 @@ fn sound_directory(path: impl Into<PathBuf>, origin: &str) -> SoundDirectory {
     }
 }
 
-/// Treats a set-but-empty environment variable as unset, per the XDG Base
-/// Directory spec's rule for `XDG_DATA_HOME`/`XDG_DATA_DIRS` (and applied
-/// here to every platform's discovery variables for the same reason): an
-/// empty value must never resolve to a CWD-relative path via `PathBuf::from`,
-/// which would present a stray `./sounds` (or `./Media`, `./Themes`, ...)
-/// directory as a legitimate system sound theme.
-fn non_empty(value: Option<OsString>) -> Option<OsString> {
-    value.filter(|value| !value.is_empty())
+/// Resolves an environment variable that names exactly one directory,
+/// rejecting anything that is not an absolute path.
+///
+/// This covers both invalid forms the XDG Base Directory spec calls out for
+/// `XDG_DATA_HOME`/`XDG_DATA_DIRS` -- set-but-empty (which must be treated as
+/// unset) and relative (which "must be ignored") -- and is applied to every
+/// platform's discovery variables for the same reason. A relative value,
+/// empty included, resolves against the process working directory, which for
+/// ilium is the user's project directory; without this check a checked-out
+/// repository containing its own `sounds/` (or `Media/`, `Themes/`, ...)
+/// folder would be presented as a legitimate system sound theme. An empty
+/// `OsString` needs no separate case: `PathBuf::from("")` is not absolute.
+fn absolute_directory(value: Option<OsString>) -> Option<PathBuf> {
+    let path = PathBuf::from(value?);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 const fn platform_label() -> &'static str {
@@ -553,9 +591,16 @@ fn play_system_beep() -> Result<(), SoundError> {
 fn play_file(path: &Path) -> Result<(), SoundError> {
     ensure_file_exists(path)?;
     let path_argument = path.as_os_str();
+    // The configured filename is data, never options. A `[sound] file` path
+    // beginning with `-` (hand-editable in `config.toml`) would otherwise be
+    // parsed as a flag by every one of these players, so each candidate is
+    // given an explicit end-of-options marker: `--` for the getopt/getopt_long
+    // parsers (pw-play, paplay, mpv, aplay), and `-i` for ffplay, whose own
+    // FFmpeg option parser does not honour `--` but does take an explicit
+    // input flag.
     let mut commands = vec![
-        OwnedCommandSpec::new("pw-play", vec![path_argument]),
-        OwnedCommandSpec::new("paplay", vec![path_argument]),
+        OwnedCommandSpec::new("pw-play", vec![OsStr::new("--"), path_argument]),
+        OwnedCommandSpec::new("paplay", vec![OsStr::new("--"), path_argument]),
         OwnedCommandSpec::new(
             "ffplay",
             vec![
@@ -563,6 +608,7 @@ fn play_file(path: &Path) -> Result<(), SoundError> {
                 OsStr::new("-autoexit"),
                 OsStr::new("-loglevel"),
                 OsStr::new("quiet"),
+                OsStr::new("-i"),
                 path_argument,
             ],
         ),
@@ -571,6 +617,7 @@ fn play_file(path: &Path) -> Result<(), SoundError> {
             vec![
                 OsStr::new("--no-video"),
                 OsStr::new("--really-quiet"),
+                OsStr::new("--"),
                 path_argument,
             ],
         ),
@@ -582,7 +629,7 @@ fn play_file(path: &Path) -> Result<(), SoundError> {
     {
         commands.push(OwnedCommandSpec::new(
             "aplay",
-            vec![OsStr::new("-q"), path_argument],
+            vec![OsStr::new("-q"), OsStr::new("--"), path_argument],
         ));
     }
     run_first_available_owned(&commands)
@@ -821,6 +868,43 @@ mod tests {
     }
 
     #[test]
+    fn background_task_still_running_is_treated_symmetrically_with_waiting_background() {
+        // Entering from a non-background-wait state reuses the WaitingBackground chime.
+        assert_eq!(
+            event_for_transition(
+                Some(&status(AgentActivity::Working)),
+                &status(AgentActivity::BackgroundTaskStillRunning)
+            ),
+            Some(SoundEvent::WaitingBackground)
+        );
+        // Moving directly between the two background-wait flavors must not refire it.
+        assert_eq!(
+            event_for_transition(
+                Some(&status(AgentActivity::WaitingBackground)),
+                &status(AgentActivity::BackgroundTaskStillRunning)
+            ),
+            None
+        );
+        // Leaving it for Idle/Done still plays the finished chime.
+        assert_eq!(
+            event_for_transition(
+                Some(&status(AgentActivity::BackgroundTaskStillRunning)),
+                &status(AgentActivity::Done)
+            ),
+            Some(SoundEvent::AgentFinished)
+        );
+        // Resuming Working from it must not refire AgentStarted -- it was
+        // already a busy state, same as WaitingBackground.
+        assert_eq!(
+            event_for_transition(
+                Some(&status(AgentActivity::BackgroundTaskStillRunning)),
+                &status(AgentActivity::Working)
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn ignores_first_poll_and_stable_states() {
         assert_eq!(
             event_for_transition(None, &status(AgentActivity::Done)),
@@ -854,6 +938,28 @@ mod tests {
             .sounds
             .iter()
             .all(|sound| is_supported_sound_file(&sound.path)));
+    }
+
+    #[test]
+    fn environment_directories_reject_unset_empty_and_relative_values() {
+        assert_eq!(absolute_directory(None), None);
+        assert_eq!(absolute_directory(Some(OsString::new())), None);
+        assert_eq!(
+            absolute_directory(Some(OsString::from("relative/share"))),
+            None
+        );
+
+        // An absolute-path literal is necessarily platform-specific: on
+        // Windows a merely rooted path is absolute only once it also carries
+        // a drive or UNC prefix.
+        #[cfg(windows)]
+        let absolute = OsString::from("C:\\ProgramData");
+        #[cfg(not(windows))]
+        let absolute = OsString::from("/usr/local/share");
+        assert_eq!(
+            absolute_directory(Some(absolute.clone())),
+            Some(PathBuf::from(absolute))
+        );
     }
 
     #[test]

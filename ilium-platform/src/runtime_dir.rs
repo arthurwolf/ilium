@@ -37,9 +37,10 @@ pub const MAX_SOCKET_PATH_BYTES: usize = 100;
 /// per-session lock and marker files, so it resolves under the user's own
 /// local application data.
 pub fn session_socket_directory() -> io::Result<PathBuf> {
-    let directory = std::env::var_os(SOCKET_DIR_ENV)
-        .filter(|directory| !directory.is_empty())
-        .map_or_else(socket_directory_path, PathBuf::from);
+    let directory = match directory_override(SOCKET_DIR_ENV)? {
+        Some(directory) => directory,
+        None => socket_directory_path(),
+    };
     secure_fs::create_private_directory(&directory)?;
     Ok(directory)
 }
@@ -53,7 +54,65 @@ pub fn session_socket_directory() -> io::Result<PathBuf> {
 /// resolves this directory from `%LOCALAPPDATA%` and never looked at the XDG
 /// variable, so a test isolating itself that way was isolated on Unix and
 /// sharing the real user's directory on Windows.
+///
+/// A relative value is resolved to an absolute path rather than kept relative;
+/// see [`directory_override`] for why a still-relative one names two different
+/// sockets.
 pub const SOCKET_DIR_ENV: &str = "ILIUM_SOCKET_DIR";
+
+/// Reads one of this module's environment overrides, resolved to an absolute
+/// directory, or `None` when it is unset or empty.
+///
+/// The absolute part is the point. A path that is still relative means
+/// "relative to whoever reads it", and the two processes that read these
+/// directories do not share a working directory: the CLI resolves the socket
+/// and log paths from *its* directory, then spawns the detached server with
+/// `current_dir` set to the project root. A relative override therefore has
+/// the client connecting to one socket while the server binds another (and the
+/// server writing its log where the client never looks), with no error
+/// anywhere -- the same failure the `XDG_RUNTIME_DIR` arm avoids by treating a
+/// relative value as unset. Falling back is right for a variable ilium does not
+/// own and whose spec mandates it; for ilium's own override, resolving the path
+/// the caller asked for is both what they meant and unambiguous afterwards.
+fn directory_override(variable: &str) -> io::Result<Option<PathBuf>> {
+    resolve_directory_override(variable, std::env::var_os(variable))
+}
+
+/// Split from the caller so the resolution can be tested without mutating the
+/// environment, which is process-global and cannot be done safely while other
+/// tests run in parallel.
+fn resolve_directory_override(
+    variable: &str,
+    value: Option<std::ffi::OsString>,
+) -> io::Result<Option<PathBuf>> {
+    // An empty value is treated as unset, matching how an unset variable and a
+    // variable exported as `""` are interchangeable in every shell.
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let directory = PathBuf::from(value);
+    if directory.is_absolute() {
+        return Ok(Some(directory));
+    }
+
+    // `std::path::absolute` is purely lexical: it prepends the current
+    // directory without resolving symlinks or touching the filesystem, so it
+    // cannot fail on a directory that does not exist yet -- which this one
+    // usually does not, since the caller is about to create it. Its only
+    // failure is an unavailable current directory, and naming the variable
+    // keeps that from surfacing as a bare "No such file or directory" with no
+    // hint of which override produced it.
+    std::path::absolute(&directory).map(Some).map_err(|source| {
+        io::Error::new(
+            source.kind(),
+            format!(
+                "{variable}={} could not be resolved to an absolute path: {source}",
+                directory.display()
+            ),
+        )
+    })
+}
 
 /// `XDG_RUNTIME_DIR` wins wherever it is set, on every Unix.
 ///
@@ -119,6 +178,9 @@ fn short_shared_directory() -> PathBuf {
 /// case: they scan this root for the session they just started, and a root
 /// holding hundreds of directories from previous runs makes that scan find
 /// somebody else's.
+///
+/// A relative value is resolved to an absolute path rather than kept relative;
+/// see [`directory_override`].
 pub const DEBUG_LOG_DIR_ENV: &str = "ILIUM_DEBUG_LOG_DIR";
 
 /// Root directory for timestamped debug logs, created private.
@@ -129,11 +191,10 @@ pub const DEBUG_LOG_DIR_ENV: &str = "ILIUM_DEBUG_LOG_DIR";
 /// (and a user's own `rm -rf`) to a single place -- unless
 /// [`DEBUG_LOG_DIR_ENV`] names one explicitly.
 pub fn debug_log_root() -> io::Result<PathBuf> {
-    let directory =
-        match std::env::var_os(DEBUG_LOG_DIR_ENV).filter(|directory| !directory.is_empty()) {
-            Some(directory) => PathBuf::from(directory),
-            None => debug_log_root_path()?,
-        };
+    let directory = match directory_override(DEBUG_LOG_DIR_ENV)? {
+        Some(directory) => directory,
+        None => debug_log_root_path()?,
+    };
     secure_fs::create_private_directory(&directory)?;
     Ok(directory)
 }
@@ -273,27 +334,84 @@ mod tests {
     /// directory elsewhere. This loosens the parent first so the assertion
     /// actually exercises the restriction rather than observing a mode some
     /// earlier test call already left behind.
+    ///
+    /// The parent is resolved through [`short_shared_directory`] rather than
+    /// from what [`debug_log_root`] returns, because this test *chmods* what it
+    /// finds: going through the public function would let a
+    /// [`DEBUG_LOG_DIR_ENV`] set in the ambient environment aim a
+    /// permission change at some unrelated directory's parent.
     #[cfg(unix)]
     #[test]
     fn the_debug_log_root_restricts_the_shared_parent_even_if_left_loose() {
         use std::os::unix::fs::PermissionsExt;
 
         let _guard = SHARED_DIRECTORY_LOCK.lock().expect("lock poisoned");
-        let directory = debug_log_root().expect("log root");
-        let parent = directory.parent().expect("log root has a parent");
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755))
+        let parent = short_shared_directory();
+        secure_fs::create_private_directory(&parent).expect("create shared parent");
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755))
             .expect("loosen shared parent");
 
-        debug_log_root().expect("log root again");
+        let logs = debug_log_root_path().expect("log root path");
 
-        let mode = std::fs::metadata(parent)
+        assert_eq!(logs.parent(), Some(parent.as_path()));
+        let mode = std::fs::metadata(&parent)
             .expect("metadata")
             .permissions()
             .mode()
             & 0o777;
         assert_eq!(
             mode, 0o700,
-            "debug_log_root must re-restrict the shared parent, not just the logs leaf"
+            "the log root resolver must re-restrict the shared parent, not just the logs leaf"
         );
     }
+
+    /// A relative override must not stay relative: the CLI resolves these
+    /// directories from its own working directory and then spawns the server
+    /// with a different one, so a path meaning "relative to here" would name
+    /// two different sockets and two different log roots.
+    #[test]
+    fn a_relative_override_is_resolved_against_the_current_directory() {
+        let relative = Some(std::ffi::OsString::from("relative/run"));
+
+        let resolved = resolve_directory_override(SOCKET_DIR_ENV, relative)
+            .expect("resolve override")
+            .expect("override present");
+
+        assert!(
+            resolved.is_absolute(),
+            "a relative override must be made absolute, got {resolved:?}"
+        );
+        assert!(resolved.ends_with("relative/run"), "got {resolved:?}");
+    }
+
+    /// An absolute override is handed back exactly as given -- resolution must
+    /// not normalise away a component the user deliberately pointed at.
+    #[test]
+    fn an_absolute_override_is_used_verbatim() {
+        let absolute = Some(std::ffi::OsString::from(ABSOLUTE_OVERRIDE));
+
+        let resolved =
+            resolve_directory_override(DEBUG_LOG_DIR_ENV, absolute).expect("resolve override");
+
+        assert_eq!(resolved, Some(PathBuf::from(ABSOLUTE_OVERRIDE)));
+    }
+
+    /// An override exported as `""` is the shell's way of saying "unset", and
+    /// treating it as a path would resolve the current directory itself.
+    #[test]
+    fn an_unset_or_empty_override_resolves_to_nothing() {
+        let unset = resolve_directory_override(SOCKET_DIR_ENV, None).expect("unset override");
+        let empty = resolve_directory_override(SOCKET_DIR_ENV, Some(std::ffi::OsString::new()))
+            .expect("empty override");
+
+        assert_eq!(unset, None);
+        assert_eq!(empty, None);
+    }
+
+    /// Absolute on both families, so the two tests above assert the same thing
+    /// everywhere instead of a Unix-shaped path that Windows calls relative.
+    #[cfg(unix)]
+    const ABSOLUTE_OVERRIDE: &str = "/tmp/ilium-override-test";
+    #[cfg(windows)]
+    const ABSOLUTE_OVERRIDE: &str = r"C:\ilium-override-test";
 }

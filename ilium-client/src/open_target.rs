@@ -36,6 +36,14 @@ impl OpenTarget {
             Self::Directory(_) => "Open folder",
         }
     }
+
+    /// Returns the locally verified regular file behind this target.
+    pub fn file_path(&self) -> Option<&Path> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::Url(_) | Self::Directory(_) => None,
+        }
+    }
 }
 
 /// Finds a clickable target at `column` in `line` and resolves it against the
@@ -160,6 +168,24 @@ mod tests {
         assert_eq!(
             resolve_at("see src/missing.rs", 4, project.path(), None),
             None
+        );
+    }
+
+    #[test]
+    fn resolves_an_unprefixed_project_local_file_after_trailing_comma_trim() {
+        let project = tempfile::tempdir().unwrap();
+        let file_path = project.path().join("data").join("STYLE.md");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, "# Style\n").unwrap();
+
+        assert_eq!(
+            resolve_at(
+                "Read data/STYLE.md, before continuing",
+                7,
+                project.path(),
+                None
+            ),
+            Some(OpenTarget::File(file_path))
         );
     }
 

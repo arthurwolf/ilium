@@ -163,6 +163,7 @@ const fn activity_label(activity: AgentActivity) -> &'static str {
         AgentActivity::Working => "working",
         AgentActivity::WaitingApproval => "waiting for approval",
         AgentActivity::WaitingBackground => "waiting for background work",
+        AgentActivity::BackgroundTaskStillRunning => "a background task is still finishing up",
         AgentActivity::Idle => "idle",
         AgentActivity::Done => "done",
     }

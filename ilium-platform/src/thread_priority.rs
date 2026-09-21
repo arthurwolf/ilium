@@ -12,6 +12,13 @@
 //! Windows has thread priority classes. Callers pick an intent and this module
 //! maps it -- picking the mechanism at a call site would eventually reach for
 //! `setpriority` on Darwin and slow the whole interface down.
+//!
+//! Lowering is one-way and never restored, so a thread that outlives one piece
+//! of work keeps the priority it was given. On Linux that is enforced here (a
+//! request that would *raise* a thread is clamped to where the thread already
+//! sits); Darwin and Windows take the caller's intent literally, so a pool
+//! thread reused for two different intents must not be handed the more
+//! interactive one second.
 
 /// How aggressively a worker thread should yield to interactive work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,24 +45,55 @@ pub enum WorkerPriority {
 /// The value set is absolute rather than relative on purpose: worker threads
 /// come from pools that get reused across many calls, so a relative adjustment
 /// would compound on every reuse instead of settling at a fixed, correct value.
+/// It is clamped by `effective_niceness` below, so an absolute target can only
+/// ever lower the thread, never raise it.
 #[cfg(target_os = "linux")]
 pub fn lower_current_thread(priority: WorkerPriority) {
-    let niceness = match priority {
+    let requested_niceness = match priority {
         WorkerPriority::BelowNormal => 10,
         WorkerPriority::Lowest => 15,
     };
+    // SAFETY: `getpriority` takes no pointers, and `PRIO_PROCESS` with a pid
+    // of 0 reads the calling thread, the same Linux-only property the doc
+    // comment above describes for `setpriority`.
+    let current_niceness = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+
+    // `getpriority` returns -1 both for a genuine niceness of -1 and as its
+    // failure return, distinguishable only by clearing and re-reading `errno`.
+    // Doing so would change nothing here: -1 is below every value this module
+    // asks for, so a real -1 and a failed read both mean "the clamp below does
+    // not apply", which is also the right answer when the read failed.
+    let target_niceness = effective_niceness(requested_niceness, current_niceness);
+
     // SAFETY: `setpriority` takes no pointers, and `PRIO_PROCESS` with a pid
     // of 0 restricts its effect to the calling thread.
-    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, niceness) };
+    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, target_niceness) };
     if result == -1 {
-        // The target values above are never a "already there, returned -1 by
-        // coincidence" case, so -1 here is a genuine failure.
+        // `setpriority` reports success as 0 and failure as -1, with no
+        // in-band value that could be mistaken for either -- unlike
+        // `getpriority` above, whose -1 is ambiguous.
         let error = std::io::Error::last_os_error();
         tracing::warn!(
-            "failed to lower worker thread priority to niceness {niceness}: {error}; \
+            "failed to lower worker thread priority to niceness {target_niceness}: {error}; \
              continuing at default scheduling priority"
         );
     }
+}
+
+/// The niceness to actually ask for, given the intent's target and where the
+/// thread already sits.
+///
+/// A thread inherits its creator's niceness, so a process launched under `nice`
+/// (or any supervisor that lowers it) hands workers a niceness already above
+/// every target here. Setting the target absolutely in that situation would be
+/// a *raise* -- the opposite of this module's contract, rejected with `EACCES`
+/// for an unprivileged thread and, where `CAP_SYS_NICE` or `RLIMIT_NICE` allows
+/// it, actually granted, undoing the operator's deliberate deprioritisation.
+/// Taking the larger of the two keeps the value absolute (so pool reuse settles
+/// rather than compounding) while making the operation one-way.
+#[cfg(target_os = "linux")]
+fn effective_niceness(requested: i32, current: i32) -> i32 {
+    requested.max(current)
 }
 
 /// Darwin's per-thread mechanism is a quality-of-service class, not niceness.
@@ -160,10 +198,35 @@ mod tests {
             .join()
             .expect("worker thread");
 
+        // SAFETY: as above -- `getpriority` takes no pointers, pid 0 reads the
+        // caller.
         let after = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
         assert_eq!(
             before, after,
             "spawning thread's priority must be untouched"
         );
+    }
+
+    /// Lowering is one-way: whatever niceness a thread inherits, asking for a
+    /// target must never move it back towards interactive priority. The real
+    /// call cannot assert this (an unprivileged raise fails, so the observed
+    /// niceness is identical either way), so the clamp is asserted directly.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_target_never_raises_a_thread_that_is_already_lower() {
+        // Launched under `nice -n 19`: both intents must leave it at 19.
+        assert_eq!(effective_niceness(10, 19), 19);
+        assert_eq!(effective_niceness(15, 19), 19);
+
+        // Ordinary case: a default-priority thread reaches the target.
+        assert_eq!(effective_niceness(10, 0), 10);
+        assert_eq!(effective_niceness(15, 0), 15);
+
+        // A thread the operator raised above default is still lowered.
+        assert_eq!(effective_niceness(10, -20), 10);
+
+        // Reapplying the same intent to a pooled thread settles instead of
+        // compounding, which is why the value stays absolute.
+        assert_eq!(effective_niceness(10, effective_niceness(10, 0)), 10);
     }
 }

@@ -32,6 +32,7 @@
 pub mod agent_debug_export;
 pub mod agent_debug_ui;
 pub mod agent_from_line;
+pub mod agent_history_path;
 pub mod agent_toolbar;
 pub mod app;
 pub mod board;
@@ -80,6 +81,8 @@ pub mod search_ui;
 pub mod search_workers;
 pub mod session_naming;
 pub mod settings_ui;
+pub mod smart_copy;
+pub mod smart_copy_workers;
 pub mod split_layout;
 pub mod syntax;
 pub mod terminal_activity;
@@ -125,6 +128,7 @@ use crate::error::ClientError;
 use crate::icon_search_workers::IconSearchWorkers;
 use crate::naming_workers::NamingWorkers;
 use crate::search_workers::SearchWorkers;
+use crate::smart_copy_workers::{SmartCopyWorkerUpdate, SmartCopyWorkers};
 use crate::terminal_guard::TerminalGuard;
 use crate::trigger_execution_lease::TriggerExecutionLease;
 
@@ -505,6 +509,8 @@ async fn run_inner(
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
     let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
     let mut search_workers = SearchWorkers::new(search_events_tx);
+    let (smart_copy_events_tx, mut smart_copy_events_rx) = mpsc::channel(64);
+    let mut smart_copy_workers = SmartCopyWorkers::new(smart_copy_events_tx);
     let (icon_search_events_tx, mut icon_search_events_rx) =
         mpsc::channel(ICON_SEARCH_EVENTS_CHANNEL_CAPACITY);
     let mut icon_search_workers = IconSearchWorkers::new(icon_search_events_tx);
@@ -644,6 +650,16 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
+            Some(smart_copy_event) = smart_copy_events_rx.recv() => {
+                let generation = smart_copy_event.generation;
+                let is_terminal = matches!(smart_copy_event.update, SmartCopyWorkerUpdate::Finished | SmartCopyWorkerUpdate::Failed(_));
+                app.apply_smart_copy_worker_event(smart_copy_event);
+                if is_terminal {
+                    smart_copy_workers.finish(generation);
+                }
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
             Some(icon_search_event) = icon_search_events_rx.recv() => {
                 app.apply_icon_semantic_search_event(icon_search_event);
                 needs_redraw = true;
@@ -698,6 +714,12 @@ async fn run_inner(
             &mut icon_search_workers,
             home_dir.as_deref(),
         );
+        if app.take_smart_copy_cancel_requested() {
+            smart_copy_workers.cancel();
+        }
+        if let Some(request) = app.take_pending_smart_copy_request() {
+            smart_copy_workers.start(request);
+        }
         reconcile_debug_logging(&mut app);
         reconcile_agent_debug_menu(&mut app);
         reconcile_progress_monitor_enabled(&mut app);
@@ -788,6 +810,8 @@ async fn run_inner(
             last_draw_at = Instant::now();
         }
     }
+
+    smart_copy_workers.cancel();
 
     if let Some(service) = voice_service {
         service.shutdown().await;
