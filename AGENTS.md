@@ -110,3 +110,15 @@ Use the `directories` crate, never hardcode `~`:
 ## Icon rendering
 
 - Never "fix" an icon rendering or width issue by replacing the normal UTF-8 icons with plain stable glyphs. Diagnose and correct the rendering, cell-width, or diff behavior while keeping normal icons as the default. A stable-glyph mode may exist only as an explicit, opt-in user preference.
+
+<!-- ilium-agent-feature: chatroom -->
+If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
+<!-- /ilium-agent-feature: chatroom -->
+
+<!-- ilium-agent-feature: progress version=2 -->
+For every task expected to take at least three minutes inside an Ilium pane, you MUST use the Ilium progress-monitor lifecycle. Start the task first and verify that its process or job is alive. Then construct a cheap absolute-path probe which prints exactly one JSON object containing a stable non-empty `job_id`, a `status` of `not-started-yet`, `running`, `error`, or `done`, a finite `percent` from 0 through 100, and bounded `message`/`error` details. The probe runs from the Ilium server's project root and receives no pane-shell aliases or transient environment, so use absolute paths or an explicit absolute `cd`.
+
+You MUST run `ilium progress check --command '<probe>'` and confirm its JSONL validation result before registration. Then run `ilium progress set --command '<probe>' --interval-seconds <n>` and wait for Ilium's positive JSONL registration acknowledgement containing the monitor ID and accepted first report. After registration, the agent MUST NOT poll in any form: do not make repeated tool calls, run checking loops, sleep then recheck, repeatedly inspect logs or files, issue recurring status commands, or spend conversational turns checking progress. Ilium's detached server is the sole recurring poller. You MAY perform other useful work that does not poll the task.
+
+If no useful work remains and a `/goal` is active, you MUST run `ilium progress arm-goal-resume --monitor-id <id>`; Ilium will safely pause the current goal, notify the agent when the task reaches `done` or `error`, and resume only the same still-paused goal whose pause that monitor owns. If no `/goal` is active, end the turn instead of simulating a wait. After arming or ending the turn, do nothing until Ilium sends the terminal message; never consume turns merely because the task is still running. Leave terminal detection, result delivery, and owned goal resumption to Ilium. Do not manually clear a terminal result before handling its notification. Retain the task identity, final process exit evidence, progress evidence, and failure details for verification; use `ilium progress clear --monitor-id <id>` only after the lifecycle is complete or when explicitly cancelling it.
+<!-- /ilium-agent-feature: progress -->
