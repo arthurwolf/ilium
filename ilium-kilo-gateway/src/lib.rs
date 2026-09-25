@@ -54,10 +54,15 @@ impl Default for PaidProxy {
 impl PaidProxy {
     /// Full CONNECT URL `protocol://[user:pass@]ip:port` -- credentials only
     /// when both fields are non-empty, so an IP-authorized proxy stays the
-    /// clean `ip:port` form.
+    /// clean `ip:port` form. User-info bytes are percent-encoded so a proxy
+    /// credential loaded from MongoDB cannot change the URL delimiters.
     pub fn connect_url(&self) -> String {
         let credentials = if !self.username.is_empty() && !self.password.is_empty() {
-            format!("{}:{}@", self.username, self.password)
+            format!(
+                "{}:{}@",
+                encode_proxy_user_info(&self.username),
+                encode_proxy_user_info(&self.password)
+            )
         } else {
             String::new()
         };
@@ -66,6 +71,21 @@ impl PaidProxy {
             self.protocol, credentials, self.ip, self.port
         )
     }
+}
+
+fn encode_proxy_user_info(value: &str) -> String {
+    const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX_DIGITS[usize::from(byte >> 4)]));
+            encoded.push(char::from(HEX_DIGITS[usize::from(byte & 0x0f)]));
+        }
+    }
+    encoded
 }
 
 /// Picks one proxy uniformly at random from `proxies`, or `None` when the
@@ -1038,6 +1058,16 @@ mod tests {
             password: "pass".to_string(),
         };
         assert_eq!(proxy.connect_url(), "http://user:pass@198.51.100.7:8080");
+
+        let encoded = PaidProxy {
+            username: "user@example".to_string(),
+            password: "p@ss:word".to_string(),
+            ..proxy.clone()
+        };
+        assert_eq!(
+            encoded.connect_url(),
+            "http://user%40example:p%40ss%3Aword@198.51.100.7:8080"
+        );
 
         let ip_authorized = PaidProxy {
             username: String::new(),
