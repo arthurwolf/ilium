@@ -89,7 +89,7 @@ fn type_rank(node: &Node) -> u8 {
         NodeKind::Folder { .. } => 2,
         NodeKind::Pane {
             content: PaneContentKind::Terminal,
-            status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+            status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
             ..
         } => class.type_sort_rank(),
         NodeKind::Pane {

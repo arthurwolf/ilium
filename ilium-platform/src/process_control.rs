@@ -1,4 +1,5 @@
-//! Stopping a server process, and asking whether one is still alive.
+//! Process lifetime control: bounded child trees, stopping a server process,
+//! and asking whether one is still alive.
 //!
 //! These are the CLI's *fallback* path. A session is normally stopped by
 //! asking the server over IPC to shut itself down; these functions exist for
@@ -10,8 +11,237 @@
 //! shutdown can complete between the liveness probe that chose this path and
 //! the call itself, and treating that race as an error would make an ordinary
 //! stop report a failure.
+//!
+//! Progress probes use [`prepare_process_tree`] plus [`ProcessTreeGuard`]
+//! instead of killing only the shell process. That distinction matters because
+//! shell commands routinely spawn children which otherwise survive a timeout
+//! or cancellation and keep output pipes or other resources open.
 
 use std::io;
+use std::process::Command;
+
+/// Configures `command` so its process and ordinary descendants form one
+/// kernel-owned termination unit.
+///
+/// Call this before spawning, then immediately create a [`ProcessTreeGuard`]
+/// from the returned child's process id. The guard terminates that unit when
+/// explicitly requested or when dropped, which makes cancellation safe too.
+///
+/// Unix can establish the process group atomically in the child before exec.
+/// Windows creates a new console process group here and the guard additionally
+/// assigns the spawned process to a kill-on-close Job Object. The standard
+/// process API does not expose a suspended child's primary thread, so Windows
+/// has an unavoidable spawn-to-assignment window; callers must attach the guard
+/// immediately and fail closed if assignment is unsuccessful.
+#[cfg(unix)]
+pub fn prepare_process_tree(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    // Zero asks the child to use its own pid as the new process-group id. This
+    // happens after fork and before exec, before agent-authored code can run.
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+pub fn prepare_process_tree(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    // This isolates console-control delivery. Descendant lifetime is enforced
+    // by ProcessTreeGuard's Job Object rather than by this console grouping.
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+}
+
+/// Owns the operating-system termination unit for one spawned command tree.
+///
+/// Dropping an armed guard is intentionally destructive: it is the cancellation
+/// path used when an async probe future is aborted. Call [`Self::terminate`]
+/// after ordinary completion as well, so descendants that kept running after
+/// their original shell exited cannot leak out of a completed probe.
+#[must_use = "dropping the guard immediately terminates the configured process tree"]
+#[derive(Debug)]
+pub struct ProcessTreeGuard {
+    #[cfg(unix)]
+    process_group_id: Option<libc::pid_t>,
+    // Store the Windows HANDLE as an integer so this ownership token remains
+    // Send across async suspension points. It is converted back only inside
+    // the platform-specific implementation below.
+    #[cfg(windows)]
+    job_handle: Option<isize>,
+}
+
+impl ProcessTreeGuard {
+    /// Attaches a guard to a child previously configured with
+    /// [`prepare_process_tree`].
+    ///
+    /// On Windows this can fail if the process cannot be assigned to the Job
+    /// Object (for example because of a restrictive outer job). Callers must
+    /// then stop and reap the direct child rather than run it unguarded.
+    #[cfg(unix)]
+    pub fn attach(process_id: u32) -> io::Result<Self> {
+        let process_group_id = checked_process_id(process_id)?;
+        Ok(Self {
+            process_group_id: Some(process_group_id),
+        })
+    }
+
+    #[cfg(windows)]
+    pub fn attach(process_id: u32) -> io::Result<Self> {
+        use std::ptr;
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        };
+
+        if process_id == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "process id 0 cannot own a process tree",
+            ));
+        }
+
+        // SAFETY: null security attributes and name request a private Job
+        // Object. The returned owned handle is closed on every path below.
+        let job_handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+        if job_handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `limits` has exactly the type and size required by the
+        // selected information class and remains live for the call.
+        let configured = unsafe {
+            SetInformationJobObject(
+                job_handle,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        if configured == 0 {
+            let error = io::Error::last_os_error();
+            // SAFETY: `job_handle` is owned here and has not been closed.
+            unsafe { CloseHandle(job_handle) };
+            return Err(error);
+        }
+
+        // Open a separate process handle rather than retaining one owned by a
+        // particular async runtime. The child handle held by the caller keeps
+        // even a very short-lived process object addressable during this step.
+        // SAFETY: integer arguments only; the returned handle is checked and
+        // closed below.
+        let process_handle =
+            unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, process_id) };
+        if process_handle.is_null() {
+            let error = io::Error::last_os_error();
+            // SAFETY: `job_handle` is owned here and has not been closed.
+            unsafe { CloseHandle(job_handle) };
+            return Err(error);
+        }
+
+        // SAFETY: both handles are valid. Assignment causes this process and
+        // descendants created afterwards to be terminated when the Job handle
+        // is closed.
+        let assigned = unsafe { AssignProcessToJobObject(job_handle, process_handle) };
+        let assignment_error = (assigned == 0).then(io::Error::last_os_error);
+        // SAFETY: this function owns both handles at this point. The process
+        // itself remains alive after closing our duplicate process handle.
+        unsafe { CloseHandle(process_handle) };
+        if let Some(error) = assignment_error {
+            // SAFETY: assignment failed, so closing the private Job cannot
+            // affect an unrelated process.
+            unsafe { CloseHandle(job_handle) };
+            return Err(error);
+        }
+
+        Ok(Self {
+            job_handle: Some(job_handle as isize),
+        })
+    }
+
+    /// Immediately terminates the guarded process and all descendants still
+    /// belonging to its operating-system termination unit.
+    ///
+    /// The operation is idempotent. "Already gone" is success.
+    #[cfg(unix)]
+    pub fn terminate(&mut self) -> io::Result<()> {
+        let Some(process_group_id) = self.process_group_id else {
+            return Ok(());
+        };
+        // A negative pid addresses the process group. `checked_process_id`
+        // rejects zero and values that cannot safely be negated.
+        // SAFETY: kill takes no pointers; invalid/stale group ids are reported
+        // through errno.
+        let result = unsafe { libc::kill(-process_group_id, libc::SIGKILL) };
+        if result == 0 {
+            self.process_group_id = None;
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            self.process_group_id = None;
+            return Ok(());
+        }
+        Err(error)
+    }
+
+    #[cfg(windows)]
+    pub fn terminate(&mut self) -> io::Result<()> {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        let Some(raw_job_handle) = self.job_handle.take() else {
+            return Ok(());
+        };
+        let job_handle = raw_job_handle as HANDLE;
+        // SAFETY: the handle is the live, private Job Object owned by this
+        // guard. Closing it is required even if explicit termination reports
+        // an error; KILL_ON_JOB_CLOSE provides the second termination path.
+        let terminated = unsafe { TerminateJobObject(job_handle, 1) };
+        let termination_error = (terminated == 0).then(io::Error::last_os_error);
+        // SAFETY: taken above, therefore closed exactly once.
+        unsafe { CloseHandle(job_handle) };
+        termination_error.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for ProcessTreeGuard {
+    fn drop(&mut self) {
+        let _ = self.terminate();
+    }
+}
+
+#[cfg(unix)]
+fn checked_process_id(process_id: u32) -> io::Result<libc::pid_t> {
+    if process_id == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id 0 cannot own a process tree",
+        ));
+    }
+    let process_id = libc::pid_t::try_from(process_id).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id does not fit in pid_t",
+        )
+    })?;
+    // The negative representation is used by kill(2) for a process group. A
+    // pid_t minimum cannot be negated, though a valid positive u32 can never
+    // normally reach it; keep the arithmetic explicit nonetheless.
+    process_id.checked_neg().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process id cannot be represented as a process group",
+        )
+    })?;
+    Ok(process_id)
+}
 
 /// Asks the process to terminate.
 ///
@@ -231,6 +461,40 @@ mod tests {
         assert!(!is_running(process_id));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn dropping_process_tree_guard_stops_the_shell_and_its_descendant() {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "sleep 60 & descendant=$!; echo $descendant; wait"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        prepare_process_tree(&mut command);
+        let mut child = command.spawn().expect("spawn isolated process tree");
+        let root_process_id = child.id();
+        let guard = ProcessTreeGuard::attach(root_process_id).expect("attach process tree guard");
+        let stdout = child.stdout.take().expect("child stdout");
+        let mut descendant_line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut descendant_line)
+            .expect("read descendant pid");
+        let descendant_process_id = descendant_line
+            .trim()
+            .parse::<u32>()
+            .expect("numeric descendant pid");
+        assert!(is_running(root_process_id));
+        assert!(is_running(descendant_process_id));
+
+        drop(guard);
+        child.wait().expect("reap process-tree root");
+
+        assert!(!is_running(root_process_id));
+        wait_until_not_running(descendant_process_id);
+    }
+
     // Pid 0 means "the caller's own process group" to `kill`; the guards must
     // keep it from ever reaching the syscall.
     #[cfg(unix)]
@@ -239,6 +503,20 @@ mod tests {
         assert!(!is_running(0));
         let error = terminate(0).expect_err("terminating pid 0 must be refused");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        let error = ProcessTreeGuard::attach(0).expect_err("guarding pid 0 must be refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(unix)]
+    fn wait_until_not_running(process_id: u32) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while is_running(process_id) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !is_running(process_id),
+            "descendant {process_id} survived process-tree termination"
+        );
     }
 
     #[cfg(unix)]

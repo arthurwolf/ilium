@@ -253,6 +253,20 @@ async fn read_requests<R>(
                 "terminal submission received"
             );
         }
+        if let ClientRequest::SubmitTerminalText {
+            pane_id,
+            text,
+            source,
+        } = &request
+        {
+            tracing::info!(
+                request_name,
+                ?pane_id,
+                ?source,
+                text_bytes = text.len(),
+                "terminal text submission received"
+            );
+        }
 
         let stream_control = match &request {
             ClientRequest::SetVisiblePanes { pane_ids } => {

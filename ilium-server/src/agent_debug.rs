@@ -426,7 +426,7 @@ async fn current_context(state: &ServerState, pane_id: NodeId) -> Option<AgentDe
         return None;
     };
     let (class, activity) = match status {
-        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity) => {
+        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
             (Some(class.clone()), Some(*activity))
         }
         _ => (None, None),

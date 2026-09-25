@@ -87,19 +87,17 @@ pub fn execute(app: &mut App, command: ControlCommand) -> Result<ExecutionReceip
     }
 }
 
-/// Sends voice-originated text and its submission key in one request so the
-/// PTY cannot observe the command without the final Enter or interleave input.
+/// Queues voice-originated text for the detached server's semantic Enter path.
 fn execute_terminal_submission(
     app: &mut App,
     command: TerminalSubmissionCommand,
 ) -> Result<ExecutionReceipt, String> {
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
-    let mut bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
-    bytes.push(b'\r');
-    app.send_terminal_bytes(pane_id, bytes, Some(PromptSubmissionSource::VoiceControl));
+    let text = required_nonempty(Some(command.text), "text")?;
+    app.send_terminal_submission(pane_id, text, PromptSubmissionSource::VoiceControl);
     Ok(ExecutionReceipt::queued(
-        "Sent and submitted text to the terminal",
+        "Queued text and Enter for the terminal",
     ))
 }
 

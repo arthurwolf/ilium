@@ -159,6 +159,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         }
         Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
+        Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
         Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu, &app.ui_settings),
         Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
         Mode::CreateGroup(state) => draw_create_group(frame, app, state),
@@ -215,6 +216,16 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::ApiSettingPrompt(state) => {
             modal::render_text_prompt(frame, area, "HTTP API port", state, "Apply");
         }
+        Mode::AgentSetupPathPrompt(feature, state) => {
+            modal::render_text_prompt(
+                frame,
+                area,
+                &format!("{} global instruction file", feature.label()),
+                state,
+                "Use file",
+            );
+        }
+        Mode::AgentSetupPrompt(state) => crate::setup_prompt::render(frame, area, state),
         Mode::VoicePromptEditor(state) => modal::render_multiline_prompt(
             frame,
             area,
@@ -245,6 +256,137 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         | Mode::Settings(_)
         | Mode::Search(_) => {}
     }
+}
+
+fn draw_text_trigger_dialog(
+    frame: &mut Frame,
+    area: Rect,
+    state: &crate::text_trigger_dialog::TextTriggerDialogState,
+) {
+    use crate::text_trigger_dialog::TextTriggerFocus;
+    let layout = crate::text_trigger_dialog::layout(area);
+    frame.render_widget(Clear, layout.popup);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title(if state.editing_index.is_some() {
+            "Edit text trigger"
+        } else {
+            "Add text trigger"
+        })),
+        layout.popup,
+    );
+    let field = |label: &str, value: &str, active: bool| {
+        Paragraph::new(format!("{label}: {value}")).style(if active {
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new()
+        })
+    };
+    frame.render_widget(
+        field(
+            "Regexp",
+            &state.regexp.buf,
+            state.focus == TextTriggerFocus::Regexp,
+        ),
+        layout.regexp,
+    );
+    frame.render_widget(
+        field(
+            "Message",
+            &state.message.buf,
+            state.focus == TextTriggerFocus::Message,
+        ),
+        layout.message,
+    );
+    frame.render_widget(
+        field(
+            "Match",
+            state.target.label(),
+            state.focus == TextTriggerFocus::Target,
+        ),
+        layout.target,
+    );
+    frame.render_widget(
+        Paragraph::new("SAMPLE TEXT")
+            .style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Rect::new(
+            layout.sample.x,
+            layout.sample.y.saturating_sub(1),
+            layout.sample.width,
+            1,
+        ),
+    );
+    frame.render_widget(&state.sample, layout.sample);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "[{}] Enabled",
+            if state.enabled { "x" } else { " " }
+        ))
+        .style(if state.focus == TextTriggerFocus::Enabled {
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new()
+        }),
+        layout.enabled,
+    );
+    let preview = if state.regexp.buf.is_empty() {
+        "Enter a regexp to preview matching sample lines.".to_owned()
+    } else {
+        match regex::Regex::new(&state.regexp.buf) {
+            Ok(regex) => {
+                let mut lines = state
+                    .sample_text()
+                    .lines()
+                    .map(|line| preview_text_trigger_line(&regex, line))
+                    .collect::<Vec<_>>();
+                if regex.is_match(&state.message.buf) {
+                    lines.push(
+                        "⚠ Reply also matches this regexp; echoed input can loop.".to_owned(),
+                    );
+                }
+                lines.join("\n")
+            }
+            Err(error) => format!("Invalid regexp: {error}"),
+        }
+    };
+    frame.render_widget(
+        Paragraph::new(preview).block(theme::block(false).title("LIVE PREVIEW")),
+        layout.preview,
+    );
+    frame.render_widget(
+        Paragraph::new("[ Save trigger ]")
+            .alignment(Alignment::Center)
+            .style(if state.focus == TextTriggerFocus::Save {
+                Style::new()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(Color::Cyan)
+            }),
+        layout.save,
+    );
+    frame.render_widget(
+        Paragraph::new("Tab fields · arrows select scope · Space toggle · Enter save · Esc cancel")
+            .alignment(Alignment::Center)
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        layout.hint,
+    );
+}
+
+fn preview_text_trigger_line(regex: &regex::Regex, line: &str) -> String {
+    let Some(found) = regex.find(line) else {
+        return format!("· {line}");
+    };
+    let matched = &line[found.start()..found.end()];
+    if matched.is_empty() {
+        return format!("✓ {line}  ⟪zero-width match⟫");
+    }
+    format!(
+        "✓ {}[{}]{}",
+        &line[..found.start()],
+        matched,
+        &line[found.end()..]
+    )
 }
 
 fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
@@ -1568,7 +1710,7 @@ fn pane_title(app: &App, id: NodeId) -> String {
     match &node.kind {
         NodeKind::Pane { status, .. } => {
             let logical_title = match status {
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => {
+                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
                     format!("{} — {}", node.name, agent_class_title(class))
                 }
                 _ => node.name.clone(),
@@ -1609,6 +1751,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
         Mode::ApiSettingPrompt(_) => "HTTP API PORT",
+        Mode::AgentSetupPathPrompt(_, _) => "AGENT SETUP FILE",
+        Mode::AgentSetupPrompt(_) => "AGENT SETUP",
         Mode::VoicePromptEditor(_) => "VOICE PROMPT",
         Mode::SaveAs(..) => "SAVE AS",
         Mode::Help => "HELP",
@@ -1624,6 +1768,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
+        Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateGroup(_) => "NEW GROUP",
@@ -2223,6 +2368,34 @@ mod tests {
         assert!(rendered.contains("Text (optional)"));
         assert!(rendered.contains("[x] Send Enter after the text"));
         assert!(rendered.contains("[ Schedule input ]"));
+    }
+
+    #[test]
+    fn text_trigger_dialog_visually_marks_matches_and_loop_risk() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
+        state.regexp.buf = "ready".to_owned();
+        state.message.buf = "ready".to_owned();
+        state.sample = TextArea::from(vec!["not yet".to_owned(), "system ready now".to_owned()]);
+        app.mode = Mode::TextTriggerDialog(Box::new(state));
+        app.set_screen_area(Rect::new(0, 0, 100, 34));
+        let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("LIVE PREVIEW"));
+        assert!(rendered.contains("Regexp: ready"));
+        assert!(rendered.contains("Message: ready"));
+        assert!(rendered.contains("· not yet"));
+        assert!(rendered.contains("✓ system [ready] now"));
+        assert!(rendered.contains("echoed input can loop"));
     }
 
     #[test]

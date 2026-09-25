@@ -624,7 +624,9 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
     assert!(matches!(scheduled_tree, ServerEvent::TreeSnapshot(_)));
     drop(client);
 
-    tokio::time::sleep(Duration::from_millis(1300)).await;
+    // The detached executor now sends text, lets the child process it, then
+    // sends Enter; allow that second stage to complete before reattaching.
+    tokio::time::sleep(Duration::from_millis(1600)).await;
 
     let mut reattached = server.connect().await;
     write_frame(

@@ -169,9 +169,38 @@ Config lives at `~/.config/ilium/config.toml` and most of it is editable live fr
 
 Session snapshots are stored per project in `<project>/.ilium/sessions/<name>.json`. Add `.ilium/` to your project's `.gitignore`.
 
+### Agent setup
+
+Ilium can teach coding agents about two facilities they cannot discover from
+the terminal UI alone: project Chatroom coordination and long-running-task
+progress monitors. It installs and refreshes its own versioned instruction
+blocks automatically—there is no per-agent setup step. Claude targets are
+`~/.claude/CLAUDE.md` and `<project>/CLAUDE.md`; Codex targets are
+`~/.codex/AGENTS.md` and `<project>/AGENTS.md`.
+
+Settings → Setup shows the detected state. A custom Claude global file may be
+selected for either feature. Ilium only changes blocks identified by its own
+markers: hand-written instructions are preserved, and stale managed blocks are
+atomically upgraded without rewriting the rest of the file.
+
+The Progress contract is mandatory for an informed agent whenever a task is
+expected to last at least three minutes. The agent starts and verifies the job,
+validates a cheap JSON probe with `ilium progress check`, then registers it with
+`ilium progress set` and waits for the positive JSONL acknowledgement. From
+that point the agent must not poll: the detached Ilium server is the sole
+recurring poller. It keeps task failure separate from probe failure, displays a
+sticky terminal result, and submits the result back to a ready agent composer.
+If an active Codex `/goal` has no other useful work, the agent can use
+`ilium progress arm-goal-resume --monitor-id <id>`; Ilium pauses and later
+resumes only the exact goal pause owned by that monitor.
+
 ### Optional LLM features
 
 ilium can use an LLM to auto-name sessions and panes, reorganize the tree, and identify semantic regions for Smart Copy. This is **optional and off the critical path** — every core feature (multiplexing, detection, splits, persistence) works without any credentials. Providers supported: Kilo Gateway (default, has a free tier), local Ollama, OpenAI-compatible endpoints, Anthropic, and OpenRouter. Configure under Settings → Inference, or turn automatic naming/organization behavior off under Settings → Triggers.
+
+Settings → Titles chooses how future AI-authored pane titles are written. **Labeling** makes a compact uppercase name for the thing you would look for again in the tree; **Summarization** describes the session's work. The choice also applies to requested AI retitles and tree restructuring. Changing it does not rename existing panes, and titles you renamed yourself remain fixed.
+
+Kilo paid-proxy egress is a hand-edited option. Set `paid_proxies_enabled = true` under `[inference.kilo_gateway]`, then configure the MongoDB `uri`, `database`, `collection`, and proxy field names under `[inference.kilo_gateway.proxy_database]` and its `.structure` table. Ilium reads enabled rows at client boot; proxy records are not stored in `config.toml`.
 
 Voice control is a separate opt-in feature requiring an OpenAI Realtime key; it is disabled unless you configure it.
 

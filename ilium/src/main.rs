@@ -25,9 +25,11 @@ use ilium::session;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use ilium::error::CliError;
 use ilium_platform::paths;
@@ -128,16 +130,22 @@ enum ChatCommand {
     },
 }
 
-/// Local mirror of the `[percent, message]` contract every progress-monitor
-/// command's stdout must satisfy -- see `ilium-server`'s `progress_monitor`
-/// module doc for the full contract this subcommand's `Set` variant installs.
+/// Agent-facing lifecycle operations for one pane's server-owned long-task
+/// monitor. Every successful operation prints exactly one JSONL record so an
+/// agent can consume the result without scraping prose.
 #[derive(Subcommand, Debug)]
 enum ProgressCommand {
-    /// Starts (or replaces) this pane's server-run progress monitor:
-    /// `command` runs every `interval-seconds` and its stdout must be
-    /// exactly one JSON object, `{"percent": <0-100>, "message": <string>}`.
-    /// Prefer more detail in `message` over less -- it is clipped to fit,
-    /// not rejected for being long.
+    /// Runs and validates one probe through the server without installing it.
+    /// Stdout must contain exactly one JSON object with `job_id`, `status`,
+    /// `percent`, optional `message`, and `error` when status is `error`.
+    Check {
+        #[arg(long)]
+        command: String,
+    },
+    /// Validates, then atomically starts or replaces this pane's monitor. The
+    /// command waits for a correlated server acknowledgement containing the
+    /// monitor ID and accepted first report; silence is never acceptance.
+    /// Probe stdout follows the same contract as `progress check`.
     ///
     /// WORKING DIRECTORY: `command` is spawned by the ilium SERVER process,
     /// not by the pane's own shell -- despite running "in the pane", it does
@@ -155,9 +163,9 @@ enum ProgressCommand {
     /// start -- never rely on inherited relative-path resolution.
     ///
     /// PERFORMANCE: this command is spawned as a brand-new shell process on
-    /// every tick (default every 1 second, `MIN_INTERVAL` floors it at
-    /// 500ms), for as long as the pane exists. It must be cheap: prefer O(1)
-    /// or cached state reads over recursive filesystem walks, avoid
+    /// every tick (default every 1 second), for as long as the pane exists.
+    /// It must be cheap: prefer O(1) or cached state reads over recursive
+    /// filesystem walks, avoid
     /// spawning further heavy subprocesses from within it, and avoid network
     /// calls unless truly necessary. If the underlying check is inherently
     /// expensive, raise `--interval-seconds` rather than letting an
@@ -172,10 +180,59 @@ enum ProgressCommand {
         /// performance notes above.
         #[arg(long, default_value_t = 1)]
         interval_seconds: u32,
+        /// Whether Ilium should leave an active goal alone or safely pause it
+        /// after this turn and resume only the causally owned pause.
+        #[arg(long, value_enum, default_value_t = ProgressGoalPolicyArgument::KeepRunning)]
+        goal_policy: ProgressGoalPolicyArgument,
     },
-    /// Stops this pane's active progress monitor, if any, and clears its
-    /// last reported progress.
-    Clear,
+    /// Returns the current registration, latest report, and monitor health.
+    Status,
+    /// Arms safe `/goal pause` and causally owned `/goal resume` delivery for
+    /// the active monitor after this agent turn finishes.
+    ArmGoalResume {
+        #[arg(long)]
+        monitor_id: u64,
+    },
+    /// Removes goal pause/resume intent from the specified active monitor.
+    DisarmGoalResume {
+        #[arg(long)]
+        monitor_id: u64,
+    },
+    /// Stops the active monitor and clears its retained progress. Supplying a
+    /// monitor ID fences the operation so a stale agent cannot clear a newer
+    /// replacement.
+    Clear {
+        #[arg(long)]
+        monitor_id: Option<u64>,
+    },
+}
+
+impl ProgressCommand {
+    const fn operation_name(&self) -> &'static str {
+        match self {
+            Self::Check { .. } => "check",
+            Self::Set { .. } => "set",
+            Self::Status => "status",
+            Self::ArmGoalResume { .. } => "arm-goal-resume",
+            Self::DisarmGoalResume { .. } => "disarm-goal-resume",
+            Self::Clear { .. } => "clear",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ProgressGoalPolicyArgument {
+    KeepRunning,
+    PauseAndResume,
+}
+
+impl From<ProgressGoalPolicyArgument> for ilium_ipc::ProgressGoalPolicy {
+    fn from(value: ProgressGoalPolicyArgument) -> Self {
+        match value {
+            ProgressGoalPolicyArgument::KeepRunning => Self::KeepRunning,
+            ProgressGoalPolicyArgument::PauseAndResume => Self::PauseAndResume,
+        }
+    }
 }
 
 #[tokio::main]
@@ -279,16 +336,30 @@ struct PaneIdentity {
 }
 
 fn pane_identity_from_env() -> Result<PaneIdentity, CliError> {
-    let pane_id = std::env::var(ilium_ipc::pane_env::PANE_ID)
-        .ok()
+    pane_identity_from_values(
+        std::env::var(ilium_ipc::pane_env::PANE_ID).ok(),
+        std::env::var(ilium_ipc::pane_env::SESSION_NAME).ok(),
+        std::env::var(ilium_ipc::pane_env::SESSION_SOCKET).ok(),
+    )
+}
+
+fn pane_identity_from_values(
+    pane_id: Option<String>,
+    session_name: Option<String>,
+    socket_path: Option<String>,
+) -> Result<PaneIdentity, CliError> {
+    let pane_id = pane_id
         .and_then(|value| value.parse::<u64>().ok())
         .map(ilium_core::NodeId)
         .ok_or(CliError::NotInsideIliumPane(ilium_ipc::pane_env::PANE_ID))?;
-    let session_name = std::env::var(ilium_ipc::pane_env::SESSION_NAME)
-        .map_err(|_| CliError::NotInsideIliumPane(ilium_ipc::pane_env::SESSION_NAME))?;
-    let socket_path = std::env::var(ilium_ipc::pane_env::SESSION_SOCKET)
+    let session_name = session_name.ok_or(CliError::NotInsideIliumPane(
+        ilium_ipc::pane_env::SESSION_NAME,
+    ))?;
+    let socket_path = socket_path
         .map(PathBuf::from)
-        .map_err(|_| CliError::NotInsideIliumPane(ilium_ipc::pane_env::SESSION_SOCKET))?;
+        .ok_or(CliError::NotInsideIliumPane(
+            ilium_ipc::pane_env::SESSION_SOCKET,
+        ))?;
     Ok(PaneIdentity {
         pane_id,
         session_name,
@@ -296,72 +367,480 @@ fn pane_identity_from_env() -> Result<PaneIdentity, CliError> {
     })
 }
 
-/// How long `progress` waits for a rejection before assuming its request was
-/// accepted. Neither `SetPaneProgressMonitor` nor `ClearPaneProgressMonitor`
-/// broadcasts a success confirmation -- the monitor's first tick may be
-/// seconds away, or never arrive at all if the command turns out to be bad
-/// -- so only a `ServerEvent::Error` is worth waiting for; a quiet window
-/// this short keeps the common case (an agent calling this once at the start
-/// of a long task) from feeling like it hung.
-const PROGRESS_REQUEST_QUIET_WINDOW: Duration = Duration::from_millis(750);
+/// Includes the server's bounded first-probe execution plus enough local IPC
+/// slack to return its correlated result. A quiet socket is never acceptance.
+const PROGRESS_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+
+static NEXT_PROGRESS_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy)]
+enum ExpectedProgressResponse {
+    Check,
+    Set,
+    Status,
+    ArmGoalResume,
+    DisarmGoalResume,
+    Clear,
+}
+
+enum ProgressResponse {
+    Check {
+        pane_id: ilium_core::NodeId,
+        result: Result<ilium_ipc::ProgressMonitorPreflight, ilium_ipc::ProgressMonitorRejection>,
+    },
+    Set {
+        pane_id: ilium_core::NodeId,
+        result: Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection>,
+    },
+    Status {
+        pane_id: ilium_core::NodeId,
+        result: Result<ilium_ipc::ProgressMonitorStatus, ilium_ipc::ProgressMonitorRejection>,
+    },
+    GoalPolicyChanged {
+        operation: &'static str,
+        pane_id: ilium_core::NodeId,
+        monitor_id: u64,
+        result: Result<ilium_ipc::ProgressGoalPolicy, ilium_ipc::ProgressMonitorRejection>,
+    },
+    Clear {
+        pane_id: ilium_core::NodeId,
+        result: Result<Option<u64>, ilium_ipc::ProgressMonitorRejection>,
+    },
+}
 
 async fn progress(command: ProgressCommand) -> Result<(), CliError> {
-    let identity = pane_identity_from_env()?;
-    let mut connection =
-        ilium_client::connection::Connection::connect(&identity.socket_path, identity.session_name)
-            .await?;
+    let request_id = next_progress_request_id();
+    let operation = command.operation_name();
+    let identity = match pane_identity_from_env() {
+        Ok(identity) => identity,
+        Err(error) => {
+            print_progress_request_failure(
+                operation,
+                request_id,
+                None,
+                "pane-identity-unavailable",
+                &error,
+            );
+            return Err(error);
+        }
+    };
+    let mut connection = match ilium_client::connection::Connection::connect(
+        &identity.socket_path,
+        identity.session_name.clone(),
+    )
+    .await
+    {
+        Ok(connection) => connection,
+        Err(error) => {
+            let error = CliError::from(error);
+            print_progress_request_failure(
+                operation,
+                request_id,
+                Some(identity.pane_id),
+                "connection-failed",
+                &error,
+            );
+            return Err(error);
+        }
+    };
 
-    let (request, accepted_message) = match command {
+    let (request, expected_response) = match command {
+        ProgressCommand::Check { command } => (
+            ilium_ipc::ClientRequest::CheckPaneProgressMonitor {
+                request_id,
+                pane_id: identity.pane_id,
+                command,
+            },
+            ExpectedProgressResponse::Check,
+        ),
         ProgressCommand::Set {
             command,
             interval_seconds,
+            goal_policy,
         } => (
             ilium_ipc::ClientRequest::SetPaneProgressMonitor {
+                request_id,
                 pane_id: identity.pane_id,
                 command,
                 interval_seconds,
+                goal_policy: goal_policy.into(),
             },
-            "progress monitor started",
+            ExpectedProgressResponse::Set,
         ),
-        ProgressCommand::Clear => (
-            ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
+        ProgressCommand::Status => (
+            ilium_ipc::ClientRequest::GetPaneProgressMonitorStatus {
+                request_id,
                 pane_id: identity.pane_id,
             },
-            "progress monitor cleared",
+            ExpectedProgressResponse::Status,
+        ),
+        ProgressCommand::ArmGoalResume { monitor_id } => (
+            ilium_ipc::ClientRequest::ArmProgressGoalResume {
+                request_id,
+                pane_id: identity.pane_id,
+                monitor_id,
+            },
+            ExpectedProgressResponse::ArmGoalResume,
+        ),
+        ProgressCommand::DisarmGoalResume { monitor_id } => (
+            ilium_ipc::ClientRequest::DisarmProgressGoalResume {
+                request_id,
+                pane_id: identity.pane_id,
+                monitor_id,
+            },
+            ExpectedProgressResponse::DisarmGoalResume,
+        ),
+        ProgressCommand::Clear { monitor_id } => (
+            ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
+                request_id,
+                pane_id: identity.pane_id,
+                expected_monitor_id: monitor_id,
+            },
+            ExpectedProgressResponse::Clear,
         ),
     };
-    connection
-        .requests
-        .send(request)
-        .await
-        .map_err(|_send_error| {
-            CliError::ServerReportedError(
-                "connection closed before the request was sent".to_string(),
-            )
-        })?;
+    if connection.requests.send(request).await.is_err() {
+        let error = CliError::ServerReportedError(
+            "connection closed before the request was sent".to_string(),
+        );
+        print_progress_request_failure(
+            operation,
+            request_id,
+            Some(identity.pane_id),
+            "request-send-failed",
+            &error,
+        );
+        return Err(error);
+    }
 
-    let rejection = tokio::time::timeout(PROGRESS_REQUEST_QUIET_WINDOW, async {
-        while let Some(event) = connection.events.recv().await {
-            if let ilium_ipc::ServerEvent::Error { message } = event {
-                return Some(message);
-            }
-        }
-        None
-    })
-    .await;
+    let response = wait_for_progress_response(&mut connection, request_id, expected_response).await;
 
     let _ = connection
         .requests
         .send(ilium_ipc::ClientRequest::Detach)
         .await;
 
-    match rejection {
-        Ok(Some(message)) => Err(CliError::ServerReportedError(message)),
-        Ok(None) | Err(_) => {
-            println!("{accepted_message}");
-            Ok(())
+    match response {
+        Ok(response) => print_progress_response(request_id, response),
+        Err(error) => {
+            print_progress_request_failure(
+                operation,
+                request_id,
+                Some(identity.pane_id),
+                "transport-error",
+                &error,
+            );
+            Err(error)
         }
     }
+}
+
+fn print_progress_request_failure(
+    operation: &str,
+    request_id: u64,
+    pane_id: Option<ilium_core::NodeId>,
+    code: &str,
+    error: &CliError,
+) {
+    let pane_id = pane_id.map_or_else(|| "null".to_string(), |pane_id| pane_id.0.to_string());
+    println!(
+        "{{\"type\":\"progress_request_failed\",\"operation\":{},\"request_id\":{request_id},\"pane_id\":{pane_id},\"code\":{},\"message\":{}}}",
+        json_string(operation),
+        json_string(code),
+        json_string(&error.to_string())
+    );
+}
+
+fn next_progress_request_id() -> u64 {
+    let sequence = NEXT_PROGRESS_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let unix_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos() as u64);
+    let process_component = u64::from(std::process::id()).rotate_left(32);
+    let request_id = unix_nanos ^ process_component ^ sequence.rotate_left(17);
+    if request_id == 0 {
+        1
+    } else {
+        request_id
+    }
+}
+
+async fn wait_for_progress_response(
+    connection: &mut ilium_client::connection::Connection,
+    request_id: u64,
+    expected: ExpectedProgressResponse,
+) -> Result<ProgressResponse, CliError> {
+    tokio::time::timeout(PROGRESS_REQUEST_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            let matched = match (expected, event) {
+                (
+                    ExpectedProgressResponse::Check,
+                    ilium_ipc::ServerEvent::ProgressMonitorCheckCompleted {
+                        request_id: response_id,
+                        pane_id,
+                        result,
+                    },
+                ) if response_id == request_id => Some(ProgressResponse::Check { pane_id, result }),
+                (
+                    ExpectedProgressResponse::Set,
+                    ilium_ipc::ServerEvent::ProgressMonitorSetCompleted {
+                        request_id: response_id,
+                        pane_id,
+                        result,
+                    },
+                ) if response_id == request_id => Some(ProgressResponse::Set { pane_id, result }),
+                (
+                    ExpectedProgressResponse::Status,
+                    ilium_ipc::ServerEvent::ProgressMonitorStatusReported {
+                        request_id: response_id,
+                        pane_id,
+                        result,
+                    },
+                ) if response_id == request_id => {
+                    Some(ProgressResponse::Status { pane_id, result })
+                }
+                (
+                    operation @ (ExpectedProgressResponse::ArmGoalResume
+                    | ExpectedProgressResponse::DisarmGoalResume),
+                    ilium_ipc::ServerEvent::ProgressMonitorGoalPolicyChanged {
+                        request_id: response_id,
+                        pane_id,
+                        monitor_id,
+                        result,
+                    },
+                ) if response_id == request_id => Some(ProgressResponse::GoalPolicyChanged {
+                    operation: match operation {
+                        ExpectedProgressResponse::ArmGoalResume => "arm-goal-resume",
+                        ExpectedProgressResponse::DisarmGoalResume => "disarm-goal-resume",
+                        _ => "goal-policy",
+                    },
+                    pane_id,
+                    monitor_id,
+                    result,
+                }),
+                (
+                    ExpectedProgressResponse::Clear,
+                    ilium_ipc::ServerEvent::ProgressMonitorCleared {
+                        request_id: response_id,
+                        pane_id,
+                        result,
+                    },
+                ) if response_id == request_id => Some(ProgressResponse::Clear { pane_id, result }),
+                _ => None,
+            };
+            if let Some(response) = matched {
+                return Ok(response);
+            }
+        }
+        Err(CliError::ServerReportedError(
+            "connection closed before the correlated progress response arrived".to_string(),
+        ))
+    })
+    .await
+    .map_err(|_| {
+        CliError::ServerReportedError(format!(
+            "timed out after {PROGRESS_REQUEST_TIMEOUT:?} waiting for correlated progress response"
+        ))
+    })?
+}
+
+fn print_progress_response(request_id: u64, response: ProgressResponse) -> Result<(), CliError> {
+    match response {
+        ProgressResponse::Check { pane_id, result } => match result {
+            Ok(preflight) => {
+                println!(
+                    "{{\"type\":\"progress_check\",\"request_id\":{request_id},\"pane_id\":{},\"checked_at_unix_millis\":{},\"report\":{}}}",
+                    pane_id.0,
+                    preflight.checked_at_unix_millis,
+                    progress_report_json(&preflight.report)
+                );
+                Ok(())
+            }
+            Err(rejection) => print_progress_rejection(request_id, pane_id, "check", rejection),
+        },
+        ProgressResponse::Set { pane_id, result } => match result {
+            Ok(accepted) => {
+                println!(
+                    "{{\"type\":\"progress_set\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{},\"goal_policy\":{},\"progress\":{}}}",
+                    pane_id.0,
+                    accepted.monitor_id,
+                    json_string(progress_goal_policy_name(accepted.goal_policy)),
+                    pane_progress_json(&accepted.progress)
+                );
+                Ok(())
+            }
+            Err(rejection) => print_progress_rejection(request_id, pane_id, "set", rejection),
+        },
+        ProgressResponse::Status { pane_id, result } => match result {
+            Ok(status) => {
+                let progress = status
+                    .progress
+                    .as_ref()
+                    .map_or_else(|| "null".to_string(), pane_progress_json);
+                let goal_policy = status.goal_policy.map_or_else(
+                    || "null".to_string(),
+                    |policy| json_string(progress_goal_policy_name(policy)),
+                );
+                println!(
+                    "{{\"type\":\"progress_status\",\"request_id\":{request_id},\"pane_id\":{},\"active\":{},\"progress\":{progress},\"goal_policy\":{goal_policy},\"goal_resume_armed\":{}}}",
+                    pane_id.0,
+                    status.progress.is_some(),
+                    status.goal_resume_armed
+                );
+                Ok(())
+            }
+            Err(rejection) => print_progress_rejection(request_id, pane_id, "status", rejection),
+        },
+        ProgressResponse::GoalPolicyChanged {
+            operation,
+            pane_id,
+            monitor_id,
+            result,
+        } => match result {
+            Ok(goal_policy) => {
+                println!(
+                    "{{\"type\":\"progress_goal_policy_changed\",\"operation\":{operation_json},\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{monitor_id},\"goal_policy\":{}}}",
+                    pane_id.0,
+                    json_string(progress_goal_policy_name(goal_policy)),
+                    operation_json = json_string(operation)
+                );
+                Ok(())
+            }
+            Err(rejection) => print_progress_rejection(request_id, pane_id, operation, rejection),
+        },
+        ProgressResponse::Clear { pane_id, result } => match result {
+            Ok(cleared_monitor_id) => {
+                let cleared_id = cleared_monitor_id
+                    .map_or_else(|| "null".to_string(), |monitor_id| monitor_id.to_string());
+                println!(
+                    "{{\"type\":\"progress_clear\",\"request_id\":{request_id},\"pane_id\":{},\"cleared\":{},\"cleared_monitor_id\":{cleared_id}}}",
+                    pane_id.0,
+                    cleared_monitor_id.is_some()
+                );
+                Ok(())
+            }
+            Err(rejection) => print_progress_rejection(request_id, pane_id, "clear", rejection),
+        },
+    }
+}
+
+fn print_progress_rejection(
+    request_id: u64,
+    pane_id: ilium_core::NodeId,
+    operation: &str,
+    rejection: ilium_ipc::ProgressMonitorRejection,
+) -> Result<(), CliError> {
+    println!(
+        "{{\"type\":\"progress_rejected\",\"operation\":{},\"request_id\":{request_id},\"pane_id\":{},\"code\":{},\"message\":{}}}",
+        json_string(operation),
+        pane_id.0,
+        json_string(progress_rejection_code_name(rejection.code)),
+        json_string(&rejection.message)
+    );
+    Err(CliError::ServerReportedError(rejection.message))
+}
+
+fn pane_progress_json(progress: &ilium_core::PaneProgress) -> String {
+    format!(
+        "{{\"monitor_id\":{},\"report\":{},\"monitor_health\":{},\"last_observed_unix_millis\":{}}}",
+        progress.monitor_id,
+        progress_report_json(&progress.report),
+        progress_monitor_health_json(&progress.monitor_health),
+        progress.last_observed_unix_millis
+    )
+}
+
+fn progress_report_json(report: &ilium_core::ProgressTaskReport) -> String {
+    let error = report
+        .error
+        .as_deref()
+        .map_or_else(|| "null".to_string(), json_string);
+    format!(
+        "{{\"job_id\":{},\"status\":{},\"percent\":{},\"message\":{},\"error\":{error}}}",
+        json_string(&report.job_id),
+        json_string(progress_task_status_name(report.status)),
+        report.percent,
+        json_string(&report.message)
+    )
+}
+
+fn progress_monitor_health_json(health: &ilium_core::ProgressMonitorHealth) -> String {
+    match health {
+        ilium_core::ProgressMonitorHealth::Healthy => "{\"state\":\"healthy\"}".to_string(),
+        ilium_core::ProgressMonitorHealth::Degraded {
+            consecutive_failures,
+            last_error,
+        } => format!(
+            "{{\"state\":\"degraded\",\"consecutive_failures\":{consecutive_failures},\"last_error\":{}}}",
+            json_string(last_error)
+        ),
+        ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures,
+            last_error,
+        } => format!(
+            "{{\"state\":\"failed\",\"consecutive_failures\":{consecutive_failures},\"last_error\":{}}}",
+            json_string(last_error)
+        ),
+    }
+}
+
+const fn progress_task_status_name(status: ilium_core::ProgressTaskStatus) -> &'static str {
+    match status {
+        ilium_core::ProgressTaskStatus::NotStartedYet => "not-started-yet",
+        ilium_core::ProgressTaskStatus::Running => "running",
+        ilium_core::ProgressTaskStatus::Error => "error",
+        ilium_core::ProgressTaskStatus::Done => "done",
+    }
+}
+
+const fn progress_goal_policy_name(policy: ilium_ipc::ProgressGoalPolicy) -> &'static str {
+    match policy {
+        ilium_ipc::ProgressGoalPolicy::KeepRunning => "keep-running",
+        ilium_ipc::ProgressGoalPolicy::PauseAndResume => "pause-and-resume",
+    }
+}
+
+const fn progress_rejection_code_name(
+    code: ilium_ipc::ProgressMonitorRejectionCode,
+) -> &'static str {
+    match code {
+        ilium_ipc::ProgressMonitorRejectionCode::Disabled => "disabled",
+        ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest => "invalid-request",
+        ilium_ipc::ProgressMonitorRejectionCode::InvalidProbeReport => "invalid-probe-report",
+        ilium_ipc::ProgressMonitorRejectionCode::ProbeSpawnFailed => "probe-spawn-failed",
+        ilium_ipc::ProgressMonitorRejectionCode::ProbeTimedOut => "probe-timed-out",
+        ilium_ipc::ProgressMonitorRejectionCode::ProbeExitedNonZero => "probe-exited-non-zero",
+        ilium_ipc::ProgressMonitorRejectionCode::ProbeOutputTooLarge => "probe-output-too-large",
+        ilium_ipc::ProgressMonitorRejectionCode::ProbeIoFailed => "probe-io-failed",
+        ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound => "pane-not-found",
+        ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor => "stale-monitor",
+        ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable => {
+            "goal-ownership-unavailable"
+        }
+    }
+}
+
+fn json_string(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            '\u{08}' => encoded.push_str("\\b"),
+            '\u{0c}' => encoded.push_str("\\f"),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            character if character <= '\u{1f}' => {
+                use std::fmt::Write as _;
+                let _ = write!(encoded, "\\u{:04x}", u32::from(character));
+            }
+            character => encoded.push(character),
+        }
+    }
+    encoded.push('"');
+    encoded
 }
 
 /// The bare-invocation and `new-session` paths: ensure the session's
@@ -564,7 +1043,7 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
         while let Some(event) = connection.events.recv().await {
             match event {
                 ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
-                    return Ok(Some(tree.panes().count()))
+                    return Ok(Some(tree.panes().count()));
                 }
                 ilium_ipc::ServerEvent::Error { message } => return Err(message),
                 _ => {}
@@ -701,8 +1180,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, pane_identity_from_env, session, shell_join,
+        chatroom_project_root, client_restart_args, json_string, pane_identity_from_values,
+        pane_progress_json, progress_report_json, session, shell_join, Cli, Command,
+        ProgressCommand,
     };
+    use clap::Parser;
 
     fn project_session(name: &str) -> session::ProjectSession {
         session::ProjectSession {
@@ -781,17 +1263,179 @@ mod tests {
     }
 
     /// `ilium progress` only works run from inside a pane ilium itself
-    /// spawned (see `pane_env`'s doc comment) -- an ordinary shell, or a
-    /// test process, has none of `ILIUM_PANE_ID`/`ILIUM_SESSION_NAME`/
-    /// `ILIUM_SESSION_SOCKET` set. Deliberately does not call
-    /// `std::env::set_var`/`remove_var` (process-global and racy under
-    /// parallel tests) -- this only asserts the common "not set at all"
-    /// case, which is already the ambient state of any normal test run.
+    /// spawned. Test the pure environment-value boundary instead of assuming
+    /// the test runner itself is outside Ilium or mutating process-global env.
     #[test]
     fn progress_outside_a_pane_reports_the_missing_env_var() {
         assert!(matches!(
-            pane_identity_from_env(),
+            pane_identity_from_values(None, None, None),
             Err(super::CliError::NotInsideIliumPane(_))
         ));
+    }
+
+    #[test]
+    fn progress_check_parses_probe_command_without_installing_interval() {
+        let cli = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "check",
+            "--command",
+            "/work/status --json",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Check { command }
+            }) if command == "/work/status --json"
+        ));
+    }
+
+    #[test]
+    fn progress_set_defaults_to_one_second_interval() {
+        let cli = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "set",
+            "--command",
+            "/work/status --json",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Set {
+                    command,
+                    interval_seconds: 1,
+                    goal_policy: super::ProgressGoalPolicyArgument::KeepRunning,
+                }
+            }) if command == "/work/status --json"
+        ));
+    }
+
+    #[test]
+    fn progress_set_accepts_pause_and_resume_goal_policy() {
+        let cli = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "set",
+            "--command",
+            "/work/status --json",
+            "--goal-policy",
+            "pause-and-resume",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Set {
+                    goal_policy: super::ProgressGoalPolicyArgument::PauseAndResume,
+                    ..
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn progress_lifecycle_commands_require_explicit_monitor_ids() {
+        for operation in ["arm-goal-resume", "disarm-goal-resume"] {
+            assert!(Cli::try_parse_from(["ilium", "progress", operation]).is_err());
+
+            let cli = Cli::try_parse_from(["ilium", "progress", operation, "--monitor-id", "42"])
+                .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Command::Progress {
+                    command: ProgressCommand::ArmGoalResume { monitor_id: 42 }
+                        | ProgressCommand::DisarmGoalResume { monitor_id: 42 }
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn progress_clear_accepts_an_optional_monitor_fence() {
+        let unfenced = Cli::try_parse_from(["ilium", "progress", "clear"]).unwrap();
+        assert!(matches!(
+            unfenced.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Clear { monitor_id: None }
+            })
+        ));
+
+        let fenced =
+            Cli::try_parse_from(["ilium", "progress", "clear", "--monitor-id", "99"]).unwrap();
+        assert!(matches!(
+            fenced.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Clear {
+                    monitor_id: Some(99)
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn progress_status_rejects_unexpected_arguments() {
+        assert!(Cli::try_parse_from(["ilium", "progress", "status"]).is_ok());
+        assert!(Cli::try_parse_from(["ilium", "progress", "status", "extra"]).is_err());
+    }
+
+    #[test]
+    fn progress_json_strings_escape_control_characters_without_breaking_jsonl() {
+        let source = "quote \" slash \\ newline\n tab\t nul\0 snowman ☃";
+        let encoded = json_string(source);
+
+        assert!(!encoded.contains('\n'));
+        assert_eq!(serde_json::from_str::<String>(&encoded).unwrap(), source);
+    }
+
+    #[test]
+    fn progress_report_output_preserves_the_complete_probe_contract() {
+        let report = ilium_core::ProgressTaskReport::new(
+            "render-42".to_string(),
+            ilium_core::ProgressTaskStatus::Error,
+            73.5,
+            "encoder stopped after frame 735".to_string(),
+            Some("exit status 9: bad \"frame\"".to_string()),
+        )
+        .unwrap();
+
+        let output: serde_json::Value =
+            serde_json::from_str(&progress_report_json(&report)).unwrap();
+        assert_eq!(output["job_id"], "render-42");
+        assert_eq!(output["status"], "error");
+        assert_eq!(output["percent"], 73.5);
+        assert_eq!(output["message"], "encoder stopped after frame 735");
+        assert_eq!(output["error"], "exit status 9: bad \"frame\"");
+    }
+
+    #[test]
+    fn pane_progress_output_keeps_monitor_health_separate_from_task_status() {
+        let report = ilium_core::ProgressTaskReport::new(
+            "render-42".to_string(),
+            ilium_core::ProgressTaskStatus::Running,
+            73.5,
+            "frame 735/1000".to_string(),
+            None,
+        )
+        .unwrap();
+        let mut progress = ilium_core::PaneProgress::new(91, report, 1_700_000_000_000).unwrap();
+        progress.monitor_health = ilium_core::ProgressMonitorHealth::Degraded {
+            consecutive_failures: 2,
+            last_error: "probe timed out".to_string(),
+        };
+
+        let output: serde_json::Value =
+            serde_json::from_str(&pane_progress_json(&progress)).unwrap();
+        assert_eq!(output["monitor_id"], 91);
+        assert_eq!(output["report"]["status"], "running");
+        assert_eq!(output["monitor_health"]["state"], "degraded");
+        assert_eq!(output["monitor_health"]["consecutive_failures"], 2);
+        assert_eq!(output["monitor_health"]["last_error"], "probe timed out");
     }
 }

@@ -38,7 +38,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_agent_session::TranscriptLocator;
-use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, Tree};
+use ilium_core::{
+    AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, PaneProgress, Tree,
+};
+use ilium_ipc::ProgressGoalPolicy;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
@@ -46,6 +49,7 @@ use tokio::task::JoinHandle;
 use crate::agent_debug::PaneDebugLogSnapshot;
 use crate::error::{ServerError, SnapshotError};
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
+use crate::progress_monitor::ProgressMonitorRegistration;
 use crate::state::ServerState;
 
 /// How long the background snapshot writer waits, once woken by
@@ -60,7 +64,7 @@ const SNAPSHOT_DEBOUNCE_INTERVAL: Duration = Duration::from_millis(750);
 /// currently enforced on load -- see `workspace_file::CURRENT_VERSION`'s
 /// identical comment for why that's an acceptable, deliberate choice for a
 /// best-effort recovery file.
-const CURRENT_SNAPSHOT_VERSION: u32 = 1;
+const CURRENT_SNAPSHOT_VERSION: u32 = 2;
 
 /// Project-local save format written by the single-process precursor. It is
 /// intentionally defined at the server persistence boundary: importing it is
@@ -117,12 +121,106 @@ pub struct SessionSnapshot {
     /// stay outside the hot `TreeSnapshot` IPC path.
     #[serde(default)]
     pub agent_debug_logs: Vec<PaneDebugLogSnapshot>,
+    /// Durable progress-monitor registrations and terminal delivery state.
+    /// This stays outside `Tree`: the tree owns presentation state, while the
+    /// command, cadence, and recovery bookkeeping belong to the server's I/O
+    /// boundary. Older snapshots default to no registrations.
+    #[serde(default)]
+    pub(crate) progress_monitors: Vec<PersistedProgressMonitor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaneSnapshot {
     pub node_id: NodeId,
     pub kind: PaneSnapshotKind,
+}
+
+/// What is durably known about an automated PTY delivery.
+///
+/// Only `Queued` is safe to retry after a server restart. `Attempted`,
+/// `DeliveredToPty`, and `Uncertain` may already have reached the agent, so
+/// replaying any of them could duplicate a result or resume a goal twice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PersistedProgressDeliveryState {
+    #[default]
+    NotQueued,
+    Queued,
+    Attempted,
+    DeliveredToPty,
+    Uncertain,
+}
+
+impl PersistedProgressDeliveryState {
+    pub(crate) const fn may_retry_after_restart(self) -> bool {
+        matches!(self, Self::Queued)
+    }
+}
+
+/// Server-owned progress lifecycle data required to recover after a crash.
+/// No top-level registration ID is persisted. `latest_progress` necessarily
+/// carries the previous presentation ID, but monitor IDs are process-local
+/// generations: restore never reuses that value, allocates a fresh ID, and
+/// rewrites the embedded state before publishing or starting work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PersistedProgressMonitor {
+    pub pane_id: NodeId,
+    pub command: String,
+    pub interval_seconds: u64,
+    pub goal_policy: ProgressGoalPolicy,
+    pub latest_progress: PaneProgress,
+    #[serde(default)]
+    pub goal_resume_armed: bool,
+    #[serde(default)]
+    pub result_delivery: PersistedProgressDeliveryState,
+    #[serde(default)]
+    pub goal_resume_delivery: PersistedProgressDeliveryState,
+}
+
+impl PersistedProgressMonitor {
+    pub(crate) const fn requires_probe_before_restore(&self) -> bool {
+        !self.latest_progress.is_terminal() && !self.latest_progress.monitor_health.is_failed()
+    }
+
+    pub(crate) fn accepts_restored_preflight(
+        &self,
+        preflight: &ilium_ipc::ProgressMonitorPreflight,
+    ) -> bool {
+        preflight.report.job_id == self.latest_progress.report.job_id
+    }
+
+    /// Reconstitutes the monitor specification with a fresh generation.
+    /// The caller must still run one preflight probe and require the same
+    /// `job_id` before installing a non-terminal recurring coordinator.
+    pub(crate) fn restored_registration(
+        &self,
+        fresh_monitor_id: u64,
+    ) -> Result<ProgressMonitorRegistration, crate::progress_monitor::ProgressProbeError> {
+        let mut initial_progress = self.latest_progress.clone();
+        initial_progress.monitor_id = fresh_monitor_id;
+        let registration = ProgressMonitorRegistration {
+            monitor_id: fresh_monitor_id,
+            pane_id: self.pane_id,
+            command: self.command.clone(),
+            interval: Duration::from_secs(self.interval_seconds),
+            initial_progress,
+        };
+        registration.validate()?;
+        Ok(registration)
+    }
+
+    /// Goal ownership cannot be reconstructed from a snapshot alone. A
+    /// restored record may retain that the user requested pause/resume for
+    /// diagnostics, but automatic resume is always disarmed on boot.
+    pub(crate) fn disarm_ambiguous_goal_resume(&mut self) {
+        self.goal_resume_armed = false;
+        if !matches!(
+            self.goal_resume_delivery,
+            PersistedProgressDeliveryState::NotQueued
+        ) {
+            self.goal_resume_delivery = PersistedProgressDeliveryState::Uncertain;
+        }
+    }
 }
 
 /// Loads the native project-local snapshot if present, otherwise imports the
@@ -290,6 +388,7 @@ impl LegacyWorkspace {
             tree,
             panes,
             agent_debug_logs: Vec::new(),
+            progress_monitors: Vec::new(),
         })
     }
 }
@@ -363,24 +462,45 @@ fn shell_quote(value: &str) -> String {
 /// the `tree` read lock before `panes`, per `ServerState`'s documented
 /// lock ordering.
 async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
-    let (tree, pane_snapshots) = {
+    build_snapshot_with_progress_override(state, None).await
+}
+
+/// Builds the current snapshot while substituting one already-validated
+/// progress registration for the live runtime state of the same pane.
+///
+/// This is used by `SetPaneProgressMonitor` while holding that pane's effect
+/// gate: the previous live monitor remains untouched until the complete
+/// replacement snapshot is durable. A failed write can therefore reject the
+/// replacement without cancelling the previously accepted monitor.
+async fn build_snapshot_with_progress_override(
+    state: &ServerState,
+    progress_override: Option<&PersistedProgressMonitor>,
+) -> SessionSnapshot {
+    let (tree, pane_snapshots, progress_monitors) = {
         let tree = state.tree.read().await;
         let panes = state.panes.read().await;
-        let pane_snapshots = panes
-            .iter()
-            .map(|(node_id, resource)| PaneSnapshot {
+        let mut pane_snapshots = Vec::with_capacity(panes.len());
+        let mut progress_monitors = Vec::new();
+        for (node_id, resource) in panes.iter() {
+            let kind = match resource {
+                PaneResource::Terminal(runtime) => {
+                    let progress_monitor = progress_override
+                        .filter(|progress_monitor| progress_monitor.pane_id == *node_id)
+                        .cloned()
+                        .or_else(|| runtime.progress_monitor_snapshot(*node_id));
+                    if let Some(progress_monitor) = progress_monitor {
+                        progress_monitors.push(progress_monitor);
+                    }
+                    PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
+                }
+                PaneResource::Editor { path } => PaneSnapshotKind::Editor { path: path.clone() },
+            };
+            pane_snapshots.push(PaneSnapshot {
                 node_id: *node_id,
-                kind: match resource {
-                    PaneResource::Terminal(runtime) => {
-                        PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
-                    }
-                    PaneResource::Editor { path } => {
-                        PaneSnapshotKind::Editor { path: path.clone() }
-                    }
-                },
-            })
-            .collect();
-        (tree.clone(), pane_snapshots)
+                kind,
+            });
+        }
+        (tree.clone(), pane_snapshots, progress_monitors)
     };
     let agent_debug_logs = state.agent_debug.snapshot().await;
     SessionSnapshot {
@@ -388,6 +508,7 @@ async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
         tree,
         panes: pane_snapshots,
         agent_debug_logs,
+        progress_monitors,
     }
 }
 
@@ -428,16 +549,47 @@ fn snapshot_origin_from_identity(
 }
 
 /// Builds and writes the current snapshot to `state.snapshot_path`.
-/// Best-effort by design (see module docs): callers are expected to log an
-/// `Err` and continue, never to treat a failed snapshot write as a reason
-/// to reject a request or to crash the server. Request handlers never
-/// call this directly on the request path -- see
-/// [`spawn_snapshot_writer`]/[`flush_pending_snapshot`] and
+/// Ordinary recovery saves are best-effort (see module docs). Operations
+/// that fence an irreversible effect or return a durable-acceptance ack call
+/// the error-propagating barrier wrappers below instead; every other request
+/// uses [`spawn_snapshot_writer`]/[`flush_pending_snapshot`] through
 /// `ServerState::request_snapshot_save`.
 pub async fn save_snapshot(state: &ServerState) -> Result<(), ServerError> {
     let _write_guard = state.snapshot_write_lock.lock().await;
     let snapshot = build_snapshot(state).await;
     write_snapshot_to(&state.snapshot_path, &snapshot).await
+}
+
+/// Durability barrier for an irreversible server-owned effect.
+///
+/// Unlike [`flush_pending_snapshot`], this always writes a fresh snapshot and
+/// propagates errors. It therefore remains a valid barrier when the
+/// background writer has already consumed the dirty flag: both paths share
+/// `snapshot_write_lock`, and this write is built only after any older write
+/// has finished, so an older snapshot cannot overwrite it afterward.
+pub(crate) async fn await_snapshot_durability_barrier(
+    state: &ServerState,
+) -> Result<(), ServerError> {
+    save_snapshot(state).await
+}
+
+/// Durably stages a validated replacement progress registration without
+/// disturbing the currently running monitor. The caller must hold the pane's
+/// `progress_effect_gate` from before this call through the subsequent live
+/// commit, and must retain the returned write guard through that commit. This
+/// makes a persistence failure transactionally harmless to the old monitor
+/// and prevents a background writer that already claimed the dirty flag from
+/// overwriting the staged registration with pre-commit state.
+pub(crate) async fn await_progress_monitor_durability_barrier(
+    state: &ServerState,
+    progress_monitor: &PersistedProgressMonitor,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, ServerError> {
+    let write_guard = std::sync::Arc::clone(&state.snapshot_write_lock)
+        .lock_owned()
+        .await;
+    let snapshot = build_snapshot_with_progress_override(state, Some(progress_monitor)).await;
+    write_snapshot_to(&state.snapshot_path, &snapshot).await?;
+    Ok(write_guard)
 }
 
 /// Spawns the background task that owns every crash-recovery snapshot
@@ -511,17 +663,11 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
         };
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    tokio::fs::create_dir_all(parent)
-        .await
-        .map_err(|source| to_snapshot_io_error("create directory for", source))?;
-    // Owner-only, cross-platform: `ilium_platform::secure_fs` is the single
-    // place that knows what "private" means per platform (Unix mode bits vs.
-    // Windows' inherited profile ACL), matching every other private
-    // file/directory this codebase writes (debug logs, agent-debug exports,
-    // the ready-log marker). A snapshot holds the workspace tree and pane
-    // titles, which belongs in that same guarantee.
-    ilium_platform::secure_fs::restrict_directory_to_owner(parent)
-        .map_err(|source| to_snapshot_io_error("secure directory for", source))?;
+    // Create and restrict the directory through the platform adapter in one
+    // operation. This avoids briefly creating session data with ambient
+    // permissions and refuses pre-planted symlink components.
+    ilium_platform::secure_fs::create_private_directory(parent)
+        .map_err(|source| to_snapshot_io_error("create private directory for", source))?;
     let temp_path = parent.join(format!(
         ".{}.tmp-{}",
         path.file_name()
@@ -627,7 +773,9 @@ mod tests {
         AgentDebugContext, AgentDebugEventDraft, AgentDebugEventKind, AgentDebugSource,
         PaneDebugLog,
     };
-    use ilium_core::{PaneContentKind, ROOT_ID};
+    use ilium_core::{
+        PaneContentKind, PaneProgress, ProgressTaskReport, ProgressTaskStatus, ROOT_ID,
+    };
 
     fn scratch_snapshot_path() -> PathBuf {
         let dir = std::env::temp_dir()
@@ -671,6 +819,32 @@ mod tests {
                 },
             ],
             agent_debug_logs: Vec::new(),
+            progress_monitors: Vec::new(),
+        }
+    }
+
+    fn sample_persisted_progress(pane_id: NodeId) -> PersistedProgressMonitor {
+        PersistedProgressMonitor {
+            pane_id,
+            command: "/usr/local/bin/progress-probe".to_string(),
+            interval_seconds: 15,
+            goal_policy: ProgressGoalPolicy::PauseAndResume,
+            latest_progress: PaneProgress::new(
+                41,
+                ProgressTaskReport::new(
+                    "render-job-7".to_string(),
+                    ProgressTaskStatus::Running,
+                    72.5,
+                    "frame 725/1000".to_string(),
+                    None,
+                )
+                .unwrap(),
+                1_700_000_000_000,
+            )
+            .unwrap(),
+            goal_resume_armed: true,
+            result_delivery: PersistedProgressDeliveryState::NotQueued,
+            goal_resume_delivery: PersistedProgressDeliveryState::Queued,
         }
     }
 
@@ -790,6 +964,157 @@ mod tests {
         let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
 
         assert!(loaded.agent_debug_logs.is_empty());
+    }
+
+    #[test]
+    fn snapshots_from_before_progress_lifecycle_default_to_no_monitors() {
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        old_shape
+            .as_object_mut()
+            .expect("snapshot serializes as an object")
+            .remove("progress_monitors");
+
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert!(loaded.progress_monitors.is_empty());
+    }
+
+    #[test]
+    fn early_progress_snapshots_default_missing_delivery_bookkeeping_safely() {
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        snapshot
+            .progress_monitors
+            .push(sample_persisted_progress(pane_id));
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        let monitor = old_shape
+            .get_mut("progress_monitors")
+            .and_then(serde_json::Value::as_array_mut)
+            .and_then(|monitors| monitors.first_mut())
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("fixture has one serialized progress monitor");
+        monitor.remove("goal_resume_armed");
+        monitor.remove("result_delivery");
+        monitor.remove("goal_resume_delivery");
+
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+        let monitor = &loaded.progress_monitors[0];
+        assert!(!monitor.goal_resume_armed);
+        assert_eq!(
+            monitor.result_delivery,
+            PersistedProgressDeliveryState::NotQueued
+        );
+        assert_eq!(
+            monitor.goal_resume_delivery,
+            PersistedProgressDeliveryState::NotQueued
+        );
+    }
+
+    #[tokio::test]
+    async fn progress_monitor_state_round_trips_with_the_session_snapshot() {
+        let path = scratch_snapshot_path();
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        snapshot
+            .progress_monitors
+            .push(sample_persisted_progress(pane_id));
+
+        write_snapshot_to(&path, &snapshot).await.unwrap();
+        let loaded = load_snapshot(&path).await.unwrap().unwrap();
+
+        assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn restore_rewrites_generation_and_disarms_ambiguous_goal_ownership() {
+        let mut persisted = sample_persisted_progress(NodeId(17));
+        persisted.disarm_ambiguous_goal_resume();
+        let restored = persisted.restored_registration(99).unwrap();
+
+        assert_eq!(restored.monitor_id, 99);
+        assert_eq!(restored.initial_progress.monitor_id, 99);
+        assert_eq!(restored.initial_progress.report.job_id, "render-job-7");
+        assert!(!persisted.goal_resume_armed);
+        assert_eq!(
+            persisted.goal_resume_delivery,
+            PersistedProgressDeliveryState::Uncertain
+        );
+        assert!(!persisted.goal_resume_delivery.may_retry_after_restart());
+    }
+
+    #[test]
+    fn restore_rejects_invalid_persisted_registration_parameters() {
+        let mut persisted = sample_persisted_progress(NodeId(17));
+        persisted.interval_seconds = 0;
+        assert!(persisted.restored_registration(99).is_err());
+
+        persisted.interval_seconds = 15;
+        assert!(persisted.restored_registration(0).is_err());
+
+        persisted.command.clear();
+        assert!(persisted.restored_registration(99).is_err());
+    }
+
+    #[test]
+    fn only_never_attempted_queued_delivery_is_retryable_after_restart() {
+        assert!(PersistedProgressDeliveryState::Queued.may_retry_after_restart());
+        for state in [
+            PersistedProgressDeliveryState::NotQueued,
+            PersistedProgressDeliveryState::Attempted,
+            PersistedProgressDeliveryState::DeliveredToPty,
+            PersistedProgressDeliveryState::Uncertain,
+        ] {
+            assert!(!state.may_retry_after_restart(), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn restore_probe_is_required_only_for_still_observable_nonterminal_tasks() {
+        let mut persisted = sample_persisted_progress(NodeId(17));
+        assert!(persisted.requires_probe_before_restore());
+
+        persisted.latest_progress.report.status = ProgressTaskStatus::Done;
+        persisted.latest_progress.report.percent = 100.0;
+        assert!(!persisted.requires_probe_before_restore());
+
+        persisted.latest_progress.report.status = ProgressTaskStatus::Running;
+        persisted.latest_progress.report.percent = 72.5;
+        persisted.latest_progress.monitor_health = ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe unavailable".to_string(),
+        };
+        assert!(!persisted.requires_probe_before_restore());
+    }
+
+    #[test]
+    fn restored_preflight_must_keep_the_same_job_identity() {
+        let persisted = sample_persisted_progress(NodeId(17));
+        let matching = ilium_ipc::ProgressMonitorPreflight {
+            report: ProgressTaskReport::new(
+                "render-job-7".to_string(),
+                ProgressTaskStatus::Running,
+                73.0,
+                "frame 730/1000".to_string(),
+                None,
+            )
+            .unwrap(),
+            checked_at_unix_millis: 1_700_000_000_100,
+        };
+        let replacement = ilium_ipc::ProgressMonitorPreflight {
+            report: ProgressTaskReport::new(
+                "render-job-8".to_string(),
+                ProgressTaskStatus::Running,
+                1.0,
+                "different task".to_string(),
+                None,
+            )
+            .unwrap(),
+            checked_at_unix_millis: 1_700_000_000_100,
+        };
+
+        assert!(persisted.accepts_restored_preflight(&matching));
+        assert!(!persisted.accepts_restored_preflight(&replacement));
     }
 
     #[test]
@@ -1306,6 +1631,7 @@ root:
                 },
             ],
             agent_debug_logs: Vec::new(),
+            progress_monitors: Vec::new(),
         };
 
         assert!(normalize_agent_resumes(

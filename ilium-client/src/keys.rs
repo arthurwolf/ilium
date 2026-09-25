@@ -59,6 +59,8 @@ pub fn handle_event(app: &mut App, event: Event) {
                 | Mode::NavigationLeaderPending
                 | Mode::SchedulePaneInput(_)
                 | Mode::QueuePrompt(_)
+                | Mode::AgentSetupPathPrompt(_, _)
+                | Mode::AgentSetupPrompt(_)
         );
         if !has_native_paste_handler {
             replay_pasted_text_as_keys(app, pasted);
@@ -85,6 +87,10 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_voice_setting_prompt(app, field, state, &event)
         }
         Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
+        Mode::AgentSetupPathPrompt(feature, state) => {
+            handle_agent_setup_path_prompt(app, feature, state, &event)
+        }
+        Mode::AgentSetupPrompt(state) => handle_agent_setup_prompt(app, state, &event),
         Mode::VoicePromptEditor(state) => handle_voice_prompt_editor(app, state, &event),
         Mode::SaveAs(id, state) => handle_save_as_event(app, id, state, &event),
         Mode::ContextMenu(menu) => handle_context_menu_event(app, menu, &event),
@@ -97,6 +103,7 @@ pub fn handle_event(app: &mut App, event: Event) {
         }
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
         Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
+        Mode::TextTriggerDialog(state) => handle_text_trigger_dialog_event(app, state, &event),
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
         }
@@ -339,11 +346,11 @@ fn handle_session_recovery_event(app: &mut App, pane_count: usize, event: &Event
     match key.code {
         KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
             app.resolve_session_recovery(true);
-            app.mode = Mode::Normal;
+            app.pop_modal();
         }
         KeyCode::Char('n' | 'N') | KeyCode::Esc => {
             app.resolve_session_recovery(false);
-            app.mode = Mode::Normal;
+            app.pop_modal();
         }
         _ => app.mode = Mode::ConfirmSessionRecovery { pane_count },
     }
@@ -1038,6 +1045,86 @@ fn handle_api_setting_prompt(app: &mut App, mut state: TextPromptState, event: &
     }
 }
 
+fn handle_agent_setup_path_prompt(
+    app: &mut App,
+    feature: crate::agent_feature_setup::AgentFeature,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    if let Event::Paste(pasted) = event {
+        let normalized = pasted.trim_end_matches(['\r', '\n']);
+        if normalized.chars().any(char::is_control) {
+            app.status_message = Some("The instruction-file path must be one line".to_string());
+        } else {
+            for character in normalized.chars() {
+                text_prompt::handle_key(&mut state, KeyCode::Char(character));
+            }
+        }
+        app.mode = Mode::AgentSetupPathPrompt(feature, state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentSetupPathPrompt(feature, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentSetupPathPrompt(feature, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            if app.settings_set_agent_setup_path(feature, &state.buf) {
+                app.pop_modal();
+            } else {
+                app.mode = Mode::AgentSetupPathPrompt(feature, state);
+            }
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
+        PromptOutcome::Continue => app.mode = Mode::AgentSetupPathPrompt(feature, state),
+    }
+}
+
+fn handle_agent_setup_prompt(
+    app: &mut App,
+    mut state: Box<crate::setup_prompt::SetupPromptState>,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::AgentSetupPrompt(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AgentSetupPrompt(state);
+        return;
+    }
+    let outcome = state.handle_key(key.code);
+    match outcome {
+        crate::setup_prompt::SetupPromptOutcome::Continue => {
+            app.mode = Mode::AgentSetupPrompt(state)
+        }
+        crate::setup_prompt::SetupPromptOutcome::Apply { chatroom, progress } => {
+            app.mode = Mode::Normal;
+            if app.apply_agent_setup_prompt(&state.scope, chatroom, progress) {
+                app.maybe_show_agent_setup_prompt();
+            } else {
+                app.mode = Mode::AgentSetupPrompt(state);
+            }
+        }
+        crate::setup_prompt::SetupPromptOutcome::NotNow => {
+            app.mode = Mode::Normal;
+            app.maybe_show_agent_setup_prompt();
+        }
+        crate::setup_prompt::SetupPromptOutcome::NeverAsk => {
+            app.mode = Mode::Normal;
+            if app.suppress_agent_setup_prompt(&state.scope) {
+                app.maybe_show_agent_setup_prompt();
+            } else {
+                app.mode = Mode::AgentSetupPrompt(state);
+            }
+        }
+    }
+}
+
 fn handle_voice_prompt_editor(
     app: &mut App,
     mut state: Box<crate::voice_settings::VoicePromptEditorState>,
@@ -1061,6 +1148,84 @@ fn handle_voice_prompt_editor(
             state.textarea.input(*key);
             app.mode = Mode::VoicePromptEditor(state);
         }
+    }
+}
+
+fn handle_text_trigger_dialog_event(
+    app: &mut App,
+    mut state: Box<crate::text_trigger_dialog::TextTriggerDialogState>,
+    event: &Event,
+) {
+    use crate::text_trigger_dialog::TextTriggerFocus;
+    let Event::Key(key) = event else {
+        app.mode = Mode::TextTriggerDialog(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::TextTriggerDialog(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.pop_modal(),
+        KeyCode::Tab => {
+            state.focus = state.focus.next();
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        KeyCode::BackTab => {
+            state.focus = state.focus.previous();
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.focus == TextTriggerFocus::Target => {
+            state.target = match state.target {
+                ilium_ipc::TextTriggerTarget::Agents => ilium_ipc::TextTriggerTarget::Both,
+                ilium_ipc::TextTriggerTarget::Terminals => ilium_ipc::TextTriggerTarget::Agents,
+                ilium_ipc::TextTriggerTarget::Both => ilium_ipc::TextTriggerTarget::Terminals,
+            };
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter
+            if state.focus == TextTriggerFocus::Target =>
+        {
+            state.target = match state.target {
+                ilium_ipc::TextTriggerTarget::Agents => ilium_ipc::TextTriggerTarget::Terminals,
+                ilium_ipc::TextTriggerTarget::Terminals => ilium_ipc::TextTriggerTarget::Both,
+                ilium_ipc::TextTriggerTarget::Both => ilium_ipc::TextTriggerTarget::Agents,
+            };
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        KeyCode::Char(' ') if state.focus == TextTriggerFocus::Enabled => {
+            state.enabled = !state.enabled;
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        KeyCode::Enter if state.focus == TextTriggerFocus::Save => {
+            let index = state.editing_index;
+            let trigger = state.candidate();
+            if trigger.regexp.is_empty()
+                || regex::Regex::new(&trigger.regexp).is_err()
+                || trigger.message.contains(['\r', '\n'])
+            {
+                app.status_message = Some(
+                    "Enter a valid regexp and use a one-line message before saving".to_string(),
+                );
+                app.mode = Mode::TextTriggerDialog(state);
+            } else {
+                app.commit_text_trigger(index, trigger);
+                app.pop_modal();
+            }
+        }
+        _ if state.focus == TextTriggerFocus::Regexp => {
+            let _ = crate::text_prompt::handle_key(&mut state.regexp, key.code);
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        _ if state.focus == TextTriggerFocus::Message => {
+            let _ = crate::text_prompt::handle_key(&mut state.message, key.code);
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        _ if state.focus == TextTriggerFocus::Sample => {
+            state.sample.input(*key);
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        _ => app.mode = Mode::TextTriggerDialog(state),
     }
 }
 
@@ -1685,15 +1850,49 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Tab => {
             state.tab = state.tab.next();
-            state.selected_row = 0;
+            state.selected_row = usize::from(
+                state.tab == SettingsTab::Titles
+                    && app.inference_settings.title_style
+                        == ilium_inference::TitleStyle::Summarization,
+            );
             state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
         KeyCode::BackTab => {
             state.tab = state.tab.previous();
-            state.selected_row = 0;
+            state.selected_row = usize::from(
+                state.tab == SettingsTab::Titles
+                    && app.inference_settings.title_style
+                        == ilium_inference::TitleStyle::Summarization,
+            );
             state.trigger_action_cursor = 0;
             state.scroll = 0;
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Setup => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Setup => {
+            state.selected_row =
+                (state.selected_row + 1).min(app.agent_setup_rows().len().saturating_sub(1));
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Setup => {
+            if let Some(row) = app.agent_setup_rows().get(state.selected_row).cloned() {
+                match row {
+                    crate::app::AgentSetupRow::GlobalFile { feature, .. } => {
+                        app.mode = Mode::Settings(state);
+                        app.settings_open_agent_setup_path(feature);
+                        return;
+                    }
+                    _ => app.settings_toggle_agent_setup_row(&row),
+                }
+            }
+        }
+        KeyCode::Char('r' | 'R') if state.tab == SettingsTab::Setup => {
+            if let Some(crate::app::AgentSetupRow::GlobalFile { feature, .. }) =
+                app.agent_setup_rows().get(state.selected_row)
+            {
+                app.settings_reset_agent_setup_path(*feature);
+            }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Icons => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -1719,6 +1918,19 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Char('r') if state.tab == SettingsTab::Icons => {
             state.icons_preview_real = !state.icons_preview_real
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Titles => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Titles => {
+            state.selected_row = (state.selected_row + 1).min(1);
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Titles => {
+            app.settings_select_title_style(if state.selected_row == 0 {
+                ilium_inference::TitleStyle::Labeling
+            } else {
+                ilium_inference::TitleStyle::Summarization
+            });
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Inference => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -1814,6 +2026,26 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     .checked_sub(1)
                     .and_then(|index| event.available_actions().get(index).copied());
                 app.settings_toggle_trigger_action(event, action);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::TextTriggers => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::TextTriggers => {
+            state.selected_row =
+                (state.selected_row + 1).min(app.text_trigger_settings.triggers.len());
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::TextTriggers => {
+            let selected = state.selected_row;
+            app.mode = Mode::Settings(state);
+            app.open_text_trigger_dialog(
+                (selected < app.text_trigger_settings.triggers.len()).then_some(selected),
+            );
+            return;
+        }
+        KeyCode::Delete | KeyCode::Backspace if state.tab == SettingsTab::TextTriggers => {
+            if state.selected_row < app.text_trigger_settings.triggers.len() {
+                app.delete_text_trigger(state.selected_row);
             }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::VoiceControl => {
@@ -2721,6 +2953,38 @@ mod indent_outdent_tests {
             panic!("pasting text should keep the rename prompt open");
         };
         assert_eq!(state.buf, "before-café 世界");
+    }
+
+    #[test]
+    fn setup_path_paste_never_submits_or_leaks_trailing_keys_into_settings() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.mode = Mode::AgentSetupPathPrompt(
+            crate::agent_feature_setup::AgentFeature::Progress,
+            TextPromptState::new(""),
+        );
+
+        handle_event(
+            &mut app,
+            Event::Paste("/tmp/custom-CLAUDE.md\nr".to_string()),
+        );
+
+        let Mode::AgentSetupPathPrompt(_, state) = &app.mode else {
+            panic!("multiline paste must keep the setup path editor open");
+        };
+        assert!(state.buf.is_empty());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("The instruction-file path must be one line")
+        );
+
+        handle_event(
+            &mut app,
+            Event::Paste("/tmp/custom-CLAUDE.md\r\n".to_string()),
+        );
+        let Mode::AgentSetupPathPrompt(_, state) = &app.mode else {
+            panic!("single-line paste with a trailing newline must not submit");
+        };
+        assert_eq!(state.buf, "/tmp/custom-CLAUDE.md");
     }
 
     #[test]

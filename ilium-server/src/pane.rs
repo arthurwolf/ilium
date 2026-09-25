@@ -9,12 +9,18 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ilium_core::{
-    AgentClass, AgentProvider, BuiltinAgentProvider, NodeId, SessionIdentityTransitionRule,
+    AgentClass, AgentProvider, BuiltinAgentProvider, GoalState, NodeId, PaneProgress,
+    SessionIdentityTransitionRule,
 };
+use ilium_ipc::{ProgressGoalPolicy, ProgressMonitorStatus};
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use crate::progress_monitor::{
+    ProgressMonitorFence, ProgressMonitorGeneration, ProgressMonitorRegistration,
+};
 use crate::shell_title::ShellCommandTracker;
 
 /// Default pty size a newly-created terminal pane starts at, before the
@@ -28,6 +34,89 @@ pub const DEFAULT_PANE_COLS: u16 = 80;
 /// Deliberately neutral title shown after an agent discards its conversation.
 /// The next verified session may replace it through normal title inference.
 pub const FRESH_AGENT_TITLE: &str = "<new>";
+
+/// What Ilium durably knows about one automated progress-owned PTY delivery.
+/// `DeliveredToPty` deliberately does not claim the agent consumed the text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProgressDeliveryState {
+    #[default]
+    NotQueued,
+    Queued,
+    Attempted,
+    DeliveredToPty,
+    Uncertain,
+}
+
+impl From<ProgressDeliveryState> for crate::persistence::PersistedProgressDeliveryState {
+    fn from(value: ProgressDeliveryState) -> Self {
+        match value {
+            ProgressDeliveryState::NotQueued => Self::NotQueued,
+            ProgressDeliveryState::Queued => Self::Queued,
+            ProgressDeliveryState::Attempted => Self::Attempted,
+            ProgressDeliveryState::DeliveredToPty => Self::DeliveredToPty,
+            ProgressDeliveryState::Uncertain => Self::Uncertain,
+        }
+    }
+}
+
+impl From<crate::persistence::PersistedProgressDeliveryState> for ProgressDeliveryState {
+    fn from(value: crate::persistence::PersistedProgressDeliveryState) -> Self {
+        match value {
+            crate::persistence::PersistedProgressDeliveryState::NotQueued => Self::NotQueued,
+            crate::persistence::PersistedProgressDeliveryState::Queued => Self::Queued,
+            crate::persistence::PersistedProgressDeliveryState::Attempted => Self::Attempted,
+            crate::persistence::PersistedProgressDeliveryState::DeliveredToPty => {
+                Self::DeliveredToPty
+            }
+            crate::persistence::PersistedProgressDeliveryState::Uncertain => Self::Uncertain,
+        }
+    }
+}
+
+/// Stable ownership evidence captured before Ilium submits `/goal pause`.
+/// Every field must still match before pause confirmation or resumption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgressGoalBinding {
+    pub monitor_id: u64,
+    pub process_id: u32,
+    pub session_id: String,
+    pub goal_owner_epoch: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProgressGoalResumeState {
+    #[default]
+    Disarmed,
+    Armed(ProgressGoalBinding),
+    PauseSubmitted(ProgressGoalBinding),
+    OwnedPause(ProgressGoalBinding),
+    ResumeDeliveredToPty(ProgressGoalBinding),
+    Unsafe(String),
+}
+
+impl ProgressGoalResumeState {
+    pub const fn is_armed(&self) -> bool {
+        matches!(
+            self,
+            Self::Armed(_) | Self::PauseSubmitted(_) | Self::OwnedPause(_)
+        )
+    }
+}
+
+/// Server-owned operational state for one accepted progress registration.
+/// The pure tree carries only `latest_progress`; command and delivery state
+/// stay beside the PTY because they control server-side work.
+#[derive(Debug, Clone)]
+pub struct ProgressMonitorRuntimeState {
+    pub monitor_id: u64,
+    pub command: String,
+    pub interval: Duration,
+    pub latest_progress: PaneProgress,
+    pub goal_policy: ProgressGoalPolicy,
+    pub goal_resume: ProgressGoalResumeState,
+    pub result_delivery: ProgressDeliveryState,
+    pub goal_resume_delivery: ProgressDeliveryState,
+}
 
 /// What a terminal pane was spawned to run -- kept separate from
 /// `ilium_ipc::NewPaneKind` (which also has an `Editor` variant that can
@@ -78,6 +167,9 @@ impl TerminalOrigin {
 /// background task that forwards its raw output bytes to attached clients.
 pub struct TerminalPaneRuntime {
     pub session: PtySession,
+    /// Serializes semantic input for this pane across the gap between an
+    /// automated text write and its later Enter. Other panes remain usable.
+    pub input_gate: std::sync::Arc<Mutex<()>>,
     pub origin: TerminalOrigin,
     pub shell_command_tracker: Option<ShellCommandTracker>,
     /// Observes submitted agent slash commands only so an in-process
@@ -114,6 +206,10 @@ pub struct TerminalPaneRuntime {
     /// `/goal clear`, or a different PID/class removes it so one process can never
     /// leak its flag into a replacement CLI in the same terminal pane.
     pub confirmed_goal_owner: Option<ConfirmedGoalOwner>,
+    /// Identifies one continuous goal owner independently of its phase.
+    /// Active -> paused -> active transitions retain the epoch; clearing the
+    /// goal or replacing its process/provider advances it.
+    pub goal_owner_epoch: u64,
     pub detection_schedule: DetectionSchedule,
     /// This pane's agent session/thread ID, once `crate::session_id`
     /// discovers one. Rechecked while an agent is detected because `/resume`
@@ -153,7 +249,7 @@ pub struct TerminalPaneRuntime {
     /// so closing this pane has a single, unambiguous place to cancel it
     /// (see `CLAUDE.md`'s async-task-ownership rule) -- `abort_background_tasks`
     /// is the only way this handle is ever touched after creation.
-    forward_task: JoinHandle<()>,
+    forward_task: Option<JoinHandle<()>>,
     /// One cancellable task that waits for a newly-launched agent's visible
     /// composer before submitting its one-shot initial request. It is owned by
     /// the pane so closing the pane or manually typing into it cannot leave a
@@ -165,6 +261,16 @@ pub struct TerminalPaneRuntime {
     /// closing the pane has a single, unambiguous place to cancel the
     /// previous run -- same rationale as `initial_prompt_task`.
     progress_monitor_task: Option<JoinHandle<()>>,
+    /// Pause/result/resume waiter for the active monitor. Separate from the
+    /// probe task so terminal probing can stop while a safe composer is still
+    /// pending. Replacement and clear cancel both.
+    progress_delivery_task: Option<JoinHandle<()>>,
+    /// Atomic generation fence shared with the probe and delivery tasks.
+    pub progress_monitor_generation: ProgressMonitorGeneration,
+    /// Serializes registration replacement/clear with the final readiness
+    /// check and full text-to-Enter submission of progress-owned effects.
+    pub progress_effect_gate: std::sync::Arc<Mutex<()>>,
+    pub progress_monitor: Option<ProgressMonitorRuntimeState>,
 }
 
 impl TerminalPaneRuntime {
@@ -173,10 +279,10 @@ impl TerminalPaneRuntime {
         origin: TerminalOrigin,
         pending_generated_session_id: Option<String>,
         initial_poll_interval: Duration,
-        forward_task: JoinHandle<()>,
     ) -> Self {
         Self {
             session,
+            input_gate: std::sync::Arc::new(Mutex::new(())),
             shell_command_tracker: matches!(&origin, TerminalOrigin::PlainShell)
                 .then(ShellCommandTracker::default),
             session_command_tracker: ShellCommandTracker::default(),
@@ -187,6 +293,7 @@ impl TerminalPaneRuntime {
             title_generation: 0,
             is_showing_fresh_agent_screen: false,
             confirmed_goal_owner: None,
+            goal_owner_epoch: 0,
             origin,
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
@@ -208,9 +315,24 @@ impl TerminalPaneRuntime {
             detected_agent_class: None,
             session_process_id: None,
             auto_answered_interstitial_prompt_for_pid: None,
-            forward_task,
+            forward_task: None,
             initial_prompt_task: None,
             progress_monitor_task: None,
+            progress_delivery_task: None,
+            progress_monitor_generation: ProgressMonitorGeneration::default(),
+            progress_effect_gate: std::sync::Arc::new(Mutex::new(())),
+            progress_monitor: None,
+        }
+    }
+
+    /// Installs the output forwarder only after this runtime is present in
+    /// the pane registry. A command can print its first line immediately on
+    /// spawn; starting the forwarder before registration would let a Text
+    /// Trigger observe that line but fail to write its reply into a runtime
+    /// which has not yet become addressable.
+    pub fn set_forward_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.forward_task.replace(task) {
+            previous_task.abort();
         }
     }
 
@@ -238,12 +360,294 @@ impl TerminalPaneRuntime {
         }
     }
 
+    pub fn set_progress_delivery_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.progress_delivery_task.replace(task) {
+            previous_task.abort();
+        }
+    }
+
+    pub fn cancel_progress_delivery_task(&mut self) {
+        if let Some(task) = self.progress_delivery_task.take() {
+            task.abort();
+        }
+    }
+
+    /// Stops all automated progress work without discarding the accepted
+    /// registration, sticky terminal evidence, or generation. Used by the
+    /// global feature switch; explicit clear remains the destructive action.
+    pub fn stop_progress_tasks_preserving_state(&mut self) {
+        if let Some(task) = self.progress_monitor_task.take() {
+            task.abort();
+        }
+        self.cancel_progress_delivery_task();
+    }
+
+    /// Commits an already-preflighted registration. The caller must hold the
+    /// pane's `progress_effect_gate`, making replacement atomic with respect
+    /// to any delivery's final validation and delayed Enter.
+    pub fn install_progress_monitor(
+        &mut self,
+        registration: ProgressMonitorRegistration,
+        goal_policy: ProgressGoalPolicy,
+    ) -> Result<ProgressMonitorFence, String> {
+        registration.validate().map_err(|error| error.to_string())?;
+        if goal_policy == ProgressGoalPolicy::PauseAndResume
+            && (registration.initial_progress.is_terminal()
+                || registration.initial_progress.monitor_health.is_failed())
+        {
+            return Err(
+                "a terminal or failed progress monitor cannot arm goal resumption".to_string(),
+            );
+        }
+        // Validate every rejectable condition before advancing the generation
+        // or aborting the old tasks. A failed PauseAndResume replacement must
+        // leave the previous accepted monitor fully intact.
+        let initial_goal_resume = match goal_policy {
+            ProgressGoalPolicy::KeepRunning => ProgressGoalResumeState::Disarmed,
+            ProgressGoalPolicy::PauseAndResume => ProgressGoalResumeState::Armed(
+                self.verified_active_codex_goal_binding(registration.monitor_id)?,
+            ),
+        };
+        let fence = self
+            .progress_monitor_generation
+            .activate(registration.monitor_id)
+            .map_err(|error| error.to_string())?;
+        if let Some(task) = self.progress_monitor_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.progress_delivery_task.take() {
+            task.abort();
+        }
+        self.progress_monitor = Some(ProgressMonitorRuntimeState {
+            monitor_id: registration.monitor_id,
+            command: registration.command,
+            interval: registration.interval,
+            latest_progress: registration.initial_progress,
+            goal_policy,
+            goal_resume: initial_goal_resume,
+            result_delivery: ProgressDeliveryState::NotQueued,
+            goal_resume_delivery: ProgressDeliveryState::NotQueued,
+        });
+        Ok(fence)
+    }
+
+    pub fn is_current_progress_monitor(&self, monitor_id: u64) -> bool {
+        self.progress_monitor_generation.current() == Some(monitor_id)
+            && self
+                .progress_monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.monitor_id == monitor_id)
+    }
+
+    pub fn update_progress_monitor_progress(
+        &mut self,
+        monitor_id: u64,
+        progress: PaneProgress,
+    ) -> bool {
+        if progress.monitor_id != monitor_id || !self.is_current_progress_monitor(monitor_id) {
+            return false;
+        }
+        let Some(monitor) = self.progress_monitor.as_mut() else {
+            return false;
+        };
+        monitor.latest_progress = progress;
+        true
+    }
+
+    pub fn progress_monitor_status(&self, pane_id: NodeId) -> ProgressMonitorStatus {
+        ProgressMonitorStatus {
+            pane_id,
+            progress: self
+                .progress_monitor
+                .as_ref()
+                .map(|monitor| monitor.latest_progress.clone()),
+            goal_policy: self
+                .progress_monitor
+                .as_ref()
+                .map(|monitor| monitor.goal_policy),
+            goal_resume_armed: self
+                .progress_monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.goal_resume.is_armed()),
+        }
+    }
+
+    pub fn armed_progress_goal_binding(&self, monitor_id: u64) -> Option<ProgressGoalBinding> {
+        if !self.is_current_progress_monitor(monitor_id) {
+            return None;
+        }
+        let monitor = self.progress_monitor.as_ref()?;
+        match &monitor.goal_resume {
+            ProgressGoalResumeState::Armed(binding) => Some(binding.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn progress_monitor_snapshot(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<crate::persistence::PersistedProgressMonitor> {
+        let monitor = self.progress_monitor.as_ref()?;
+        Some(crate::persistence::PersistedProgressMonitor {
+            pane_id,
+            command: monitor.command.clone(),
+            interval_seconds: monitor.interval.as_secs(),
+            goal_policy: monitor.goal_policy,
+            latest_progress: monitor.latest_progress.clone(),
+            goal_resume_armed: monitor.goal_resume.is_armed(),
+            result_delivery: monitor.result_delivery.into(),
+            goal_resume_delivery: monitor.goal_resume_delivery.into(),
+        })
+    }
+
+    /// Applies crash-recovery delivery evidence without reconstructing goal
+    /// ownership. Only a caller that separately checks `Queued` may retry it;
+    /// attempted/uncertain states remain sticky evidence.
+    pub fn restore_progress_delivery_state(
+        &mut self,
+        result_delivery: crate::persistence::PersistedProgressDeliveryState,
+        goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState,
+    ) -> Result<(), String> {
+        let monitor = self
+            .progress_monitor
+            .as_mut()
+            .ok_or_else(|| "no progress monitor is installed".to_string())?;
+        monitor.result_delivery = result_delivery.into();
+        monitor.goal_resume_delivery = goal_resume_delivery.into();
+        monitor.goal_resume = ProgressGoalResumeState::Disarmed;
+        Ok(())
+    }
+
+    /// Captures a resumption binding only for a currently active, verified
+    /// Codex goal whose live process and transcript identity agree.
+    pub fn arm_progress_goal_resume(
+        &mut self,
+        monitor_id: u64,
+    ) -> Result<ProgressGoalBinding, String> {
+        if !self.is_current_progress_monitor(monitor_id) {
+            return Err(format!("progress monitor {monitor_id} is stale"));
+        }
+        let monitor = self
+            .progress_monitor
+            .as_ref()
+            .expect("current monitor was checked above");
+        if monitor.latest_progress.is_terminal()
+            || monitor.latest_progress.monitor_health.is_failed()
+        {
+            return Err(
+                "a terminal or failed progress monitor cannot arm goal resumption".to_string(),
+            );
+        }
+        let binding = self.verified_active_codex_goal_binding(monitor_id)?;
+        let monitor = self
+            .progress_monitor
+            .as_mut()
+            .expect("current monitor was checked above");
+        monitor.goal_policy = ProgressGoalPolicy::PauseAndResume;
+        monitor.goal_resume = ProgressGoalResumeState::Armed(binding.clone());
+        monitor.goal_resume_delivery = ProgressDeliveryState::NotQueued;
+        Ok(binding)
+    }
+
+    fn verified_active_codex_goal_binding(
+        &self,
+        monitor_id: u64,
+    ) -> Result<ProgressGoalBinding, String> {
+        let owner = self
+            .confirmed_goal_owner
+            .as_ref()
+            .filter(|owner| {
+                owner.agent_class == AgentClass::Codex && owner.goal_state == GoalState::Active
+            })
+            .ok_or_else(|| "an active verified Codex goal is required".to_string())?;
+        if self.detected_agent_process_id != Some(owner.process_id)
+            || self.session_process_id != Some(owner.process_id)
+            || self.detected_agent_class.as_ref() != Some(&AgentClass::Codex)
+            || self.session_agent_class.as_ref() != Some(&AgentClass::Codex)
+            || self.is_session_identity_invalidated
+        {
+            return Err("Codex process and session ownership are not stable".to_string());
+        }
+        let session_id = self
+            .session_id
+            .clone()
+            .ok_or_else(|| "Codex session identity is not verified yet".to_string())?;
+        let binding = ProgressGoalBinding {
+            monitor_id,
+            process_id: owner.process_id,
+            session_id,
+            goal_owner_epoch: self.goal_owner_epoch,
+        };
+        Ok(binding)
+    }
+
+    pub fn disarm_progress_goal_resume(&mut self, monitor_id: u64) -> Result<(), String> {
+        if !self.is_current_progress_monitor(monitor_id) {
+            return Err(format!("progress monitor {monitor_id} is stale"));
+        }
+        self.cancel_progress_delivery_task();
+        let monitor = self
+            .progress_monitor
+            .as_mut()
+            .expect("current monitor was checked above");
+        monitor.goal_policy = ProgressGoalPolicy::KeepRunning;
+        monitor.goal_resume = ProgressGoalResumeState::Disarmed;
+        monitor.goal_resume_delivery = ProgressDeliveryState::NotQueued;
+        Ok(())
+    }
+
+    pub fn progress_goal_binding_matches(
+        &self,
+        binding: &ProgressGoalBinding,
+        required_state: GoalState,
+    ) -> bool {
+        self.is_current_progress_monitor(binding.monitor_id)
+            && self.goal_owner_epoch == binding.goal_owner_epoch
+            && !self.is_session_identity_invalidated
+            && self.session_id.as_deref() == Some(binding.session_id.as_str())
+            && self.session_agent_class.as_ref() == Some(&AgentClass::Codex)
+            && self.session_process_id == Some(binding.process_id)
+            && self.detected_agent_process_id == Some(binding.process_id)
+            && self.detected_agent_class.as_ref() == Some(&AgentClass::Codex)
+            && self.confirmed_goal_owner.as_ref().is_some_and(|owner| {
+                owner.process_id == binding.process_id
+                    && owner.agent_class == AgentClass::Codex
+                    && owner.goal_state == required_state
+            })
+    }
+
+    /// Replaces detector-owned goal evidence while maintaining a stable
+    /// epoch across phase-only transitions of the same process/provider.
+    pub fn update_confirmed_goal_owner(&mut self, owner: Option<ConfirmedGoalOwner>) {
+        let same_continuous_owner =
+            same_goal_owner_identity(self.confirmed_goal_owner.as_ref(), owner.as_ref());
+        if !same_continuous_owner && self.confirmed_goal_owner != owner {
+            self.goal_owner_epoch = self.goal_owner_epoch.wrapping_add(1).max(1);
+        }
+        self.confirmed_goal_owner = owner;
+    }
+
+    /// Explicit goal clearing is an identity boundary even before the next
+    /// detector pass sees the provider's footer disappear.
+    pub fn clear_confirmed_goal_owner(&mut self) {
+        if self.confirmed_goal_owner.take().is_some() {
+            self.goal_owner_epoch = self.goal_owner_epoch.wrapping_add(1).max(1);
+        }
+    }
+
     /// Cancels this pane's active progress-monitor loop, if any. Used by
     /// `ClearPaneProgressMonitor` and by the server's own progress-monitor
     /// setting being disabled mid-run.
     pub fn cancel_progress_monitor(&mut self) {
         if let Some(task) = self.progress_monitor_task.take() {
             task.abort();
+        }
+        if let Some(task) = self.progress_delivery_task.take() {
+            task.abort();
+        }
+        if let Some(monitor) = self.progress_monitor.take() {
+            self.progress_monitor_generation
+                .clear_if_current(monitor.monitor_id);
         }
     }
 
@@ -253,10 +657,21 @@ impl TerminalPaneRuntime {
     /// `session.kill()`, since a pane can also be torn down after its
     /// child already exited on its own).
     pub fn abort_background_tasks(&mut self) {
-        self.forward_task.abort();
+        if let Some(forward_task) = self.forward_task.take() {
+            forward_task.abort();
+        }
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_monitor();
     }
+}
+
+fn same_goal_owner_identity(
+    previous: Option<&ConfirmedGoalOwner>,
+    next: Option<&ConfirmedGoalOwner>,
+) -> bool {
+    previous.zip(next).is_some_and(|(previous, next)| {
+        previous.process_id == next.process_id && previous.agent_class == next.agent_class
+    })
 }
 
 /// Identity boundary for a server-retained goal signal.
@@ -264,6 +679,7 @@ impl TerminalPaneRuntime {
 pub struct ConfirmedGoalOwner {
     pub process_id: u32,
     pub agent_class: AgentClass,
+    pub goal_state: ilium_core::GoalState,
 }
 
 /// Returns the exact provider rule that invalidates a persisted identity.
@@ -578,6 +994,28 @@ mod tests {
         ] {
             assert!(!clears_agent_goal(command));
         }
+    }
+
+    #[test]
+    fn goal_phase_changes_preserve_identity_but_clear_and_replacement_do_not() {
+        let active = ConfirmedGoalOwner {
+            process_id: 42,
+            agent_class: AgentClass::Codex,
+            goal_state: GoalState::Active,
+        };
+        let paused = ConfirmedGoalOwner {
+            goal_state: GoalState::Paused,
+            ..active.clone()
+        };
+        let replacement = ConfirmedGoalOwner {
+            process_id: 43,
+            ..active.clone()
+        };
+
+        assert!(same_goal_owner_identity(Some(&active), Some(&paused)));
+        assert!(!same_goal_owner_identity(Some(&active), None));
+        assert!(!same_goal_owner_identity(None, Some(&active)));
+        assert!(!same_goal_owner_identity(Some(&active), Some(&replacement)));
     }
 
     #[test]

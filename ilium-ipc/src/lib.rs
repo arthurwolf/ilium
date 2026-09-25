@@ -14,6 +14,7 @@
 mod error;
 mod framing;
 mod protocol;
+mod text_trigger;
 
 pub use error::IpcError;
 pub use framing::{read_frame, write_frame, FrameReader, FrameWriter, MAX_FRAME_LEN};
@@ -24,8 +25,11 @@ pub use ilium_agent_debug::{
 };
 pub use protocol::{
     ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
+    NewPaneWorkingDirectory, ProgressGoalPolicy, ProgressMonitorAccepted, ProgressMonitorPreflight,
+    ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus,
+    PromptSubmissionSource, ServerEvent,
 };
+pub use text_trigger::{TextTrigger, TextTriggerSettings, TextTriggerTarget};
 
 /// Environment variables `ilium-server` injects into every spawned terminal
 /// pane (see `ilium-server`'s `pane::spawn_terminal_session`), so a process
@@ -203,6 +207,26 @@ mod tests {
                 text: "cargo test".to_string(),
                 send_enter: true,
             },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "Explain this codebase".to_string(),
+                source: PromptSubmissionSource::TextTrigger,
+            },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "Task completed".to_string(),
+                source: PromptSubmissionSource::ProgressResult,
+            },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "/goal pause".to_string(),
+                source: PromptSubmissionSource::ProgressGoalPause,
+            },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "/goal resume".to_string(),
+                source: PromptSubmissionSource::ProgressGoalResume,
+            },
             ClientRequest::EnqueuePrompt {
                 pane_id: NodeId(2),
                 text: "cargo test".to_string(),
@@ -328,12 +352,37 @@ mod tests {
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 last_prompt: "fix the login bug".to_string(),
             },
+            ClientRequest::CheckPaneProgressMonitor {
+                request_id: 40,
+                pane_id: NodeId(2),
+                command: "/tmp/render_progress.sh".to_string(),
+            },
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 41,
                 pane_id: NodeId(2),
                 command: "/tmp/render_progress.sh".to_string(),
                 interval_seconds: 1,
+                goal_policy: ProgressGoalPolicy::KeepRunning,
             },
-            ClientRequest::ClearPaneProgressMonitor { pane_id: NodeId(2) },
+            ClientRequest::GetPaneProgressMonitorStatus {
+                request_id: 42,
+                pane_id: NodeId(2),
+            },
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 43,
+                pane_id: NodeId(2),
+                expected_monitor_id: Some(7),
+            },
+            ClientRequest::ArmProgressGoalResume {
+                request_id: 44,
+                pane_id: NodeId(2),
+                monitor_id: 7,
+            },
+            ClientRequest::DisarmProgressGoalResume {
+                request_id: 45,
+                pane_id: NodeId(2),
+                monitor_id: 7,
+            },
             ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
         ]
     }
@@ -346,6 +395,22 @@ mod tests {
         tree.add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .expect("group accepts pane children");
         tree
+    }
+
+    fn sample_progress() -> ilium_core::PaneProgress {
+        ilium_core::PaneProgress::new(
+            7,
+            ilium_core::ProgressTaskReport::new(
+                "render-42".to_string(),
+                ilium_core::ProgressTaskStatus::Running,
+                42.5,
+                "frame 1200/3000, ETA 8m".to_string(),
+                None,
+            )
+            .expect("valid sample report"),
+            1_700_000_000_000,
+        )
+        .expect("valid sample progress")
     }
 
     /// Every `ServerEvent` variant, one instance each -- same exhaustive
@@ -378,7 +443,11 @@ mod tests {
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
-                status: PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+                status: PaneStatus::AgentWithGoal(
+                    AgentClass::Codex,
+                    AgentActivity::Working,
+                    ilium_core::GoalState::Active,
+                ),
             },
             ServerEvent::Error {
                 message: "pane 2 failed to spawn: No such file or directory".to_string(),
@@ -453,16 +522,51 @@ mod tests {
             },
             ServerEvent::PaneProgressChanged {
                 pane_id: NodeId(2),
-                progress: Some(ilium_core::PaneProgress {
-                    percent: 42.5,
-                    message: "frame 1200/3000, ETA 8m".to_string(),
-                }),
+                progress: Some(sample_progress()),
             },
             ServerEvent::PaneProgressChanged {
                 pane_id: NodeId(2),
                 progress: None,
             },
             ServerEvent::ProgressMonitorEnabledChanged { enabled: false },
+            ServerEvent::ProgressMonitorCheckCompleted {
+                request_id: 40,
+                pane_id: NodeId(2),
+                result: Ok(ProgressMonitorPreflight {
+                    report: sample_progress().report,
+                    checked_at_unix_millis: 1_700_000_000_000,
+                }),
+            },
+            ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 41,
+                pane_id: NodeId(2),
+                result: Ok(ProgressMonitorAccepted {
+                    monitor_id: 7,
+                    progress: sample_progress(),
+                    goal_policy: ProgressGoalPolicy::PauseAndResume,
+                }),
+            },
+            ServerEvent::ProgressMonitorStatusReported {
+                request_id: 42,
+                pane_id: NodeId(2),
+                result: Ok(ProgressMonitorStatus {
+                    pane_id: NodeId(2),
+                    progress: Some(sample_progress()),
+                    goal_policy: Some(ProgressGoalPolicy::KeepRunning),
+                    goal_resume_armed: false,
+                }),
+            },
+            ServerEvent::ProgressMonitorGoalPolicyChanged {
+                request_id: 44,
+                pane_id: NodeId(2),
+                monitor_id: 7,
+                result: Ok(ProgressGoalPolicy::PauseAndResume),
+            },
+            ServerEvent::ProgressMonitorCleared {
+                request_id: 43,
+                pane_id: NodeId(2),
+                result: Ok(Some(7)),
+            },
         ]
     }
 

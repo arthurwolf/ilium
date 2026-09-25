@@ -15,6 +15,7 @@
 //! `crate::paths` for how `main` resolves the real paths).
 
 mod agent_debug;
+mod agent_delivery;
 pub mod config;
 mod detection;
 pub mod error;
@@ -29,12 +30,14 @@ mod persistence;
 mod progress_monitor;
 mod prompt_queue;
 mod scheduled_input;
+mod session_backups;
 mod session_id;
 mod shell_title;
 mod snapshot_state;
 mod sounds;
 mod state;
 mod task_guard;
+mod text_triggers;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,6 +93,8 @@ pub struct ServerOptions {
     /// detection-loop tick's `identify_agent_with_extra` call.
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
+    /// Initial automatic session-backup setting from the shared config file.
+    pub session_backups_enabled: bool,
     /// Initial recorder policy loaded from `[ui]`. Live clients can update it
     /// without restarting the detached server.
     pub agent_debug_menu_enabled: bool,
@@ -162,6 +167,11 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         agent_debug_menu_enabled: options.agent_debug_menu_enabled,
         progress_monitor_enabled: options.progress_monitor_enabled,
     }));
+    state.set_session_backups_enabled(options.session_backups_enabled);
+
+    // Capture before loading can normalize an older snapshot in place, and
+    // before StartFresh's first write can replace the existing session.
+    let initial_backup_bucket = session_backups::capture_on_start(&state).await;
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
         match persistence::load_snapshot_or_migrate(
@@ -191,6 +201,10 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
     let snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
+    let session_backup_task = AbortOnDropHandle::new(session_backups::spawn(
+        Arc::clone(&state),
+        initial_backup_bucket,
+    ));
     let sound_config_watcher_task = options
         .sound_config_path
         .clone()
@@ -209,6 +223,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }
+    session_backup_task.abort();
     // Gives already-broadcast events (notably `KillSession`'s final
     // `TreeSnapshot`) a chance to actually reach attached clients before
     // their connection tasks are cancelled -- see this constant's doc
@@ -339,20 +354,19 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
 /// rule.
 pub(crate) async fn restore_snapshot(
     state: &Arc<ServerState>,
-    snapshot: persistence::SessionSnapshot,
+    mut snapshot: persistence::SessionSnapshot,
 ) {
     let pane_count = snapshot.panes.len();
+    let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
     {
         let mut tree = state.tree.write().await;
         *tree = snapshot.tree;
-        // A restored progress value can never update again: the monitor loop
-        // that was reporting it lived only in the previous process's memory
-        // and is not respawned by recovery (unlike a terminal pane itself,
-        // there is no persisted command/interval to resume it from). Leaving
-        // a stale percent/message on screen forever would be more
-        // misleading than showing nothing, so every pane's progress is
-        // cleared as part of applying this snapshot.
+        // Presentation state contains the previous process's monitor IDs.
+        // Clear it before respawning panes; each valid persisted registration
+        // below receives a fresh process-local generation and republishes its
+        // latest state. A missing, invalid, orphaned, or disabled monitor can
+        // therefore never leave an unfenced stale percentage on screen.
         let pane_ids: Vec<ilium_core::NodeId> = tree.all_ids().collect();
         for pane_id in pane_ids {
             let _ = tree.set_pane_progress(pane_id, None);
@@ -451,6 +465,40 @@ pub(crate) async fn restore_snapshot(
         // still-failing pane(s) in the persisted snapshot forever,
         // repeating this same failed respawn on every future restart.
         state.request_snapshot_save();
+    }
+
+    let persisted_monitor_count = persisted_progress_monitors.len();
+    let mut restored_monitor_count = 0_usize;
+    for mut persisted_monitor in persisted_progress_monitors {
+        if failed_pane_ids.contains(&persisted_monitor.pane_id) {
+            continue;
+        }
+        // A snapshot proves only that a pause/resume workflow once existed;
+        // it cannot prove that the same process, transcript, goal epoch, and
+        // still-paused state survived the server boundary. Preserve the task
+        // and delivery evidence, but fail closed on automatic goal resumption.
+        persisted_monitor.disarm_ambiguous_goal_resume();
+        let pane_id = persisted_monitor.pane_id;
+        match ipc::handlers::restore_persisted_progress_monitor(state, persisted_monitor).await {
+            Ok(()) => restored_monitor_count += 1,
+            Err(error) => {
+                tracing::warn!(
+                    "progress monitor for pane {pane_id:?} was not restored conservatively: \
+                     {error}"
+                );
+                // The in-memory state intentionally omitted this stale or
+                // invalid record; make the next snapshot remove it on disk as
+                // well instead of retrying the same unsafe restore forever.
+                state.request_snapshot_save();
+            }
+        }
+    }
+    if persisted_monitor_count > 0 {
+        tracing::info!(
+            "restored {restored_monitor_count} of {persisted_monitor_count} persisted progress \
+             monitor(s) for session {:?}",
+            state.session_name
+        );
     }
 
     // The replaced tree may carry scheduled pane inputs restored from disk.
@@ -588,7 +636,11 @@ mod restore_tests {
     async fn startup_respawns_panes_from_a_crash_recovery_snapshot() {
         let dir = tempfile::tempdir().expect("create tempdir");
         let socket_path = dir.path().join("restore-test.sock");
-        let snapshot_path = dir.path().join("restore-test.snapshot.json");
+        let snapshot_path = dir
+            .path()
+            .join(".ilium")
+            .join("sessions")
+            .join("restore-test.json");
 
         // The tree a previous, now-dead server process would have
         // persisted: one group holding a terminal pane and an editor pane.
@@ -644,8 +696,12 @@ mod restore_tests {
                 pane_id: terminal_pane_id,
                 log: persisted_debug_log,
             }],
+            progress_monitors: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
+        tokio::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
+            .await
+            .expect("create snapshot directory");
         tokio::fs::write(&snapshot_path, &json)
             .await
             .expect("write snapshot fixture");
@@ -653,7 +709,7 @@ mod restore_tests {
         let options = ServerOptions {
             session_name: "restore-test".to_string(),
             socket_path: socket_path.clone(),
-            snapshot_path,
+            snapshot_path: snapshot_path.clone(),
             ready_log_metadata: None,
             session_cwd: dir.path().to_path_buf(),
             home_dir: dir.path().to_path_buf(),
@@ -667,6 +723,7 @@ mod restore_tests {
             agent_debug_menu_enabled: true,
             http_api: HttpApiConfig { port: 0 },
             progress_monitor_enabled: true,
+            session_backups_enabled: true,
         };
         let server_task = tokio::spawn(async move {
             let result = run(options).await;
@@ -684,6 +741,29 @@ mod restore_tests {
         )
         .await;
         assert!(bound, "server did not bind its socket in time");
+
+        let backup_directory = snapshot_path
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("project .ilium directory")
+            .join("backups")
+            .join("restore-test");
+        let backups = std::fs::read_dir(&backup_directory)
+            .expect("read startup backup directory")
+            .map(|entry| entry.expect("backup entry").path())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            backups.len(),
+            1,
+            "startup must archive the pre-restore snapshot"
+        );
+        assert_eq!(
+            tokio::fs::read(&backups[0])
+                .await
+                .expect("read startup backup bytes"),
+            json,
+            "startup backup must preserve the exact pre-normalization JSON"
+        );
 
         let mut client = SessionEndpoint::from_path(&socket_path)
             .connect()
@@ -849,6 +929,7 @@ mod restore_tests {
             tree: Tree::new(),
             panes: Vec::new(),
             agent_debug_logs: Vec::new(),
+            progress_monitors: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 
@@ -948,6 +1029,7 @@ mod restore_tests {
             tree: snapshot_tree,
             panes: Vec::new(),
             agent_debug_logs: Vec::new(),
+            progress_monitors: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 
@@ -1067,6 +1149,7 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             http_api: HttpApiConfig { port: 0 },
             progress_monitor_enabled: true,
+            session_backups_enabled: false,
         };
         let server_task = tokio::spawn(async move {
             let result = run(options).await;
@@ -1137,6 +1220,7 @@ mod socket_tests {
             agent_debug_menu_enabled: false,
             http_api: HttpApiConfig { port: 0 },
             progress_monitor_enabled: true,
+            session_backups_enabled: false,
         }
     }
 

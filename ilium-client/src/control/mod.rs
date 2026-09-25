@@ -52,7 +52,7 @@ impl VoiceTargetContext {
                 matches!(
                     &node.kind,
                     NodeKind::Pane {
-                        status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                        status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
                         ..
                     }
                 )
@@ -557,7 +557,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 agent_pane_id,
-                PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::AgentWithGoal(
+                    AgentClass::Codex,
+                    AgentActivity::Working,
+                    ilium_core::GoalState::Active,
+                ),
             )
             .unwrap();
 
@@ -644,10 +648,10 @@ mod tests {
         assert_eq!(output.result["status"], "queued");
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::KeyInput {
+            vec![ilium_ipc::ClientRequest::SubmitTerminalText {
                 pane_id,
-                bytes: b"/clear\r".to_vec(),
-                submission: Some(ilium_ipc::PromptSubmissionSource::VoiceControl),
+                text: "/clear".to_owned(),
+                source: ilium_ipc::PromptSubmissionSource::VoiceControl,
             }]
         );
     }

@@ -222,6 +222,27 @@ mod unix_only {
         );
     }
 
+    #[test]
+    fn screen_snapshot_preserves_dimmed_cell_evidence() {
+        let command = PtyCommand::new("sh", std::env::temp_dir(), 24, 80)
+            .arg("-c")
+            .arg("printf '\\033[2mplaceholder\\033[22m draft\\n'");
+        let session = PtySession::spawn(command).expect("spawning style fixture should succeed");
+
+        assert!(
+            wait_until(
+                || session.screen_text().contains("placeholder draft"),
+                Duration::from_secs(5),
+            ),
+            "expected styled fixture output, got: {:?}",
+            session.screen_text()
+        );
+        let snapshot = session.screen_snapshot();
+        assert!(snapshot.is_cell_dimmed(0, 0));
+        assert!(snapshot.is_cell_dimmed(0, 10));
+        assert!(!snapshot.is_cell_dimmed(0, 12));
+    }
+
     #[tokio::test]
     async fn screen_changed_watch_channel_notifies_on_new_output() {
         let command = PtyCommand::new("cat", std::env::temp_dir(), 24, 80);

@@ -12,7 +12,7 @@
 //! `TreeSnapshot` confirms it did. This is what keeps there being exactly
 //! one writable tree (the server's) -- see the crate's module docs.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -24,6 +24,7 @@ use ilium_ipc::{ClientRequest, PaneResizeCause, PromptSubmissionSource};
 use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
+use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
 use crate::agent_from_line::{
     CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
 };
@@ -31,8 +32,9 @@ use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::board::BoardPane;
 use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
-    ApiSettings, DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings,
-    LeftPanelSizingMode, SessionSettings, TerminalSettings, TreeOrder, UiSettings, VoiceSettings,
+    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, KanbanBoardSettings,
+    KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings, TreeOrder,
+    UiSettings, VoiceSettings,
 };
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
@@ -63,6 +65,7 @@ use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
 use crate::trigger_settings::{TriggerAction, TriggerOccurrence, TriggerSettings};
 use crate::voice_settings::{VoicePromptEditorState, VoiceRow, VoiceSettingField};
 use ilium_inference::InferenceSettings;
+use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
@@ -240,6 +243,12 @@ pub enum Mode {
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
     /// Edits the loopback HTTP API port from Settings.
     ApiSettingPrompt(TextPromptState),
+    /// Edits one feature's global Claude-instruction file. Empty input resets
+    /// that feature to `~/.claude/CLAUDE.md`.
+    AgentSetupPathPrompt(AgentFeature, TextPromptState),
+    /// One-time global or project-local setup offer shown after startup or
+    /// when a project first appears in the attached session.
+    AgentSetupPrompt(Box<crate::setup_prompt::SetupPromptState>),
     /// Multiline additive prompt editor for the voice controller.
     VoicePromptEditor(Box<VoicePromptEditorState>),
     /// In-progress "Save As" filename prompt for the editor pane `NodeId`.
@@ -277,6 +286,7 @@ pub enum Mode {
     SchedulePaneInput(Box<ScheduledInputDialogState>),
     /// Multiline prompt collected for the server-owned completion queue.
     QueuePrompt(Box<PromptQueueDialogState>),
+    TextTriggerDialog(Box<crate::text_trigger_dialog::TextTriggerDialogState>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -341,8 +351,12 @@ pub enum VoiceInteractionRequest {
 /// for the tab-list-left/content-right layout this drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
+    /// Managed Claude-instruction setup for Ilium agent features.
+    Setup,
     Inference,
+    Titles,
     Triggers,
+    TextTriggers,
     Icons,
     Appearance,
     Terminal,
@@ -355,6 +369,58 @@ pub enum SettingsTab {
     Debug,
     Api,
     About,
+}
+
+/// One keyboard/mouse-selectable row in the Setup settings tab. Target rows
+/// install or remove a feature; global-file rows open the path editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSetupRow {
+    GlobalTarget {
+        feature: AgentFeature,
+        instruction_file: PathBuf,
+    },
+    GlobalFile {
+        feature: AgentFeature,
+        instruction_file: PathBuf,
+        is_custom: bool,
+    },
+    ProjectTarget {
+        feature: AgentFeature,
+        project_root: PathBuf,
+        instruction_file: PathBuf,
+    },
+}
+
+impl AgentSetupRow {
+    pub const fn feature(&self) -> AgentFeature {
+        match self {
+            Self::GlobalTarget { feature, .. }
+            | Self::GlobalFile { feature, .. }
+            | Self::ProjectTarget { feature, .. } => *feature,
+        }
+    }
+
+    pub fn instruction_file(&self) -> &Path {
+        match self {
+            Self::GlobalTarget {
+                instruction_file, ..
+            }
+            | Self::GlobalFile {
+                instruction_file, ..
+            }
+            | Self::ProjectTarget {
+                instruction_file, ..
+            } => instruction_file,
+        }
+    }
+}
+
+/// Cached filesystem observation used by Settings rendering. Keeping errors
+/// explicit avoids presenting an unreadable target as safely disabled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSetupTargetStatus {
+    Available(FeatureSetupStatus),
+    Unavailable(String),
 }
 
 /// Editable fields are kept distinct from visual rows so a provider cannot
@@ -459,7 +525,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 14] = [
+    pub const ALL: [SettingsTab; 17] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -470,16 +536,22 @@ impl SettingsTab {
         Self::Sound,
         Self::VoiceControl,
         Self::Inference,
+        Self::Titles,
         Self::Triggers,
+        Self::TextTriggers,
         Self::Debug,
         Self::Api,
         Self::About,
+        Self::Setup,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Setup => "Setup",
             Self::Inference => "Inference",
+            Self::Titles => "Titles",
             Self::Triggers => "Triggers",
+            Self::TextTriggers => "Text Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
             Self::Terminal => "Terminal",
@@ -618,9 +690,10 @@ impl EditorRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionRow {
     RecoveryPolicy,
+    BackupsEnabled,
 }
 impl SessionRow {
-    pub const ALL: [Self; 1] = [Self::RecoveryPolicy];
+    pub const ALL: [Self; 2] = [Self::RecoveryPolicy, Self::BackupsEnabled];
 }
 
 /// Rows in the Debug tab. The registry keeps keyboard and mouse interaction
@@ -931,7 +1004,7 @@ impl ContextMenuAction {
             Self::FocusPane | Self::NewTerminal => IconTarget::Terminal,
             Self::CreateBoardFromMarkdown => IconTarget::Board,
             Self::SchedulePaneInput => IconTarget::WaitingBackground,
-            Self::QueuePrompt => IconTarget::Goal,
+            Self::QueuePrompt => IconTarget::GoalActive,
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
             Self::AskForUpdate => IconTarget::AskForUpdate,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
@@ -1463,6 +1536,23 @@ pub struct App {
     /// Live event-to-actions routing table. Detection is server/render-cache
     /// owned; this client value decides which LLM work enters the outboxes.
     pub trigger_settings: TriggerSettings,
+    /// Configured regex-driven responses, executed by the detached server.
+    pub text_trigger_settings: TextTriggerSettings,
+    /// Managed instruction targets and durable setup-prompt suppression.
+    pub agent_setup_settings: AgentSetupSettings,
+    /// Filesystem status refreshed at explicit lifecycle boundaries, never
+    /// by the pure Settings renderer.
+    pub agent_setup_statuses: HashMap<(AgentFeature, PathBuf), AgentSetupTargetStatus>,
+    pending_agent_setup_prompts: VecDeque<crate::setup_prompt::SetupPromptScope>,
+    has_seen_global_setup_prompt: bool,
+    seen_project_setup_prompts: HashSet<PathBuf>,
+    /// Optional setup offers must wait until the authoritative attach stream
+    /// (including any recovery offer) is complete.
+    pub(crate) is_initial_state_sync_complete: bool,
+    /// False when startup could not load the durable setup policy. Optional
+    /// offers stay suppressed rather than treating fallback defaults as a
+    /// confidently fresh user decision.
+    pub(crate) is_agent_setup_policy_available: bool,
     pub terminal_settings: TerminalSettings,
     pub editor_settings: EditorSettings,
     pub session_settings: SessionSettings,
@@ -1505,6 +1595,11 @@ pub struct App {
     /// case settings changes still apply live but can't be persisted (see
     /// `apply_and_persist_ui_settings`).
     pub config_dir: Option<PathBuf>,
+    /// Home directory captured by the real client bootstrap for automatic
+    /// provider-global instruction targets. `App::new` stays host-I/O-free;
+    /// tests opt in with an isolated path instead of touching the user's
+    /// actual `~/.codex` or `~/.claude` files.
+    pub agent_setup_home_dir: Option<PathBuf>,
     pointer_position: Option<Position>,
     is_terminal_focused: bool,
     tree_drag_source: Option<NodeId>,
@@ -1811,6 +1906,14 @@ impl App {
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             inference_settings: InferenceSettings::default(),
             trigger_settings: TriggerSettings::default(),
+            text_trigger_settings: TextTriggerSettings::default(),
+            agent_setup_settings: AgentSetupSettings::default(),
+            agent_setup_statuses: HashMap::new(),
+            pending_agent_setup_prompts: VecDeque::new(),
+            has_seen_global_setup_prompt: false,
+            seen_project_setup_prompts: HashSet::new(),
+            is_initial_state_sync_complete: false,
+            is_agent_setup_policy_available: true,
             terminal_settings: TerminalSettings::default(),
             editor_settings: EditorSettings::default(),
             session_settings: SessionSettings::default(),
@@ -1838,6 +1941,7 @@ impl App {
             inference_test_state: InferenceTestState::Idle,
             inference_test_result: None,
             config_dir: None,
+            agent_setup_home_dir: None,
             pointer_position: None,
             is_terminal_focused: true,
             tree_drag_source: None,
@@ -2062,7 +2166,7 @@ impl App {
             return None;
         };
         let class = match status {
-            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => class.clone(),
+            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => class.clone(),
             PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
         };
         let project_path = self
@@ -2090,23 +2194,22 @@ impl App {
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
-        if let ClientRequest::KeyInput { pane_id, bytes, .. } = &request {
-            if !bytes.is_empty() {
+        match &request {
+            ClientRequest::KeyInput { pane_id, bytes, .. } if !bytes.is_empty() => {
                 self.record_plain_terminal_activity(*pane_id, Instant::now());
             }
+            ClientRequest::SubmitTerminalText { pane_id, .. } => {
+                self.record_plain_terminal_activity(*pane_id, Instant::now());
+            }
+            _ => {}
         }
 
         self.outbox.push(request);
     }
 
     /// Writes raw bytes into a terminal pane's PTY, scrolling that pane's
-    /// local view to the live tail first. Shared by every non-keyboard
-    /// source of terminal input (voice control, the agent toolbar) so they
-    /// all go through the exact same `ClientRequest::KeyInput` shape a real
-    /// keypress does -- in particular, the server's own session-identity
-    /// tracking (`agent_session_identity_transition_rule`) observes these
-    /// bytes the same way it observes typed input, so a toolbar `/clear`
-    /// invalidates session identity exactly like a hand-typed one would.
+    /// local view to the live tail first. Use for keystrokes and text that
+    /// must remain unsubmitted; text plus Enter uses the semantic request.
     pub(crate) fn send_terminal_bytes(
         &mut self,
         pane_id: NodeId,
@@ -2120,6 +2223,24 @@ impl App {
             pane_id,
             bytes,
             submission,
+        });
+    }
+
+    /// Queues one semantic text submission. The detached server inserts the
+    /// text and later sends Enter under a pane-local input reservation.
+    pub(crate) fn send_terminal_submission(
+        &mut self,
+        pane_id: NodeId,
+        text: String,
+        source: PromptSubmissionSource,
+    ) {
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+            view.scroll_to_bottom();
+        }
+        self.queue_request(ClientRequest::SubmitTerminalText {
+            pane_id,
+            text,
+            source,
         });
     }
 
@@ -2511,7 +2632,9 @@ impl App {
             return None;
         };
         match status {
-            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => class.provider(),
+            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
+                class.provider()
+            }
             _ => None,
         }
     }
@@ -2524,6 +2647,17 @@ impl App {
 
     pub fn pane_viewport_at(&self, position: Position) -> Option<PaneViewport> {
         split_layout::viewport_at(&self.pane_viewports(), position)
+    }
+
+    /// Returns the exact frozen-screen rectangle used by Smart Copy rendering
+    /// and pointer hit-testing. A completed agent's acknowledgement row is
+    /// presentation chrome, not part of the captured terminal screen.
+    pub(crate) fn smart_copy_terminal_area(&self, pane_id: NodeId) -> Option<Rect> {
+        let viewport = self.pane_viewport(pane_id)?;
+        Some(
+            self.completed_agent_close_action(viewport)
+                .map_or(viewport.content_area, |action| action.terminal_area),
+        )
     }
 
     /// Returns every currently actionable transfer across a visible split
@@ -2578,7 +2712,7 @@ impl App {
             Some(NodeKind::Pane {
                 content: PaneContentKind::Terminal,
                 status: PaneStatus::Agent(_, AgentActivity::Done)
-                    | PaneStatus::AgentWithGoal(_, AgentActivity::Done),
+                    | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _),
                 ..
             })
         )
@@ -2640,13 +2774,18 @@ impl App {
             self.status_message = Some("That entry is not a project".to_string());
             return;
         };
-        match crate::chatroom::initialize(&project_root) {
+        let instruction_file = project_root.join("CLAUDE.md");
+        match crate::chatroom::initialize(&project_root).and_then(|()| {
+            crate::agent_feature_setup::install(&instruction_file, AgentFeature::Chatroom)
+                .map_err(anyhow::Error::from)
+        }) {
             Ok(()) => {
+                self.refresh_agent_setup_statuses();
                 self.chatroom_projects.insert(project_id);
                 self.bump_tree_version();
                 self.show_chatroom(project_id);
                 self.status_message =
-                    Some("Chatroom added; Claude/Codex hooks and guidance are ready".to_string());
+                    Some("Chatroom added; hooks and CLAUDE.md guidance are ready".to_string());
             }
             Err(error) => {
                 self.status_message = Some(format!("Could not add chatroom: {error}"));
@@ -3047,7 +3186,7 @@ impl App {
                 };
                 match status {
                     PaneStatus::Agent(class, activity)
-                    | PaneStatus::AgentWithGoal(class, activity) => {
+                    | PaneStatus::AgentWithGoal(class, activity, _) => {
                         Some(format!("{} — {} ({activity:?})", class.label(), node.name))
                     }
                     _ => None,
@@ -3473,12 +3612,19 @@ impl App {
             }
         }
     }
-    fn persist_session_settings(&mut self) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_session_settings(&config_dir, &self.session_settings)
-            {
+    fn persist_session_settings(&mut self, previous: SessionSettings) -> bool {
+        let Some(config_dir) = self.config_dir.clone() else {
+            return true;
+        };
+        match crate::config::save_session_settings(&config_dir, &previous, &self.session_settings) {
+            Ok(saved) => {
+                self.session_settings = saved;
+                true
+            }
+            Err(error) => {
+                self.session_settings = previous;
                 self.status_message = Some(format!("Could not save session settings: {error}"));
+                false
             }
         }
     }
@@ -3690,6 +3836,701 @@ impl App {
         self.trigger_settings = triggers.normalized();
     }
 
+    /// Installs a server-acknowledged Text Trigger list without persisting or
+    /// echoing a second update request back to the detached server.
+    pub fn apply_text_trigger_settings(&mut self, settings: TextTriggerSettings) {
+        self.text_trigger_settings = settings;
+    }
+
+    /// Installs the durable setup policy loaded before the terminal starts.
+    /// Prompting is queued separately so startup recovery dialogs retain
+    /// precedence over these optional offers.
+    pub fn apply_agent_setup_settings(&mut self, settings: AgentSetupSettings) {
+        self.agent_setup_settings = settings;
+        self.refresh_agent_setup_statuses();
+        if self.is_initial_state_sync_complete {
+            self.reconcile_agent_setup_prompts();
+        }
+    }
+
+    /// Returns the effective global instruction file for one feature. A
+    /// user-selected path overrides the standard Claude file independently
+    /// for Chatroom and Progress.
+    pub fn agent_setup_global_file(&self, feature: AgentFeature) -> Option<PathBuf> {
+        let custom = match feature {
+            AgentFeature::Chatroom => &self.agent_setup_settings.chatroom_global_file,
+            AgentFeature::Progress => &self.agent_setup_settings.progress_global_file,
+        };
+        custom.clone().or_else(|| {
+            self.agent_setup_home_dir
+                .as_ref()
+                .map(|home_dir| home_dir.join(".claude/CLAUDE.md"))
+        })
+    }
+
+    /// All global instruction files that currently shipped agent CLIs read.
+    /// A configured Claude target remains authoritative for that provider;
+    /// Codex always receives the same managed contract automatically.
+    fn automatic_global_agent_setup_files(&self, feature: AgentFeature) -> Vec<PathBuf> {
+        let mut files = self
+            .agent_setup_global_file(feature)
+            .into_iter()
+            .collect::<Vec<_>>();
+        if let Some(home_dir) = self.agent_setup_home_dir.as_ref() {
+            files.push(home_dir.join(".codex/AGENTS.md"));
+        }
+        files.sort();
+        files.dedup();
+        files
+    }
+
+    /// Installs or refreshes Ilium's managed Chatroom and Progress contracts
+    /// without requiring a settings visit or an opt-in dialog. User-authored
+    /// text is preserved by `agent_feature_setup`; only marker-owned blocks
+    /// are inserted or upgraded.
+    fn ensure_automatic_agent_setup(&self) -> Vec<String> {
+        let mut failures = Vec::new();
+        for feature in AgentFeature::ALL {
+            for instruction_file in self.automatic_global_agent_setup_files(feature) {
+                if matches!(
+                    crate::agent_feature_setup::status(&instruction_file, feature),
+                    Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)
+                ) {
+                    continue;
+                }
+                if let Err(error) = self.install_agent_feature(feature, &instruction_file, None) {
+                    failures.push(format!(
+                        "{} in {}: {error}",
+                        feature.label(),
+                        instruction_file.display()
+                    ));
+                }
+            }
+            for project_root in self.agent_setup_project_roots() {
+                for filename in ["CLAUDE.md", "AGENTS.md"] {
+                    let instruction_file = project_root.join(filename);
+                    if matches!(
+                        crate::agent_feature_setup::status(&instruction_file, feature),
+                        Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)
+                    ) {
+                        continue;
+                    }
+                    if let Err(error) = self.install_agent_feature(
+                        feature,
+                        &instruction_file,
+                        Some(project_root.as_path()),
+                    ) {
+                        failures.push(format!(
+                            "{} in {}: {error}",
+                            feature.label(),
+                            instruction_file.display()
+                        ));
+                    }
+                }
+            }
+        }
+        failures
+    }
+
+    /// Stable, de-duplicated project roots currently represented by this
+    /// attached session, including the canonical launch project before the
+    /// first server snapshot arrives.
+    pub fn agent_setup_project_roots(&self) -> Vec<PathBuf> {
+        let mut roots = if self.is_initial_state_sync_complete {
+            Vec::new()
+        } else {
+            vec![normalize_path_lexically(&self.session_cwd)]
+        };
+        for project_id in self.tree.project_ids() {
+            if let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) {
+                roots.push(normalize_path_lexically(project_root));
+            }
+        }
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
+    fn is_agent_setup_project_current(&self, project_root: &Path) -> bool {
+        let project_root = normalize_path_lexically(project_root);
+        project_root.is_dir() && self.agent_setup_project_roots().contains(&project_root)
+    }
+
+    /// Builds the complete selectable Setup document without filesystem I/O.
+    /// Status is read from the cache refreshed at lifecycle boundaries.
+    pub fn agent_setup_rows(&self) -> Vec<AgentSetupRow> {
+        let projects = self.agent_setup_project_roots();
+        let mut rows = Vec::new();
+        for feature in AgentFeature::ALL {
+            if let Some(instruction_file) = self.agent_setup_global_file(feature) {
+                let is_custom = match feature {
+                    AgentFeature::Chatroom => {
+                        self.agent_setup_settings.chatroom_global_file.is_some()
+                    }
+                    AgentFeature::Progress => {
+                        self.agent_setup_settings.progress_global_file.is_some()
+                    }
+                };
+                rows.push(AgentSetupRow::GlobalTarget {
+                    feature,
+                    instruction_file: instruction_file.clone(),
+                });
+                rows.push(AgentSetupRow::GlobalFile {
+                    feature,
+                    instruction_file,
+                    is_custom,
+                });
+            }
+            rows.extend(projects.iter().cloned().map(|project_root| {
+                AgentSetupRow::ProjectTarget {
+                    feature,
+                    instruction_file: project_root.join("CLAUDE.md"),
+                    project_root,
+                }
+            }));
+        }
+        rows
+    }
+
+    pub fn agent_setup_status(
+        &self,
+        feature: AgentFeature,
+        instruction_file: &Path,
+    ) -> AgentSetupTargetStatus {
+        self.agent_setup_statuses
+            .get(&(feature, instruction_file.to_path_buf()))
+            .cloned()
+            .unwrap_or_else(|| AgentSetupTargetStatus::Unavailable("status not refreshed".into()))
+    }
+
+    /// Refreshes every target once. The Settings renderer only consumes this
+    /// cache, avoiding repeated disk reads on animation frames.
+    pub fn refresh_agent_setup_statuses(&mut self) {
+        let targets: HashSet<(AgentFeature, PathBuf)> = self
+            .agent_setup_rows()
+            .into_iter()
+            .filter(|row| !matches!(row, AgentSetupRow::GlobalFile { .. }))
+            .map(|row| (row.feature(), row.instruction_file().to_path_buf()))
+            .collect();
+        self.agent_setup_statuses = targets
+            .into_iter()
+            .map(|(feature, path)| {
+                let status = crate::agent_feature_setup::status(&path, feature)
+                    .map(AgentSetupTargetStatus::Available)
+                    .unwrap_or_else(|error| AgentSetupTargetStatus::Unavailable(error.to_string()));
+                ((feature, path), status)
+            })
+            .collect();
+    }
+
+    /// Opens the shared single-line editor for one feature's global file.
+    pub fn settings_open_agent_setup_path(&mut self, feature: AgentFeature) {
+        let initial = self
+            .agent_setup_global_file(feature)
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
+        self.push_modal(Mode::AgentSetupPathPrompt(
+            feature,
+            TextPromptState::new(initial),
+        ));
+    }
+
+    /// Resolves and persists a user-entered global target. An empty value
+    /// resets the feature to the standard `~/.claude/CLAUDE.md` path.
+    pub fn settings_set_agent_setup_path(&mut self, feature: AgentFeature, value: &str) -> bool {
+        let trimmed = value.trim();
+        let path = if trimmed.is_empty() {
+            None
+        } else if let Some(relative) = trimmed.strip_prefix("~/") {
+            directories::BaseDirs::new()
+                .map(|dirs| normalize_path_lexically(&dirs.home_dir().join(relative)))
+        } else {
+            let candidate = PathBuf::from(trimmed);
+            let resolved = if candidate.is_absolute() {
+                candidate
+            } else {
+                self.session_cwd.join(candidate)
+            };
+            Some(normalize_path_lexically(&resolved))
+        };
+        if !trimmed.is_empty() && path.is_none() {
+            self.status_message = Some("Could not resolve the home directory".to_string());
+            return false;
+        }
+        let mut candidate = self.agent_setup_settings.clone();
+        match feature {
+            AgentFeature::Chatroom => candidate.chatroom_global_file = path,
+            AgentFeature::Progress => candidate.progress_global_file = path,
+        }
+        self.agent_setup_settings = match self.save_agent_setup_settings(&candidate) {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.status_message = Some(error);
+                return false;
+            }
+        };
+        self.refresh_agent_setup_statuses();
+        self.reconcile_agent_setup_prompts();
+        self.status_message = Some(
+            "Global target changed; any managed block in the previous file was left untouched"
+                .to_string(),
+        );
+        true
+    }
+
+    pub fn settings_reset_agent_setup_path(&mut self, feature: AgentFeature) {
+        let _ = self.settings_set_agent_setup_path(feature, "");
+    }
+
+    /// Refreshes one automatically managed target on demand. Setup is not a
+    /// feature toggle: removing a mandatory block here would create a window
+    /// where a newly launched agent is uninformed. User-authored lookalikes
+    /// are never deleted.
+    pub fn settings_toggle_agent_setup_row(&mut self, row: &AgentSetupRow) {
+        let (feature, instruction_file, project_root) = match row {
+            AgentSetupRow::GlobalTarget {
+                feature,
+                instruction_file,
+            } => (*feature, instruction_file.as_path(), None),
+            AgentSetupRow::ProjectTarget {
+                feature,
+                instruction_file,
+                project_root,
+            } => (
+                *feature,
+                instruction_file.as_path(),
+                Some(project_root.as_path()),
+            ),
+            AgentSetupRow::GlobalFile { .. } => return,
+        };
+        if let Some(project_root) = project_root {
+            if !self.is_agent_setup_project_current(project_root) {
+                self.status_message = Some(format!(
+                    "Project is no longer open: {}",
+                    project_root.display()
+                ));
+                self.reconcile_agent_setup_prompts();
+                return;
+            }
+        }
+        // Re-read at action time instead of trusting the render cache: the
+        // user or another attached Ilium client may have edited this target
+        // since Settings was opened. The mutation itself takes a cross-process
+        // lock and reads again, so this fresh status only chooses enable versus
+        // disable; it is not the concurrency boundary.
+        let status = crate::agent_feature_setup::status(instruction_file, feature)
+            .map(AgentSetupTargetStatus::Available)
+            .unwrap_or_else(|error| AgentSetupTargetStatus::Unavailable(error.to_string()));
+        let result = match status {
+            AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed) => {
+                self.install_agent_feature(feature, instruction_file, project_root)
+            }
+            AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedFuture) => Ok(()),
+            AgentSetupTargetStatus::Available(
+                FeatureSetupStatus::NotInstalled
+                | FeatureSetupStatus::DetectedUnmanaged
+                | FeatureSetupStatus::ManagedStale,
+            ) => self.install_agent_feature(feature, instruction_file, project_root),
+            AgentSetupTargetStatus::Unavailable(error) => {
+                self.status_message = Some(format!(
+                    "Could not inspect {}: {error}",
+                    instruction_file.display()
+                ));
+                return;
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.refresh_agent_setup_statuses();
+                let status = self.agent_setup_status(feature, instruction_file);
+                self.status_message = Some(format!(
+                    "{}: {} ({})",
+                    feature.label(),
+                    match status {
+                        AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed) => {
+                            "managed automatically"
+                        }
+                        AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedStale) => {
+                            "updated"
+                        }
+                        AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedFuture) => {
+                            "left newer managed instructions unchanged"
+                        }
+                        AgentSetupTargetStatus::Available(
+                            FeatureSetupStatus::DetectedUnmanaged,
+                        ) => "managed block removed; user instruction remains",
+                        AgentSetupTargetStatus::Available(FeatureSetupStatus::NotInstalled) => {
+                            "disabled"
+                        }
+                        AgentSetupTargetStatus::Unavailable(_) => "status unavailable",
+                    },
+                    instruction_file.display()
+                ));
+            }
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "Could not update {} in {}: {error}",
+                    feature.label(),
+                    instruction_file.display()
+                ));
+            }
+        }
+    }
+
+    fn install_agent_feature(
+        &self,
+        feature: AgentFeature,
+        instruction_file: &Path,
+        project_root: Option<&Path>,
+    ) -> std::io::Result<()> {
+        if feature == AgentFeature::Chatroom {
+            if let Some(project_root) = project_root {
+                crate::chatroom::initialize(project_root).map_err(std::io::Error::other)?;
+            }
+        }
+        crate::agent_feature_setup::install(instruction_file, feature)
+    }
+
+    fn save_agent_setup_settings(
+        &self,
+        settings: &AgentSetupSettings,
+    ) -> Result<AgentSetupSettings, String> {
+        let Some(config_dir) = self.config_dir.as_ref() else {
+            return Err(
+                "Could not save agent setup settings: configuration directory is unavailable"
+                    .to_string(),
+            );
+        };
+        crate::config::update_agent_setup_settings(config_dir, &self.agent_setup_settings, settings)
+            .map_err(|error| format!("Could not save agent setup settings: {error}"))
+    }
+
+    fn setup_feature_needs_install(&mut self, feature: AgentFeature, path: &Path) -> Option<bool> {
+        let status = match crate::agent_feature_setup::status(path, feature) {
+            Ok(status) => AgentSetupTargetStatus::Available(status),
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "Could not inspect {} in {}: {error}",
+                    feature.label(),
+                    path.display()
+                ));
+                AgentSetupTargetStatus::Unavailable(error.to_string())
+            }
+        };
+        self.agent_setup_statuses
+            .insert((feature, path.to_path_buf()), status.clone());
+        match status {
+            AgentSetupTargetStatus::Unavailable(_) => None,
+            AgentSetupTargetStatus::Available(status) => Some(matches!(
+                status,
+                FeatureSetupStatus::NotInstalled | FeatureSetupStatus::ManagedStale
+            )),
+        }
+    }
+
+    fn queue_agent_setup_prompt_global(&mut self) {
+        if self.agent_setup_settings.never_ask_global || self.has_seen_global_setup_prompt {
+            return;
+        }
+        let (Some(chatroom_file), Some(progress_file)) = (
+            self.agent_setup_global_file(AgentFeature::Chatroom),
+            self.agent_setup_global_file(AgentFeature::Progress),
+        ) else {
+            return;
+        };
+        let Some(chatroom) =
+            self.setup_feature_needs_install(AgentFeature::Chatroom, &chatroom_file)
+        else {
+            return;
+        };
+        let Some(progress) =
+            self.setup_feature_needs_install(AgentFeature::Progress, &progress_file)
+        else {
+            return;
+        };
+        if !chatroom && !progress {
+            return;
+        }
+        self.has_seen_global_setup_prompt = true;
+        self.pending_agent_setup_prompts
+            .push_back(crate::setup_prompt::SetupPromptScope::Global {
+                chatroom_file,
+                progress_file,
+            });
+    }
+
+    fn queue_agent_setup_prompt_for_project(&mut self, project_root: PathBuf) {
+        let project_root = normalize_path_lexically(&project_root);
+        if self.seen_project_setup_prompts.contains(&project_root)
+            || self
+                .agent_setup_settings
+                .never_ask_projects
+                .iter()
+                .any(|path| normalize_path_lexically(path) == project_root)
+        {
+            return;
+        }
+        let instruction_file = project_root.join("CLAUDE.md");
+        let Some(chatroom) =
+            self.setup_feature_needs_install(AgentFeature::Chatroom, &instruction_file)
+        else {
+            return;
+        };
+        let Some(progress) =
+            self.setup_feature_needs_install(AgentFeature::Progress, &instruction_file)
+        else {
+            return;
+        };
+        if !chatroom && !progress {
+            return;
+        }
+        self.seen_project_setup_prompts.insert(project_root.clone());
+        self.pending_agent_setup_prompts
+            .push_back(crate::setup_prompt::SetupPromptScope::Project(project_root));
+    }
+
+    /// Called after authoritative project snapshots so newly opened projects
+    /// receive the same one-time offer as the launch project.
+    pub fn reconcile_agent_setup_prompts(&mut self) {
+        // Managed agent education is mandatory and provider-aware. Run this
+        // only after the attach snapshot establishes the authoritative set of
+        // project roots, then let the legacy prompt machinery observe that
+        // there is nothing left to opt into.
+        let automatic_failures =
+            if self.is_initial_state_sync_complete && self.is_agent_setup_policy_available {
+                self.ensure_automatic_agent_setup()
+            } else {
+                Vec::new()
+            };
+        self.refresh_agent_setup_statuses();
+        if !self.is_initial_state_sync_complete || !self.is_agent_setup_policy_available {
+            return;
+        }
+        if !automatic_failures.is_empty() {
+            self.status_message = Some(format!(
+                "Automatic agent setup could not update: {}",
+                automatic_failures.join("; ")
+            ));
+        }
+        let global_chatroom = self.agent_setup_global_file(AgentFeature::Chatroom);
+        let global_progress = self.agent_setup_global_file(AgentFeature::Progress);
+        let project_roots = self.agent_setup_project_roots();
+        let scope_is_current = |scope: &crate::setup_prompt::SetupPromptScope| match scope {
+            crate::setup_prompt::SetupPromptScope::Global {
+                chatroom_file,
+                progress_file,
+            } => {
+                global_chatroom.as_ref() == Some(chatroom_file)
+                    && global_progress.as_ref() == Some(progress_file)
+            }
+            crate::setup_prompt::SetupPromptScope::Project(project_root) => {
+                project_root.is_dir()
+                    && project_roots
+                        .iter()
+                        .any(|candidate| candidate == project_root)
+            }
+        };
+        self.pending_agent_setup_prompts
+            .retain(|scope| scope_is_current(scope));
+        let active_scope_is_stale = matches!(
+            &self.mode,
+            Mode::AgentSetupPrompt(state) if !scope_is_current(&state.scope)
+        );
+        if active_scope_is_stale {
+            self.mode = Mode::Normal;
+            self.status_message = Some("Setup target is no longer current".to_string());
+        }
+        self.queue_agent_setup_prompt_global();
+        for project_root in project_roots {
+            self.queue_agent_setup_prompt_for_project(project_root);
+        }
+    }
+
+    /// Opens the next queued offer only when no other interaction owns input.
+    pub fn maybe_show_agent_setup_prompt(&mut self) {
+        if !self.is_initial_state_sync_complete
+            || !self.is_agent_setup_policy_available
+            || !matches!(self.mode, Mode::Normal)
+        {
+            return;
+        }
+        while let Some(scope) = self.pending_agent_setup_prompts.pop_front() {
+            let (chatroom_file, progress_file) = match &scope {
+                crate::setup_prompt::SetupPromptScope::Global {
+                    chatroom_file,
+                    progress_file,
+                } => (chatroom_file.clone(), progress_file.clone()),
+                crate::setup_prompt::SetupPromptScope::Project(project_root) => {
+                    let file = project_root.join("CLAUDE.md");
+                    (file.clone(), file)
+                }
+            };
+            let Some(chatroom) =
+                self.setup_feature_needs_install(AgentFeature::Chatroom, &chatroom_file)
+            else {
+                continue;
+            };
+            let Some(progress) =
+                self.setup_feature_needs_install(AgentFeature::Progress, &progress_file)
+            else {
+                continue;
+            };
+            let state = crate::setup_prompt::SetupPromptState::new(scope, chatroom, progress);
+            if state.has_available_feature() {
+                self.mode = Mode::AgentSetupPrompt(Box::new(state));
+                return;
+            }
+        }
+    }
+
+    pub fn apply_agent_setup_prompt(
+        &mut self,
+        scope: &crate::setup_prompt::SetupPromptScope,
+        chatroom: bool,
+        progress: bool,
+    ) -> bool {
+        let (chatroom_file, progress_file, project_root) = match scope {
+            crate::setup_prompt::SetupPromptScope::Global {
+                chatroom_file,
+                progress_file,
+            } => (chatroom_file.clone(), progress_file.clone(), None),
+            crate::setup_prompt::SetupPromptScope::Project(project_root) => {
+                let file = project_root.join("CLAUDE.md");
+                (file.clone(), file, Some(project_root.as_path()))
+            }
+        };
+        if let Some(project_root) = project_root {
+            if !self.is_agent_setup_project_current(project_root) {
+                self.status_message = Some(format!(
+                    "Setup target is no longer an open project: {}",
+                    project_root.display()
+                ));
+                return false;
+            }
+        }
+        let mut applied = Vec::new();
+        let mut failures = Vec::new();
+        for (selected, feature, path) in [
+            (chatroom, AgentFeature::Chatroom, chatroom_file),
+            (progress, AgentFeature::Progress, progress_file),
+        ] {
+            if !selected {
+                continue;
+            }
+            match self.install_agent_feature(feature, &path, project_root) {
+                Ok(()) => applied.push(feature.label()),
+                Err(error) => failures.push(format!(
+                    "{} in {}: {error}",
+                    feature.label(),
+                    path.display()
+                )),
+            }
+        }
+        self.refresh_agent_setup_statuses();
+        if failures.is_empty() {
+            self.status_message = Some(if applied.is_empty() {
+                "No agent setup changes selected".to_string()
+            } else {
+                format!("Agent setup updated: {}", applied.join(", "))
+            });
+            true
+        } else {
+            let success = if applied.is_empty() {
+                String::new()
+            } else {
+                format!("Updated {}. ", applied.join(", "))
+            };
+            self.status_message = Some(format!(
+                "{success}Setup failed; this offer remains open: {}",
+                failures.join("; ")
+            ));
+            false
+        }
+    }
+
+    pub fn suppress_agent_setup_prompt(
+        &mut self,
+        scope: &crate::setup_prompt::SetupPromptScope,
+    ) -> bool {
+        let mut candidate = self.agent_setup_settings.clone();
+        match scope {
+            crate::setup_prompt::SetupPromptScope::Global { .. } => {
+                candidate.never_ask_global = true;
+            }
+            crate::setup_prompt::SetupPromptScope::Project(project_root) => {
+                let project_root = normalize_path_lexically(project_root);
+                if !candidate
+                    .never_ask_projects
+                    .iter()
+                    .any(|path| normalize_path_lexically(path) == project_root)
+                {
+                    candidate.never_ask_projects.push(project_root);
+                    candidate.never_ask_projects.sort();
+                }
+            }
+        }
+        self.agent_setup_settings = match self.save_agent_setup_settings(&candidate) {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.status_message = Some(error);
+                return false;
+            }
+        };
+        true
+    }
+
+    /// Persists the complete list first, then asks the currently attached
+    /// detached server to replace its prospective matching rules.
+    pub fn apply_and_persist_text_trigger_settings(&mut self, settings: TextTriggerSettings) {
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) = crate::config::save_text_trigger_settings(&config_dir, &settings) {
+                self.status_message = Some(format!("Could not save Text Triggers: {error}"));
+                return;
+            }
+        }
+        self.text_trigger_settings = settings.clone();
+        self.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers { settings });
+    }
+
+    pub fn open_text_trigger_dialog(&mut self, index: Option<usize>) {
+        let existing = index.and_then(|index| {
+            self.text_trigger_settings
+                .triggers
+                .get(index)
+                .map(|trigger| (index, trigger))
+        });
+        self.push_modal(Mode::TextTriggerDialog(Box::new(
+            crate::text_trigger_dialog::TextTriggerDialogState::new(existing),
+        )));
+    }
+
+    pub fn commit_text_trigger(
+        &mut self,
+        index: Option<usize>,
+        mut trigger: ilium_ipc::TextTrigger,
+    ) {
+        let mut settings = self.text_trigger_settings.clone();
+        if let Some(index) = index {
+            if let Some(previous) = settings.triggers.get(index) {
+                trigger.id = previous.id.clone();
+            }
+            if let Some(slot) = settings.triggers.get_mut(index) {
+                *slot = trigger;
+            }
+        } else {
+            settings.triggers.push(trigger);
+        }
+        self.apply_and_persist_text_trigger_settings(settings);
+    }
+
+    pub fn delete_text_trigger(&mut self, index: usize) {
+        let mut settings = self.text_trigger_settings.clone();
+        if index < settings.triggers.len() {
+            settings.triggers.remove(index);
+            self.apply_and_persist_text_trigger_settings(settings);
+        }
+    }
+
     pub fn apply_and_persist_trigger_settings(&mut self, triggers: TriggerSettings) {
         self.apply_trigger_settings(triggers);
         if let Some(config_dir) = self.config_dir.clone() {
@@ -3730,6 +4571,15 @@ impl App {
     ) {
         let mut settings = self.inference_settings.clone();
         settings.selected_provider = provider;
+        self.apply_and_persist_inference_settings(settings);
+    }
+
+    pub fn settings_select_title_style(&mut self, style: ilium_inference::TitleStyle) {
+        if self.inference_settings.title_style == style {
+            return;
+        }
+        let mut settings = self.inference_settings.clone();
+        settings.title_style = style;
         self.apply_and_persist_inference_settings(settings);
     }
 
@@ -4089,6 +4939,7 @@ impl App {
     /// `SettingsState`'s doc comments for the UI/UX brief this screen (and
     /// every setting added to it) must keep matching.
     pub fn action_open_settings(&mut self) {
+        self.refresh_agent_setup_statuses();
         self.mode = Mode::Settings(SettingsState::new());
     }
 
@@ -4585,11 +5436,10 @@ impl App {
                 if next == EffortLevel::Ultracode {
                     self.send_terminal_bytes(pane_id, b"ultracode ".to_vec(), None);
                 } else {
-                    let bytes = format!("/effort {}\r", next.command_word()).into_bytes();
-                    self.send_terminal_bytes(
+                    self.send_terminal_submission(
                         pane_id,
-                        bytes,
-                        Some(PromptSubmissionSource::ToolbarAction),
+                        format!("/effort {}", next.command_word()),
+                        PromptSubmissionSource::ToolbarAction,
                     );
                 }
             }
@@ -4695,10 +5545,7 @@ impl App {
         else {
             return;
         };
-        let Some(content_area) = self
-            .pane_viewport(pane_id)
-            .map(|viewport| viewport.content_area)
-        else {
+        let Some(content_area) = self.smart_copy_terminal_area(pane_id) else {
             return;
         };
         if let Some(session) = self.smart_copy_session.as_mut() {
@@ -4719,6 +5566,7 @@ impl App {
                 .map(|candidate| (candidate.text.clone(), candidate.label.clone()))
         });
         let Some((text, label)) = selection else {
+            self.status_message = Some("Move over a highlighted Smart Copy selection".to_string());
             return;
         };
         self.copy_terminal_text_to_clipboard(text, &format!("Copied {label}"));
@@ -4742,15 +5590,21 @@ impl App {
         if self.pending_staged_keystrokes.is_some() {
             return;
         }
-        let first_stage = stages.remove(0);
-        self.send_terminal_bytes(
-            pane_id,
-            first_stage,
-            Some(PromptSubmissionSource::ToolbarAction),
-        );
-        if stages.is_empty() {
+        if stages.len() == 1 {
+            let stage = stages.remove(0);
+            let Some(body) = stage.strip_suffix(b"\r") else {
+                tracing::error!("toolbar command is missing its final Enter");
+                return;
+            };
+            let Ok(text) = String::from_utf8(body.to_vec()) else {
+                tracing::error!("toolbar command is not UTF-8 text");
+                return;
+            };
+            self.send_terminal_submission(pane_id, text, PromptSubmissionSource::ToolbarAction);
             return;
         }
+        let first_stage = stages.remove(0);
+        self.send_terminal_bytes(pane_id, first_stage, None);
         self.pending_staged_keystrokes = Some(PendingStagedKeystrokes {
             pane_id,
             stages: stages.into(),
@@ -4775,7 +5629,10 @@ impl App {
         let pane_id = pending.pane_id;
         let sequence_finished = pending.stages.is_empty();
         pending.next_at = now + STAGED_KEYSTROKE_DELAY;
-        self.send_terminal_bytes(pane_id, stage, Some(PromptSubmissionSource::ToolbarAction));
+        // These remaining stages navigate Codex's model picker. They are key
+        // presses, not submitted agent prompts; non-CR stages would also fail
+        // the server's submission-metadata validation.
+        self.send_terminal_bytes(pane_id, stage, None);
         if sequence_finished {
             self.pending_staged_keystrokes = None;
         }
@@ -4940,12 +5797,29 @@ impl App {
         self.apply_editor_settings(settings);
         self.persist_editor_settings();
     }
-    pub fn settings_adjust_session_row(&mut self, _row: SessionRow, direction: i32) {
-        self.session_settings.recovery_policy =
-            self.session_settings.recovery_policy.stepped(direction);
-        self.persist_session_settings();
-        self.status_message =
-            Some("Recovery policy applies when the server next starts".to_string());
+    pub fn settings_adjust_session_row(&mut self, row: SessionRow, direction: i32) {
+        let previous = self.session_settings;
+        match row {
+            SessionRow::RecoveryPolicy => {
+                self.session_settings.recovery_policy =
+                    self.session_settings.recovery_policy.stepped(direction);
+            }
+            SessionRow::BackupsEnabled => {
+                self.session_settings.backups_enabled = !self.session_settings.backups_enabled;
+            }
+        }
+        if !self.persist_session_settings(previous) {
+            return;
+        }
+        self.status_message = Some(match row {
+            SessionRow::RecoveryPolicy => {
+                "Recovery policy applies when the server next starts".to_string()
+            }
+            SessionRow::BackupsEnabled if self.session_settings.backups_enabled => {
+                "Automatic session backups enabled".to_string()
+            }
+            SessionRow::BackupsEnabled => "Automatic session backups disabled".to_string(),
+        });
     }
 
     /// Records the pointer's last reported cell, driving the tree-panel
@@ -5150,7 +6024,7 @@ impl App {
             }
 
             let frame_millis = match status {
-                PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity) => {
+                PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity, _) => {
                     match activity {
                         AgentActivity::Working => Some(tree_ui::SPINNER_FRAME_MS as u64),
                         AgentActivity::WaitingBackground => {
@@ -6290,7 +7164,7 @@ impl App {
     fn split_choice_kind_label(&self, pane_id: NodeId) -> &'static str {
         match self.tree.get(pane_id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
                 ..
             }) => "agent",
             Some(NodeKind::Pane {
@@ -6421,7 +7295,7 @@ impl App {
                 &node.kind,
                 NodeKind::Pane {
                     content: PaneContentKind::Terminal,
-                    status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                    status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
                     ..
                 }
             )
@@ -6650,7 +7524,7 @@ impl App {
         match &node.kind {
             NodeKind::Pane {
                 content: PaneContentKind::Terminal,
-                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
                 ..
             } => format!("{} agent", class.label()),
             _ => "terminal".to_string(),
@@ -7303,13 +8177,12 @@ impl App {
             self.status_message = Some("No idle agent to ask for an update".to_string());
             return;
         }
-        let bytes = format!("{}\r", Self::ASK_FOR_UPDATE_PROMPT).into_bytes();
         let pane_count = pane_ids.len();
         for pane_id in pane_ids {
-            self.send_terminal_bytes(
+            self.send_terminal_submission(
                 pane_id,
-                bytes.clone(),
-                Some(PromptSubmissionSource::AskForUpdate),
+                Self::ASK_FOR_UPDATE_PROMPT.to_owned(),
+                PromptSubmissionSource::AskForUpdate,
             );
         }
         self.status_message = Some(if pane_count == 1 {
@@ -9822,6 +10695,44 @@ mod tests {
     }
 
     #[test]
+    fn editing_text_trigger_preserves_its_id_persists_and_queues_live_update() {
+        let directory = tempfile::tempdir().expect("text trigger config directory");
+        let mut app = App::new("test-session".to_owned(), directory.path().to_path_buf());
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.apply_text_trigger_settings(ilium_ipc::TextTriggerSettings {
+            triggers: vec![ilium_ipc::TextTrigger {
+                id: "stable-rule-id".to_owned(),
+                enabled: true,
+                regexp: "old".to_owned(),
+                message: "old reply".to_owned(),
+                target: ilium_ipc::TextTriggerTarget::Both,
+                sample_text: String::new(),
+            }],
+        });
+
+        app.commit_text_trigger(
+            Some(0),
+            ilium_ipc::TextTrigger {
+                id: String::new(),
+                enabled: false,
+                regexp: "new".to_owned(),
+                message: "new reply".to_owned(),
+                target: ilium_ipc::TextTriggerTarget::Agents,
+                sample_text: "new sample".to_owned(),
+            },
+        );
+
+        let persisted = crate::config::load(directory.path()).expect("read text trigger config");
+        assert_eq!(persisted.text_triggers, app.text_trigger_settings);
+        assert_eq!(app.text_trigger_settings.triggers[0].id, "stable-rule-id");
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::UpdateTextTriggers { settings }]
+                if settings == &app.text_trigger_settings
+        ));
+    }
+
+    #[test]
     fn successful_editor_and_board_edits_report_node_activity() {
         let directory = tempfile::tempdir().expect("create client activity directory");
         let mut app = app();
@@ -10903,7 +11814,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 done_pane,
-                PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done),
+                PaneStatus::AgentWithGoal(
+                    AgentClass::Codex,
+                    AgentActivity::Done,
+                    ilium_core::GoalState::Active,
+                ),
             )
             .unwrap();
         let working_pane = app
@@ -10923,16 +11838,15 @@ mod tests {
 
         app.execute_context_action(ContextMenuAction::AskForUpdate, project);
 
-        let expected_bytes = format!("{}\r", App::ASK_FOR_UPDATE_PROMPT).into_bytes();
         let requests = app.take_outbound_requests();
         assert_eq!(requests.len(), 2, "only the idle and done panes are asked");
         for (pane_id, request) in [idle_pane, done_pane].into_iter().zip(requests) {
             assert_eq!(
                 request,
-                ClientRequest::KeyInput {
+                ClientRequest::SubmitTerminalText {
                     pane_id,
-                    bytes: expected_bytes.clone(),
-                    submission: Some(PromptSubmissionSource::AskForUpdate),
+                    text: App::ASK_FOR_UPDATE_PROMPT.to_owned(),
+                    source: PromptSubmissionSource::AskForUpdate,
                 }
             );
         }
@@ -11508,7 +12422,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval),
+                PaneStatus::AgentWithGoal(
+                    AgentClass::Claude,
+                    AgentActivity::WaitingApproval,
+                    ilium_core::GoalState::Active,
+                ),
             )
             .unwrap();
         app.tree
@@ -12871,10 +13789,10 @@ mod tests {
         app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Compact);
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::SubmitTerminalText {
                 pane_id,
-                bytes: b"/compact\r".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                text: "/compact".to_owned(),
+                source: PromptSubmissionSource::ToolbarAction,
             }]
         );
 
@@ -12891,10 +13809,10 @@ mod tests {
         app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Model(0));
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::SubmitTerminalText {
                 pane_id,
-                bytes: b"/model haiku\r".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                text: "/model haiku".to_owned(),
+                source: PromptSubmissionSource::ToolbarAction,
             }]
         );
 
@@ -12997,7 +13915,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"/model".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                submission: None,
             }]
         );
 
@@ -13015,7 +13933,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"\r".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                submission: None,
             }]
         );
 
@@ -13026,7 +13944,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"2".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                submission: None,
             }]
         );
 
@@ -13037,7 +13955,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"3".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                submission: None,
             }]
         );
 
@@ -13189,7 +14107,7 @@ mod tests {
             vec![ClientRequest::KeyInput {
                 pane_id,
                 bytes: b"/model".to_vec(),
-                submission: Some(PromptSubmissionSource::ToolbarAction),
+                submission: None,
             }]
         );
     }
@@ -13580,7 +14498,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval),
+                PaneStatus::AgentWithGoal(
+                    AgentClass::Claude,
+                    AgentActivity::WaitingApproval,
+                    ilium_core::GoalState::Active,
+                ),
             )
             .unwrap();
         app.ui_settings.agent_debug_menu_enabled = true;
@@ -14063,12 +14985,38 @@ mod tests {
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
-        assert_eq!(SettingsTab::Inference.next(), SettingsTab::Triggers);
-        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::Debug);
+        assert_eq!(SettingsTab::Inference.next(), SettingsTab::Titles);
+        assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
+        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::TextTriggers);
+        assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::Debug);
         assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
         assert_eq!(SettingsTab::Api.next(), SettingsTab::About);
-        assert_eq!(SettingsTab::About.next(), SettingsTab::Appearance);
-        assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::About);
+        assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
+        assert_eq!(SettingsTab::Setup.next(), SettingsTab::Appearance);
+        assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::Setup);
+    }
+
+    #[test]
+    fn title_style_selection_saves_and_reloads_without_changing_provider() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        let provider = app.inference_settings.selected_provider;
+        assert_eq!(
+            app.inference_settings.title_style,
+            ilium_inference::TitleStyle::Summarization
+        );
+        app.settings_select_title_style(ilium_inference::TitleStyle::Labeling);
+        assert_eq!(
+            app.inference_settings.title_style,
+            ilium_inference::TitleStyle::Labeling
+        );
+        let loaded = crate::config::load(config_dir.path()).unwrap();
+        assert_eq!(
+            loaded.inference.title_style,
+            ilium_inference::TitleStyle::Labeling
+        );
+        assert_eq!(loaded.inference.selected_provider, provider);
     }
 
     #[test]
@@ -14598,5 +15546,202 @@ mod tests {
 
         app.request_chatroom_reconcile();
         assert!(app.next_chatroom_reconcile_at.unwrap() <= Instant::now());
+    }
+
+    #[test]
+    fn setup_rows_include_both_features_for_global_and_launch_project_targets() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        app.agent_setup_settings.chatroom_global_file =
+            Some(project.path().join("global-chatroom.md"));
+        app.agent_setup_settings.progress_global_file =
+            Some(project.path().join("global-progress.md"));
+
+        let rows = app.agent_setup_rows();
+
+        assert_eq!(rows.len(), 6);
+        for feature in AgentFeature::ALL {
+            assert_eq!(
+                rows.iter().filter(|row| row.feature() == feature).count(),
+                3
+            );
+            assert!(rows.iter().any(|row| matches!(
+                row,
+                AgentSetupRow::ProjectTarget {
+                    feature: row_feature,
+                    project_root,
+                    ..
+                } if *row_feature == feature && project_root == project.path()
+            )));
+        }
+    }
+
+    #[test]
+    fn automatic_setup_teaches_claude_and_codex_globally_and_per_project() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("project");
+        let home = directory.path().join("home");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let mut app = App::new("test".to_string(), project.clone());
+        app.agent_setup_home_dir = Some(home.clone());
+        app.tree.ensure_launch_project(project.clone()).unwrap();
+        app.is_initial_state_sync_complete = true;
+
+        app.reconcile_agent_setup_prompts();
+
+        for target in [
+            home.join(".claude/CLAUDE.md"),
+            home.join(".codex/AGENTS.md"),
+            project.join("CLAUDE.md"),
+            project.join("AGENTS.md"),
+        ] {
+            for feature in AgentFeature::ALL {
+                assert_eq!(
+                    crate::agent_feature_setup::status(&target, feature).unwrap(),
+                    FeatureSetupStatus::Managed,
+                    "{} should contain current {} teaching",
+                    target.display(),
+                    feature.label()
+                );
+            }
+        }
+        assert!(app.pending_agent_setup_prompts.is_empty());
+    }
+
+    #[test]
+    fn project_chatroom_setup_refresh_is_idempotent_and_preserves_room_data() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        app.refresh_agent_setup_statuses();
+        let row = app
+            .agent_setup_rows()
+            .into_iter()
+            .find(|row| {
+                matches!(
+                    row,
+                    AgentSetupRow::ProjectTarget {
+                        feature: AgentFeature::Chatroom,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+
+        app.settings_toggle_agent_setup_row(&row);
+        assert!(crate::chatroom::exists(project.path()));
+        assert!(matches!(
+            app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
+            AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed)
+        ));
+
+        app.settings_toggle_agent_setup_row(&row);
+        assert!(crate::chatroom::exists(project.path()));
+        assert!(matches!(
+            app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
+            AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed)
+        ));
+    }
+
+    #[test]
+    fn legacy_setup_suppression_preferences_persist_independently_by_scope() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let config_dir = directory.path().join("config");
+        std::fs::create_dir(&config_dir).unwrap();
+        let settings = AgentSetupSettings {
+            chatroom_global_file: Some(directory.path().join("global-chatroom.md")),
+            progress_global_file: Some(directory.path().join("global-progress.md")),
+            ..AgentSetupSettings::default()
+        };
+        let mut app = App::new("test".to_string(), project.clone());
+        app.config_dir = Some(config_dir.clone());
+        app.tree.add_project(project.clone()).unwrap();
+        app.is_initial_state_sync_complete = true;
+        app.apply_agent_setup_settings(settings);
+
+        let global_scope = crate::setup_prompt::SetupPromptScope::Global {
+            chatroom_file: directory.path().join("global-chatroom.md"),
+            progress_file: directory.path().join("global-progress.md"),
+        };
+        assert!(app.suppress_agent_setup_prompt(&global_scope));
+        assert!(
+            app.suppress_agent_setup_prompt(&crate::setup_prompt::SetupPromptScope::Project(
+                project.clone()
+            ))
+        );
+
+        let persisted = crate::config::load(&config_dir).unwrap().agent_setup;
+        assert!(persisted.never_ask_global);
+        assert_eq!(persisted.never_ask_projects, vec![project]);
+    }
+
+    #[test]
+    fn fully_configured_targets_do_not_queue_setup_prompts() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let global_file = directory.path().join("global.md");
+        let project_file = project.join("CLAUDE.md");
+        for path in [&global_file, &project_file] {
+            crate::agent_feature_setup::install(path, AgentFeature::Chatroom).unwrap();
+            crate::agent_feature_setup::install(path, AgentFeature::Progress).unwrap();
+        }
+        let mut app = App::new("test".to_string(), project);
+        app.tree
+            .add_project(directory.path().join("project"))
+            .unwrap();
+        app.is_initial_state_sync_complete = true;
+        app.apply_agent_setup_settings(AgentSetupSettings {
+            chatroom_global_file: Some(global_file.clone()),
+            progress_global_file: Some(global_file),
+            ..AgentSetupSettings::default()
+        });
+
+        app.maybe_show_agent_setup_prompt();
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.pending_agent_setup_prompts.is_empty());
+    }
+
+    #[test]
+    fn stale_project_offer_cannot_recreate_or_modify_a_closed_project_target() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        app.is_initial_state_sync_complete = true;
+        let scope = crate::setup_prompt::SetupPromptScope::Project(project.path().to_path_buf());
+
+        assert!(!app.apply_agent_setup_prompt(&scope, false, true));
+
+        assert!(!project.path().join("CLAUDE.md").exists());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("no longer an open project")));
+    }
+
+    #[test]
+    fn failed_setup_persistence_keeps_the_previous_paths_and_suppression_policy() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
+        let previous = app.agent_setup_settings.clone();
+        let global_scope = crate::setup_prompt::SetupPromptScope::Global {
+            chatroom_file: project.path().join("chatroom.md"),
+            progress_file: project.path().join("progress.md"),
+        };
+
+        assert!(!app.settings_set_agent_setup_path(
+            AgentFeature::Progress,
+            project.path().join("custom.md").to_str().unwrap(),
+        ));
+        assert_eq!(app.agent_setup_settings, previous);
+
+        assert!(!app.suppress_agent_setup_prompt(&global_scope));
+        assert_eq!(app.agent_setup_settings, previous);
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("configuration directory is unavailable")));
     }
 }

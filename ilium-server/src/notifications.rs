@@ -38,12 +38,13 @@ pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -
             _,
             AgentActivity::Working
                 | AgentActivity::WaitingBackground
-                | AgentActivity::BackgroundTaskStillRunning
+                | AgentActivity::BackgroundTaskStillRunning,
+            _,
         )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done, _)
     )
 }
 
@@ -296,31 +297,57 @@ mod tests {
 
     #[test]
     fn agent_with_goal_working_to_agent_with_goal_idle_notifies() {
-        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
-        let goal_idle = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Idle);
+        let goal_working = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::Working,
+            ilium_core::GoalState::Active,
+        );
+        let goal_idle = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::Idle,
+            ilium_core::GoalState::Active,
+        );
         assert!(is_finished_transition(Some(&goal_working), &goal_idle));
     }
 
     #[test]
     fn agent_with_goal_working_to_plain_agent_idle_notifies_when_goal_clears_on_completion() {
-        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
+        let goal_working = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::Working,
+            ilium_core::GoalState::Active,
+        );
         let plain_idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
         assert!(is_finished_transition(Some(&goal_working), &plain_idle));
     }
 
     #[test]
     fn agent_with_goal_waiting_background_to_agent_with_goal_done_notifies() {
-        let goal_waiting =
-            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingBackground);
-        let goal_done = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done);
+        let goal_waiting = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::WaitingBackground,
+            ilium_core::GoalState::Active,
+        );
+        let goal_done = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::Done,
+            ilium_core::GoalState::Active,
+        );
         assert!(is_finished_transition(Some(&goal_waiting), &goal_done));
     }
 
     #[test]
     fn agent_with_goal_working_to_agent_with_goal_waiting_approval_does_not_notify() {
-        let goal_working = PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Working);
-        let goal_waiting_approval =
-            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::WaitingApproval);
+        let goal_working = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::Working,
+            ilium_core::GoalState::Active,
+        );
+        let goal_waiting_approval = PaneStatus::AgentWithGoal(
+            AgentClass::Claude,
+            AgentActivity::WaitingApproval,
+            ilium_core::GoalState::Active,
+        );
         assert!(!is_finished_transition(
             Some(&goal_working),
             &goal_waiting_approval

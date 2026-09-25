@@ -15,10 +15,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ilium_inference::InferenceSettings;
-use ilium_platform::secure_fs;
+use ilium_ipc::TextTriggerSettings;
+use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
 use ilium_sound::SoundSettings;
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use ratatui::style::Color;
@@ -64,6 +65,10 @@ pub struct ClientConfig {
     pub inference: InferenceSettings,
     /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
     pub triggers: TriggerSettings,
+    /// Regex-driven terminal responses shown in the Text Triggers tab.
+    pub text_triggers: TextTriggerSettings,
+    /// Managed agent-instruction targets and durable startup-prompt choices.
+    pub agent_setup: AgentSetupSettings,
     /// Terminal presentation and creation defaults.
     pub terminal: TerminalSettings,
     /// Defaults applied when a local editor buffer is opened.
@@ -90,6 +95,8 @@ impl Default for ClientConfig {
             kanban_board: KanbanBoardSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
+            text_triggers: TextTriggerSettings::default(),
+            agent_setup: AgentSetupSettings::default(),
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
@@ -98,6 +105,21 @@ impl Default for ClientConfig {
             api: ApiSettings::default(),
         }
     }
+}
+
+/// Durable `[agent_setup]` policy.
+///
+/// An absent per-feature path means Ilium's normal global Claude file
+/// (`~/.claude/CLAUDE.md`). Project targets are discovered from the live
+/// tree and deliberately are not persisted here. Only the user's explicit
+/// "never ask again" decisions are retained by canonical project path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AgentSetupSettings {
+    pub chatroom_global_file: Option<PathBuf>,
+    pub progress_global_file: Option<PathBuf>,
+    pub never_ask_global: bool,
+    pub never_ask_projects: Vec<PathBuf>,
 }
 
 /// Durable `[debug]` settings. File diagnostics remain opt-in for a fresh
@@ -360,9 +382,18 @@ impl SessionRecoveryPolicy {
         stepped_value(&Self::ALL, self, direction)
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSettings {
     pub recovery_policy: SessionRecoveryPolicy,
+    pub backups_enabled: bool,
+}
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self {
+            recovery_policy: SessionRecoveryPolicy::default(),
+            backups_enabled: true,
+        }
+    }
 }
 
 /// `[keyboard]` settings, validated before they reach input dispatch.
@@ -849,6 +880,10 @@ struct RawClientConfig {
     #[serde(default)]
     triggers: TriggerSettings,
     #[serde(default)]
+    text_triggers: TextTriggerSettings,
+    #[serde(default)]
+    agent_setup: AgentSetupSettings,
+    #[serde(default)]
     terminal: RawTerminalConfig,
     #[serde(default)]
     editor: RawEditorConfig,
@@ -929,6 +964,7 @@ struct RawEditorConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
     recovery_policy: Option<String>,
+    backups_enabled: Option<bool>,
 }
 
 /// `[theme]`'s color overrides, each an optional `"#rrggbb"` (or `rrggbb`)
@@ -1061,6 +1097,8 @@ pub enum ConfigSaveError {
     Serialize(#[from] toml::ser::Error),
     #[error("failed to write config file: {0}")]
     Write(std::io::Error),
+    #[error("existing [session] config is not a TOML table")]
+    InvalidSessionTable,
 }
 
 /// Loads `<config_dir>/config.toml`'s `[keybindings]`, `[keyboard]`, `[theme]`,
@@ -1136,6 +1174,8 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         kanban_board,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
+        text_triggers: normalize_text_trigger_settings(raw.text_triggers),
+        agent_setup: raw.agent_setup,
         terminal,
         editor,
         session,
@@ -1143,6 +1183,18 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         debug: raw.debug,
         api: raw.api,
     })
+}
+
+/// Hand-authored TOML predates no Text Trigger IDs, so accept an omitted ID
+/// and assign one before the list reaches the server. The next settings save
+/// persists it, giving later edits and diagnostics a stable identity.
+fn normalize_text_trigger_settings(mut settings: TextTriggerSettings) -> TextTriggerSettings {
+    for trigger in &mut settings.triggers {
+        if trigger.id.is_empty() {
+            trigger.id = uuid::Uuid::new_v4().to_string();
+        }
+    }
+    settings
 }
 
 /// Resolves both configurable keyboard prefixes while keeping an absent
@@ -1393,6 +1445,7 @@ fn merge_session(raw: RawSessionConfig) -> Result<SessionSettings, ConfigLoadErr
             .map(parse_session_recovery_policy)
             .transpose()?
             .unwrap_or_default(),
+        backups_enabled: raw.backups_enabled.unwrap_or(true),
     })
 }
 
@@ -1754,9 +1807,59 @@ pub fn save_editor_settings(
 }
 pub fn save_session_settings(
     config_dir: &Path,
-    settings: &SessionSettings,
-) -> Result<(), ClientError> {
-    save_table(config_dir, "session", session_settings_to_toml(settings))
+    previous: &SessionSettings,
+    desired: &SessionSettings,
+) -> Result<SessionSettings, ClientError> {
+    let path = config_dir.join("config.toml");
+    let lock_path = config_dir.join(".session-settings.lock");
+    let _lock =
+        ExclusiveFileLock::acquire(&lock_path).map_err(|source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::Write(source)),
+        })?;
+    let mut document = read_toml_document(&path)?;
+    let session_value = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table")
+        .entry("session".to_string())
+        .or_insert_with(|| session_settings_to_toml(&SessionSettings::default()));
+    let session_table = session_value
+        .as_table_mut()
+        .ok_or_else(|| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::InvalidSessionTable),
+        })?;
+
+    if desired.recovery_policy != previous.recovery_policy {
+        let value = match desired.recovery_policy {
+            SessionRecoveryPolicy::RestoreAutomatically => "restore_automatically",
+            SessionRecoveryPolicy::AskBeforeRestore => "ask_before_restore",
+            SessionRecoveryPolicy::StartFresh => "start_fresh",
+        };
+        session_table.insert(
+            "recovery_policy".to_string(),
+            toml::Value::String(value.to_owned()),
+        );
+    }
+    if desired.backups_enabled != previous.backups_enabled {
+        session_table.insert(
+            "backups_enabled".to_string(),
+            toml::Value::Boolean(desired.backups_enabled),
+        );
+    }
+
+    let raw: RawSessionConfig = toml::Value::Table(session_table.clone())
+        .try_into()
+        .map_err(|source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::Parse(source)),
+        })?;
+    let saved = merge_session(raw).map_err(|source| ClientError::ConfigLoad {
+        path: path.clone(),
+        source,
+    })?;
+    write_toml_document(&path, &document)?;
+    Ok(saved)
 }
 fn save_table(config_dir: &Path, name: &str, value: toml::Value) -> Result<(), ClientError> {
     let path = config_dir.join("config.toml");
@@ -1882,6 +1985,89 @@ pub fn save_trigger_settings(
     })?;
     table.insert("triggers".to_owned(), value);
     write_toml_document(&path, &document)
+}
+
+/// Persists the complete `[text_triggers]` list while preserving every
+/// unrelated client and detached-server setting.
+pub fn save_text_trigger_settings(
+    config_dir: &Path,
+    settings: &TextTriggerSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("text_triggers".to_owned(), value);
+    write_toml_document(&path, &document)
+}
+
+/// Persists managed-instruction targets and prompt suppression while
+/// preserving all unrelated client and detached-server configuration.
+pub fn save_agent_setup_settings(
+    config_dir: &Path,
+    settings: &AgentSetupSettings,
+) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "agent_setup", value)
+}
+
+/// Applies only fields changed by this client against the latest persisted
+/// `[agent_setup]` table. The lock covers read, merge, and atomic publication,
+/// so two Ilium clients changing independent setup choices cannot replace one
+/// another's values with stale in-memory copies.
+pub fn update_agent_setup_settings(
+    config_dir: &Path,
+    previous: &AgentSetupSettings,
+    desired: &AgentSetupSettings,
+) -> Result<AgentSetupSettings, ClientError> {
+    let path = config_dir.join("config.toml");
+    let lock_path = config_dir.join(".agent-setup.lock");
+    let _lock =
+        ExclusiveFileLock::acquire(&lock_path).map_err(|source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::Write(source)),
+        })?;
+    let mut document = read_toml_document(&path)?;
+    let mut current = document
+        .get("agent_setup")
+        .cloned()
+        .map(AgentSetupSettings::deserialize)
+        .transpose()
+        .map_err(|source| ClientError::ConfigSave {
+            path: path.clone(),
+            source: Box::new(ConfigSaveError::Parse(source)),
+        })?
+        .unwrap_or_default();
+    if desired.chatroom_global_file != previous.chatroom_global_file {
+        current.chatroom_global_file = desired.chatroom_global_file.clone();
+    }
+    if desired.progress_global_file != previous.progress_global_file {
+        current.progress_global_file = desired.progress_global_file.clone();
+    }
+    if desired.never_ask_global != previous.never_ask_global {
+        current.never_ask_global = desired.never_ask_global;
+    }
+    if desired.never_ask_projects != previous.never_ask_projects {
+        current.never_ask_projects = desired.never_ask_projects.clone();
+    }
+    let value = toml::Value::try_from(&current).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table")
+        .insert("agent_setup".to_string(), value);
+    write_toml_document(&path, &document)?;
+    Ok(current)
 }
 
 /// Persists only `[voice]`, preserving every unrelated client and server
@@ -2194,6 +2380,10 @@ fn session_settings_to_toml(settings: &SessionSettings) -> toml::Value {
             .into(),
         ),
     );
+    table.insert(
+        "backups_enabled".into(),
+        toml::Value::Boolean(settings.backups_enabled),
+    );
     toml::Value::Table(table)
 }
 
@@ -2282,6 +2472,38 @@ mod tests {
     }
 
     #[test]
+    fn inference_settings_never_serialize_runtime_proxy_rows() {
+        let dir = scratch_dir();
+        let mut inference = InferenceSettings::default();
+        inference.kilo_gateway.paid_proxies_enabled = true;
+        inference
+            .kilo_gateway
+            .paid_proxies
+            .push(ilium_inference::PaidProxy {
+                ip: "198.51.100.7".to_string(),
+                port: 8080,
+                protocol: "http".to_string(),
+                username: "user".to_string(),
+                password: "secret".to_string(),
+            });
+
+        save_inference_settings(&dir, &inference).unwrap();
+
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[inference.kilo_gateway.proxy_database]"));
+        assert!(!saved.contains("[[inference.kilo_gateway.paid_proxies]]"));
+        assert!(!saved.contains("198.51.100.7"));
+        assert!(!saved.contains("secret"));
+
+        let loaded = load(&dir).unwrap();
+        assert!(loaded.inference.kilo_gateway.paid_proxies.is_empty());
+        assert_eq!(
+            loaded.inference.kilo_gateway.proxy_database,
+            inference.kilo_gateway.proxy_database
+        );
+    }
+
+    #[test]
     fn legacy_inference_table_without_kilo_settings_uses_the_safe_default() {
         let dir = scratch_dir();
         std::fs::write(
@@ -2314,6 +2536,80 @@ mod tests {
         let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(saved.contains("[detection]"));
         assert_eq!(load(&dir).unwrap().triggers, triggers);
+    }
+
+    #[test]
+    fn text_trigger_settings_round_trip_without_replacing_server_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 5\n",
+        )
+        .unwrap();
+        let settings = TextTriggerSettings {
+            triggers: vec![ilium_ipc::TextTrigger {
+                id: "notify-ready".to_owned(),
+                enabled: true,
+                regexp: "(?i)ready".to_owned(),
+                message: "continue".to_owned(),
+                target: ilium_ipc::TextTriggerTarget::Agents,
+                sample_text: "Ready for the next task".to_owned(),
+            }],
+        };
+
+        save_text_trigger_settings(&dir, &settings).unwrap();
+
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[detection]"));
+        assert!(saved.contains("[[text_triggers.triggers]]"));
+        assert_eq!(load(&dir).unwrap().text_triggers, settings);
+    }
+
+    #[test]
+    fn agent_setup_settings_round_trip_paths_and_prompt_suppression() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 5\n",
+        )
+        .unwrap();
+        let settings = AgentSetupSettings {
+            chatroom_global_file: Some(PathBuf::from("/tmp/chatroom-instructions.md")),
+            progress_global_file: Some(PathBuf::from("/tmp/progress-instructions.md")),
+            never_ask_global: true,
+            never_ask_projects: vec![PathBuf::from("/work/one"), PathBuf::from("/work/two")],
+        };
+
+        save_agent_setup_settings(&dir, &settings).unwrap();
+
+        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(saved.contains("[detection]"));
+        assert!(saved.contains("[agent_setup]"));
+        assert_eq!(load(&dir).unwrap().agent_setup, settings);
+    }
+
+    #[test]
+    fn stale_setup_clients_merge_independent_field_changes() {
+        let dir = scratch_dir();
+        let baseline = AgentSetupSettings::default();
+        let path_change = AgentSetupSettings {
+            chatroom_global_file: Some(PathBuf::from("/tmp/chatroom.md")),
+            ..baseline.clone()
+        };
+        let suppression_change = AgentSetupSettings {
+            never_ask_projects: vec![PathBuf::from("/work/project")],
+            ..baseline.clone()
+        };
+
+        update_agent_setup_settings(&dir, &baseline, &path_change).unwrap();
+        update_agent_setup_settings(&dir, &baseline, &suppression_change).unwrap();
+
+        let saved = load(&dir).unwrap().agent_setup;
+        assert_eq!(saved.chatroom_global_file, path_change.chatroom_global_file);
+        assert_eq!(
+            saved.never_ask_projects,
+            suppression_change.never_ask_projects
+        );
     }
 
     #[test]
@@ -3134,6 +3430,36 @@ mod tests {
             keymap::action_for_table(&config.keybindings, BindingKey::Character('z')),
             Some(keymap::Action::Quit)
         );
+    }
+
+    #[test]
+    fn session_backups_default_on_and_stale_writers_merge_independent_fields() {
+        let dir = scratch_dir();
+        let baseline = load(&dir).expect("missing config uses defaults").session;
+        assert!(baseline.backups_enabled);
+
+        let disable_backups = SessionSettings {
+            backups_enabled: false,
+            ..baseline
+        };
+        save_session_settings(&dir, &baseline, &disable_backups)
+            .expect("disable automatic backups");
+
+        // A second client still has the original in-memory settings. Its
+        // recovery-policy edit must merge only that field into current disk
+        // state instead of re-enabling backups from its stale copy.
+        let stale_recovery_change = SessionSettings {
+            recovery_policy: SessionRecoveryPolicy::AskBeforeRestore,
+            ..baseline
+        };
+        let saved = save_session_settings(&dir, &baseline, &stale_recovery_change)
+            .expect("merge the independent recovery-policy edit");
+        assert!(!saved.backups_enabled);
+        assert_eq!(
+            saved.recovery_policy,
+            SessionRecoveryPolicy::AskBeforeRestore
+        );
+        assert_eq!(load(&dir).expect("read merged settings").session, saved);
     }
 
     #[test]

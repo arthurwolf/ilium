@@ -7,9 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+pub use ilium_kilo_gateway::PaidProxy;
 use ilium_kilo_gateway::{
     choose_random_paid_proxy, ChatMessage, CompletionRequest, CompletionStreamEvent, GatewayError,
-    KiloGatewayClient, PaidProxy, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
+    KiloGatewayClient, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
     DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
     FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
 };
@@ -21,6 +22,9 @@ pub const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_ANTHROPIC_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
+pub const DEFAULT_PROXY_DATABASE_URI: &str = "mongodb://127.0.0.1:27017";
+pub const DEFAULT_PROXY_DATABASE_NAME: &str = "money";
+pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const MAXIMUM_PROVIDER_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAXIMUM_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -59,12 +63,23 @@ impl InferenceProviderKind {
     }
 }
 
+/// How AI-authored pane titles are chosen. This affects title inference only;
+/// provider selection and user-written titles keep their own ownership.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleStyle {
+    Labeling,
+    #[default]
+    Summarization,
+}
+
 /// Complete durable settings. Switching providers preserves every other
 /// provider's endpoint, model, and credentials for a later switch back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
+    pub title_style: TitleStyle,
     pub kilo_gateway: KiloGatewaySettings,
     pub ollama: OllamaSettings,
     pub openai: ApiKeyProviderSettings,
@@ -76,6 +91,7 @@ impl Default for InferenceSettings {
     fn default() -> Self {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
+            title_style: TitleStyle::default(),
             kilo_gateway: KiloGatewaySettings::default(),
             ollama: OllamaSettings::default(),
             openai: ApiKeyProviderSettings::new(DEFAULT_OPENAI_URL),
@@ -104,13 +120,62 @@ pub struct KiloGatewaySettings {
     pub model: String,
     /// Power-user escape hatch, deliberately absent from the settings UI:
     /// enable only by hand-editing `config.toml`'s `[inference.kilo_gateway]`
-    /// table. When true and `paid_proxies` is non-empty, every Kilo Gateway
-    /// call is routed through one proxy sampled at random from the list
-    /// instead of calling Kilo directly.
+    /// table. When true, every Kilo Gateway call is routed through one proxy
+    /// loaded from `proxy_database` at client boot instead of calling Kilo
+    /// directly.
     #[serde(default)]
     pub paid_proxies_enabled: bool,
-    #[serde(default)]
+    /// MongoDB source for the paid proxies. The database source is durable
+    /// configuration; the records themselves are loaded into `paid_proxies`
+    /// once during boot and are never serialized into `config.toml`.
+    pub proxy_database: ProxyDatabaseSettings,
+    /// Runtime-only proxy records loaded from MongoDB during client boot.
+    #[serde(skip, default)]
     pub paid_proxies: Vec<PaidProxy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProxyDatabaseSettings {
+    pub uri: String,
+    pub database: String,
+    pub collection: String,
+    pub structure: ProxyDatabaseStructure,
+}
+
+impl Default for ProxyDatabaseSettings {
+    fn default() -> Self {
+        Self {
+            uri: DEFAULT_PROXY_DATABASE_URI.to_string(),
+            database: DEFAULT_PROXY_DATABASE_NAME.to_string(),
+            collection: DEFAULT_PROXY_COLLECTION_NAME.to_string(),
+            structure: ProxyDatabaseStructure::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProxyDatabaseStructure {
+    pub ip: String,
+    pub port: String,
+    pub protocol: String,
+    pub username: String,
+    pub password: String,
+    pub enabled: String,
+}
+
+impl Default for ProxyDatabaseStructure {
+    fn default() -> Self {
+        Self {
+            ip: "ip".to_string(),
+            port: "port".to_string(),
+            protocol: "protocol".to_string(),
+            username: "username".to_string(),
+            password: "password".to_string(),
+            enabled: "enabled".to_string(),
+        }
+    }
 }
 
 impl Default for KiloGatewaySettings {
@@ -118,6 +183,7 @@ impl Default for KiloGatewaySettings {
         Self {
             model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
             paid_proxies_enabled: false,
+            proxy_database: ProxyDatabaseSettings::default(),
             paid_proxies: Vec::new(),
         }
     }
@@ -126,14 +192,18 @@ impl Default for KiloGatewaySettings {
 /// Builds a Kilo Gateway client honoring the hidden paid-proxies flag: a
 /// fresh random proxy is sampled per call so repeated calls spread across
 /// the configured list rather than pinning to one egress IP.
-fn kilo_gateway_client(settings: &KiloGatewaySettings) -> KiloGatewayClient {
+fn kilo_gateway_client(
+    settings: &KiloGatewaySettings,
+) -> Result<KiloGatewayClient, InferenceError> {
     let client = KiloGatewayClient::default();
     if !settings.paid_proxies_enabled {
-        return client;
+        return Ok(client);
     }
     match choose_random_paid_proxy(&settings.paid_proxies) {
-        Some(proxy) => client.with_proxy_url(proxy.connect_url()),
-        None => client,
+        Some(proxy) => Ok(client.with_proxy_url(proxy.connect_url())),
+        None => Err(InferenceError::Configuration(
+            "paid proxy egress is enabled but no proxies were loaded from MongoDB".to_string(),
+        )),
     }
 }
 
@@ -473,7 +543,7 @@ impl InferenceProvider for KiloGatewayProvider {
             ],
             request.max_tokens,
         );
-        kilo_gateway_client(&self.0)
+        kilo_gateway_client(&self.0)?
             .complete_text(&request)
             .map(|text| InferenceResponse { text })
             .map_err(map_gateway_error)
@@ -496,7 +566,7 @@ impl InferenceProvider for KiloGatewayProvider {
             ],
             request.max_tokens,
         );
-        kilo_gateway_client(&self.0)
+        kilo_gateway_client(&self.0)?
             .stream_text(&request, &mut |event| match event {
                 CompletionStreamEvent::TextDelta(text) => {
                     on_event(InferenceStreamEvent::TextDelta(text))
@@ -509,7 +579,7 @@ impl InferenceProvider for KiloGatewayProvider {
     }
 
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
-        let models = kilo_gateway_client(&self.0)
+        let models = kilo_gateway_client(&self.0)?
             .list_free_models()
             .map_err(map_gateway_error)?;
         if models.is_empty() {
@@ -1121,6 +1191,20 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
 
+    #[test]
+    fn title_style_defaults_to_existing_summary_and_round_trips_labeling() {
+        let old_config: InferenceSettings =
+            serde_json::from_str(r#"{"selected_provider":"ollama"}"#).unwrap();
+        assert_eq!(old_config.title_style, TitleStyle::Summarization);
+
+        let mut labeled = old_config;
+        labeled.title_style = TitleStyle::Labeling;
+        let encoded = serde_json::to_string(&labeled).unwrap();
+        assert!(encoded.contains("\"title_style\":\"labeling\""));
+        let restored: InferenceSettings = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.title_style, TitleStyle::Labeling);
+    }
+
     fn spawn_http_response(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind local HTTP fixture");
         let address = listener.local_addr().expect("fixture address");
@@ -1313,6 +1397,20 @@ mod tests {
     }
 
     #[test]
+    fn kilo_gateway_proxy_egress_fails_closed_without_boot_loaded_rows() {
+        let settings = KiloGatewaySettings {
+            paid_proxies_enabled: true,
+            ..KiloGatewaySettings::default()
+        };
+
+        assert!(matches!(
+            kilo_gateway_client(&settings),
+            Err(InferenceError::Configuration(message))
+                if message.contains("no proxies were loaded from MongoDB")
+        ));
+    }
+
+    #[test]
     fn kilo_gateway_provider_routes_through_a_configured_paid_proxy() {
         let settings = KiloGatewaySettings {
             model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
@@ -1327,6 +1425,7 @@ mod tests {
                 username: String::new(),
                 password: String::new(),
             }],
+            ..KiloGatewaySettings::default()
         };
         let provider = KiloGatewayProvider(Arc::new(settings));
 

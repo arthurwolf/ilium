@@ -139,6 +139,7 @@ async fn async_main(
         agent_debug_menu_enabled: server_config.agent_debug_menu_enabled,
         http_api: server_config.http_api,
         progress_monitor_enabled: server_config.progress_monitor_enabled,
+        session_backups_enabled: server_config.session_backups_enabled,
     };
     match ilium_server::run(options).await {
         Ok(()) => ExitCode::SUCCESS,

@@ -31,6 +31,7 @@
 
 pub mod agent_debug_export;
 pub mod agent_debug_ui;
+pub mod agent_feature_setup;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_toolbar;
@@ -73,6 +74,7 @@ pub mod progress_bar;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
+mod proxy_database;
 pub mod render_cache;
 pub mod restructure;
 pub mod scheduled_input;
@@ -81,6 +83,7 @@ pub mod search_ui;
 pub mod search_workers;
 pub mod session_naming;
 pub mod settings_ui;
+pub mod setup_prompt;
 pub mod smart_copy;
 pub mod smart_copy_workers;
 pub mod split_layout;
@@ -94,6 +97,7 @@ pub mod terminal_selection;
 pub mod terminal_title_inference;
 pub mod terminal_view;
 pub mod text_prompt;
+pub mod text_trigger_dialog;
 pub mod theme;
 pub mod tick;
 pub mod title_inference;
@@ -353,8 +357,12 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         .unwrap_or(false);
     ilium_logging::initialize(&options.log_path, file_logging_enabled_hint, "client")?;
     ilium_logging::install_panic_logging();
-    let (config, config_dir) = init_config(config_dir_result, file_logging_enabled_hint);
+    let (mut config, config_dir, is_agent_setup_policy_available) =
+        init_config(config_dir_result, file_logging_enabled_hint);
     ilium_logging::set_enabled(config.debug.file_logging_enabled)?;
+    if config.inference.kilo_gateway.paid_proxies_enabled {
+        proxy_database::load_paid_proxies(&mut config.inference.kilo_gateway).await?;
+    }
     tracing::info!(
         session_name = options.session_name,
         session_cwd = %options.session_cwd.display(),
@@ -386,6 +394,7 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         &options,
         config,
         config_dir,
+        is_agent_setup_policy_available,
         sound_discovery,
         voice_input_devices,
         voice_output_devices,
@@ -416,11 +425,13 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
 fn init_config(
     config_dir_result: Result<PathBuf, ClientError>,
     fallback_debug_logging_enabled: bool,
-) -> (crate::config::ClientConfig, Option<PathBuf>) {
+) -> (crate::config::ClientConfig, Option<PathBuf>, bool) {
+    let mut is_agent_setup_policy_available = true;
     let config_dir = match config_dir_result {
         Ok(dir) => Some(dir),
         Err(error) => {
             tracing::warn!("failed to resolve config directory, using defaults: {error}");
+            is_agent_setup_policy_available = false;
             None
         }
     };
@@ -429,6 +440,7 @@ fn init_config(
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!("failed to load config, using defaults: {error}");
+                is_agent_setup_policy_available = false;
                 let mut config = crate::config::ClientConfig::default();
                 config.debug.file_logging_enabled = fallback_debug_logging_enabled;
                 config
@@ -441,13 +453,14 @@ fn init_config(
         }
     };
     crate::theme::init(config.theme);
-    (config, config_dir)
+    (config, config_dir, is_agent_setup_policy_available)
 }
 
 async fn run_inner(
     options: &RunOptions,
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
+    is_agent_setup_policy_available: bool,
     sound_discovery: ilium_sound::SoundDiscovery,
     voice_input_devices: Vec<String>,
     voice_output_devices: Vec<String>,
@@ -476,6 +489,9 @@ async fn run_inner(
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
 
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
+    app.agent_setup_home_dir =
+        directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf());
+    app.is_agent_setup_policy_available = is_agent_setup_policy_available;
     // The one place a terminal capability query belongs: a real process with a
     // real terminal attached, once. See `App::probe_terminal_image_support`.
     app.probe_terminal_image_support();
@@ -486,6 +502,14 @@ async fn run_inner(
     app.apply_sound_settings(config.sound);
     app.apply_inference_settings(config.inference);
     app.apply_trigger_settings(config.triggers);
+    app.apply_text_trigger_settings(config.text_triggers);
+    app.apply_agent_setup_settings(config.agent_setup);
+    // The detached server owns execution. Queue one prospective replacement
+    // on each attach so a server started before the client still receives the
+    // persisted global rules without needing a restart.
+    app.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers {
+        settings: app.text_trigger_settings.clone(),
+    });
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);

@@ -264,6 +264,25 @@ pub struct PtyOutputChunk {
 pub struct ScreenSnapshot {
     pub generation: u64,
     pub text: String,
+    /// Zero-based cursor row and column from the same parser frame as
+    /// `text`. Automated agent input uses this to distinguish rendered
+    /// placeholder text from a dirty composer whose cursor advanced through
+    /// user-authored input.
+    pub cursor_position: (u16, u16),
+    /// Row-major coordinates of visible cells carrying the terminal's dim
+    /// attribute. Codex uses this attribute for composer placeholder text but
+    /// not for user-authored drafts, so automated delivery can fail closed
+    /// even when the user moved a dirty draft's cursor back to column zero.
+    pub dimmed_cells: Vec<(u16, u16)>,
+}
+
+impl ScreenSnapshot {
+    /// Whether the cell at `row`, `column` carried the dim attribute in this
+    /// exact parser frame.
+    #[must_use]
+    pub fn is_cell_dimmed(&self, row: u16, column: u16) -> bool {
+        self.dimmed_cells.binary_search(&(row, column)).is_ok()
+    }
 }
 
 /// A consistent, bounded replay of a pane's output through `through_sequence`.
@@ -1113,9 +1132,24 @@ impl PtySession {
     /// the revision of another.
     pub fn screen_snapshot(&self) -> ScreenSnapshot {
         let parser = self.parser.read().unwrap();
+        let screen = parser.screen();
+        let (rows, columns) = screen.size();
+        let mut dimmed_cells = Vec::new();
+        for row in 0..rows {
+            for column in 0..columns {
+                if screen
+                    .cell(row, column)
+                    .is_some_and(|cell| cell.has_contents() && cell.dim())
+                {
+                    dimmed_cells.push((row, column));
+                }
+            }
+        }
         ScreenSnapshot {
             generation: self.screen_generation.load(Ordering::Acquire),
-            text: parser.screen().contents(),
+            text: screen.contents(),
+            cursor_position: screen.cursor_position(),
+            dimmed_cells,
         }
     }
 

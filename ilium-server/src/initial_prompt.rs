@@ -9,20 +9,12 @@
 //! fallback for the small startup window before that detector's next tick.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
-use ilium_ipc::PromptSubmissionSource;
+use ilium_core::NodeId;
 use tokio::sync::oneshot;
 
-use crate::ipc::handlers::write_key_input;
 use crate::pane::PaneResource;
 use crate::state::ServerState;
-
-/// Rechecks identity state even when the agent's prompt was drawn before the
-/// detector's process-tree pass completed. Screen changes wake the task
-/// immediately; this bounded fallback avoids depending on a further redraw.
-const READINESS_RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Starts the pane-owned task that delivers one initial prompt after visible
 /// agent readiness. A caller may return to IPC immediately; the task is
@@ -57,91 +49,23 @@ pub(crate) async fn start(
 
 /// Waits on the PTY's screen-change signal until either the detector or one of
 /// the known provider composer signatures confirms readiness, then writes text
-/// plus the final Enter in one PTY transaction so user input cannot interleave.
+/// and a later Enter under one pane input reservation.
 async fn deliver_when_ready(
     state: Arc<ServerState>,
     pane_id: NodeId,
     initial_input: String,
     completion_sender: oneshot::Sender<Result<(), String>>,
 ) {
-    let mut screen_changed = {
-        let panes = state.panes.read().await;
-        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-            let _ = completion_sender.send(Err("pane closed before prompt delivery".to_string()));
-            return;
-        };
-        runtime.session.subscribe_screen_changed()
-    };
-
-    loop {
-        if pane_has_ready_agent_composer(&state, pane_id).await {
-            let bytes = initial_submission_bytes(&initial_input);
-            // `write_key_input` itself broadcasts `PanePromptSubmitted` on the
-            // `Ok` path whenever `submission` is `Some` -- broadcasting it
-            // again here would double every subscriber's prompt-submitted
-            // count for this one delivery, so only the failure path needs
-            // handling.
-            if let Err(error) = write_key_input(
-                &state,
-                pane_id,
-                &bytes,
-                Some(PromptSubmissionSource::InitialAgentPrompt),
-            )
-            .await
-            {
-                let message = error.to_string();
-                tracing::warn!(
-                    pane_id = pane_id.0,
-                    "initial agent prompt was not delivered after readiness: {message}"
-                );
-                let _ = completion_sender.send(Err(message));
-            } else {
-                let _ = completion_sender.send(Ok(()));
-            }
-            return;
-        }
-
-        tokio::select! {
-            changed = screen_changed.changed() => {
-                if changed.is_err() {
-                    let _ = completion_sender.send(Err("pane closed before prompt delivery".to_string()));
-                    return;
-                }
-            }
-            () = tokio::time::sleep(READINESS_RECHECK_INTERVAL) => {}
-        }
+    let bytes = initial_input_bytes(&initial_input);
+    let result =
+        crate::agent_delivery::deliver_initial_prompt_when_ready(&state, pane_id, &bytes).await;
+    if let Err(message) = &result {
+        tracing::warn!(
+            pane_id = pane_id.0,
+            "initial agent prompt was not delivered after readiness: {message}"
+        );
     }
-}
-
-/// Takes one coherent pane snapshot while holding the registry read lock.
-/// Detection owns the process-tree work; when that classification has not yet
-/// arrived, the fallback still accepts only a known provider's exact composer
-/// chrome. A new pane has no prior transcript, so that narrow screen contract
-/// is stronger and more responsive than a fixed launch delay.
-async fn pane_has_ready_agent_composer(state: &ServerState, pane_id: NodeId) -> bool {
-    let panes = state.panes.read().await;
-    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-        return false;
-    };
-    let screen_snapshot = runtime.session.screen_snapshot();
-    if let Some(agent_class) = runtime.detected_agent_class.as_ref() {
-        return ilium_detect::is_agent_prompt_ready(agent_class, &screen_snapshot.text);
-    }
-
-    // The canonical provider registry drives this fallback, so adding a new
-    // built-in provider automatically extends readiness detection here too.
-    BuiltinAgentProvider::ALL.into_iter().any(|provider| {
-        ilium_detect::is_agent_prompt_ready(&provider.class(), &screen_snapshot.text)
-    })
-}
-
-/// Encodes a multiline editor task as bracketed paste and appends the sole
-/// submission Enter. Keeping both in one call to `write_key_input` makes the
-/// text/Enter handoff atomic with respect to concurrent terminal input.
-fn initial_submission_bytes(initial_input: &str) -> Vec<u8> {
-    let mut bytes = initial_input_bytes(initial_input);
-    bytes.push(b'\r');
-    bytes
+    let _ = completion_sender.send(result);
 }
 
 /// Encodes multiline editor content as one bracketed paste, leaving the
@@ -175,13 +99,13 @@ pub(crate) fn initial_input_bytes(initial_input: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{initial_input_bytes, initial_submission_bytes};
+    use super::initial_input_bytes;
 
     #[test]
-    fn multiline_initial_prompt_is_one_bracketed_paste_with_final_enter() {
+    fn multiline_initial_prompt_is_one_bracketed_paste_body() {
         assert_eq!(
-            initial_submission_bytes("first\nsecond"),
-            b"\x1b[200~first\nsecond\x1b[201~\r"
+            initial_input_bytes("first\nsecond"),
+            b"\x1b[200~first\nsecond\x1b[201~"
         );
     }
 
@@ -220,8 +144,8 @@ mod tests {
     #[test]
     fn a_single_line_paste_start_marker_is_stripped_so_it_cannot_open_a_phantom_paste() {
         // Written raw, `ESC[200~` would put the composer into paste mode with
-        // no closing marker, so the submission `\r` appended by
-        // `initial_submission_bytes` would be swallowed as paste content.
+        // no closing marker, so the later Enter would be swallowed as paste
+        // content.
         assert_eq!(initial_input_bytes("before\x1b[200~after"), b"beforeafter");
     }
 

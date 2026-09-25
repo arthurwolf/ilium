@@ -22,19 +22,226 @@ pub enum PaneContentKind {
     Board,
 }
 
-/// One reported tick of a long-running task's progress, set by
-/// `Tree::set_pane_progress` from a server-run monitor command (see
-/// `ilium-server`'s progress-monitor loop) and cleared explicitly when the
-/// agent finishes or cancels it. `percent` is always clamped to `0.0..=100.0`
-/// by the setter so no renderer needs to defend against an out-of-range or
-/// NaN value from an agent-authored command.
+/// Maximum UTF-8 byte lengths accepted from an unattended progress probe.
+/// These limits belong to the shared domain contract so the server, restored
+/// snapshots, and future adapters cannot disagree about what is safe to keep
+/// and display.
+pub const MAXIMUM_PROGRESS_JOB_ID_BYTES: usize = 256;
+pub const MAXIMUM_PROGRESS_MESSAGE_BYTES: usize = 2_048;
+pub const MAXIMUM_PROGRESS_ERROR_BYTES: usize = 4_096;
+pub const MAXIMUM_PROGRESS_MONITOR_ERROR_BYTES: usize = 2_048;
+
+/// Task lifecycle reported by the task-specific probe. Monitor execution
+/// failures are deliberately represented by [`ProgressMonitorHealth`], not by
+/// `Error`: failure to observe a task does not prove the task itself failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressTaskStatus {
+    NotStartedYet,
+    Running,
+    Error,
+    Done,
+}
+
+impl ProgressTaskStatus {
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Error | Self::Done)
+    }
+}
+
+/// Whether Ilium can currently observe the task. A degraded monitor retains
+/// the latest valid task report while retrying; a failed monitor has stopped
+/// polling and therefore leaves the task outcome explicitly unknown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressMonitorHealth {
+    Healthy,
+    Degraded {
+        consecutive_failures: u32,
+        last_error: String,
+    },
+    Failed {
+        consecutive_failures: u32,
+        last_error: String,
+    },
+}
+
+impl ProgressMonitorHealth {
+    pub const fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+
+    fn validate(&self) -> Result<(), ProgressValidationError> {
+        let (consecutive_failures, last_error) = match self {
+            Self::Healthy => return Ok(()),
+            Self::Degraded {
+                consecutive_failures,
+                last_error,
+            }
+            | Self::Failed {
+                consecutive_failures,
+                last_error,
+            } => (*consecutive_failures, last_error),
+        };
+        if consecutive_failures == 0 {
+            return Err(ProgressValidationError::InvalidMonitorFailureCount);
+        }
+        validate_bounded_text(
+            "monitor error",
+            last_error,
+            MAXIMUM_PROGRESS_MONITOR_ERROR_BYTES,
+            false,
+        )
+    }
+}
+
+/// A validated task report independent of any one monitor registration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressTaskReport {
+    pub job_id: String,
+    pub status: ProgressTaskStatus,
+    pub percent: f32,
+    pub message: String,
+    pub error: Option<String>,
+}
+
+impl ProgressTaskReport {
+    /// Constructs the canonical report. `done` is normalized to exactly 100%;
+    /// every other invalid value is rejected instead of silently clamped.
+    pub fn new(
+        job_id: String,
+        status: ProgressTaskStatus,
+        percent: f32,
+        message: String,
+        error: Option<String>,
+    ) -> Result<Self, ProgressValidationError> {
+        let mut report = Self {
+            job_id,
+            status,
+            percent: if status == ProgressTaskStatus::Done {
+                100.0
+            } else {
+                percent
+            },
+            message,
+            error,
+        };
+        if report.error.as_deref() == Some("") {
+            report.error = None;
+        }
+        report.validate()?;
+        Ok(report)
+    }
+
+    pub fn validate(&self) -> Result<(), ProgressValidationError> {
+        validate_bounded_text("job_id", &self.job_id, MAXIMUM_PROGRESS_JOB_ID_BYTES, false)?;
+        if !self.percent.is_finite() || !(0.0..=100.0).contains(&self.percent) {
+            return Err(ProgressValidationError::InvalidPercent);
+        }
+        if self.status == ProgressTaskStatus::Done && self.percent != 100.0 {
+            return Err(ProgressValidationError::DonePercentNotOneHundred);
+        }
+        validate_bounded_text(
+            "message",
+            &self.message,
+            MAXIMUM_PROGRESS_MESSAGE_BYTES,
+            true,
+        )?;
+        match (&self.status, &self.error) {
+            (ProgressTaskStatus::Error, Some(error)) => {
+                validate_bounded_text("error", error, MAXIMUM_PROGRESS_ERROR_BYTES, false)
+            }
+            (ProgressTaskStatus::Error, None) => Err(ProgressValidationError::MissingTaskError),
+            (_, Some(_)) => Err(ProgressValidationError::UnexpectedTaskError),
+            (_, None) => Ok(()),
+        }
+    }
+}
+
+/// Presentation state for one registered monitor. The task report and monitor
+/// health are kept together for one atomic tree/event update, but retain their
+/// separate semantics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaneProgress {
-    pub percent: f32,
-    /// Free-form status text (file being worked on, ETA, sub-step, ...).
-    /// Kept unclipped here; the renderer truncates to fit available rows, the
-    /// same division of responsibility as `last_prompt`/`last_prompt_banner`.
-    pub message: String,
+    pub monitor_id: u64,
+    pub report: ProgressTaskReport,
+    pub monitor_health: ProgressMonitorHealth,
+    pub last_observed_unix_millis: u64,
+}
+
+impl PaneProgress {
+    pub fn new(
+        monitor_id: u64,
+        report: ProgressTaskReport,
+        last_observed_unix_millis: u64,
+    ) -> Result<Self, ProgressValidationError> {
+        let progress = Self {
+            monitor_id,
+            report,
+            monitor_health: ProgressMonitorHealth::Healthy,
+            last_observed_unix_millis,
+        };
+        progress.validate()?;
+        Ok(progress)
+    }
+
+    pub fn validate(&self) -> Result<(), ProgressValidationError> {
+        if self.monitor_id == 0 {
+            return Err(ProgressValidationError::InvalidMonitorId);
+        }
+        self.report.validate()?;
+        self.monitor_health.validate()
+    }
+
+    pub const fn is_terminal(&self) -> bool {
+        self.report.status.is_terminal()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProgressValidationError {
+    #[error("progress monitor id must be non-zero")]
+    InvalidMonitorId,
+    #[error("progress percent must be finite and in 0..=100")]
+    InvalidPercent,
+    #[error("done progress must be exactly 100 percent")]
+    DonePercentNotOneHundred,
+    #[error("error status requires non-empty error detail")]
+    MissingTaskError,
+    #[error("only error status may include task error detail")]
+    UnexpectedTaskError,
+    #[error("monitor failure count must be positive")]
+    InvalidMonitorFailureCount,
+    #[error("{field} must not be empty")]
+    EmptyText { field: &'static str },
+    #[error("{field} exceeds its {maximum_bytes}-byte limit")]
+    TextTooLong {
+        field: &'static str,
+        maximum_bytes: usize,
+    },
+    #[error("{field} contains a control character")]
+    ControlCharacter { field: &'static str },
+}
+
+fn validate_bounded_text(
+    field: &'static str,
+    value: &str,
+    maximum_bytes: usize,
+    allow_empty: bool,
+) -> Result<(), ProgressValidationError> {
+    if !allow_empty && value.trim().is_empty() {
+        return Err(ProgressValidationError::EmptyText { field });
+    }
+    if value.len() > maximum_bytes {
+        return Err(ProgressValidationError::TextTooLong {
+            field,
+            maximum_bytes,
+        });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ProgressValidationError::ControlCharacter { field });
+    }
+    Ok(())
 }
 
 /// The user-owned document backing a kanban board.  The server persists this
@@ -441,6 +648,19 @@ pub enum AgentActivity {
     Idle,
 }
 
+/// Provider-reported lifecycle phase of a persistent task goal. This is
+/// independent from [`AgentActivity`]: an agent can be working while a goal is
+/// paused or blocked, and a reached goal remains useful context after the
+/// agent becomes idle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GoalState {
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    Reached,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaneStatus {
     /// Terminal pane, no agent CLI detected in it.
@@ -450,7 +670,7 @@ pub enum PaneStatus {
     /// Terminal pane running a detected agent CLI with a visible persistent
     /// task goal. Kept distinct so goal state travels through the existing
     /// snapshot/status-change contract without parallel client-local state.
-    AgentWithGoal(AgentClass, AgentActivity),
+    AgentWithGoal(AgentClass, AgentActivity, GoalState),
     /// Editor pane; `true` means it has unsaved changes.
     Editor { dirty: bool },
     /// A client-local kanban board backed by a user-selected path.
@@ -695,7 +915,7 @@ pub enum NodeKind {
         /// monitor command is currently reporting one. `serde(default)`
         /// keeps existing recovery snapshots compatible.
         #[serde(default)]
-        progress: Option<PaneProgress>,
+        progress: Option<Box<PaneProgress>>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -876,6 +1096,8 @@ pub enum TreeError {
     NotAPane(NodeId),
     #[error("pane {0:?} is not a terminal")]
     NotATerminal(NodeId),
+    #[error("pane {pane_id:?} progress is invalid: {reason}")]
+    InvalidPaneProgress { pane_id: NodeId, reason: String },
     #[error("scheduled input must contain text, Enter, or both")]
     EmptyScheduledInput,
     #[error("queued prompt must contain text and a positive delivery count")]
@@ -1379,7 +1601,11 @@ impl Tree {
                 NodeKind::Pane {
                     content: PaneContentKind::Terminal,
                     status: PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-                        | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done),
+                        | PaneStatus::AgentWithGoal(
+                            _,
+                            AgentActivity::Idle | AgentActivity::Done,
+                            _
+                        ),
                     ..
                 }
             )
@@ -2568,8 +2794,8 @@ impl Tree {
             PaneStatus::Agent(class, AgentActivity::Done) => {
                 Some(PaneStatus::Agent(class.clone(), AgentActivity::Idle))
             }
-            PaneStatus::AgentWithGoal(class, AgentActivity::Done) => Some(
-                PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle),
+            PaneStatus::AgentWithGoal(class, AgentActivity::Done, goal_state) => Some(
+                PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle, *goal_state),
             ),
             _ => None,
         };
@@ -2712,9 +2938,8 @@ impl Tree {
     }
 
     /// Records (or, with `None`, clears) a terminal pane's active
-    /// long-running-task progress. Percent is clamped to `0.0..=100.0` here
-    /// so no renderer needs to defend against an out-of-range or NaN value
-    /// reported by an agent-authored monitor command.
+    /// long-running-task progress. Invalid externally sourced state is
+    /// rejected rather than silently normalized at this persistence boundary.
     pub fn set_pane_progress(
         &mut self,
         id: NodeId,
@@ -2732,18 +2957,15 @@ impl Tree {
         if *content != PaneContentKind::Terminal {
             return Err(TreeError::NotATerminal(id));
         }
-        *field = progress.map(|progress| PaneProgress {
-            // `f32::clamp` leaves NaN as NaN (NaN compares false against both
-            // bounds), so a malformed agent-authored monitor command could
-            // otherwise poison the value; `Ord`-style clamp isn't available
-            // for floats, so NaN is checked explicitly instead.
-            percent: if progress.percent.is_nan() {
-                0.0
-            } else {
-                progress.percent.clamp(0.0, 100.0)
-            },
-            message: progress.message,
-        });
+        if let Some(progress) = progress.as_ref() {
+            progress
+                .validate()
+                .map_err(|error| TreeError::InvalidPaneProgress {
+                    pane_id: id,
+                    reason: error.to_string(),
+                })?;
+        }
+        *field = progress.map(Box::new);
         Ok(())
     }
 
@@ -2832,7 +3054,7 @@ impl Tree {
     /// any monitor command is currently reporting one.
     pub fn pane_progress(&self, id: NodeId) -> Option<&PaneProgress> {
         match &self.get(id)?.kind {
-            NodeKind::Pane { progress, .. } => progress.as_ref(),
+            NodeKind::Pane { progress, .. } => progress.as_deref(),
             NodeKind::Container(_) | NodeKind::Folder { .. } => None,
         }
     }
@@ -4505,7 +4727,7 @@ mod tests {
     }
 
     #[test]
-    fn set_pane_progress_round_trips_clamps_and_rejects_non_terminal_panes() {
+    fn set_pane_progress_round_trips_strictly_and_rejects_non_terminal_panes() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let terminal = tree
@@ -4516,51 +4738,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(tree.pane_progress(terminal), None);
-        tree.set_pane_progress(
-            terminal,
-            Some(PaneProgress {
-                percent: 42.0,
-                message: "frame 1200/3000".to_string(),
-            }),
+        let progress = PaneProgress::new(
+            7,
+            ProgressTaskReport::new(
+                "render-42".to_string(),
+                ProgressTaskStatus::Running,
+                42.0,
+                "frame 1200/3000".to_string(),
+                None,
+            )
+            .unwrap(),
+            1234,
         )
         .unwrap();
-        assert_eq!(
-            tree.pane_progress(terminal),
-            Some(&PaneProgress {
-                percent: 42.0,
-                message: "frame 1200/3000".to_string()
-            })
-        );
+        tree.set_pane_progress(terminal, Some(progress.clone()))
+            .unwrap();
+        assert_eq!(tree.pane_progress(terminal), Some(&progress));
 
-        tree.set_pane_progress(
-            terminal,
-            Some(PaneProgress {
-                percent: 250.0,
-                message: "over budget".to_string(),
-            }),
-        )
-        .unwrap();
-        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 100.0);
-
-        tree.set_pane_progress(
-            terminal,
-            Some(PaneProgress {
-                percent: -10.0,
-                message: "under budget".to_string(),
-            }),
-        )
-        .unwrap();
-        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 0.0);
-
-        tree.set_pane_progress(
-            terminal,
-            Some(PaneProgress {
-                percent: f32::NAN,
-                message: "nan".to_string(),
-            }),
-        )
-        .unwrap();
-        assert_eq!(tree.pane_progress(terminal).unwrap().percent, 0.0);
+        let mut invalid = progress.clone();
+        invalid.report.percent = f32::NAN;
+        assert!(matches!(
+            tree.set_pane_progress(terminal, Some(invalid)),
+            Err(TreeError::InvalidPaneProgress { pane_id, .. }) if pane_id == terminal
+        ));
+        assert_eq!(tree.pane_progress(terminal), Some(&progress));
 
         tree.set_pane_progress(terminal, None).unwrap();
         assert_eq!(tree.pane_progress(terminal), None);
@@ -4568,13 +4769,73 @@ mod tests {
         assert!(matches!(
             tree.set_pane_progress(
                 editor,
-                Some(PaneProgress {
-                    percent: 10.0,
-                    message: "nope".to_string()
-                })
+                Some(progress)
             ),
             Err(TreeError::NotATerminal(id)) if id == editor
         ));
+    }
+
+    #[test]
+    fn progress_report_invariants_are_strict() {
+        let done = ProgressTaskReport::new(
+            "job".to_string(),
+            ProgressTaskStatus::Done,
+            17.0,
+            "finished".to_string(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(done.percent, 100.0);
+        assert!(matches!(
+            ProgressTaskReport::new(
+                "job".to_string(),
+                ProgressTaskStatus::Running,
+                101.0,
+                String::new(),
+                None
+            ),
+            Err(ProgressValidationError::InvalidPercent)
+        ));
+        assert!(matches!(
+            ProgressTaskReport::new(
+                "job".to_string(),
+                ProgressTaskStatus::Error,
+                42.0,
+                String::new(),
+                None
+            ),
+            Err(ProgressValidationError::MissingTaskError)
+        ));
+        assert!(matches!(
+            ProgressTaskReport::new(
+                "bad\njob".to_string(),
+                ProgressTaskStatus::Running,
+                42.0,
+                String::new(),
+                None
+            ),
+            Err(ProgressValidationError::ControlCharacter { field: "job_id" })
+        ));
+    }
+
+    #[test]
+    fn monitor_health_is_independent_from_task_failure() {
+        let report = ProgressTaskReport::new(
+            "job".to_string(),
+            ProgressTaskStatus::Running,
+            64.0,
+            "rendering".to_string(),
+            None,
+        )
+        .unwrap();
+        let mut progress = PaneProgress::new(9, report, 100).unwrap();
+        progress.monitor_health = ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe timed out".to_string(),
+        };
+        progress.validate().unwrap();
+        assert_eq!(progress.report.status, ProgressTaskStatus::Running);
+        assert!(progress.monitor_health.is_failed());
     }
 
     #[test]
@@ -4761,7 +5022,7 @@ mod tests {
         .unwrap();
         tree.set_pane_status(
             goal_pane,
-            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done),
+            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done, GoalState::Active),
         )
         .unwrap();
         tree.set_pane_status(
@@ -4778,7 +5039,8 @@ mod tests {
             tree.acknowledge_agent_completion(goal_pane).unwrap(),
             Some(PaneStatus::AgentWithGoal(
                 AgentClass::Claude,
-                AgentActivity::Idle
+                AgentActivity::Idle,
+                GoalState::Active,
             ))
         );
         assert_eq!(
@@ -4789,7 +5051,11 @@ mod tests {
         assert!(matches!(
             &tree.get(goal_pane).unwrap().kind,
             NodeKind::Pane {
-                status: PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Idle),
+                status: PaneStatus::AgentWithGoal(
+                    AgentClass::Claude,
+                    AgentActivity::Idle,
+                    GoalState::Active
+                ),
                 ..
             }
         ));
@@ -5731,7 +5997,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             done,
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done),
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done, GoalState::Active),
         )
         .unwrap();
         let plain_shell = tree

@@ -31,8 +31,17 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             apply_tree_snapshot(app, tree);
             None
         }
+        ServerEvent::TextTriggersChanged { settings } => {
+            app.apply_text_trigger_settings(settings);
+            None
+        }
         ServerEvent::SessionRecoveryAvailable { pane_count } => {
-            app.mode = crate::app::Mode::ConfirmSessionRecovery { pane_count };
+            let recovery = crate::app::Mode::ConfirmSessionRecovery { pane_count };
+            if matches!(app.mode, crate::app::Mode::Normal) {
+                app.mode = recovery;
+            } else {
+                app.push_modal(recovery);
+            }
             None
         }
         ServerEvent::ScreenUpdate {
@@ -260,6 +269,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::InitialStateSyncComplete => {
+            app.is_initial_state_sync_complete = true;
+            app.reconcile_agent_setup_prompts();
+            app.maybe_show_agent_setup_prompt();
             Some(TriggerOccurrence::global(TriggerEvent::StartupComplete))
         }
         ServerEvent::PanePromptSubmitted { pane_id, source } => {
@@ -425,6 +437,16 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.ui_settings.progress_monitor_enabled = enabled;
             None
         }
+        ServerEvent::ProgressMonitorCheckCompleted { .. }
+        | ServerEvent::ProgressMonitorSetCompleted { .. }
+        | ServerEvent::ProgressMonitorStatusReported { .. }
+        | ServerEvent::ProgressMonitorGoalPolicyChanged { .. }
+        | ServerEvent::ProgressMonitorCleared { .. } => {
+            // These request-correlated replies are consumed by one-shot CLI
+            // connections. An attached TUI may observe a broadcast from an
+            // older server, but it has no local lifecycle state to update.
+            None
+        }
     }
 }
 
@@ -449,9 +471,26 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
 /// a known limitation of a multi-client session, not papered over with a
 /// guess.
 fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
+    let selected_setup_row = match &app.mode {
+        crate::app::Mode::Settings(state) if state.tab == crate::app::SettingsTab::Setup => {
+            app.agent_setup_rows().get(state.selected_row).cloned()
+        }
+        _ => None,
+    };
     let selection_reconciliation = selection_reconciliation(app, &tree);
     app.track_tree_snapshot_change(&tree);
     app.tree = tree;
+    if let Some(selected_setup_row) = selected_setup_row {
+        let current_rows = app.agent_setup_rows();
+        let replacement_index = current_rows
+            .iter()
+            .position(|row| row == &selected_setup_row);
+        let last_row = current_rows.len().saturating_sub(1);
+        if let crate::app::Mode::Settings(state) = &mut app.mode {
+            state.selected_row =
+                replacement_index.unwrap_or_else(|| state.selected_row.min(last_row));
+        }
+    }
     app.request_chatroom_reconcile();
     app.restore_expanded_groups();
     app.reconcile_selected_tree_path();
@@ -473,7 +512,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
             &node.kind,
             ilium_core::NodeKind::Pane {
                 status: ilium_core::PaneStatus::Agent(_, _)
-                    | ilium_core::PaneStatus::AgentWithGoal(_, _),
+                    | ilium_core::PaneStatus::AgentWithGoal(_, _, _),
                 ..
             }
         ) {
@@ -663,6 +702,9 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         }
     }
     app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
+    if app.is_initial_state_sync_complete {
+        app.reconcile_agent_setup_prompts();
+    }
 }
 
 /// Chooses the next surviving visible row below a removed selection, falling
@@ -2129,9 +2171,51 @@ mod tests {
     #[test]
     fn initial_state_complete_is_the_global_startup_trigger() {
         let mut app = app();
+        app.agent_setup_settings.never_ask_global = true;
         assert_eq!(
             apply(&mut app, ServerEvent::InitialStateSyncComplete),
             Some(TriggerOccurrence::global(TriggerEvent::StartupComplete))
         );
+    }
+
+    #[test]
+    fn automatic_setup_runs_at_initial_sync_without_displacing_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
+        app.apply_agent_setup_settings(crate::config::AgentSetupSettings {
+            chatroom_global_file: Some(directory.path().join("global-chatroom.md")),
+            progress_global_file: Some(directory.path().join("global-progress.md")),
+            ..crate::config::AgentSetupSettings::default()
+        });
+
+        app.maybe_show_agent_setup_prompt();
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
+        apply(
+            &mut app,
+            ServerEvent::SessionRecoveryAvailable { pane_count: 2 },
+        );
+        apply(&mut app, ServerEvent::InitialStateSyncComplete);
+        assert!(matches!(
+            app.mode,
+            crate::app::Mode::ConfirmSessionRecovery { pane_count: 2 }
+        ));
+        for path in [
+            directory.path().join("global-chatroom.md"),
+            directory.path().join("global-progress.md"),
+        ] {
+            let feature = if path.ends_with("global-chatroom.md") {
+                crate::agent_feature_setup::AgentFeature::Chatroom
+            } else {
+                crate::agent_feature_setup::AgentFeature::Progress
+            };
+            assert_eq!(
+                crate::agent_feature_setup::status(&path, feature).unwrap(),
+                crate::agent_feature_setup::FeatureSetupStatus::Managed
+            );
+        }
+
+        app.mode = crate::app::Mode::Normal;
+        app.maybe_show_agent_setup_prompt();
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
     }
 }

@@ -31,7 +31,11 @@ pub enum IconTarget {
     WaitingApproval,
     Done,
     Idle,
-    Goal,
+    GoalActive,
+    GoalPaused,
+    GoalBlocked,
+    GoalUsageLimited,
+    GoalReached,
     Bookmark,
     Lock,
     ToolbarSearch,
@@ -72,7 +76,7 @@ pub enum IconTarget {
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 58] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -92,7 +96,11 @@ impl IconTarget {
         Self::WaitingApproval,
         Self::Done,
         Self::Idle,
-        Self::Goal,
+        Self::GoalActive,
+        Self::GoalPaused,
+        Self::GoalBlocked,
+        Self::GoalUsageLimited,
+        Self::GoalReached,
         Self::Bookmark,
         Self::Lock,
         Self::ToolbarSearch,
@@ -150,7 +158,11 @@ impl IconTarget {
             Self::WaitingApproval => "Needs approval",
             Self::Done => "Done",
             Self::Idle => "Idle",
-            Self::Goal => "Goal attached",
+            Self::GoalActive => "Goal: pursuing",
+            Self::GoalPaused => "Goal: paused",
+            Self::GoalBlocked => "Goal: blocked",
+            Self::GoalUsageLimited => "Goal: usage limited",
+            Self::GoalReached => "Goal: reached",
             Self::Bookmark => "Bookmarked tree item",
             Self::Lock => "Locked closed folder",
             Self::ToolbarSearch => "Toolbar: search",
@@ -209,7 +221,11 @@ impl IconTarget {
             Self::WaitingApproval => "waiting_approval",
             Self::Done => "done",
             Self::Idle => "idle",
-            Self::Goal => "goal",
+            Self::GoalActive => "goal_active",
+            Self::GoalPaused => "goal_paused",
+            Self::GoalBlocked => "goal_blocked",
+            Self::GoalUsageLimited => "goal_usage_limited",
+            Self::GoalReached => "goal_reached",
             Self::Bookmark => "bookmark",
             Self::Lock => "lock",
             Self::ToolbarSearch => "toolbar_search",
@@ -272,7 +288,11 @@ impl IconTarget {
             Self::WaitingApproval => "?",
             Self::Done => "🔔",
             Self::Idle => "●",
-            Self::Goal => "🏁",
+            Self::GoalActive => "🎯",
+            Self::GoalPaused => "⏸️",
+            Self::GoalBlocked => "🚧",
+            Self::GoalUsageLimited => "⌛",
+            Self::GoalReached => "🏁",
             Self::Bookmark => "★",
             Self::Lock => "🔒",
             Self::ToolbarSearch => "⌕",
@@ -328,7 +348,11 @@ impl IconTarget {
             Self::WaitingApproval => &["?", "!", "⚑", "✋"],
             Self::Done => &["🔔", "✓", "●", "✦"],
             Self::Idle => &["●", "·", "○", "—"],
-            Self::Goal => &["🏁", "⚑", "◆", "✦"],
+            Self::GoalActive => &["🎯", "🏁", "🚩", "⚑"],
+            Self::GoalPaused => &["⏸️", "⏸", "🟨", "⏳"],
+            Self::GoalBlocked => &["🚧", "⛔", "🛑", "⚠️"],
+            Self::GoalUsageLimited => &["⌛", "⏳", "📉", "🪫"],
+            Self::GoalReached => &["🏁", "✅", "🏆", "🎉"],
             Self::Bookmark => &["★", "☆", "🔖", "📌"],
             Self::Lock => &["🔒", "🔐", "🔏", "⛓️"],
             Self::ToolbarSearch => &["⌕", "🔎", "🔍", "◉"],
@@ -390,7 +414,11 @@ pub struct IconSettings {
     pub waiting_approval: String,
     pub done: String,
     pub idle: String,
-    pub goal: String,
+    pub goal_active: String,
+    pub goal_paused: String,
+    pub goal_blocked: String,
+    pub goal_usage_limited: String,
+    pub goal_reached: String,
     pub bookmark: String,
     pub lock: String,
     pub toolbar_search: String,
@@ -455,7 +483,11 @@ impl IconSettings {
             waiting_approval: value(IconTarget::WaitingApproval),
             done: value(IconTarget::Done),
             idle: value(IconTarget::Idle),
-            goal: value(IconTarget::Goal),
+            goal_active: value(IconTarget::GoalActive),
+            goal_paused: value(IconTarget::GoalPaused),
+            goal_blocked: value(IconTarget::GoalBlocked),
+            goal_usage_limited: value(IconTarget::GoalUsageLimited),
+            goal_reached: value(IconTarget::GoalReached),
             bookmark: value(IconTarget::Bookmark),
             lock: value(IconTarget::Lock),
             toolbar_search: value(IconTarget::ToolbarSearch),
@@ -514,7 +546,11 @@ impl IconSettings {
             IconTarget::WaitingApproval => &self.waiting_approval,
             IconTarget::Done => &self.done,
             IconTarget::Idle => &self.idle,
-            IconTarget::Goal => &self.goal,
+            IconTarget::GoalActive => &self.goal_active,
+            IconTarget::GoalPaused => &self.goal_paused,
+            IconTarget::GoalBlocked => &self.goal_blocked,
+            IconTarget::GoalUsageLimited => &self.goal_usage_limited,
+            IconTarget::GoalReached => &self.goal_reached,
             IconTarget::Bookmark => &self.bookmark,
             IconTarget::Lock => &self.lock,
             IconTarget::ToolbarSearch => &self.toolbar_search,
@@ -573,7 +609,11 @@ impl IconSettings {
             IconTarget::WaitingApproval => &mut self.waiting_approval,
             IconTarget::Done => &mut self.done,
             IconTarget::Idle => &mut self.idle,
-            IconTarget::Goal => &mut self.goal,
+            IconTarget::GoalActive => &mut self.goal_active,
+            IconTarget::GoalPaused => &mut self.goal_paused,
+            IconTarget::GoalBlocked => &mut self.goal_blocked,
+            IconTarget::GoalUsageLimited => &mut self.goal_usage_limited,
+            IconTarget::GoalReached => &mut self.goal_reached,
             IconTarget::Bookmark => &mut self.bookmark,
             IconTarget::Lock => &mut self.lock,
             IconTarget::ToolbarSearch => &mut self.toolbar_search,
@@ -1009,5 +1049,25 @@ mod tests {
         }]);
         assert_eq!(results.entry_count, 1);
         assert_eq!(results.entry(0).expect("one semantic hit").glyph, "🚀");
+    }
+
+    #[test]
+    fn every_goal_phase_has_a_named_configurable_default_icon() {
+        for (target, key, glyph) in [
+            (super::IconTarget::GoalActive, "goal_active", "🎯"),
+            (super::IconTarget::GoalPaused, "goal_paused", "⏸️"),
+            (super::IconTarget::GoalBlocked, "goal_blocked", "🚧"),
+            (
+                super::IconTarget::GoalUsageLimited,
+                "goal_usage_limited",
+                "⌛",
+            ),
+            (super::IconTarget::GoalReached, "goal_reached", "🏁"),
+        ] {
+            assert!(super::IconTarget::ALL.contains(&target));
+            assert_eq!(target.key(), key);
+            assert_eq!(target.default_glyph(), glyph);
+            assert_eq!(super::IconTarget::from_key(key), Some(target));
+        }
     }
 }

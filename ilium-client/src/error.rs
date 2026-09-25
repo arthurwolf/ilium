@@ -40,4 +40,6 @@ pub enum ClientError {
         #[source]
         source: Box<crate::config::ConfigSaveError>,
     },
+    #[error("failed to load Kilo Gateway paid proxies from MongoDB: {0}")]
+    ProxyDatabase(#[from] crate::proxy_database::ProxyDatabaseError),
 }

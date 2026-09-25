@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
     BoardStorage, NodeActivityRevision, NodeId, PaneProgress, PaneStatus, PaneTitleSource,
-    PromptQueueDelivery, RestructurePlan, SplitOrientation, Tree, TreeMoveDirection,
+    ProgressTaskReport, PromptQueueDelivery, RestructurePlan, SplitOrientation, Tree,
+    TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,72 @@ pub enum PromptSubmissionSource {
     /// one or more idle/done agent panes. Appended last for the same reason
     /// as `ToolbarAction`.
     AskForUpdate,
+    /// A regex Text Trigger response written by the detached server after a
+    /// completed eligible terminal-output line matched a configured rule.
+    TextTrigger,
+    /// A task-terminal or monitor-failure notification emitted by the progress
+    /// lifecycle coordinator.
+    ProgressResult,
+    /// The progress lifecycle coordinator's causally tracked `/goal pause`.
+    ProgressGoalPause,
+    /// The progress lifecycle coordinator's causally tracked `/goal resume`.
+    ProgressGoalResume,
+}
+
+/// Whether the agent continues useful work while Ilium monitors or asks Ilium
+/// to pause and later resume its currently active persistent goal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressGoalPolicy {
+    KeepRunning,
+    PauseAndResume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressMonitorRejectionCode {
+    Disabled,
+    InvalidRequest,
+    InvalidProbeReport,
+    ProbeSpawnFailed,
+    ProbeTimedOut,
+    ProbeExitedNonZero,
+    ProbeOutputTooLarge,
+    ProbeIoFailed,
+    PaneNotFound,
+    StaleMonitor,
+    GoalOwnershipUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressMonitorRejection {
+    pub code: ProgressMonitorRejectionCode,
+    pub message: String,
+}
+
+/// Successful one-shot validation of a progress command. It intentionally has
+/// no monitor ID because `check` does not install persistent state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressMonitorPreflight {
+    pub report: ProgressTaskReport,
+    pub checked_at_unix_millis: u64,
+}
+
+/// Positive acknowledgement that the server committed a new registration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressMonitorAccepted {
+    pub monitor_id: u64,
+    pub progress: PaneProgress,
+    pub goal_policy: ProgressGoalPolicy,
+}
+
+/// Correlated machine-readable status returned by `ilium progress status`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressMonitorStatus {
+    pub pane_id: NodeId,
+    pub progress: Option<PaneProgress>,
+    pub goal_policy: Option<ProgressGoalPolicy>,
+    pub goal_resume_armed: bool,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here
@@ -388,24 +455,43 @@ pub enum ClientRequest {
         expected_session_id: String,
         last_prompt: String,
     },
-    /// Starts (or replaces) `pane_id`'s server-run progress monitor:
-    /// `command` runs in the pane's shell every `interval_seconds` and its
-    /// stdout is parsed as `{"percent": <0-100>, "message": <string>}` (see
-    /// `ilium-server`'s progress-monitor loop). Sent by the `ilium progress
-    /// set` CLI subcommand run from inside the pane's own shell, not by the
-    /// TUI -- any connection may send it, so the server enforces
-    /// `UpdateProgressMonitorEnabled`'s live setting, replying with
-    /// `ServerEvent::Error` when disabled. Appended to preserve every
-    /// earlier bincode variant discriminant.
+    /// Executes and validates one probe without installing a monitor.
+    CheckPaneProgressMonitor {
+        request_id: u64,
+        pane_id: NodeId,
+        command: String,
+    },
+    /// Transactionally preflights and then installs (or replaces) one
+    /// server-owned monitor. The correlated result is
+    /// [`ServerEvent::ProgressMonitorSetCompleted`].
     SetPaneProgressMonitor {
+        request_id: u64,
         pane_id: NodeId,
         command: String,
         interval_seconds: u32,
+        goal_policy: ProgressGoalPolicy,
     },
-    /// Stops `pane_id`'s active progress monitor, if any, and clears its
-    /// last reported progress. Appended to preserve every earlier bincode
-    /// variant discriminant.
-    ClearPaneProgressMonitor { pane_id: NodeId },
+    /// Returns the live registration/report state for one pane.
+    GetPaneProgressMonitorStatus { request_id: u64, pane_id: NodeId },
+    /// Stops `pane_id`'s monitor and clears presentation state. Supplying an
+    /// ID fences the clear so a stale agent cannot remove its replacement.
+    ClearPaneProgressMonitor {
+        request_id: u64,
+        pane_id: NodeId,
+        expected_monitor_id: Option<u64>,
+    },
+    /// Arms safe pause/resume orchestration for an existing monitor.
+    ArmProgressGoalResume {
+        request_id: u64,
+        pane_id: NodeId,
+        monitor_id: u64,
+    },
+    /// Disarms goal orchestration without clearing the task monitor.
+    DisarmProgressGoalResume {
+        request_id: u64,
+        pane_id: NodeId,
+        monitor_id: u64,
+    },
     /// Applies the Settings tab's progress-monitor toggle to the
     /// already-running detached server -- same live-toggle shape as
     /// `UpdateDebugLogging`. The client persists the same value before
@@ -413,6 +499,20 @@ pub enum ClientRequest {
     /// identical policy. Appended to preserve every earlier bincode variant
     /// discriminant.
     UpdateProgressMonitorEnabled { enabled: bool },
+    /// Replaces the detached server's text-trigger rules immediately. The
+    /// client persists the same value in `[text_triggers]` for future servers.
+    /// Appended to preserve every earlier bincode variant discriminant.
+    UpdateTextTriggers {
+        settings: crate::TextTriggerSettings,
+    },
+    /// Inserts literal text into one terminal, then delivers a separate Enter
+    /// after the receiving application has had time to process the insertion.
+    /// Unlike `KeyInput`, this is a semantic submission, not a raw byte write.
+    SubmitTerminalText {
+        pane_id: NodeId,
+        text: String,
+        source: PromptSubmissionSource,
+    },
 }
 
 impl ClientRequest {
@@ -463,9 +563,15 @@ impl ClientRequest {
             Self::SetNodeExpanded { .. } => "set_node_expanded",
             Self::SetNodeLockedClosed { .. } => "set_node_locked_closed",
             Self::ReportLastPromptFromTranscript { .. } => "report_last_prompt_from_transcript",
+            Self::CheckPaneProgressMonitor { .. } => "check_pane_progress_monitor",
             Self::SetPaneProgressMonitor { .. } => "set_pane_progress_monitor",
+            Self::GetPaneProgressMonitorStatus { .. } => "get_pane_progress_monitor_status",
             Self::ClearPaneProgressMonitor { .. } => "clear_pane_progress_monitor",
+            Self::ArmProgressGoalResume { .. } => "arm_progress_goal_resume",
+            Self::DisarmProgressGoalResume { .. } => "disarm_progress_goal_resume",
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
+            Self::UpdateTextTriggers { .. } => "update_text_triggers",
+            Self::SubmitTerminalText { .. } => "submit_terminal_text",
         }
     }
 
@@ -668,4 +774,41 @@ pub enum ServerEvent {
     /// same shape as `DebugLoggingChanged`. Appended last to preserve every
     /// existing bincode discriminant.
     ProgressMonitorEnabledChanged { enabled: bool },
+    /// The detached server accepted a live text-trigger update. Every
+    /// attached client converges its rendered settings without sending a
+    /// request back to the server.
+    TextTriggersChanged {
+        settings: crate::TextTriggerSettings,
+    },
+    /// Correlated result of a one-shot progress probe validation.
+    ProgressMonitorCheckCompleted {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<ProgressMonitorPreflight, ProgressMonitorRejection>,
+    },
+    /// Correlated positive or negative registration transaction result.
+    ProgressMonitorSetCompleted {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<ProgressMonitorAccepted, ProgressMonitorRejection>,
+    },
+    /// Correlated live status response.
+    ProgressMonitorStatusReported {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<ProgressMonitorStatus, ProgressMonitorRejection>,
+    },
+    /// Confirms a monitor's goal policy changed after generation validation.
+    ProgressMonitorGoalPolicyChanged {
+        request_id: u64,
+        pane_id: NodeId,
+        monitor_id: u64,
+        result: Result<ProgressGoalPolicy, ProgressMonitorRejection>,
+    },
+    /// Confirms a fenced clear. `None` means the pane had no active monitor.
+    ProgressMonitorCleared {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<Option<u64>, ProgressMonitorRejection>,
+    },
 }

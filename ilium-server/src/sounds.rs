@@ -115,7 +115,10 @@ fn spawn_config_watcher_with_interval(
             );
             return;
         };
-        let mut observed_fingerprint = poll_config_blocking(&config_path).await;
+        // Force the first tick to reload. `main`'s initial load can race a
+        // config write before this watcher starts; recording the new file's
+        // fingerprint without applying it would keep stale live settings.
+        let mut observed_fingerprint = None;
         let mut interval = tokio::time::interval(poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -138,6 +141,7 @@ fn spawn_config_watcher_with_interval(
             match load_config_blocking(config_dir.clone()).await {
                 Ok(config) => {
                     *state.sound_settings.write().await = config.sound;
+                    state.set_session_backups_enabled(config.session_backups_enabled);
                     observed_fingerprint = Some(current_fingerprint);
                 }
                 Err(error) => tracing::warn!(
@@ -268,10 +272,16 @@ mod tests {
         // Let the watcher record the initial config before testing a subsequent edit.
         tokio::time::sleep(Duration::from_millis(30)).await;
 
-        std::fs::write(&config_path, "[sound.events]\napproval_required = true\n").unwrap();
+        std::fs::write(
+            &config_path,
+            "[sound.events]\napproval_required = true\n[session]\nbackups_enabled = false\n",
+        )
+        .unwrap();
         let updated = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                if state.sound_settings.read().await.events.approval_required {
+                if state.sound_settings.read().await.events.approval_required
+                    && !state.session_backups_enabled()
+                {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;

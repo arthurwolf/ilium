@@ -51,6 +51,13 @@ fn main() {
             second_argument_index,
         } => run_clear_transition(first_argument_index, second_argument_index),
         FixtureBehavior::ChangeOnly => run_change_only(),
+        FixtureBehavior::GoalLifecycle { log_path } => run_goal_lifecycle(&log_path),
+        FixtureBehavior::PrintFile { path } => {
+            let contents = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("fixture reading {}: {error}", path.display()));
+            emit(&contents);
+        }
+        FixtureBehavior::RepaintThenReappear => run_repaint_then_reappear(),
         FixtureBehavior::EchoSubmittedLine { prefix } => {
             if let Some(line) = read_submitted_line() {
                 emit(&format!("{prefix}:<{line}>\r\n"));
@@ -265,13 +272,86 @@ fn read_submitted_line() -> Option<String> {
     }
 }
 
+fn run_goal_lifecycle(log_path: &std::path::Path) {
+    crossterm::terminal::enable_raw_mode().expect("enable raw mode for goal lifecycle fixture");
+    render_goal_composer(false);
+    while let Some(submission) = read_raw_submission() {
+        let normalized = submission.replace('\n', "\\n").replace('\r', "\\r");
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .unwrap_or_else(|error| panic!("open {}: {error}", log_path.display()));
+        writeln!(log, "{normalized}").expect("append goal lifecycle submission");
+        if submission.trim() == "/goal pause" {
+            render_goal_composer(true);
+        } else if submission.trim() == "/goal resume" {
+            render_goal_composer(false);
+            break;
+        } else {
+            // The result itself is a separate turn. Keep the same paused goal
+            // and repaint a fresh composer so Ilium can prove a later screen
+            // generation before sending `/goal resume`.
+            render_goal_composer(true);
+        }
+    }
+    let _ = crossterm::terminal::disable_raw_mode();
+    linger();
+}
+
+fn render_goal_composer(is_paused: bool) {
+    clear_screen();
+    let goal_segment = if is_paused {
+        "Goal paused (/goal resume)"
+    } else {
+        "Pursuing goal (5m)"
+    };
+    // Enable bracketed paste exactly as real agent composers do. Progress
+    // result messages are intentionally multiline.
+    // Codex renders placeholder cells to the right of the prompt while the
+    // live cursor remains at the first input cell. Keep that distinction:
+    // cursor-aware delivery must accept this empty composer but reject the
+    // same visible text after a user draft advances the cursor.
+    // Real Codex draws its status footer two rows *below* the composer, and
+    // Ilium reads goal state only from that footer, so the cursor is moved
+    // back up to the composer's first input cell after painting it.
+    emit(&format!(
+        "\x1b[?2004h› \x1b[2mSend a message\x1b[22m\r\n\r\n  \
+         gpt-6 · workspace · Ready · {goal_segment}\x1b[2A\r\x1b[2C"
+    ));
+}
+
+fn read_raw_submission() -> Option<String> {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+    let mut bytes = Vec::new();
+    let mut byte = [0_u8; 1];
+    loop {
+        match std::io::stdin().read(&mut byte) {
+            Ok(0) | Err(_) => return None,
+            Ok(_) if byte[0] == b'\r' => break,
+            Ok(_) => bytes.push(byte[0]),
+        }
+    }
+    if bytes.starts_with(PASTE_START) {
+        bytes.drain(..PASTE_START.len());
+    }
+    if bytes.ends_with(PASTE_END) {
+        bytes.truncate(bytes.len() - PASTE_END.len());
+    }
+    String::from_utf8(bytes).ok()
+}
+
 fn run_working_then_idle(working_seconds: u32) {
     for _ in 0..working_seconds {
-        // Both rows in one write, so no observer can see the goal line
-        // without the activity line -- see `run_change_only`.
+        // One write, so no observer can see the goal footer without the
+        // activity line -- see `run_change_only`. The layout matches real
+        // Codex: activity row, composer, then the status footer below it,
+        // which is the only row Ilium reads goal state from.
         emit(
-            "gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\r\n\
-             Cogitating (esc to interrupt)\r\n",
+            "Cogitating (esc to interrupt)\r\n\r\n\
+             › Send a message\r\n\r\n\
+             gpt-5.6-sol xhigh · workspace · Working · Pursuing goal (5m)\r\n",
         );
         std::thread::sleep(Duration::from_secs(1));
     }
@@ -379,7 +459,9 @@ fn run_delayed_composer_then_echo(delay_seconds: u32) {
     clear_screen();
     // The leading `›` is the stable part of Codex's composer contract; the
     // placeholder text after it rotates and is deliberately not asserted on.
-    emit("› Explain this codebase\r\n");
+    // Render placeholder text while keeping the cursor at Codex's first input
+    // cell, matching the real empty-composer contract.
+    emit("› \x1b[2mExplain this codebase\x1b[22m\r\x1b[2C");
     if let Some(line) = read_submitted_line() {
         emit(&format!("received-after-ready:<{line}>\r\n"));
     }
@@ -410,4 +492,21 @@ fn run_change_only() {
         counter += 1;
         std::thread::sleep(Duration::from_secs(1));
     }
+}
+
+fn run_repaint_then_reappear() {
+    // The server attaches the output forwarder just after spawning the PTY.
+    std::thread::sleep(Duration::from_millis(500));
+    emit("\x1b[Htrigger-ready\x1b[K\r\n");
+    std::thread::sleep(Duration::from_millis(350));
+    emit("\x1b[Hwaiting\x1b[K");
+    std::thread::sleep(Duration::from_millis(100));
+    emit("\x1b[Htrigger-ready\x1b[K\r\n");
+    std::thread::sleep(Duration::from_millis(350));
+    emit("\x1b[Hwaiting\x1b[K\r\n");
+    // Longer than the trigger settle window, so this is a new occurrence
+    // rather than a repaint of the first.
+    std::thread::sleep(Duration::from_millis(2000));
+    emit("\x1b[Htrigger-ready\x1b[K\r\n");
+    linger();
 }

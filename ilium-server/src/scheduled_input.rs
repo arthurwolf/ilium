@@ -16,7 +16,7 @@ use ilium_core::{NodeId, ScheduledPaneInput, Tree};
 use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 use tokio::task::JoinHandle;
 
-use crate::ipc::handlers::{broadcast_and_persist, write_key_input};
+use crate::ipc::handlers::{broadcast_and_persist, submit_terminal_text, write_key_input};
 use crate::state::ServerState;
 
 const MILLIS_PER_SECOND: u64 = 1000;
@@ -97,8 +97,8 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
     let mut tree_changed = false;
     for (pane_id, scheduled_input) in due_inputs {
         // Keep schedule replacement outside the final check/write/clear
-        // window. Normal live keyboard input still serializes at the PTY
-        // writer, so the delayed payload itself remains one atomic write.
+        // window. The pane input gate reserves the text-to-Enter sequence
+        // against concurrent keyboard and mouse input.
         let _transaction = state.scheduled_input_transaction.lock().await;
         if !is_current_schedule(state, pane_id, &scheduled_input).await {
             continue;
@@ -172,31 +172,40 @@ async fn is_current_schedule(
     is_current
 }
 
-/// Sends the complete payload in one PTY write so live input cannot interleave
-/// between delayed text and its Enter. The shared write path still observes
-/// the embedded carriage return for title tracking and detection refresh.
+/// Sends text plus Enter through the staged terminal submission path. Text-only
+/// and Enter-only schedules retain their raw PTY input behavior.
 async fn write_scheduled_input(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     scheduled_input: &ScheduledPaneInput,
 ) -> Result<(), String> {
-    let bytes = scheduled_input_bytes(scheduled_input);
+    if scheduled_input.send_enter && !scheduled_input.text.is_empty() {
+        return submit_terminal_text(
+            state,
+            pane_id,
+            &scheduled_input.text,
+            PromptSubmissionSource::ScheduledInput,
+        )
+        .await;
+    }
+    let bytes = raw_scheduled_input_bytes(scheduled_input)?;
     let submission = scheduled_input
         .send_enter
         .then_some(PromptSubmissionSource::ScheduledInput);
     write_key_input(state, pane_id, &bytes, submission).await
 }
 
-/// Produces each supported payload form without special cases in the PTY
-/// layer: text only, text followed by Enter, or Enter only.
-fn scheduled_input_bytes(scheduled_input: &ScheduledPaneInput) -> Vec<u8> {
-    let mut bytes =
-        Vec::with_capacity(scheduled_input.text.len() + usize::from(scheduled_input.send_enter));
-    bytes.extend_from_slice(scheduled_input.text.as_bytes());
-    if scheduled_input.send_enter {
-        bytes.push(b'\r');
+/// Raw input supports text-only or Enter-only. Combined submissions must use
+/// `submit_terminal_text` so the composer receives a separate Enter stage.
+fn raw_scheduled_input_bytes(scheduled_input: &ScheduledPaneInput) -> Result<Vec<u8>, String> {
+    if scheduled_input.send_enter && !scheduled_input.text.is_empty() {
+        return Err("text plus Enter requires staged terminal submission".to_owned());
     }
-    bytes
+    if scheduled_input.send_enter {
+        Ok(b"\r".to_vec())
+    } else {
+        Ok(scheduled_input.text.as_bytes().to_vec())
+    }
 }
 
 fn current_unix_millis() -> Result<u64, String> {
@@ -269,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn payload_bytes_cover_text_only_text_plus_enter_and_enter_only() {
+    fn raw_payload_bytes_cover_text_only_and_enter_only() {
         let text_only = ScheduledPaneInput {
             execute_at_unix_millis: 1,
             text: "continue".to_string(),
@@ -285,8 +294,8 @@ mod tests {
             send_enter: true,
         };
 
-        assert_eq!(scheduled_input_bytes(&text_only), b"continue");
-        assert_eq!(scheduled_input_bytes(&text_and_enter), b"continue\r");
-        assert_eq!(scheduled_input_bytes(&enter_only), b"\r");
+        assert_eq!(raw_scheduled_input_bytes(&text_only).unwrap(), b"continue");
+        assert!(raw_scheduled_input_bytes(&text_and_enter).is_err());
+        assert_eq!(raw_scheduled_input_bytes(&enter_only).unwrap(), b"\r");
     }
 }

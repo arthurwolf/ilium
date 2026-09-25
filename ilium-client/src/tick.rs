@@ -37,12 +37,17 @@ pub fn on_tick(
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     app.drain_pending_staged_keystrokes(now);
+    let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
+    app.maybe_show_agent_setup_prompt();
+    let setup_prompt_changed =
+        !setup_prompt_was_open && matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     was_animating
         || tree_transition_changed
         || terminal_activity_changed
         || autosave_wrote
         || workspace_search_started
         || chatroom_changed
+        || setup_prompt_changed
 }
 
 /// Re-fires a manual retitle that landed while `titles_loading` already

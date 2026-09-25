@@ -114,6 +114,14 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         app.last_tree_click = None;
     }
 
+    // Smart Copy owns mouse events for the frozen pane, including releases
+    // from a pre-existing tree/chatroom drag gesture. Route it before any
+    // other stateful mouse owner can swallow the selection click.
+    if matches!(app.mode, Mode::SmartCopy) {
+        handle_smart_copy_mouse(app, mouse, position);
+        return;
+    }
+
     // An active scrollbar drag retains ownership even when the pointer leaves
     // the chatroom panel, so releasing over the tree or status row cannot
     // leave the drag latched or route the same gesture into another surface.
@@ -124,6 +132,15 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         )
     {
         app.handle_chatroom_mouse(mouse, position);
+        return;
+    }
+
+    // The voice control is global and rendered above every full-screen view,
+    // so its hit-test must precede modal dispatch as well.
+    if app.layout.voice_control_area.contains(position)
+        && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
+    {
+        app.toggle_voice_control();
         return;
     }
 
@@ -144,20 +161,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         } else if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
             app.clear_tree_drag();
         }
-        return;
-    }
-
-    // The voice control is global and rendered above every full-screen view,
-    // so its hit-test must precede modal dispatch as well.
-    if app.layout.voice_control_area.contains(position)
-        && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
-    {
-        app.toggle_voice_control();
-        return;
-    }
-
-    if matches!(app.mode, Mode::SmartCopy) {
-        handle_smart_copy_mouse(app, mouse, position);
         return;
     }
 
@@ -303,6 +306,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    if matches!(app.mode, Mode::AgentSetupPrompt(_)) {
+        handle_agent_setup_prompt_mouse(app, mouse);
+        return;
+    }
+
     if is_shared_action_dialog(&app.mode) {
         handle_shared_action_dialog_mouse(app, mouse);
         return;
@@ -355,6 +363,9 @@ fn handle_smart_copy_mouse(app: &mut App, mouse: MouseEvent, position: Position)
         app.exit_smart_copy();
         return;
     };
+    let content_area = app
+        .smart_copy_terminal_area(pane_id)
+        .unwrap_or(viewport.content_area);
     if viewport
         .toolbar_area
         .is_some_and(|area| crate::smart_copy::exit_button_rect(area).contains(position))
@@ -367,8 +378,8 @@ fn handle_smart_copy_mouse(app: &mut App, mouse: MouseEvent, position: Position)
     match mouse.kind {
         MouseEventKind::ScrollUp => app.smart_copy_cycle_overlap(-1),
         MouseEventKind::ScrollDown => app.smart_copy_cycle_overlap(1),
-        MouseEventKind::Up(MouseButton::Left) if viewport.content_area.contains(position) => {
-            app.smart_copy_copy_current()
+        MouseEventKind::Up(MouseButton::Left) if content_area.contains(position) => {
+            app.smart_copy_copy_current();
         }
         _ => {}
     }
@@ -383,6 +394,7 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::InferenceSettingPrompt(_, _)
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::ApiSettingPrompt(_)
+            | Mode::AgentSetupPathPrompt(_, _)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
             | Mode::AgentDebugSavePath(..)
@@ -450,6 +462,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::InferenceSettingPrompt(_, state)
         | Mode::VoiceSettingPrompt(_, state)
         | Mode::ApiSettingPrompt(state)
+        | Mode::AgentSetupPathPrompt(_, state)
         | Mode::SaveAs(_, state)
         | Mode::AgentDebugSavePath(_, state)
         | Mode::BoardCardPrompt(_, state)
@@ -458,6 +471,41 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         _ => return,
     };
     place_prompt_cursor(state, layout.input_box, position);
+}
+
+fn handle_agent_setup_prompt_mouse(app: &mut App, mouse: MouseEvent) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let Some(focus) = crate::setup_prompt::hit_test(app.layout.screen_area, position) else {
+        return;
+    };
+    let Mode::AgentSetupPrompt(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+        unreachable!("setup prompt match must preserve its mode");
+    };
+    match state.activate(focus) {
+        crate::setup_prompt::SetupPromptOutcome::Continue => {
+            app.mode = Mode::AgentSetupPrompt(state)
+        }
+        crate::setup_prompt::SetupPromptOutcome::Apply { chatroom, progress } => {
+            if app.apply_agent_setup_prompt(&state.scope, chatroom, progress) {
+                app.maybe_show_agent_setup_prompt();
+            } else {
+                app.mode = Mode::AgentSetupPrompt(state);
+            }
+        }
+        crate::setup_prompt::SetupPromptOutcome::NotNow => {
+            app.maybe_show_agent_setup_prompt();
+        }
+        crate::setup_prompt::SetupPromptOutcome::NeverAsk => {
+            if app.suppress_agent_setup_prompt(&state.scope) {
+                app.maybe_show_agent_setup_prompt();
+            } else {
+                app.mode = Mode::AgentSetupPrompt(state);
+            }
+        }
+    }
 }
 
 /// Reuses the Y/N keyboard path so button clicks cannot drift from key
@@ -1444,12 +1492,47 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 app.mode = Mode::Normal;
                 return;
             }
-            if let Some(tab) = crate::settings_ui::tab_at(layout.tab_list_area, position) {
+            if let Some(tab) =
+                crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
+            {
                 if tab != state.tab {
                     state.tab = tab;
-                    state.selected_row = 0;
+                    state.selected_row = usize::from(
+                        tab == crate::app::SettingsTab::Titles
+                            && app.inference_settings.title_style
+                                == ilium_inference::TitleStyle::Summarization,
+                    );
                     state.trigger_action_cursor = 0;
                     state.scroll = 0;
+                }
+            } else if state.tab == crate::app::SettingsTab::Setup {
+                if let Some(index) = crate::settings_ui::setup_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app,
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = app.agent_setup_rows().get(index).cloned() {
+                        match row {
+                            crate::app::AgentSetupRow::GlobalFile { feature, .. } => {
+                                app.mode = Mode::Settings(state);
+                                app.settings_open_agent_setup_path(feature);
+                                return;
+                            }
+                            _ => app.settings_toggle_agent_setup_row(&row),
+                        }
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Titles {
+                if let Some(style) = crate::settings_ui::title_style_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                ) {
+                    state.selected_row =
+                        usize::from(style == ilium_inference::TitleStyle::Summarization);
+                    app.settings_select_title_style(style);
                 }
             } else if state.tab == crate::app::SettingsTab::Inference {
                 if let Some((row, direction)) = crate::settings_ui::inference_content_hit(
@@ -2938,5 +3021,107 @@ mod shared_dialog_mouse_tests {
             }] if *parent_group == group_id && name == "Planning" && path == &board_path
         ));
         std::fs::remove_dir_all(project_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod smart_copy_mouse_tests {
+    use super::*;
+    use crate::agent_toolbar::AgentToolbarAction;
+    use crate::app::{App, FocusTarget, PaneRuntime, RightPanelTarget};
+    use crate::terminal_view::TerminalView;
+    use crossterm::event::KeyModifiers;
+    use ilium_core::{AgentActivity, AgentClass, PaneContentKind, ROOT_ID};
+
+    fn app_with_candidate() -> (App, NodeId) {
+        let mut app = App::new("smart-copy-mouse-test".to_owned(), std::env::temp_dir());
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                ilium_core::PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            )
+            .unwrap();
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"curl https://example.test/api\r\n");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::SmartCopy);
+        let request = app.take_pending_smart_copy_request().unwrap();
+        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+            generation: request.generation,
+            pane_id,
+            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
+                r#"{"label":"url","kind":"url","parts":[{"lines":[1]}]}"#.to_owned(),
+            ),
+        });
+        (app, pane_id)
+    }
+
+    fn candidate_position(app: &App, pane_id: NodeId) -> Position {
+        let area = app.smart_copy_terminal_area(pane_id).unwrap();
+        let candidate = &app.smart_copy_session.as_ref().unwrap().candidates[0];
+        let span = candidate.spans[0];
+        Position::new(
+            area.x.saturating_add(span.start_column),
+            area.y.saturating_add(span.row),
+        )
+    }
+
+    fn mouse(kind: MouseEventKind, position: Position) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn smart_copy_release_is_not_lost_to_stale_tree_drag() {
+        let (mut app, pane_id) = app_with_candidate();
+        let position = candidate_position(&app, pane_id);
+        app.begin_tree_drag(pane_id);
+
+        handle_mouse_event(&mut app, mouse(MouseEventKind::Moved, position));
+        assert_eq!(
+            app.smart_copy_session
+                .as_ref()
+                .and_then(|session| session.current_candidate())
+                .map(|candidate| candidate.label.as_str()),
+            Some("url")
+        );
+        app.status_message = None;
+        handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Up(MouseButton::Left), position),
+        );
+        assert_ne!(
+            app.status_message.as_deref(),
+            Some("Move over a highlighted Smart Copy selection")
+        );
+    }
+
+    #[test]
+    fn smart_copy_release_only_hosts_still_copy_the_hovered_candidate() {
+        let (mut app, pane_id) = app_with_candidate();
+        let position = candidate_position(&app, pane_id);
+        handle_mouse_event(&mut app, mouse(MouseEventKind::Moved, position));
+        app.status_message = None;
+        handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Up(MouseButton::Left), position),
+        );
+        assert_ne!(
+            app.status_message.as_deref(),
+            Some("Move over a highlighted Smart Copy selection")
+        );
     }
 }

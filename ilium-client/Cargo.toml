@@ -31,7 +31,9 @@ ilium-transport = { version = "0.1.0", path = "../ilium-transport" }
 ilium-voice = { version = "0.1.0", path = "../ilium-voice" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
+mongodb = "3.8.0"
 pulldown-cmark = "0.13"
+regex = "1.12.3"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-image = { version = "11.0", default-features = false }
 ratatui-textarea = "0.9.2"
@@ -51,6 +53,7 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-on
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
 zbus = "5.18.0"
+uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

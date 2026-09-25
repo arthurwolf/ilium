@@ -171,6 +171,13 @@ impl IsolatedXdgDirs {
         for dir in [&data_home, &config_home, &ilium_config_dir, &debug_log_dir] {
             std::fs::create_dir_all(dir)?;
         }
+        // Unrelated smoke scenarios must never inspect or offer to modify the
+        // developer's real global agent instruction file. Dedicated setup
+        // coverage exercises the offer separately with explicit temp paths.
+        std::fs::write(
+            ilium_config_dir.join("config.toml"),
+            "[agent_setup]\nnever_ask_global = true\n",
+        )?;
         // The runtime directory deliberately does *not* live under `root`. A
         // session socket must fit `sockaddr_un` (100 bytes here), and a
         // platform temporary directory can spend most of that budget on its
@@ -564,7 +571,7 @@ async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tr
 /// YAML mapping under the `project name` key) closely enough for
 /// `project_naming::load_stored_project_name` to read it back -- see
 /// this file's module docs for why this must happen before attaching.
-fn seed_project_config(cwd: &Path) {
+fn seed_project_config(xdg: &IsolatedXdgDirs, cwd: &Path) {
     let ilium_dir = cwd.join(".ilium");
     std::fs::create_dir_all(&ilium_dir).expect("create .ilium dir");
     std::fs::write(
@@ -572,6 +579,13 @@ fn seed_project_config(cwd: &Path) {
         format!("project name: {PROJECT_NAME}\n"),
     )
     .expect("write .ilium/config.yaml");
+    let mut agent_setup = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("read isolated agent setup policy")
+        .agent_setup;
+    agent_setup.never_ask_global = true;
+    agent_setup.never_ask_projects.push(cwd.to_path_buf());
+    ilium_client::config::save_agent_setup_settings(&xdg.ilium_config_dir, &agent_setup)
+        .expect("suppress setup offers in unrelated smoke scenarios");
 }
 
 /// Writes the user-wide client config inside this test's isolated XDG root,
@@ -580,12 +594,14 @@ fn seed_project_config(cwd: &Path) {
 fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
     let ilium_config_dir = xdg.config_home.join("ilium");
     std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
+    let config_path = ilium_config_dir.join("config.toml");
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     std::fs::write(
-        ilium_config_dir.join("config.toml"),
+        config_path,
         // Deliberately no `[debug] file_logging_enabled`: this test asserts
         // further down that the Settings screen shows it off by default, so
         // seeding it on here would be seeding the answer.
-        "[keyboard]\nshortcut_base = \"b\"\n",
+        format!("{existing}\n[keyboard]\nshortcut_base = \"b\"\n"),
     )
     .expect("write isolated keyboard config");
 }
@@ -613,9 +629,11 @@ fn seed_tree_row_management_controls(xdg: &IsolatedXdgDirs) {
 fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
     let ilium_config_dir = xdg.config_home.join("ilium");
     std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
+    let config_path = ilium_config_dir.join("config.toml");
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     std::fs::write(
-        ilium_config_dir.join("config.toml"),
-        "[debug]\nfile_logging_enabled = true\n\n[detection]\nworking_poll_seconds = 1\n\n[ui]\nagent_debug_menu_enabled = true\n",
+        config_path,
+        format!("{existing}\n[debug]\nfile_logging_enabled = true\n\n[detection]\nworking_poll_seconds = 1\n\n[ui]\nagent_debug_menu_enabled = true\n"),
     )
     .expect("write isolated agent-debug config");
 }
@@ -818,7 +836,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     seed_tree_row_management_controls(&xdg);
     let project_dir = temp_root.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     // Declared after `temp_root` (see `KillSessionOnDrop`'s doc comment) and
     // before phase 1, which is the earliest point that can spawn the
     // server this guard exists to not leak.
@@ -1587,11 +1605,60 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
     );
 
-    // Triggers follows Voice control and Inference. Verify the installed
-    // binary renders the new event-to-actions surface, persists an opt-in
-    // startup action immediately, and keeps a later event visible while its
-    // longer document scrolls to follow keyboard selection.
+    // Titles follows Voice control and Inference. Exercise both its keyboard
+    // and mouse radio paths through the real rendered Settings screen.
     tui.write(b"\t\t\t")
+        .expect("switching to the Titles settings tab");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("AGENT WORK BEING NAMED")
+                    && screen.contains("CUT PAPER COMPONENT")
+                    && screen.contains("Develop Cut Paper Component")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the Titles comparison, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"k\r")
+        .expect("selecting Labeling with the keyboard");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("title_style = \"labeling\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected Labeling to persist"
+    );
+    let (summary_column, summary_row) = tui
+        .with_screen(|screen| {
+            let row = rows_containing(screen, "Summarization").first().copied()?;
+            let column = column_of_text_in_row(screen, row, "Summarization")?;
+            Some((column, row))
+        })
+        .expect("Summarization radio row should be visible");
+    tui.write(&sgr_mouse_down(0, summary_column, summary_row))
+        .expect("clicking Summarization");
+    tui.write(&sgr_mouse_up(summary_column, summary_row))
+        .expect("releasing Summarization click");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("title_style = \"summarization\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected Summarization click to persist"
+    );
+
+    // Triggers follows Titles. Verify the installed binary renders the
+    // event-to-actions surface, persists an opt-in startup action immediately,
+    // and follows keyboard selection while its longer document scrolls.
+    tui.write(b"\t")
         .expect("switching to the Triggers settings tab");
     assert!(
         wait_until(
@@ -1640,11 +1707,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    // Debug follows Triggers. Its real toggle must preserve the fresh-install
+    // Debug follows Text Triggers. Its real toggle must preserve the fresh-install
     // default (no `.txt` file before opt-in), persist the choice, open both
     // process writers immediately, and make the next structural request land
     // in the server's major-action trail.
-    tui.write(b"\t")
+    tui.write(b"\t\t")
         .expect("switching to the Debug settings tab");
     assert!(
         wait_until(
@@ -1805,7 +1872,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     seed_keyboard_config(&xdg);
     let project_dir = temp_root.path().join("client-restart-project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -2011,7 +2078,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("split-project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -2589,7 +2656,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     // See `KillSessionOnDrop`'s doc comment for why this must be declared
     // after `temp_root` and before anything that can spawn the server.
     let mut cleanup_guard = KillSessionOnDrop {
@@ -2789,8 +2856,16 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // should remain on screen briefly with one of the two labels translated
     // left. Two names plus only one settled fixed-width label distinguishes
     // that exit frame from both the pre-close and post-transition states.
-    tui.write(b"\x1b[B\x1b[B")
-        .expect("selecting the first pane row below the default group");
+    let first_pane_row = tui.with_screen(|screen| {
+        rows_containing_in_order(screen, &["📟", "shell"])
+            .first()
+            .copied()
+    });
+    let first_pane_row = first_pane_row.expect("first pane remains visible after expanding group");
+    tui.write(&sgr_mouse_down(0, 8, first_pane_row))
+        .expect("select the first pane for closing");
+    tui.write(&sgr_mouse_up(8, first_pane_row))
+        .expect("release first pane selection click");
     tui.write(b"\x01x")
         .expect("writing Ctrl+A then x (ClosePane)");
     let removal_motion_observed = wait_for_transient_frame(
@@ -2907,7 +2982,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let source_path = project_dir.join("task.txt");
     std::fs::write(
         &source_path,
@@ -2978,8 +3053,18 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         "expected task.txt in file picker, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\r")
-        .expect("select task.txt below the parent entry");
+    let (task_column, task_row) = tui
+        .with_screen(|screen| {
+            let row = rows_containing(screen, "task.txt").first().copied()?;
+            Some((column_of_text_in_row(screen, row, "task.txt")?, row))
+        })
+        .expect("task.txt should be visible in the picker");
+    for _ in 0..2 {
+        tui.write(&sgr_mouse_down(0, task_column, task_row))
+            .expect("select then open task.txt");
+        tui.write(&sgr_mouse_up(task_column, task_row))
+            .expect("release task.txt click");
+    }
     assert!(
         wait_until(
             || tui.screen_text().contains("CREATE_AGENT_TARGET_LINE"),
@@ -3095,7 +3180,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("board-project");
     std::fs::create_dir_all(&project_dir).expect("create board project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let context_source = "# Context column\n\n* [ ] Context task\n\n## Queue one\n\n## Queue two\n\n## Queue three\n\n## Queue four\n\n## Queue five\n";
     let context_path = project_dir.join("context.md");
     std::fs::write(&context_path, context_source).expect("write context Markdown");
@@ -3142,8 +3227,18 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         "expected Markdown files in editor picker, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\r")
-        .expect("select context.md below the parent entry");
+    let (context_column, context_row) = tui
+        .with_screen(|screen| {
+            let row = rows_containing(screen, "context.md").first().copied()?;
+            Some((column_of_text_in_row(screen, row, "context.md")?, row))
+        })
+        .expect("context.md should be visible in the picker");
+    for _ in 0..2 {
+        tui.write(&sgr_mouse_down(0, context_column, context_row))
+            .expect("select then open context.md");
+        tui.write(&sgr_mouse_up(context_column, context_row))
+            .expect("release context.md click");
+    }
     assert!(
         wait_until(|| tui.screen_text().contains("Context task"), WAIT_TIMEOUT).await,
         "expected context.md in editor, got: {:?}",
@@ -3668,7 +3763,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("scheduled-input-project");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -3708,7 +3803,10 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     // state while verifying scheduling.
     assert!(
         wait_until(
-            || tui.screen_text().contains("\u{1f4df}   cat"),
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Chatroom") && screen.contains("\u{1f4df}   cat")
+            },
             WAIT_TIMEOUT
         )
         .await,
@@ -3811,7 +3909,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     seed_tree_row_management_controls(&xdg);
     let project_dir = temp_root.path().join("p");
     std::fs::create_dir_all(&project_dir).expect("create project dir");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -3988,7 +4086,7 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         "const DEEP_FOLDER_EDITOR_PROOF: &str = \"opened\";\n",
     )
     .expect("write deep editor fixture");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -4129,7 +4227,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     let fixture_directory = temp_root.path().join("fixture-bin");
     std::fs::create_dir_all(&project_dir).expect("create project directory");
     std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let fake_codex = write_change_only_fake_codex(&fixture_directory);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
@@ -4524,7 +4622,7 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     let fixture_directory = temp_root.path().join("fixture-bin");
     std::fs::create_dir_all(&project_dir).expect("create project directory");
     std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let fake_codex = write_change_only_fake_codex(&fixture_directory);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
@@ -4695,7 +4793,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     let fixture_directory = temp_root.path().join("fixture-bin");
     std::fs::create_dir_all(&project_dir).expect("create project directory");
     std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let fake_codex = write_change_only_fake_codex(&fixture_directory);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
@@ -4856,7 +4954,7 @@ async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
     let fixture_directory = temp_root.path().join("fixture-bin");
     std::fs::create_dir_all(&project_dir).expect("create project directory");
     std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
-    seed_project_config(&project_dir);
+    seed_project_config(&xdg, &project_dir);
     let fake_codex = write_change_only_fake_codex(&fixture_directory);
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,

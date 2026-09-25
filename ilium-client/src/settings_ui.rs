@@ -252,6 +252,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     match state.tab {
+        SettingsTab::Setup => render_scrollable(
+            frame,
+            layout.content_area,
+            setup_lines(app, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::Inference => {
             let lines = inference_lines(
                 &app.inference_settings,
@@ -264,6 +270,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::Titles => render_scrollable(
+            frame,
+            layout.content_area,
+            title_style_lines(
+                app.inference_settings.title_style,
+                layout.content_area.width,
+                state.selected_row,
+            ),
+            state.scroll,
+        ),
         SettingsTab::Triggers => crate::trigger_settings_ui::render(
             frame,
             layout.content_area,
@@ -272,6 +288,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.trigger_action_cursor,
             state.scroll,
         ),
+        SettingsTab::TextTriggers => {
+            render_scrollable(
+                frame,
+                layout.content_area,
+                text_trigger_lines(app, state.selected_row),
+                state.scroll,
+            );
+        }
         SettingsTab::Appearance => {
             let lines = appearance_view(
                 &app.ui_settings,
@@ -388,11 +412,12 @@ pub fn close_button_hit(header_area: Rect, position: Position) -> bool {
 /// line after it -- see [`tab_at`] for the matching hit-test arithmetic.
 fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
     let row_height = tab_row_height(area);
+    let start_index = tab_window_start(area, active, row_height);
     let mut lines = Vec::with_capacity(
         usize::from(TAB_LIST_TOP_PADDING) + SettingsTab::ALL.len() * usize::from(row_height),
     );
     lines.extend((0..TAB_LIST_TOP_PADDING).map(|_| Line::from("")));
-    for tab in SettingsTab::ALL {
+    for tab in SettingsTab::ALL.into_iter().skip(start_index) {
         let style = if tab == active {
             theme::selected_style().add_modifier(Modifier::BOLD)
         } else {
@@ -412,6 +437,16 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
 /// The tab a click at `position` lands on, if any -- reproduces
 /// [`render_tab_list`]'s exact line arithmetic rather than re-deriving it.
 pub fn tab_at(tab_list_area: Rect, position: Position) -> Option<SettingsTab> {
+    tab_at_for_active(tab_list_area, position, SettingsTab::Appearance)
+}
+
+/// Active-aware hit testing for a rail whose visible window follows the
+/// keyboard-selected tab on terminals too short to show every entry.
+pub fn tab_at_for_active(
+    tab_list_area: Rect,
+    position: Position,
+    active: SettingsTab,
+) -> Option<SettingsTab> {
     if !tab_list_area.contains(position) {
         return None;
     }
@@ -424,8 +459,29 @@ pub fn tab_at(tab_list_area: Rect, position: Position) -> Option<SettingsTab> {
     if !row.is_multiple_of(row_height) {
         return None;
     }
-    let index = usize::from(row / row_height);
+    let index = tab_window_start(tab_list_area, active, row_height) + usize::from(row / row_height);
     SettingsTab::ALL.get(index).copied()
+}
+
+fn tab_window_start(area: Rect, active: SettingsTab, row_height: u16) -> usize {
+    let visible_rows = usize::from(
+        area.height
+            .saturating_sub(TAB_LIST_TOP_PADDING)
+            .checked_div(row_height)
+            .unwrap_or(0),
+    )
+    .max(1);
+    if visible_rows >= SettingsTab::ALL.len() {
+        return 0;
+    }
+    let active_index = SettingsTab::ALL
+        .iter()
+        .position(|tab| *tab == active)
+        .unwrap_or(0);
+    active_index
+        .saturating_add(1)
+        .saturating_sub(visible_rows)
+        .min(SettingsTab::ALL.len().saturating_sub(visible_rows))
 }
 
 /// Keeps the spacious two-line rail when it fits and compacts to one line
@@ -443,6 +499,57 @@ const fn tab_row_height(area: Rect) -> u16 {
 /// Renders `lines` scrolled by `scroll` rows, adding a vertical scrollbar
 /// only once the content is actually taller than `area` -- matches
 /// `crate::ui`'s own `draw_terminal_scrollbar`/`draw_rendered_scrollbar`.
+/// Compact list surface for server-executed regexp responses. The add/edit
+/// form is deliberately modal so this tab remains scannable even with many
+/// rules.
+fn text_trigger_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "TEXT TRIGGERS",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Match each completed output line and send a literal reply plus Enter.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(""),
+    ];
+    for (index, trigger) in app.text_trigger_settings.triggers.iter().enumerate() {
+        let cursor = if index == selected_row { "›" } else { " " };
+        let enabled = if trigger.enabled { "ON " } else { "OFF" };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{cursor} {enabled}  "),
+                Style::new().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!("{}  →  {}", trigger.regexp, trigger.message)),
+            Span::styled(
+                format!("  [{}]", trigger.target.label()),
+                Style::new().add_modifier(Modifier::DIM),
+            ),
+        ]));
+    }
+    let add_cursor = if selected_row == app.text_trigger_settings.triggers.len() {
+        "›"
+    } else {
+        " "
+    };
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{add_cursor} [ Add text trigger ]"),
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Enter edits; Delete removes; the editor previews every sample line.",
+        Style::new().add_modifier(Modifier::DIM),
+    )));
+    lines
+}
+
 fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, scroll: u16) {
     let total_lines = lines.len() as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll, 0));
@@ -465,6 +572,7 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     let total_lines = match tab {
+        SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
             app.inference_test_result.as_ref(),
@@ -472,6 +580,12 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             &app.model_discovery,
             &app.ollama_models,
             &app.kilo_gateway_models,
+            selected_row,
+        )
+        .len() as u16,
+        SettingsTab::Titles => title_style_lines(
+            app.inference_settings.title_style,
+            content_area.width,
             selected_row,
         )
         .len() as u16,
@@ -484,6 +598,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
                 0,
             );
         }
+        SettingsTab::TextTriggers => text_trigger_lines(app, selected_row).len() as u16,
         SettingsTab::Appearance => {
             appearance_view(&app.ui_settings, selected_row, content_area.width)
                 .lines
@@ -518,6 +633,177 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+fn setup_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
+    let rows = app.agent_setup_rows();
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "AGENT SETUP",
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Ilium installs and refreshes Claude + Codex instructions automatically · Enter refreshes · R restores the default Claude file",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(""),
+    ];
+    for feature in crate::agent_feature_setup::AgentFeature::ALL {
+        lines.push(Line::from(Span::styled(
+            feature.label().to_uppercase(),
+            Style::new().add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            match feature {
+                crate::agent_feature_setup::AgentFeature::Chatroom => {
+                    "Teach agents when and how to coordinate through the project chatroom."
+                }
+                crate::agent_feature_setup::AgentFeature::Progress => {
+                    "Require agents to hand off every task lasting at least three minutes to Ilium; agents never poll."
+                }
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+        for (index, row) in rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.feature() == feature)
+        {
+            let cursor = if index == selected_row { "›" } else { " " };
+            let selection_style = if index == selected_row {
+                theme::selected_style().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            match row {
+                crate::app::AgentSetupRow::GlobalFile {
+                    instruction_file,
+                    is_custom,
+                    ..
+                } => lines.push(Line::from(vec![
+                    Span::styled(format!("{cursor} Global file  "), selection_style),
+                    Span::raw(instruction_file.display().to_string()),
+                    Span::styled(
+                        if *is_custom {
+                            "  custom · Enter change · R default"
+                        } else {
+                            "  default · Enter change"
+                        },
+                        Style::new().add_modifier(Modifier::DIM),
+                    ),
+                ])),
+                crate::app::AgentSetupRow::GlobalTarget {
+                    instruction_file, ..
+                } => lines.push(setup_target_line(
+                    app,
+                    feature,
+                    instruction_file,
+                    format!("{cursor} Global"),
+                    selection_style,
+                )),
+                crate::app::AgentSetupRow::ProjectTarget {
+                    project_root,
+                    instruction_file,
+                    ..
+                } => lines.push(setup_target_line(
+                    app,
+                    feature,
+                    instruction_file,
+                    format!("{cursor} Project  {}", project_root.display()),
+                    selection_style,
+                )),
+            }
+        }
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Detected user-authored instructions are never removed. Ilium adds or refreshes only its marker-owned current copy.",
+        Style::new().add_modifier(Modifier::DIM),
+    )));
+    lines
+}
+
+fn setup_target_line(
+    app: &App,
+    feature: crate::agent_feature_setup::AgentFeature,
+    instruction_file: &std::path::Path,
+    label: String,
+    selection_style: Style,
+) -> Line<'static> {
+    let (badge, detail, status_style) = match app.agent_setup_status(feature, instruction_file) {
+        crate::app::AgentSetupTargetStatus::Available(
+            crate::agent_feature_setup::FeatureSetupStatus::Managed,
+        ) => ("[ON]", "Ilium-managed", Style::new().fg(Color::Green)),
+        crate::app::AgentSetupTargetStatus::Available(
+            crate::agent_feature_setup::FeatureSetupStatus::ManagedStale,
+        ) => (
+            "[UPDATE]",
+            "managed instructions need refresh",
+            Style::new().fg(Color::Yellow),
+        ),
+        crate::app::AgentSetupTargetStatus::Available(
+            crate::agent_feature_setup::FeatureSetupStatus::ManagedFuture,
+        ) => (
+            "[NEWER]",
+            "newer managed instructions preserved",
+            Style::new().fg(Color::Cyan),
+        ),
+        crate::app::AgentSetupTargetStatus::Available(
+            crate::agent_feature_setup::FeatureSetupStatus::DetectedUnmanaged,
+        ) => (
+            "[FOUND]",
+            "instruction detected",
+            Style::new().fg(Color::Yellow),
+        ),
+        crate::app::AgentSetupTargetStatus::Available(
+            crate::agent_feature_setup::FeatureSetupStatus::NotInstalled,
+        ) => (
+            "[OFF]",
+            "not set up",
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        crate::app::AgentSetupTargetStatus::Unavailable(error) => {
+            return Line::from(vec![
+                Span::styled(format!("{label}  [ERROR] "), selection_style),
+                Span::styled(error, Style::new().fg(Color::Red)),
+            ]);
+        }
+    };
+    Line::from(vec![
+        Span::styled(format!("{label}  "), selection_style),
+        Span::styled(format!("{badge} {detail}"), status_style),
+        Span::styled(
+            format!("  {}", instruction_file.display()),
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+    ])
+}
+
+/// Maps a click in the Setup document to its selectable row index.
+pub fn setup_content_hit(area: Rect, scroll: u16, position: Position, app: &App) -> Option<usize> {
+    if !area.contains(position) {
+        return None;
+    }
+    let document_line = position.y.saturating_sub(area.y).saturating_add(scroll) as usize;
+    let rows = app.agent_setup_rows();
+    let mut line = 3_usize;
+    for feature in crate::agent_feature_setup::AgentFeature::ALL {
+        line += 2;
+        for (index, _row) in rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.feature() == feature)
+        {
+            if line == document_line {
+                return Some(index);
+            }
+            line += 1;
+        }
+        line += 1;
+    }
+    None
 }
 
 /// Two-sided icon editor: a compact three-column selector table on the left,
@@ -635,7 +921,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 "    {} {} {} Claude task",
                 icons.glyph(IconTarget::Claude),
                 icons.glyph(IconTarget::Working),
-                icons.glyph(IconTarget::Goal)
+                icons.glyph(IconTarget::GoalActive)
             )),
             Line::from(format!(
                 "    {} {} Codex review",
@@ -1232,6 +1518,134 @@ pub fn icons_preview_mode_hit(
         .saturating_add(UnicodeWidthStr::width(icons_preview_demo_label(is_real_active)) as u16)
         .saturating_add(2);
     Some(position.x >= boundary)
+}
+
+/// One shared two-column specimen table for the two ways to name AI panes.
+/// The right column holds concrete outputs for the work described above it,
+/// rather than abstract promises about what each mode might do.
+fn title_style_lines(
+    active: ilium_inference::TitleStyle,
+    width: u16,
+    selected_row: usize,
+) -> Vec<Line<'static>> {
+    use ilium_inference::TitleStyle;
+    let left_width: usize = if width < 80 { 23 } else { 31 };
+    let is_narrow = width < 80;
+    let column = |left: &str, right: &str, style: Style| {
+        let padding = left_width.saturating_sub(UnicodeWidthStr::width(left));
+        Line::from(vec![
+            Span::styled(format!("  {left}"), style),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(right.to_string(), style),
+        ])
+    };
+    let label_style = if selected_row == 0 {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    let summary_style = if selected_row == 1 {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  How should AI name panes?",
+            Style::new().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(if is_narrow {
+            "  Choose how panes appear in the tree."
+        } else {
+            "  Choose how future AI titles help you find a pane in the tree."
+        }),
+        Line::from(""),
+        column(
+            "OPTION",
+            "AGENT WORK BEING NAMED",
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
+        column(
+            "",
+            "Cut-paper component",
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        column(
+            "",
+            "Ilium session backups",
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        Line::from(""),
+        column(
+            if active == TitleStyle::Labeling {
+                "(●) Labeling"
+            } else {
+                "( ) Labeling"
+            },
+            "CUT PAPER COMPONENT",
+            label_style,
+        ),
+        column(
+            "    Name the thing",
+            "SESSION BACKUPS",
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        Line::from(""),
+        column(
+            if active == TitleStyle::Summarization {
+                "(●) Summarization"
+            } else {
+                "( ) Summarization"
+            },
+            if is_narrow {
+                "Develop Cut Paper"
+            } else {
+                "Develop Cut Paper Component"
+            },
+            summary_style,
+        ),
+        column(
+            "    Describe work",
+            if is_narrow {
+                "Build Session Backups"
+            } else {
+                "Implement Ilium Rolling Session Backups"
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        Line::from(""),
+        Line::from(Span::styled(
+            if is_narrow {
+                "  Future AI titles use this choice."
+            } else {
+                "  Changes apply to future automatic and requested AI retitles."
+            },
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+        Line::from(Span::styled(
+            "  Your fixed titles stay yours.",
+            Style::new().add_modifier(Modifier::DIM),
+        )),
+    ]
+}
+
+/// The row geometry matches `title_style_lines`; clicking either column of
+/// an option selects its radio choice, including the examples themselves.
+pub fn title_style_content_hit(
+    area: Rect,
+    scroll: u16,
+    position: Position,
+) -> Option<ilium_inference::TitleStyle> {
+    if !area.contains(position) {
+        return None;
+    }
+    let line = usize::from(position.y.saturating_sub(area.y)) + usize::from(scroll);
+    match line {
+        8 | 9 => Some(ilium_inference::TitleStyle::Labeling),
+        11 | 12 => Some(ilium_inference::TitleStyle::Summarization),
+        _ => None,
+    }
 }
 
 /// Visible settings depend on the selected provider. This keeps Kilo's
@@ -2497,10 +2911,10 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
             "Maximum rows the last-prompt banner can grow to -- it only reserves as many as the prompt actually needs (wrapping long lines to fit), up to this ceiling. A prompt that still doesn't fit is truncated in the middle, keeping its first and last lines."
         }
         AppearanceRow::ProgressMonitor => {
-            "Let an agent report a long-running task's progress via `ilium progress set`, shown as a percent bar and status message in a footer below the pane. Turning this off also stops the server from accepting new progress-monitor commands and cancels every one already running -- it already has equivalent shell access in the pane, so this only gates unattended, recurring execution, not a new privilege."
+            "Let Ilium be the sole recurring poller for registered long-running tasks. The footer distinguishes task status and monitor health; terminal success or error remains visible while Ilium safely delivers the result and any monitor-owned goal resume. Turning this off rejects new monitors and cancels active observation loops, while preserving already-terminal evidence until it is cleared. Ilium already has equivalent shell access in the pane, so this gates unattended execution rather than granting a new privilege."
         }
         AppearanceRow::ProgressMonitorMaxLines => {
-            "Maximum message rows the progress footer can grow to, below its percent bar -- same growth/truncation behavior as the last-prompt banner's line limit."
+            "Maximum detail rows the progress footer can grow to below its status and percent row, including task messages, errors, monitor-health warnings, and compact job identity."
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
@@ -2704,11 +3118,18 @@ fn editor_lines(settings: &EditorSettings, selected: usize) -> Vec<Line<'static>
 }
 fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'static>> {
     setting_lines(
-        &[(
-            "Recovery policy",
-            settings.recovery_policy.label().to_string(),
-            "Used by the detached server when it next starts this project session.",
-        )],
+        &[
+            (
+                "Recovery policy",
+                settings.recovery_policy.label().to_string(),
+                "Used by the detached server when it next starts this project session.",
+            ),
+            (
+                "Automatic backups",
+                on_off(settings.backups_enabled),
+                "Copy this project's native session snapshot every 30 minutes. Older copies thin to daily, weekly, monthly, then yearly history.",
+            ),
+        ],
         selected,
     )
 }
@@ -3222,6 +3643,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn title_style_table_shows_radio_choices_shared_work_and_examples() {
+        let lines = title_style_lines(ilium_inference::TitleStyle::Summarization, 120, 1);
+        let rendered = lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("AGENT WORK BEING NAMED"));
+        assert!(rendered.contains("Cut-paper component"));
+        assert!(rendered.contains("( ) Labeling"));
+        assert!(rendered.contains("(●) Summarization"));
+        assert!(rendered.contains("CUT PAPER COMPONENT"));
+        assert!(rendered.contains("Develop Cut Paper Component"));
+        let area = Rect::new(30, 2, 100, 20);
+        assert_eq!(
+            title_style_content_hit(area, 0, Position::new(80, 10)),
+            Some(ilium_inference::TitleStyle::Labeling)
+        );
+        assert_eq!(
+            title_style_content_hit(area, 0, Position::new(80, 13)),
+            Some(ilium_inference::TitleStyle::Summarization)
+        );
+        let narrow = title_style_lines(ilium_inference::TitleStyle::Labeling, 49, 0);
+        for line in &narrow[4..13] {
+            assert!(UnicodeWidthStr::width(line.to_string().as_str()) <= 49);
+        }
+    }
+
+    #[test]
     fn compute_layout_leaves_no_border_gap_between_tabs_and_content() {
         let layout = compute_layout(Rect::new(0, 0, 100, 40));
         assert!(layout.content_area.x > layout.tab_list_area.right());
@@ -3267,28 +3717,51 @@ mod tests {
         );
         assert_eq!(
             tab_at(area, Position::new(2, 11)),
+            Some(SettingsTab::Titles)
+        );
+        assert_eq!(
+            tab_at(area, Position::new(2, 12)),
             Some(SettingsTab::Triggers)
         );
-        assert_eq!(tab_at(area, Position::new(2, 12)), Some(SettingsTab::Debug));
-        assert_eq!(tab_at(area, Position::new(2, 13)), Some(SettingsTab::Api));
-        assert_eq!(tab_at(area, Position::new(2, 14)), Some(SettingsTab::About));
+        assert_eq!(
+            tab_at(area, Position::new(2, 13)),
+            Some(SettingsTab::TextTriggers)
+        );
+        assert_eq!(tab_at(area, Position::new(2, 14)), Some(SettingsTab::Debug));
+        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Api));
+        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::Setup));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
-        let spacious = Rect::new(0, 0, 30, 30);
+        let spacious = Rect::new(0, 0, 30, 40);
         // Spacious layouts retain the blank row after each tab.
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
         assert_eq!(
-            tab_at(spacious, Position::new(2, 23)),
-            Some(SettingsTab::Debug)
-        );
-        assert_eq!(
             tab_at(spacious, Position::new(2, 25)),
-            Some(SettingsTab::Api)
+            Some(SettingsTab::TextTriggers)
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 27)),
+            Some(SettingsTab::Debug)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 29)),
+            Some(SettingsTab::Api)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 31)),
             Some(SettingsTab::About)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 33)),
+            Some(SettingsTab::Setup)
+        );
+
+        let short = Rect::new(0, 0, 30, 8);
+        assert_eq!(
+            tab_at_for_active(short, Position::new(2, 7), SettingsTab::Setup),
+            Some(SettingsTab::Setup)
         );
     }
 

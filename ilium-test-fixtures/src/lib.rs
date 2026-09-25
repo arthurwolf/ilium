@@ -110,6 +110,20 @@ pub enum FixtureBehavior {
     /// not" path.
     ChangeOnly,
 
+    /// Minimal raw-mode Codex-like composer that exposes an active goal,
+    /// accepts Ilium's `/goal pause`, one multiline progress result, and
+    /// `/goal resume`, recording each semantic submission in order.
+    GoalLifecycle { log_path: PathBuf },
+
+    /// Prints the current contents of one file and exits. Used as a portable
+    /// progress probe without depending on `cat`, PowerShell, or Python.
+    PrintFile { path: PathBuf },
+
+    /// Repaints one matching row, clears it, then displays a new matching
+    /// occurrence in the same position. Used to distinguish redraws from
+    /// genuinely separate Text Trigger appearances.
+    RepaintThenReappear,
+
     /// Reads one line and echoes it back as `<prefix>:<line>`.
     ///
     /// Replaces the inline `IFS= read -r line; printf ...` command lines the
@@ -336,6 +350,9 @@ mod tests {
             | FixtureBehavior::ResumePrompt
             | FixtureBehavior::ClearTransition { .. }
             | FixtureBehavior::ChangeOnly
+            | FixtureBehavior::GoalLifecycle { .. }
+            | FixtureBehavior::PrintFile { .. }
+            | FixtureBehavior::RepaintThenReappear
             | FixtureBehavior::EchoSubmittedLine { .. }
             | FixtureBehavior::DelayedComposerThenEcho { .. }
             | FixtureBehavior::EmitNumberedLines { .. }
@@ -364,6 +381,13 @@ mod tests {
                 second_argument_index: 2,
             },
             FixtureBehavior::ChangeOnly,
+            FixtureBehavior::GoalLifecycle {
+                log_path: PathBuf::from("/tmp/goal-lifecycle"),
+            },
+            FixtureBehavior::PrintFile {
+                path: PathBuf::from("/tmp/progress-report"),
+            },
+            FixtureBehavior::RepaintThenReappear,
             FixtureBehavior::EchoSubmittedLine {
                 prefix: "queued".to_string(),
             },

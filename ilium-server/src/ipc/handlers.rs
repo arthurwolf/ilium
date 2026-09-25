@@ -29,7 +29,10 @@ use tokio::sync::mpsc;
 use crate::mouse::to_crossterm_event;
 use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
-use crate::state::ServerState;
+use crate::state::{
+    ProgressSetRequestIdentity, ProgressSetRequestOutcome, ProgressSetRequestRecord,
+    ProgressSetResult, ServerState, MAXIMUM_CACHED_PROGRESS_SET_REQUESTS,
+};
 
 /// Caps activity-revision mutations during one continuous PTY output burst.
 struct OutputActivityGate {
@@ -95,6 +98,18 @@ pub async fn handle_request(
             // this fallback is harmless for direct handler tests and future
             // non-streaming transports, but no session-global state exists
             // to mutate here.
+            false
+        }
+        ClientRequest::UpdateTextTriggers { settings } => {
+            if let Some(message) = crate::text_triggers::validate_settings(&settings) {
+                send_direct_error(direct_tx, message).await;
+                return false;
+            }
+            let mut accepted = state.text_trigger_settings.write().await;
+            accepted.settings = settings.clone();
+            accepted.revision = accepted.revision.saturating_add(1);
+            drop(accepted);
+            state.broadcast(ServerEvent::TextTriggersChanged { settings });
             false
         }
         ClientRequest::ResolveSessionRecovery { restore } => {
@@ -218,17 +233,86 @@ pub async fn handle_request(
                 .await;
             false
         }
-        ClientRequest::SetPaneProgressMonitor {
+        ClientRequest::CheckPaneProgressMonitor {
+            request_id,
             pane_id,
             command,
-            interval_seconds,
         } => {
-            handle_set_pane_progress_monitor(state, pane_id, command, interval_seconds, direct_tx)
+            handle_check_pane_progress_monitor(state, request_id, pane_id, &command, direct_tx)
                 .await;
             false
         }
-        ClientRequest::ClearPaneProgressMonitor { pane_id } => {
-            handle_clear_pane_progress_monitor(state, pane_id).await;
+        ClientRequest::SetPaneProgressMonitor {
+            request_id,
+            pane_id,
+            command,
+            interval_seconds,
+            goal_policy,
+        } => {
+            handle_set_pane_progress_monitor(
+                state,
+                request_id,
+                pane_id,
+                command,
+                interval_seconds,
+                goal_policy,
+                direct_tx,
+            )
+            .await;
+            false
+        }
+        ClientRequest::GetPaneProgressMonitorStatus {
+            request_id,
+            pane_id,
+        } => {
+            handle_get_pane_progress_monitor_status(state, request_id, pane_id, direct_tx).await;
+            false
+        }
+        ClientRequest::ClearPaneProgressMonitor {
+            request_id,
+            pane_id,
+            expected_monitor_id,
+        } => {
+            handle_clear_pane_progress_monitor(
+                state,
+                request_id,
+                pane_id,
+                expected_monitor_id,
+                direct_tx,
+            )
+            .await;
+            false
+        }
+        ClientRequest::ArmProgressGoalResume {
+            request_id,
+            pane_id,
+            monitor_id,
+        } => {
+            handle_progress_goal_policy_change(
+                state,
+                request_id,
+                pane_id,
+                monitor_id,
+                ilium_ipc::ProgressGoalPolicy::PauseAndResume,
+                direct_tx,
+            )
+            .await;
+            false
+        }
+        ClientRequest::DisarmProgressGoalResume {
+            request_id,
+            pane_id,
+            monitor_id,
+        } => {
+            handle_progress_goal_policy_change(
+                state,
+                request_id,
+                pane_id,
+                monitor_id,
+                ilium_ipc::ProgressGoalPolicy::KeepRunning,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::UpdateProgressMonitorEnabled { enabled } => {
@@ -289,6 +373,16 @@ pub async fn handle_request(
             submission,
         } => {
             handle_key_input(state, pane_id, &bytes, submission, direct_tx).await;
+            false
+        }
+        ClientRequest::SubmitTerminalText {
+            pane_id,
+            text,
+            source,
+        } => {
+            if let Err(message) = submit_terminal_text(state, pane_id, &text, source).await {
+                send_direct_error(direct_tx, message).await;
+            }
             false
         }
         ClientRequest::MouseInput {
@@ -471,7 +565,7 @@ async fn handle_update_agent_debug_menu(state: &ServerState, enabled: bool) {
                     matches!(
                         &node.kind,
                         NodeKind::Pane {
-                            status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _),
+                            status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
                             ..
                         }
                     )
@@ -1466,71 +1560,839 @@ async fn handle_last_prompt_from_transcript(
 /// connection may send this (a bare CLI connection has the same authority as
 /// the attached TUI -- see `ipc::connection`), so the server's own live
 /// `ServerState::is_progress_monitor_enabled` setting is the only gate.
+async fn handle_check_pane_progress_monitor(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    command: &str,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let result = if !state.is_progress_monitor_enabled() {
+        Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::Disabled,
+            "progress monitor is disabled by server settings",
+        ))
+    } else if !matches!(
+        state.panes.read().await.get(&pane_id),
+        Some(PaneResource::Terminal(_))
+    ) {
+        Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            format!("pane {pane_id:?} is not a live terminal pane"),
+        ))
+    } else {
+        crate::progress_monitor::preflight(command)
+            .await
+            .map_err(|error| error.rejection())
+    };
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressMonitorCheckCompleted {
+            request_id,
+            pane_id,
+            result,
+        },
+    )
+    .await;
+}
+
+fn progress_rejection(
+    code: ilium_ipc::ProgressMonitorRejectionCode,
+    message: impl Into<String>,
+) -> ilium_ipc::ProgressMonitorRejection {
+    ilium_ipc::ProgressMonitorRejection {
+        code,
+        message: message.into(),
+    }
+}
+
 async fn handle_set_pane_progress_monitor(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    command: String,
+    interval_seconds: u32,
+    goal_policy: ilium_ipc::ProgressGoalPolicy,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let identity = ProgressSetRequestIdentity {
+        pane_id,
+        command,
+        interval_seconds,
+        goal_policy,
+    };
+    let result = idempotent_install_progress_monitor(state, request_id, identity).await;
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressMonitorSetCompleted {
+            request_id,
+            pane_id,
+            result,
+        },
+    )
+    .await;
+}
+
+/// Applies session-scoped idempotency to progress registration. The CLI uses
+/// high-entropy request IDs and may reconnect after losing its acknowledgement,
+/// so connection-local replay state would be insufficient. Reusing an ID with
+/// different arguments is rejected as a collision; exact concurrent retries
+/// wait for and reuse the leader's result without rerunning preflight.
+async fn idempotent_install_progress_monitor(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    identity: ProgressSetRequestIdentity,
+) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
+    enum Decision {
+        Lead,
+        Wait(tokio::sync::watch::Receiver<Option<ProgressSetResult>>),
+        Return(ProgressSetResult),
+    }
+
+    loop {
+        let decision = {
+            let mut cache = state.progress_set_requests.lock().await;
+            match cache.records.get(&request_id) {
+                Some(record) if record.identity != identity => Decision::Return(Err(
+                    progress_rejection(
+                        ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
+                        format!(
+                            "progress set request_id {request_id} was already used with different arguments"
+                        ),
+                    ),
+                )),
+                Some(ProgressSetRequestRecord {
+                    outcome: ProgressSetRequestOutcome::Pending(completed),
+                    ..
+                }) => Decision::Wait(completed.subscribe()),
+                Some(ProgressSetRequestRecord {
+                    outcome: ProgressSetRequestOutcome::Complete(result),
+                    ..
+                }) => Decision::Return(result.clone()),
+                None => {
+                    while cache.records.len() >= MAXIMUM_CACHED_PROGRESS_SET_REQUESTS {
+                        let Some(expired) = cache.completed_order.pop_front() else {
+                            break;
+                        };
+                        cache.records.remove(&expired);
+                    }
+                    if cache.records.len() >= MAXIMUM_CACHED_PROGRESS_SET_REQUESTS {
+                        Decision::Return(Err(progress_rejection(
+                            ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
+                            "too many progress set requests are currently pending; retry later",
+                        )))
+                    } else {
+                        let (completed, _completion_rx) = tokio::sync::watch::channel(None);
+                        cache.records.insert(
+                            request_id,
+                            ProgressSetRequestRecord {
+                                identity: identity.clone(),
+                                outcome: ProgressSetRequestOutcome::Pending(completed),
+                            },
+                        );
+                        Decision::Lead
+                    }
+                }
+            }
+        };
+
+        match decision {
+            Decision::Return(result) => return result,
+            Decision::Wait(mut completed) => {
+                let _ = completed.changed().await;
+            }
+            Decision::Lead => break,
+        }
+    }
+
+    let result = install_progress_monitor(
+        state,
+        identity.pane_id,
+        identity.command.clone(),
+        identity.interval_seconds,
+        identity.goal_policy,
+    )
+    .await;
+    let completed = {
+        let mut cache = state.progress_set_requests.lock().await;
+        let completed = match cache.records.get_mut(&request_id) {
+            Some(record) => {
+                let ProgressSetRequestOutcome::Pending(completed) = &record.outcome else {
+                    unreachable!("the progress set leader owns a pending cache entry")
+                };
+                let completed = completed.clone();
+                record.outcome = ProgressSetRequestOutcome::Complete(result.clone());
+                completed
+            }
+            None => unreachable!("the progress set leader's cache entry must remain present"),
+        };
+        cache.completed_order.push_back(request_id);
+        while cache.completed_order.len() > MAXIMUM_CACHED_PROGRESS_SET_REQUESTS {
+            if let Some(expired) = cache.completed_order.pop_front() {
+                cache.records.remove(&expired);
+            }
+        }
+        completed
+    };
+    completed.send_replace(Some(result.clone()));
+    result
+}
+
+async fn install_progress_monitor(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     command: String,
     interval_seconds: u32,
-    direct_tx: &mpsc::Sender<ServerEvent>,
-) {
+    goal_policy: ilium_ipc::ProgressGoalPolicy,
+) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
     if !state.is_progress_monitor_enabled() {
-        send_direct_error(
-            direct_tx,
-            "progress monitor is disabled by server settings".to_string(),
-        )
-        .await;
-        return;
+        return Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::Disabled,
+            "progress monitor is disabled by server settings",
+        ));
     }
-    if command.trim().is_empty() {
-        send_direct_error(
-            direct_tx,
-            "progress monitor command must not be empty".to_string(),
-        )
-        .await;
-        return;
-    }
-    let interval = std::time::Duration::from_secs(u64::from(interval_seconds.max(1)));
-    let task = crate::progress_monitor::spawn(Arc::clone(state), pane_id, command, interval);
-    let mut panes = state.panes.write().await;
-    match panes.get_mut(&pane_id) {
-        Some(PaneResource::Terminal(runtime)) => runtime.set_progress_monitor_task(task),
-        _ => {
-            drop(panes);
-            task.abort();
-            send_direct_error(
-                direct_tx,
-                format!("pane {pane_id:?} is not a live terminal pane"),
-            )
-            .await;
+    let effect_gate = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => Arc::clone(&runtime.progress_effect_gate),
+            _ => {
+                return Err(progress_rejection(
+                    ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                    format!("pane {pane_id:?} is not a live terminal pane"),
+                ));
+            }
         }
+    };
+    let interval = std::time::Duration::from_secs(u64::from(interval_seconds));
+    if !(crate::progress_monitor::MIN_INTERVAL..=crate::progress_monitor::MAX_INTERVAL)
+        .contains(&interval)
+    {
+        return Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
+            format!(
+                "progress interval must be between {} and {} seconds",
+                crate::progress_monitor::MIN_INTERVAL.as_secs(),
+                crate::progress_monitor::MAX_INTERVAL.as_secs()
+            ),
+        ));
+    }
+    // Preflight occurs before the effect gate and before replacement: a bad
+    // candidate never interrupts the monitor that is already active.
+    let preflight = crate::progress_monitor::preflight(&command)
+        .await
+        .map_err(|error| error.rejection())?;
+    let monitor_id = state.allocate_progress_monitor_id();
+    let progress = ilium_core::PaneProgress::new(
+        monitor_id,
+        preflight.report,
+        preflight.checked_at_unix_millis,
+    )
+    .map_err(|error| {
+        progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::InvalidProbeReport,
+            error.to_string(),
+        )
+    })?;
+    let registration = crate::progress_monitor::ProgressMonitorRegistration {
+        monitor_id,
+        pane_id,
+        command,
+        interval,
+        initial_progress: progress.clone(),
+    };
+    commit_progress_monitor(state, registration, goal_policy, effect_gate).await?;
+    Ok(ilium_ipc::ProgressMonitorAccepted {
+        monitor_id,
+        progress,
+        goal_policy,
+    })
+}
+
+async fn commit_progress_monitor(
+    state: &Arc<ServerState>,
+    registration: crate::progress_monitor::ProgressMonitorRegistration,
+    goal_policy: ilium_ipc::ProgressGoalPolicy,
+    effect_gate: Arc<tokio::sync::Mutex<()>>,
+) -> Result<(), ilium_ipc::ProgressMonitorRejection> {
+    let pane_id = registration.pane_id;
+    let monitor_id = registration.monitor_id;
+    let progress = registration.initial_progress.clone();
+    let _effect_guard = effect_gate.lock().await;
+    {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                format!("pane {pane_id:?} closed before registration persistence"),
+            ));
+        };
+        if !Arc::ptr_eq(&effect_gate, &runtime.progress_effect_gate) {
+            return Err(progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                format!("pane {pane_id:?} changed before registration persistence"),
+            ));
+        }
+    }
+    let durable_candidate = crate::persistence::PersistedProgressMonitor {
+        pane_id,
+        command: registration.command.clone(),
+        interval_seconds: registration.interval.as_secs(),
+        goal_policy,
+        latest_progress: progress.clone(),
+        goal_resume_armed: goal_policy == ilium_ipc::ProgressGoalPolicy::PauseAndResume,
+        result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
+        goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
+    };
+    let snapshot_write_guard =
+        crate::persistence::await_progress_monitor_durability_barrier(state, &durable_candidate)
+            .await
+            .map_err(|error| {
+                progress_rejection(
+                    ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
+                    format!("could not durably persist progress monitor: {error}"),
+                )
+            })?;
+    let mut tree = state.tree.write().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        drop(panes);
+        drop(tree);
+        drop(snapshot_write_guard);
+        return Err(repair_rejected_staged_progress_monitor(
+            state,
+            progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                format!("pane {pane_id:?} closed before registration commit"),
+            ),
+        )
+        .await);
+    };
+    if !Arc::ptr_eq(&effect_gate, &runtime.progress_effect_gate) {
+        drop(panes);
+        drop(tree);
+        drop(snapshot_write_guard);
+        return Err(repair_rejected_staged_progress_monitor(
+            state,
+            progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                format!("pane {pane_id:?} changed before registration commit"),
+            ),
+        )
+        .await);
+    }
+    let fence = match runtime.install_progress_monitor(registration.clone(), goal_policy) {
+        Ok(fence) => fence,
+        Err(message) => {
+            let rejection = progress_rejection(
+                if goal_policy == ilium_ipc::ProgressGoalPolicy::PauseAndResume {
+                    ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable
+                } else {
+                    ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest
+                },
+                message,
+            );
+            drop(panes);
+            drop(tree);
+            drop(snapshot_write_guard);
+            return Err(repair_rejected_staged_progress_monitor(state, rejection).await);
+        }
+    };
+    if let Err(error) = tree.set_pane_progress(pane_id, Some(progress.clone())) {
+        runtime.cancel_progress_monitor();
+        let rejection = progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            error.to_string(),
+        );
+        drop(panes);
+        drop(tree);
+        drop(snapshot_write_guard);
+        return Err(repair_rejected_staged_progress_monitor(state, rejection).await);
+    }
+    let probe_task = crate::progress_monitor::spawn(Arc::clone(state), registration, fence);
+    let outcome_state = Arc::clone(state);
+    let outcome_task = tokio::spawn(async move {
+        match probe_task.await {
+            Ok(outcome) => {
+                handle_progress_monitor_outcome(&outcome_state, pane_id, monitor_id, outcome).await
+            }
+            Err(error) if error.is_cancelled() => {}
+            Err(error) => {
+                tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "progress coordinator task failed")
+            }
+        }
+    });
+    runtime.set_progress_monitor_task(outcome_task);
+    let armed_binding = runtime.armed_progress_goal_binding(monitor_id);
+    drop(panes);
+    drop(tree);
+    // The live monitor now exactly matches the staged bytes. Releasing this
+    // guard lets a background writer proceed, but it can only build from the
+    // committed state and therefore cannot overwrite the durable acceptance
+    // with the previous monitor.
+    drop(snapshot_write_guard);
+    state.broadcast(ServerEvent::PaneProgressChanged {
+        pane_id,
+        progress: Some(progress),
+    });
+    state.request_snapshot_save();
+
+    if let Some(binding) = armed_binding {
+        start_progress_goal_pause(state, pane_id, binding).await;
+    }
+    Ok(())
+}
+
+/// Repairs the small stage-before-commit crash window after a pane or goal
+/// changed while its candidate snapshot was being written. The old live
+/// monitor was not touched, so a fresh current-state barrier restores disk.
+async fn repair_rejected_staged_progress_monitor(
+    state: &ServerState,
+    mut rejection: ilium_ipc::ProgressMonitorRejection,
+) -> ilium_ipc::ProgressMonitorRejection {
+    if let Err(error) = crate::persistence::await_snapshot_durability_barrier(state).await {
+        rejection.message.push_str(&format!(
+            "; additionally failed to repair the staged snapshot: {error}"
+        ));
+    }
+    rejection
+}
+
+async fn handle_progress_monitor_outcome(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    monitor_id: u64,
+    outcome: crate::progress_monitor::ProgressMonitorOutcome,
+) {
+    let final_progress = match &outcome {
+        crate::progress_monitor::ProgressMonitorOutcome::TaskTerminal(progress)
+        | crate::progress_monitor::ProgressMonitorOutcome::MonitorFailed { progress, .. } => {
+            Some(progress.clone())
+        }
+        _ => None,
+    };
+    if let Some(progress) = final_progress {
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            return;
+        };
+        if !runtime.update_progress_monitor_progress(monitor_id, progress) {
+            return;
+        }
+        drop(panes);
+        state.request_snapshot_save();
+    }
+    let message = match outcome {
+        crate::progress_monitor::ProgressMonitorOutcome::TaskTerminal(progress) => {
+            crate::agent_delivery::terminal_result_message(&progress)
+        }
+        crate::progress_monitor::ProgressMonitorOutcome::MonitorFailed { progress, error } => {
+            crate::agent_delivery::monitor_failure_message(&progress, &error.message)
+        }
+        crate::progress_monitor::ProgressMonitorOutcome::Disabled
+        | crate::progress_monitor::ProgressMonitorOutcome::Superseded
+        | crate::progress_monitor::ProgressMonitorOutcome::PaneUnavailable => return,
+    };
+    if let Err(error) = crate::agent_delivery::deliver_result_then_resume(
+        Arc::clone(state),
+        pane_id,
+        monitor_id,
+        message,
+    )
+    .await
+    {
+        tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "progress result delivery stopped");
     }
 }
 
-/// Stops `pane_id`'s active progress monitor, if any, and clears its last
-/// reported progress.
-async fn handle_clear_pane_progress_monitor(state: &Arc<ServerState>, pane_id: NodeId) {
-    {
-        let mut panes = state.panes.write().await;
-        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-            runtime.cancel_progress_monitor();
-        }
-    }
-    let cleared = {
-        let mut tree = state.tree.write().await;
-        tree.set_pane_progress(pane_id, None).is_ok()
+async fn handle_get_pane_progress_monitor_status(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let result = match state.panes.read().await.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Ok(runtime.progress_monitor_status(pane_id)),
+        _ => Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            format!("pane {pane_id:?} is not a live terminal pane"),
+        )),
     };
-    if cleared {
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressMonitorStatusReported {
+            request_id,
+            pane_id,
+            result,
+        },
+    )
+    .await;
+}
+
+/// Stops one generation and clears its sticky presentation. A supplied ID is
+/// an optimistic-concurrency fence, so an old agent cannot clear a replacement.
+async fn handle_clear_pane_progress_monitor(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    expected_monitor_id: Option<u64>,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let effect_gate = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => {
+                Some(Arc::clone(&runtime.progress_effect_gate))
+            }
+            _ => None,
+        }
+    };
+    let result = if let Some(effect_gate) = effect_gate {
+        let _effect_guard = effect_gate.lock().await;
+        let mut tree = state.tree.write().await;
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            send_direct(
+                direct_tx,
+                ServerEvent::ProgressMonitorCleared {
+                    request_id,
+                    pane_id,
+                    result: Err(progress_rejection(
+                        ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                        format!("pane {pane_id:?} closed before clear"),
+                    )),
+                },
+            )
+            .await;
+            return;
+        };
+        let current = runtime
+            .progress_monitor
+            .as_ref()
+            .map(|monitor| monitor.monitor_id);
+        if expected_monitor_id.is_some() && expected_monitor_id != current {
+            Err(progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
+                format!(
+                    "expected progress monitor {:?}, but current monitor is {:?}",
+                    expected_monitor_id, current
+                ),
+            ))
+        } else {
+            runtime.cancel_progress_monitor();
+            let _ = tree.set_pane_progress(pane_id, None);
+            Ok(current)
+        }
+    } else {
+        Err(progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            format!("pane {pane_id:?} is not a live terminal pane"),
+        ))
+    };
+    if result.is_ok() {
         state.broadcast(ServerEvent::PaneProgressChanged {
             pane_id,
             progress: None,
         });
+        state.request_snapshot_save();
+        crate::persistence::flush_pending_snapshot(state).await;
     }
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressMonitorCleared {
+            request_id,
+            pane_id,
+            result,
+        },
+    )
+    .await;
 }
 
-/// Applies a live `UpdateProgressMonitorEnabled` toggle. Disabling stops
-/// every currently running monitor task and clears every pane's reported
-/// progress -- a `false` setting must mean "no monitor commands are
-/// executing," not merely "no new ones may start."
+async fn handle_progress_goal_policy_change(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    monitor_id: u64,
+    goal_policy: ilium_ipc::ProgressGoalPolicy,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let effect_gate = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => {
+                Some(Arc::clone(&runtime.progress_effect_gate))
+            }
+            _ => None,
+        }
+    };
+    let (result, armed_binding) =
+        if let Some(effect_gate) = effect_gate {
+            let _effect_guard = effect_gate.lock().await;
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                drop(panes);
+                return send_direct(
+                    direct_tx,
+                    ServerEvent::ProgressMonitorGoalPolicyChanged {
+                        request_id,
+                        pane_id,
+                        monitor_id,
+                        result: Err(progress_rejection(
+                            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                            format!("pane {pane_id:?} closed before goal-policy change"),
+                        )),
+                    },
+                )
+                .await;
+            };
+            if !runtime.is_current_progress_monitor(monitor_id) {
+                (
+                    Err(progress_rejection(
+                        ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
+                        format!("progress monitor {monitor_id} is not current"),
+                    )),
+                    None,
+                )
+            } else {
+                match goal_policy {
+                    ilium_ipc::ProgressGoalPolicy::PauseAndResume => {
+                        match runtime.arm_progress_goal_resume(monitor_id) {
+                        Ok(binding) => (Ok(goal_policy), Some(binding)),
+                        Err(message) => (Err(progress_rejection(
+                            ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable,
+                            message,
+                        )), None),
+                    }
+                    }
+                    ilium_ipc::ProgressGoalPolicy::KeepRunning => {
+                        match runtime.disarm_progress_goal_resume(monitor_id) {
+                            Ok(()) => (Ok(goal_policy), None),
+                            Err(message) => (
+                                Err(progress_rejection(
+                                    ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
+                                    message,
+                                )),
+                                None,
+                            ),
+                        }
+                    }
+                }
+            }
+        } else {
+            (
+                Err(progress_rejection(
+                    ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+                    format!("pane {pane_id:?} is not a live terminal pane"),
+                )),
+                None,
+            )
+        };
+    if result.is_ok() {
+        state.request_snapshot_save();
+        crate::persistence::flush_pending_snapshot(state).await;
+    }
+    if let Some(binding) = armed_binding {
+        start_progress_goal_pause(state, pane_id, binding).await;
+    }
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressMonitorGoalPolicyChanged {
+            request_id,
+            pane_id,
+            monitor_id,
+            result,
+        },
+    )
+    .await;
+}
+
+async fn start_progress_goal_pause(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    binding: crate::pane::ProgressGoalBinding,
+) {
+    let monitor_id = binding.monitor_id;
+    let pause_state = Arc::clone(state);
+    let task = tokio::spawn(async move {
+        if let Err(error) =
+            crate::agent_delivery::pause_goal_for_monitor(pause_state, pane_id, binding).await
+        {
+            tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "progress-owned goal pause stopped");
+        }
+    });
+    let mut panes = state.panes.write().await;
+    if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+        if runtime.is_current_progress_monitor(monitor_id) {
+            runtime.set_progress_delivery_task(task);
+            return;
+        }
+    }
+    task.abort();
+}
+
+/// Reconstitutes one persisted registration after its pane has respawned.
+/// Monitor IDs and goal ownership never cross the process boundary. Only a
+/// nonterminal report whose fresh preflight has the same job identity resumes
+/// recurring observation, and only delivery known never to have been
+/// attempted is eligible for replay.
+pub(crate) async fn restore_persisted_progress_monitor(
+    state: &Arc<ServerState>,
+    persisted: crate::persistence::PersistedProgressMonitor,
+) -> Result<(), String> {
+    if !state.is_progress_monitor_enabled() {
+        return Err("progress monitoring is disabled".to_string());
+    }
+    let pane_id = persisted.pane_id;
+    let effect_gate = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(format!("persisted monitor pane {pane_id:?} is unavailable"));
+        };
+        Arc::clone(&runtime.progress_effect_gate)
+    };
+    let monitor_id = state.allocate_progress_monitor_id();
+    let (fresh_preflight, restoration_failure) = if persisted.requires_probe_before_restore() {
+        match crate::progress_monitor::preflight(&persisted.command).await {
+            Ok(preflight) if persisted.accepts_restored_preflight(&preflight) => {
+                (Some(preflight), None)
+            }
+            Ok(preflight) => (
+                None,
+                Some(format!(
+                    "progress observation identity could not be restored: current job_id {:?} does not match persisted job_id {:?}; task outcome is unknown",
+                    preflight.report.job_id, persisted.latest_progress.report.job_id
+                )),
+            ),
+            Err(error) => (
+                None,
+                Some(format!(
+                    "progress observation could not be restored: {error}; task outcome is unknown"
+                )),
+            ),
+        }
+    } else {
+        (None, None)
+    };
+    let mut registration = persisted
+        .restored_registration(monitor_id)
+        .map_err(|error| error.to_string())?;
+    if let Some(preflight) = fresh_preflight {
+        registration.initial_progress = ilium_core::PaneProgress::new(
+            monitor_id,
+            preflight.report,
+            preflight.checked_at_unix_millis,
+        )
+        .map_err(|error| error.to_string())?;
+    } else if let Some(restoration_failure) = restoration_failure.as_deref() {
+        let mut failed_progress = registration.initial_progress.clone();
+        failed_progress.monitor_health = ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures: crate::progress_monitor::MAXIMUM_CONSECUTIVE_OBSERVATION_FAILURES,
+            last_error: bounded_restoration_failure(restoration_failure),
+        };
+        failed_progress
+            .validate()
+            .map_err(|error| format!("restored failure evidence is invalid: {error}"))?;
+        registration.initial_progress = failed_progress;
+    }
+    let progress = registration.initial_progress.clone();
+    let should_run_probe = !progress.is_terminal() && !progress.monitor_health.is_failed();
+    let should_deliver = (persisted.result_delivery
+        == crate::persistence::PersistedProgressDeliveryState::NotQueued
+        || persisted.result_delivery.may_retry_after_restart())
+        && (progress.is_terminal() || progress.monitor_health.is_failed());
+
+    let _effect_guard = effect_gate.lock().await;
+    let mut tree = state.tree.write().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        return Err(format!(
+            "persisted monitor pane {pane_id:?} closed during restore"
+        ));
+    };
+    let fence = runtime
+        .install_progress_monitor(
+            registration.clone(),
+            ilium_ipc::ProgressGoalPolicy::KeepRunning,
+        )
+        .map_err(|error| format!("persisted monitor was rejected: {error}"))?;
+    runtime
+        .restore_progress_delivery_state(persisted.result_delivery, persisted.goal_resume_delivery)
+        .map_err(|error| format!("persisted delivery state was rejected: {error}"))?;
+    tree.set_pane_progress(pane_id, Some(progress.clone()))
+        .map_err(|error| error.to_string())?;
+
+    if should_run_probe {
+        let probe_task = crate::progress_monitor::spawn(Arc::clone(state), registration, fence);
+        let outcome_state = Arc::clone(state);
+        let task = tokio::spawn(async move {
+            match probe_task.await {
+                Ok(outcome) => {
+                    handle_progress_monitor_outcome(&outcome_state, pane_id, monitor_id, outcome)
+                        .await;
+                }
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => {
+                    tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "restored progress coordinator failed")
+                }
+            }
+        });
+        runtime.set_progress_monitor_task(task);
+    } else if should_deliver {
+        let message = if let Some(restoration_failure) = restoration_failure {
+            format!(
+                "Ilium could not restore this task's progress observation or identity. The task outcome is unknown. Details: {}",
+                bounded_restoration_failure(&restoration_failure)
+            )
+        } else if progress.is_terminal() {
+            crate::agent_delivery::terminal_result_message(&progress)
+        } else {
+            let error = match &progress.monitor_health {
+                ilium_core::ProgressMonitorHealth::Failed { last_error, .. } => last_error.as_str(),
+                _ => "progress observation stopped",
+            };
+            crate::agent_delivery::monitor_failure_message(&progress, error)
+        };
+        let delivery_state = Arc::clone(state);
+        let task = tokio::spawn(async move {
+            if let Err(error) = crate::agent_delivery::deliver_result_then_resume(
+                delivery_state,
+                pane_id,
+                monitor_id,
+                message,
+            )
+            .await
+            {
+                tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "restored progress result delivery stopped");
+            }
+        });
+        runtime.set_progress_delivery_task(task);
+    }
+    drop(panes);
+    drop(tree);
+    state.broadcast(ServerEvent::PaneProgressChanged {
+        pane_id,
+        progress: Some(progress),
+    });
+    state.request_snapshot_save();
+    Ok(())
+}
+
+fn bounded_restoration_failure(message: &str) -> String {
+    let maximum_bytes = ilium_core::MAXIMUM_PROGRESS_MONITOR_ERROR_BYTES;
+    if message.len() <= maximum_bytes {
+        return message.to_string();
+    }
+    let mut boundary = maximum_bytes.saturating_sub(3).min(message.len());
+    while boundary > 0 && !message.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    format!("{}...", &message[..boundary])
+}
+
+/// Applies a live kill switch. Nonterminal registrations are cancelled and
+/// removed; terminal task evidence and failed-monitor evidence remain sticky
+/// until explicit clear, but all of their pending automated delivery work is
+/// stopped. Thus `false` always means no probe or progress-owned PTY task is
+/// executing without destroying already-observed outcomes.
 async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enabled: bool) {
     state.set_progress_monitor_enabled(enabled);
     state.broadcast(ServerEvent::ProgressMonitorEnabledChanged { enabled });
@@ -1538,31 +2400,34 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
         return;
     }
 
+    let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
-    for resource in panes.values_mut() {
-        if let PaneResource::Terminal(runtime) = resource {
+    let mut cleared_pane_ids = Vec::new();
+    for (pane_id, resource) in panes.iter_mut() {
+        let PaneResource::Terminal(runtime) = resource else {
+            continue;
+        };
+        let preserve_evidence = runtime.progress_monitor.as_ref().is_some_and(|monitor| {
+            monitor.latest_progress.is_terminal()
+                || monitor.latest_progress.monitor_health.is_failed()
+        });
+        if preserve_evidence {
+            runtime.stop_progress_tasks_preserving_state();
+        } else if runtime.progress_monitor.is_some() {
             runtime.cancel_progress_monitor();
+            let _ = tree.set_pane_progress(*pane_id, None);
+            cleared_pane_ids.push(*pane_id);
         }
     }
     drop(panes);
-
-    let cleared_pane_ids: Vec<NodeId> = {
-        let mut tree = state.tree.write().await;
-        let candidate_ids: Vec<NodeId> = tree.all_ids().collect();
-        candidate_ids
-            .into_iter()
-            .filter(|pane_id| {
-                tree.pane_progress(*pane_id).is_some()
-                    && tree.set_pane_progress(*pane_id, None).is_ok()
-            })
-            .collect()
-    };
+    drop(tree);
     for pane_id in cleared_pane_ids {
         state.broadcast(ServerEvent::PaneProgressChanged {
             pane_id,
             progress: None,
         });
     }
+    state.request_snapshot_save();
 }
 
 /// Records whether the attached client currently has `pane_id` as its active
@@ -2020,8 +2885,8 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
     cwd: &std::path::Path,
 ) -> Result<(), RegisterPaneError> {
     let is_terminal = matches!(kind, PaneSnapshotKind::Terminal(_));
-    let resource = match kind {
-        PaneSnapshotKind::Editor { path } => PaneResource::Editor { path },
+    let (resource, output_receiver) = match kind {
+        PaneSnapshotKind::Editor { path } => (PaneResource::Editor { path }, None),
         PaneSnapshotKind::Terminal(origin) => {
             let identity = pane::PaneIdentityEnv {
                 pane_id,
@@ -2031,19 +2896,20 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
             let spawned = pane::spawn_terminal_session(&origin, cwd, &identity)?;
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
-            let forward_task = tokio::spawn(forward_output_bytes(
-                Arc::clone(state),
-                pane_id,
-                session.subscribe_output_bytes(),
-            ));
+            // Subscribe before registration so the receiver retains output
+            // produced during the short registration window. The task itself
+            // starts only after the runtime is addressable (below).
+            let output_receiver = session.subscribe_output_bytes();
             let runtime = crate::pane::TerminalPaneRuntime::new(
                 session,
                 origin,
                 pending_generated_session_id,
                 state.detection_config.idle_poll_interval,
-                forward_task,
             );
-            PaneResource::Terminal(Box::new(runtime))
+            (
+                PaneResource::Terminal(Box::new(runtime)),
+                Some(output_receiver),
+            )
         }
     };
 
@@ -2073,6 +2939,18 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
 
     let mut panes = state.panes.write().await;
     panes.insert(pane_id, resource);
+    if let Some(output_receiver) = output_receiver {
+        let forward_task = tokio::spawn(forward_output_bytes(
+            Arc::clone(state),
+            pane_id,
+            output_receiver,
+        ));
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            forward_task.abort();
+            unreachable!("the just-inserted terminal runtime must remain addressable");
+        };
+        runtime.set_forward_task(forward_task);
+    }
     drop(panes);
     drop(tree);
 
@@ -2094,6 +2972,15 @@ async fn forward_output_bytes(
 ) {
     let mut activity_gate = OutputActivityGate::new();
     let mut subscription_cache = TerminalSubscriptionCache::new();
+    let mut text_trigger_tracker = crate::text_triggers::TriggerTracker::default();
+    let (trigger_delivery_sender, trigger_delivery_receiver) = tokio::sync::mpsc::channel(64);
+    let _trigger_delivery_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(
+        crate::text_triggers::run_deliveries(
+            std::sync::Arc::clone(&state),
+            pane_id,
+            trigger_delivery_receiver,
+        ),
+    ));
     loop {
         match receiver.recv().await {
             Ok(first_chunk) => {
@@ -2103,20 +2990,16 @@ async fn forward_output_bytes(
                     }
                 }
                 // The PTY reader already parsed and journaled these bytes.
-                // When no attached right panel displays this pane, consume
-                // the ready broadcast-channel entries without allocating a
-                // merged frame, arming the 750 us coalescing timer, cloning
-                // IPC payloads, or waking every connection writer. A later
-                // subscription recovers the exact missing journal tail.
+                // Hidden panes still feed Text Triggers even without clients.
                 if !subscription_cache.has_subscribers(&state, pane_id) {
-                    drain_unsubscribed_output(&mut receiver);
-                    // Close the only race between the demand check and the
-                    // non-awaiting drain. If a subscription appeared in that
-                    // interval, publish one authoritative replay; otherwise a
-                    // control arriving later performs its own journal repair.
-                    if subscription_cache.has_subscribers(&state, pane_id) {
-                        broadcast_terminal_replay(&state, pane_id).await;
-                    }
+                    crate::text_triggers::process_output(
+                        &state,
+                        pane_id,
+                        &mut text_trigger_tracker,
+                        &first_chunk.bytes,
+                        &trigger_delivery_sender,
+                    )
+                    .await;
                     continue;
                 }
                 match collect_output_burst(first_chunk, &mut receiver).await {
@@ -2124,13 +3007,35 @@ async fn forward_output_bytes(
                         first_sequence,
                         sequence,
                         bytes,
-                    } => state.broadcast(ServerEvent::ScreenUpdate {
-                        pane_id,
-                        first_sequence,
-                        sequence,
-                        bytes,
-                    }),
+                    } => {
+                        // The visible stream merges extra PTY chunks. Match
+                        // against that complete byte range, otherwise a
+                        // regexp spanning a drained chunk is never observed.
+                        state.broadcast(ServerEvent::ScreenUpdate {
+                            pane_id,
+                            first_sequence,
+                            sequence,
+                            bytes: bytes.clone(),
+                        });
+                        crate::text_triggers::process_output(
+                            &state,
+                            pane_id,
+                            &mut text_trigger_tracker,
+                            &bytes,
+                            &trigger_delivery_sender,
+                        )
+                        .await;
+                    }
                     OutputBurst::ReplayRequired { skipped } => {
+                        // The pane's own screen already holds these bytes;
+                        // adopt it rather than replaying a partial stream.
+                        crate::text_triggers::resync_after_gap(
+                            &state,
+                            pane_id,
+                            &mut text_trigger_tracker,
+                            &trigger_delivery_sender,
+                        )
+                        .await;
                         tracing::warn!(
                             "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                         );
@@ -2139,6 +3044,13 @@ async fn forward_output_bytes(
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                crate::text_triggers::resync_after_gap(
+                    &state,
+                    pane_id,
+                    &mut text_trigger_tracker,
+                    &trigger_delivery_sender,
+                )
+                .await;
                 tracing::warn!(
                     "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                 );
@@ -2180,17 +3092,6 @@ impl TerminalSubscriptionCache {
         }
         self.has_subscribers
     }
-}
-
-/// Drops only output already queued for an undisplayed pane. It never waits:
-/// a future chunk will wake the forwarder again, at which point current
-/// subscription demand is checked afresh.
-fn drain_unsubscribed_output(
-    receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
-) {
-    while let Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) =
-        receiver.try_recv()
-    {}
 }
 
 enum OutputBurst {
@@ -2459,10 +3360,14 @@ async fn handle_key_input(
     }
 }
 
-/// Writes terminal bytes through the same title-tracking and detection path
-/// for both live client keys and server-scheduled input. Keeping one input
-/// boundary prevents delayed Enter from behaving differently from a key the
-/// user pressed directly.
+/// Codex's composer can consume an Enter arriving in the same input burst as
+/// text as a paste newline or autocomplete acceptance. Its model picker was
+/// verified live with a 280 ms text-to-Enter gap; use that established gap for
+/// every automated submission, including ones owned by the detached server.
+const AUTOMATED_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis(280);
+
+/// Writes exactly the caller's raw bytes. Keyboard input and explicit
+/// Enter-only actions retain their existing encoding and no staged behavior.
 pub(crate) async fn write_key_input(
     state: &ServerState,
     pane_id: NodeId,
@@ -2473,6 +3378,177 @@ pub(crate) async fn write_key_input(
         return Err("prompt submission metadata requires a trailing Enter".to_owned());
     }
 
+    let input_gate = pane_input_gate(state, pane_id).await?;
+    let _input_guard = input_gate.lock().await;
+    let is_initial_prompt = submission == Some(PromptSubmissionSource::InitialAgentPrompt);
+    write_key_input_unlocked(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        is_initial_prompt,
+        &input_gate,
+    )
+    .await
+}
+
+async fn pane_input_gate(
+    state: &ServerState,
+    pane_id: NodeId,
+) -> Result<std::sync::Arc<tokio::sync::Mutex<()>>, String> {
+    let panes = state.panes.read().await;
+    match panes.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Ok(std::sync::Arc::clone(&runtime.input_gate)),
+        Some(PaneResource::Editor { .. }) => {
+            Err(format!("pane {pane_id:?} is an editor, not a terminal"))
+        }
+        None => Err(format!("no pane found for node {pane_id:?}")),
+    }
+}
+
+/// Inserts literal text and delivers a later standalone Enter. Only semantic
+/// producers call this; raw `KeyInput` never changes its byte interpretation.
+pub(crate) async fn submit_terminal_text(
+    state: &ServerState,
+    pane_id: NodeId,
+    text: &str,
+    source: PromptSubmissionSource,
+) -> Result<(), String> {
+    let input_gate = pane_input_gate(state, pane_id).await?;
+    let _input_guard = input_gate.lock().await;
+    submit_terminal_text_locked(state, pane_id, text, source, &input_gate).await
+}
+
+/// A queued Text Trigger is claimed only after acquiring this pane's input
+/// gate. Edits accepted while it waited invalidate the old occurrence before
+/// any PTY bytes are written, including an A-to-B-to-A settings cycle.
+pub(crate) async fn submit_text_trigger_if_current(
+    state: &ServerState,
+    pane_id: NodeId,
+    trigger_id: &str,
+    message: &str,
+    expected_revision: u64,
+) -> Result<bool, String> {
+    let input_gate = pane_input_gate(state, pane_id).await?;
+    let _input_guard = input_gate.lock().await;
+    let current_target = {
+        let accepted = state.text_trigger_settings.read().await;
+        (accepted.revision == expected_revision)
+            .then(|| {
+                accepted.settings.triggers.iter().find(|trigger| {
+                    trigger.enabled && trigger.id == trigger_id && trigger.message == message
+                })
+            })
+            .flatten()
+            .map(|trigger| trigger.target)
+    };
+    let Some(target) = current_target else {
+        return Ok(false);
+    };
+    let status = state
+        .tree
+        .read()
+        .await
+        .get(pane_id)
+        .and_then(|node| match &node.kind {
+            NodeKind::Pane { status, .. } => Some(status.clone()),
+            _ => None,
+        });
+    if !status.is_some_and(|status| crate::text_triggers::target_matches(target, &status)) {
+        return Ok(false);
+    }
+    submit_terminal_text_locked(
+        state,
+        pane_id,
+        message,
+        PromptSubmissionSource::TextTrigger,
+        &input_gate,
+    )
+    .await?;
+    Ok(true)
+}
+
+pub(crate) async fn submit_terminal_text_locked(
+    state: &ServerState,
+    pane_id: NodeId,
+    text: &str,
+    source: PromptSubmissionSource,
+    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+) -> Result<(), String> {
+    let wants_bracketed_paste = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(format!("pane {pane_id:?} closed before text insertion"));
+        };
+        if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
+            return Err(format!("pane {pane_id:?} changed before text insertion"));
+        }
+        runtime
+            .session
+            .with_screen(|screen| screen.bracketed_paste())
+    };
+    let body = automated_submission_body(text.as_bytes(), wants_bracketed_paste)?;
+    submit_terminal_body_locked(state, pane_id, &body, source, input_gate).await
+}
+
+pub(crate) async fn submit_terminal_body_locked(
+    state: &ServerState,
+    pane_id: NodeId,
+    body: &[u8],
+    source: PromptSubmissionSource,
+    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+) -> Result<(), String> {
+    let is_initial_prompt = source == PromptSubmissionSource::InitialAgentPrompt;
+    if !body.is_empty() {
+        write_key_input_unlocked(state, pane_id, body, None, is_initial_prompt, input_gate).await?;
+        tokio::time::sleep(AUTOMATED_ENTER_DELAY).await;
+    }
+    write_key_input_unlocked(
+        state,
+        pane_id,
+        b"\r",
+        Some(source),
+        is_initial_prompt,
+        input_gate,
+    )
+    .await
+}
+
+/// A multiline agent prompt must be one paste operation so inner newlines do
+/// not become premature Enter presses. Initial-agent prompts arrive already
+/// framed; all other automatic producers carry literal UTF-8 text.
+fn automated_submission_body(bytes: &[u8], wants_bracketed_paste: bool) -> Result<Vec<u8>, String> {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Ok(bytes.to_vec());
+    };
+    if text.contains("\x1b[200~") || text.contains("\x1b[201~") {
+        return Err("terminal submission contains a bracketed-paste delimiter".to_owned());
+    }
+    if !text.contains(['\r', '\n']) {
+        return Ok(bytes.to_vec());
+    }
+    if !wants_bracketed_paste {
+        return Err("multiline terminal submission requires bracketed-paste support".to_owned());
+    }
+    let mut framed = Vec::with_capacity(PASTE_START.len() + bytes.len() + PASTE_END.len());
+    framed.extend_from_slice(PASTE_START);
+    framed.extend_from_slice(bytes);
+    framed.extend_from_slice(PASTE_END);
+    Ok(framed)
+}
+
+/// The established title, session-identity, activity and event path for one
+/// physical PTY write. Call only while holding this pane's `input_gate`.
+async fn write_key_input_unlocked(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    is_initial_prompt: bool,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+) -> Result<(), String> {
     // The tracker below decides whether these bytes actually completed a
     // semantic line. Looking for CR/LF here would misclassify newlines inside
     // a bracketed paste as submissions.
@@ -2493,7 +3569,7 @@ pub(crate) async fn write_key_input(
                 return (false, None);
             };
             let agent_class = match status {
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _) => {
+                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
                     Some(class.clone())
                 }
                 PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
@@ -2530,10 +3606,15 @@ pub(crate) async fn write_key_input(
     let mut session_transition_observation = None;
     let mut conversation_title_generation_before = None;
     let error_message = match panes.get_mut(&pane_id) {
+        Some(PaneResource::Terminal(runtime))
+            if !std::sync::Arc::ptr_eq(expected_input_gate, &runtime.input_gate) =>
+        {
+            Some(format!(
+                "pane {pane_id:?} runtime changed during input delivery"
+            ))
+        }
         Some(PaneResource::Terminal(runtime)) => {
-            if !bytes.is_empty()
-                && !matches!(submission, Some(PromptSubmissionSource::InitialAgentPrompt))
-            {
+            if !bytes.is_empty() && !is_initial_prompt {
                 runtime.cancel_initial_prompt_delivery();
             }
             // A typed command only becomes a title while the shell itself owns
@@ -2574,7 +3655,7 @@ pub(crate) async fn write_key_input(
                     // The successful PTY write is authoritative user intent.
                     // Clear retained ownership immediately so a footer-hidden
                     // `/goal clear` cannot leave a sticky sidebar flag.
-                    runtime.confirmed_goal_owner = None;
+                    runtime.clear_confirmed_goal_owner();
                     goal_was_cleared = true;
                 }
                 let active_agent_class = runtime
@@ -2667,7 +3748,11 @@ pub(crate) async fn write_key_input(
     // conditional tree transition cannot overwrite a concurrent detector's
     // newer Working/Waiting state.
     if !bytes.is_empty() {
-        let _ = record_node_activity(state, pane_id).await?;
+        if let Err(error) = record_node_activity(state, pane_id).await {
+            // The PTY write already succeeded. A later tree mutation must not
+            // turn this into a retryable delivery failure for queued work.
+            tracing::warn!(pane_id = pane_id.0, %error, "input activity bookkeeping failed after PTY write");
+        }
         let acknowledged_status = {
             let mut tree = state.tree.write().await;
             match tree.acknowledge_agent_completion(pane_id) {
@@ -2946,9 +4031,19 @@ async fn handle_mouse_input(
 ) {
     // Same rationale as `handle_resize_pane`/`handle_key_input`: resolve the
     // outcome under the lock, send only after dropping it.
+    let input_gate = match pane_input_gate(state, pane_id).await {
+        Ok(input_gate) => input_gate,
+        Err(message) => {
+            send_direct_error(direct_tx, message).await;
+            return;
+        }
+    };
+    let _input_guard = input_gate.lock().await;
     let panes = state.panes.read().await;
     let error_message = match panes.get(&pane_id) {
-        Some(PaneResource::Terminal(runtime)) => {
+        Some(PaneResource::Terminal(runtime))
+            if std::sync::Arc::ptr_eq(&input_gate, &runtime.input_gate) =>
+        {
             let event = to_crossterm_event(kind, column, row, modifiers);
             runtime
                 .session
@@ -2959,9 +4054,13 @@ async fn handle_mouse_input(
         Some(PaneResource::Editor { .. }) => {
             Some(format!("pane {pane_id:?} is an editor, not a terminal"))
         }
+        Some(PaneResource::Terminal(_)) => {
+            Some(format!("pane {pane_id:?} changed before mouse input"))
+        }
         None => Some(format!("no pane found for node {pane_id:?}")),
     };
     drop(panes);
+    drop(_input_guard);
 
     if let Some(message) = error_message {
         send_direct_error(direct_tx, message).await;
@@ -3166,6 +4265,27 @@ mod tests {
     use crate::initial_prompt::initial_input_bytes;
     use ilium_core::{NodeId, RestructureNode, SplitOrientation};
     use std::time::Duration;
+
+    #[test]
+    fn automated_multiline_body_preserves_literal_text_inside_bracketed_paste() {
+        assert_eq!(
+            automated_submission_body(b"first\r\nsecond\nthird", true).unwrap(),
+            b"\x1b[200~first\r\nsecond\nthird\x1b[201~"
+        );
+        assert_eq!(
+            automated_submission_body(b"/model", true).unwrap(),
+            b"/model"
+        );
+        assert_eq!(
+            automated_submission_body(b"first\nsecond", false).unwrap_err(),
+            "multiline terminal submission requires bracketed-paste support"
+        );
+    }
+
+    #[test]
+    fn automated_multiline_body_rejects_embedded_paste_delimiter_without_writing() {
+        assert!(automated_submission_body(b"first\n\x1b[201~second", true).is_err());
+    }
 
     /// Waits for the command-backed test pane's reader thread to journal at
     /// least one chunk without relying on scheduler timing.
@@ -3693,6 +4813,34 @@ mod tests {
         }
     }
 
+    fn persisted_running_progress_monitor(
+        pane_id: NodeId,
+        command: String,
+    ) -> crate::persistence::PersistedProgressMonitor {
+        crate::persistence::PersistedProgressMonitor {
+            pane_id,
+            command,
+            interval_seconds: 60,
+            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            latest_progress: ilium_core::PaneProgress::new(
+                99,
+                ilium_core::ProgressTaskReport::new(
+                    "persisted-job".to_string(),
+                    ilium_core::ProgressTaskStatus::Running,
+                    55.0,
+                    "last observed before restart".to_string(),
+                    None,
+                )
+                .unwrap(),
+                1_700_000_000_000,
+            )
+            .unwrap(),
+            goal_resume_armed: false,
+            result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
+            goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
+        }
+    }
+
     #[tokio::test]
     async fn set_pane_progress_monitor_runs_the_command_and_broadcasts_reported_progress() {
         let (state, pane_id, _directory) =
@@ -3704,19 +4852,29 @@ mod tests {
             !handle_request(
                 &state,
                 ClientRequest::SetPaneProgressMonitor {
+                    request_id: 11,
                     pane_id,
-                    command: r#"printf '%s' '{"percent": 42.5, "message": "frame 10/100"}'"#
+                    command: r#"printf '%s' '{"job_id":"render-11","status":"running","percent":42.5,"message":"frame 10/100"}'"#
                         .to_string(),
                     interval_seconds: 1,
+                    goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
                 },
                 &direct_tx,
             )
             .await
         );
-        assert!(
-            direct_rx.try_recv().is_err(),
-            "a valid request sends no error"
-        );
+        let accepted = direct_rx
+            .recv()
+            .await
+            .expect("registration acknowledgement");
+        assert!(matches!(
+            accepted,
+            ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 11,
+                result: Ok(_),
+                ..
+            }
+        ));
 
         let progress = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -3732,11 +4890,399 @@ mod tests {
         })
         .await
         .expect("the monitor command's first tick should report progress");
-        assert_eq!(progress.percent, 42.5);
-        assert_eq!(progress.message, "frame 10/100");
+        assert_eq!(progress.report.percent, 42.5);
+        assert_eq!(progress.report.message, "frame 10/100");
         assert_eq!(
             state.tree.read().await.pane_progress(pane_id),
             Some(&progress)
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn failed_replacement_and_stale_clear_preserve_the_accepted_monitor() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-transactional-replacement").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(4);
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 15,
+                pane_id,
+                command: r#"printf '%s' '{"job_id":"kept-job","status":"running","percent":25,"message":"healthy"}'"#.to_string(),
+                interval_seconds: 60,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        let accepted_id = match direct_rx.recv().await.unwrap() {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected registration response: {event:?}"),
+        };
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 16,
+                pane_id,
+                command: "printf '%s' 'not-json'".to_string(),
+                interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 16,
+                result: Err(_),
+                ..
+            })
+        ));
+
+        handle_request(
+            &state,
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 17,
+                pane_id,
+                expected_monitor_id: Some(accepted_id + 1),
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorCleared {
+                request_id: 17,
+                result: Err(ilium_ipc::ProgressMonitorRejection {
+                    code: ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
+                    ..
+                }),
+                ..
+            })
+        ));
+
+        handle_request(
+            &state,
+            ClientRequest::GetPaneProgressMonitorStatus {
+                request_id: 18,
+                pane_id,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorStatusReported {
+                request_id: 18,
+                result: Ok(ilium_ipc::ProgressMonitorStatus {
+                    progress: Some(progress),
+                    ..
+                }),
+                ..
+            }) if progress.monitor_id == accepted_id && progress.report.job_id == "kept-job"
+        ));
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn repeated_progress_set_request_replays_one_committed_result_without_rerunning_probe() {
+        let (state, pane_id, directory) =
+            state_with_one_terminal_pane("progress-monitor-idempotent-set").await;
+        let invocation_log = directory.path().join("probe-invocations.log");
+        let command = format!(
+            "printf x >> '{}'; sleep 0.1; printf '%s' '{{\"job_id\":\"idempotent-job\",\"status\":\"running\",\"percent\":12,\"message\":\"running\"}}'",
+            invocation_log.display()
+        );
+        let (direct_tx, mut direct_rx) = mpsc::channel(2);
+        let request = || ClientRequest::SetPaneProgressMonitor {
+            request_id: 19,
+            pane_id,
+            command: command.clone(),
+            interval_seconds: 60,
+            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+        };
+
+        let (first_handled, second_handled) = tokio::join!(
+            handle_request(&state, request(), &direct_tx),
+            handle_request(&state, request(), &direct_tx)
+        );
+        assert!(!first_handled && !second_handled);
+        let first = direct_rx.recv().await.expect("first set acknowledgement");
+        let second = direct_rx
+            .recv()
+            .await
+            .expect("replayed set acknowledgement");
+        let first_result = match first {
+            ServerEvent::ProgressMonitorSetCompleted { result, .. } => result,
+            event => panic!("unexpected first response: {event:?}"),
+        };
+        let second_result = match second {
+            ServerEvent::ProgressMonitorSetCompleted { result, .. } => result,
+            event => panic!("unexpected replay response: {event:?}"),
+        };
+        assert_eq!(second_result, first_result);
+        assert!(first_result.is_ok());
+        assert_eq!(
+            tokio::fs::read_to_string(&invocation_log)
+                .await
+                .expect("probe invocation log"),
+            "x",
+            "the exact retry must not rerun preflight"
+        );
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 19,
+                pane_id,
+                command: r#"printf '%s' '{"job_id":"collision","status":"running","percent":1,"message":"different"}'"#.to_string(),
+                interval_seconds: 60,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorSetCompleted {
+                result: Err(ilium_ipc::ProgressMonitorRejection {
+                    code: ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
+                    ..
+                }),
+                ..
+            })
+        ));
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn progress_set_acknowledges_only_after_snapshot_contains_the_monitor() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-durable-ack").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 20,
+                pane_id,
+                command: r#"printf '%s' '{"job_id":"durable-job","status":"running","percent":17,"message":"running"}'"#.to_string(),
+                interval_seconds: 60,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        let accepted_monitor_id = match direct_rx.recv().await.expect("set acknowledgement") {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected set response: {event:?}"),
+        };
+        let snapshot = crate::persistence::load_snapshot(&state.snapshot_path)
+            .await
+            .expect("durable snapshot is readable")
+            .expect("durable snapshot exists before acknowledgement is observed");
+        assert!(snapshot.progress_monitors.iter().any(|monitor| {
+            monitor.pane_id == pane_id
+                && monitor.latest_progress.monitor_id == accepted_monitor_id
+                && monitor.latest_progress.report.job_id == "durable-job"
+        }));
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn durability_barrier_writes_even_after_background_writer_claims_dirty_flag() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("snapshot-barrier-after-dirty-claim").await;
+        state.request_snapshot_save();
+        assert!(
+            state.take_pending_snapshot(),
+            "fixture simulates the background writer having claimed the dirty flag"
+        );
+        assert!(!state.is_snapshot_dirty());
+
+        crate::persistence::await_snapshot_durability_barrier(&state)
+            .await
+            .expect("barrier must not depend on the dirty flag");
+        let snapshot = crate::persistence::load_snapshot(&state.snapshot_path)
+            .await
+            .expect("barrier snapshot is readable")
+            .expect("barrier creates a snapshot");
+        assert!(snapshot.panes.iter().any(|pane| pane.node_id == pane_id));
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn failed_progress_snapshot_write_rejects_replacement_and_preserves_old_monitor() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-persistence-failure").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(3);
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 23,
+                pane_id,
+                command: r#"printf '%s' '{"job_id":"preserved-job","status":"running","percent":23,"message":"running"}'"#.to_string(),
+                interval_seconds: 60,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        let preserved_monitor_id = match direct_rx.recv().await.unwrap() {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected initial response: {event:?}"),
+        };
+        tokio::fs::remove_file(&state.snapshot_path)
+            .await
+            .expect("remove writable snapshot");
+        tokio::fs::create_dir(&state.snapshot_path)
+            .await
+            .expect("replace snapshot file with an unwritable directory target");
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 24,
+                pane_id,
+                command: r#"printf '%s' '{"job_id":"unacknowledged-job","status":"running","percent":24,"message":"running"}'"#.to_string(),
+                interval_seconds: 60,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 24,
+                result: Err(ilium_ipc::ProgressMonitorRejection { message, .. }),
+                ..
+            }) if message.contains("durably persist")
+        ));
+        handle_request(
+            &state,
+            ClientRequest::GetPaneProgressMonitorStatus {
+                request_id: 25,
+                pane_id,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorStatusReported {
+                result: Ok(ilium_ipc::ProgressMonitorStatus {
+                    progress: Some(progress),
+                    ..
+                }),
+                ..
+            }) if progress.monitor_id == preserved_monitor_id
+                && progress.report.job_id == "preserved-job"
+        ));
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn restore_probe_failure_keeps_sticky_unknown_outcome_evidence_and_queues_notice() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-restore-probe-failure").await;
+        let persisted = persisted_running_progress_monitor(
+            pane_id,
+            "printf '%s' 'probe failed' >&2; exit 7".to_string(),
+        );
+
+        restore_persisted_progress_monitor(&state, persisted)
+            .await
+            .expect("a failed restored probe becomes sticky evidence");
+        tokio::task::yield_now().await;
+        let (progress, delivery) = {
+            let panes = state.panes.read().await;
+            let PaneResource::Terminal(runtime) = panes.get(&pane_id).unwrap() else {
+                panic!("fixture pane must remain terminal");
+            };
+            let monitor = runtime.progress_monitor.as_ref().unwrap();
+            (monitor.latest_progress.clone(), monitor.result_delivery)
+        };
+        assert!(matches!(
+            progress.monitor_health,
+            ilium_core::ProgressMonitorHealth::Failed { ref last_error, .. }
+                if last_error.contains("could not be restored")
+                    && last_error.contains("task outcome is unknown")
+        ));
+        assert_ne!(
+            progress.monitor_id, 99,
+            "restore must allocate a fresh fence"
+        );
+        assert_eq!(progress.report.job_id, "persisted-job");
+        assert!(matches!(
+            delivery,
+            crate::pane::ProgressDeliveryState::Queued
+                | crate::pane::ProgressDeliveryState::Attempted
+                | crate::pane::ProgressDeliveryState::DeliveredToPty
+        ));
+        assert_eq!(
+            state.tree.read().await.pane_progress(pane_id),
+            Some(&progress)
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn restored_job_identity_mismatch_is_failed_evidence_not_a_dropped_monitor() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-restore-identity-mismatch").await;
+        let mut persisted = persisted_running_progress_monitor(
+            pane_id,
+            r#"printf '%s' '{"job_id":"replacement-job","status":"running","percent":1,"message":"different process"}'"#.to_string(),
+        );
+        persisted.result_delivery = crate::persistence::PersistedProgressDeliveryState::Attempted;
+
+        restore_persisted_progress_monitor(&state, persisted)
+            .await
+            .expect("an identity mismatch becomes sticky evidence");
+        let progress = state
+            .tree
+            .read()
+            .await
+            .pane_progress(pane_id)
+            .cloned()
+            .expect("failed restore evidence remains visible");
+        assert!(matches!(
+            progress.monitor_health,
+            ilium_core::ProgressMonitorHealth::Failed { ref last_error, .. }
+                if last_error.contains("identity could not be restored")
+                    && last_error.contains("replacement-job")
+                    && last_error.contains("persisted-job")
+        ));
+        assert_eq!(progress.report.job_id, "persisted-job");
+        let delivery = {
+            let panes = state.panes.read().await;
+            let PaneResource::Terminal(runtime) = panes.get(&pane_id).unwrap() else {
+                panic!("fixture pane must remain terminal");
+            };
+            runtime.progress_monitor.as_ref().unwrap().result_delivery
+        };
+        assert_eq!(
+            delivery,
+            crate::pane::ProgressDeliveryState::Attempted,
+            "restore must not replay a notification whose prior attempt is uncertain"
         );
 
         teardown_state_panes(&state);
@@ -3747,18 +5293,31 @@ mod tests {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-clear-stops-loop").await;
         let mut events = state.events.subscribe();
-        let (direct_tx, _direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
 
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 21,
                 pane_id,
-                command: r#"printf '%s' '{"percent": 10, "message": "starting"}'"#.to_string(),
+                command: r#"printf '%s' '{"job_id":"render-21","status":"running","percent":10,"message":"starting"}'"#.to_string(),
                 interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
         .await;
+        let monitor_id = match direct_rx
+            .recv()
+            .await
+            .expect("registration acknowledgement")
+        {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected registration response: {event:?}"),
+        };
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
@@ -3774,10 +5333,22 @@ mod tests {
 
         handle_request(
             &state,
-            ClientRequest::ClearPaneProgressMonitor { pane_id },
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 22,
+                pane_id,
+                expected_monitor_id: Some(monitor_id),
+            },
             &direct_tx,
         )
         .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorCleared {
+                request_id: 22,
+                result: Ok(Some(id)),
+                ..
+            }) if id == monitor_id
+        ));
 
         let cleared = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -3829,15 +5400,24 @@ mod tests {
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 31,
                 pane_id,
                 command: "   ".to_string(),
                 interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
         .await;
         assert!(
-            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            matches!(
+                direct_rx.try_recv(),
+                Ok(ServerEvent::ProgressMonitorSetCompleted {
+                    request_id: 31,
+                    result: Err(_),
+                    ..
+                })
+            ),
             "an empty command must be rejected with a direct error"
         );
 
@@ -3845,15 +5425,24 @@ mod tests {
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 32,
                 pane_id: missing_pane_id,
                 command: "true".to_string(),
                 interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
         .await;
         assert!(
-            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            matches!(
+                direct_rx.try_recv(),
+                Ok(ServerEvent::ProgressMonitorSetCompleted {
+                    request_id: 32,
+                    result: Err(_),
+                    ..
+                })
+            ),
             "a nonexistent pane must be rejected with a direct error"
         );
 
@@ -3870,13 +5459,23 @@ mod tests {
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 41,
                 pane_id,
-                command: r#"printf '%s' '{"percent": 5, "message": "running"}'"#.to_string(),
+                command: r#"printf '%s' '{"job_id":"render-41","status":"running","percent":5,"message":"running"}'"#.to_string(),
                 interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
         .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 41,
+                result: Ok(_),
+                ..
+            })
+        ));
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
@@ -3921,15 +5520,24 @@ mod tests {
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
+                request_id: 42,
                 pane_id,
                 command: "true".to_string(),
                 interval_seconds: 1,
+                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
         .await;
         assert!(
-            matches!(direct_rx.try_recv(), Ok(ServerEvent::Error { .. })),
+            matches!(
+                direct_rx.try_recv(),
+                Ok(ServerEvent::ProgressMonitorSetCompleted {
+                    request_id: 42,
+                    result: Err(_),
+                    ..
+                })
+            ),
             "a new request must be rejected while the setting is disabled"
         );
 

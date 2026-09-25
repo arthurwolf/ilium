@@ -217,12 +217,13 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
             _,
             AgentActivity::Working
                 | AgentActivity::WaitingBackground
-                | AgentActivity::BackgroundTaskStillRunning
+                | AgentActivity::BackgroundTaskStillRunning,
+            _,
         )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done, _)
     ) {
         return Some(SoundEvent::AgentFinished);
     }
@@ -230,11 +231,11 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
     if !matches!(
         previous,
         PaneStatus::Agent(_, AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval, _)
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval, _)
     ) {
         return Some(SoundEvent::ApprovalRequired);
     }
@@ -246,12 +247,13 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
             AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval
         ) | PaneStatus::AgentWithGoal(
             _,
-            AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval
+            AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval,
+            _,
         )
     ) && matches!(
         new,
         PaneStatus::Agent(_, AgentActivity::Working)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Working)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Working, _)
     ) {
         return Some(SoundEvent::AgentStarted);
     }
@@ -269,7 +271,8 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
             AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
         ) | PaneStatus::AgentWithGoal(
             _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning,
+            _,
         )
     ) && matches!(
         new,
@@ -278,7 +281,8 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
             AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
         ) | PaneStatus::AgentWithGoal(
             _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
+            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning,
+            _,
         )
     ) {
         return Some(SoundEvent::WaitingBackground);

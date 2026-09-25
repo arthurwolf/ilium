@@ -10,8 +10,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use ilium_core::{
-    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, ContainerKind, Node, NodeId,
-    NodeKind, PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
+    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, ContainerKind, GoalState, Node,
+    NodeId, NodeKind, PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
@@ -670,7 +670,7 @@ fn build_item(
             let display_name = match progress {
                 Some(progress) => format!(
                     "[{:.0}%] {display_name}",
-                    progress.percent.clamp(0.0, 100.0)
+                    progress.report.percent.clamp(0.0, 100.0)
                 ),
                 None => display_name,
             };
@@ -1113,7 +1113,7 @@ fn should_apply_unread_title_bold(
         && !matches!(
             status,
             PaneStatus::Agent(_, AgentActivity::Done)
-                | PaneStatus::AgentWithGoal(_, AgentActivity::Done)
+                | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
         )
 }
 
@@ -1191,16 +1191,16 @@ fn pane_label_with_icons(
         PaneStatus::Agent(class, activity) => agent_pane_label(
             class,
             *activity,
-            false,
+            None,
             title(),
             elapsed_ms,
             agent_identifiers,
             icons,
         ),
-        PaneStatus::AgentWithGoal(class, activity) => agent_pane_label(
+        PaneStatus::AgentWithGoal(class, activity, goal_state) => agent_pane_label(
             class,
             *activity,
-            true,
+            Some(*goal_state),
             title(),
             elapsed_ms,
             agent_identifiers,
@@ -1277,7 +1277,7 @@ fn pane_label(
 fn agent_pane_label(
     class: &AgentClass,
     activity: AgentActivity,
-    has_goal: bool,
+    goal_state: Option<GoalState>,
     title: String,
     elapsed_ms: u128,
     agent_identifiers: &AgentIdentifierSettings,
@@ -1296,7 +1296,8 @@ fn agent_pane_label(
                         icons.glyph(IconTarget::Working).to_string()
                     },
                 )),
-                has_goal,
+                goal_state,
+                icons,
                 Span::raw(agent_title(class, &title, agent_identifiers.mode)),
             )
         }
@@ -1314,7 +1315,8 @@ fn agent_pane_label(
                         icons.glyph(IconTarget::WaitingBackground).to_string()
                     },
                 )),
-                has_goal,
+                goal_state,
+                icons,
                 Span::raw(agent_title(class, &title, agent_identifiers.mode)),
             )
         }
@@ -1325,7 +1327,8 @@ fn agent_pane_label(
                     .glyph(IconTarget::BackgroundTaskStillRunning)
                     .to_string(),
             )),
-            has_goal,
+            goal_state,
+            icons,
             Span::raw(agent_title(class, &title, agent_identifiers.mode)),
         ),
         AgentActivity::Done => {
@@ -1340,7 +1343,8 @@ fn agent_pane_label(
                     icons.glyph(IconTarget::Done).to_string(),
                     style,
                 )),
-                has_goal,
+                goal_state,
+                icons,
                 Span::styled(
                     crate::pane_title::decorate_agent_title(
                         activity,
@@ -1358,14 +1362,16 @@ fn agent_pane_label(
                     icons.glyph(IconTarget::WaitingApproval).to_string(),
                     style,
                 )),
-                has_goal,
+                goal_state,
+                icons,
                 Span::styled(agent_title(class, &title, agent_identifiers.mode), style),
             )
         }
         AgentActivity::Idle => agent_node_label(
             node_icon,
             Some(Span::raw(icons.glyph(IconTarget::Idle).to_string())),
-            has_goal,
+            goal_state,
+            icons,
             Span::raw(agent_title(class, &title, agent_identifiers.mode)),
         ),
     }
@@ -1425,16 +1431,18 @@ fn scheduled_pane_label(
         PaneStatus::Agent(class, _) => agent_node_label(
             Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
             Some(Span::raw(clock.to_string())),
-            false,
+            None,
+            &icons,
             Span::raw(format!(
                 "{countdown} {}",
                 agent_title(class, &title, agent_identifiers.mode)
             )),
         ),
-        PaneStatus::AgentWithGoal(class, _) => agent_node_label(
+        PaneStatus::AgentWithGoal(class, _, goal_state) => agent_node_label(
             Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
             Some(Span::raw(clock.to_string())),
-            true,
+            Some(*goal_state),
+            &icons,
             Span::raw(format!(
                 "{countdown} {}",
                 agent_title(class, &title, agent_identifiers.mode)
@@ -1499,21 +1507,35 @@ fn node_label(
 fn agent_node_label(
     node_icon: Span<'static>,
     activity_icon: Option<Span<'static>>,
-    has_goal: bool,
+    goal_state: Option<GoalState>,
+    icons: &IconSettings,
     text: Span<'static>,
 ) -> Line<'static> {
-    if !has_goal {
+    let Some(goal_state) = goal_state else {
         return node_label(node_icon, activity_icon, text);
-    }
+    };
     Line::from(vec![
         fixed_width_icon_span(node_icon, NODE_ICON_COLUMN_WIDTH),
         fixed_width_icon_span(
             activity_icon.unwrap_or_default(),
             ACTIVITY_ICON_COLUMN_WIDTH,
         ),
-        fixed_width_icon_span(Span::raw("🏁"), GOAL_ICON_COLUMN_WIDTH),
+        fixed_width_icon_span(
+            Span::raw(icons.glyph(goal_icon_target(goal_state)).to_string()),
+            GOAL_ICON_COLUMN_WIDTH,
+        ),
         text,
     ])
+}
+
+const fn goal_icon_target(goal_state: GoalState) -> IconTarget {
+    match goal_state {
+        GoalState::Active => IconTarget::GoalActive,
+        GoalState::Paused => IconTarget::GoalPaused,
+        GoalState::Blocked => IconTarget::GoalBlocked,
+        GoalState::UsageLimited => IconTarget::GoalUsageLimited,
+        GoalState::Reached => IconTarget::GoalReached,
+    }
 }
 
 /// Pads an icon span without losing its color or emphasis, so status cues
@@ -2690,7 +2712,11 @@ mod tests {
     fn agent_goal_flag_sits_directly_after_the_activity_indicator() {
         let settings = AgentIdentifierSettings::default();
         let goal_line = pane_label(
-            &PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working),
+            &PaneStatus::AgentWithGoal(
+                AgentClass::Codex,
+                AgentActivity::Working,
+                GoalState::Active,
+            ),
             "Goal work",
             0,
             false,
@@ -2710,12 +2736,36 @@ mod tests {
             goal_line.spans[1].content.trim(),
             SPINNER_FRAMES[0].to_string()
         );
-        assert_eq!(goal_line.spans[2].content.trim_end(), "🏁");
+        assert_eq!(goal_line.spans[2].content.trim_end(), "🎯");
         assert_eq!(
             UnicodeWidthStr::width(goal_line.spans[2].content.as_ref()),
             GOAL_ICON_COLUMN_WIDTH
         );
         assert_eq!(ordinary_line.spans.len(), 3);
+    }
+
+    #[test]
+    fn goal_phase_icons_follow_the_configurable_semantic_targets() {
+        let settings = AgentIdentifierSettings::default();
+        let expected = [
+            (GoalState::Active, "🎯"),
+            (GoalState::Paused, "⏸️"),
+            (GoalState::Blocked, "🚧"),
+            (GoalState::UsageLimited, "⌛"),
+            (GoalState::Reached, "🏁"),
+        ];
+
+        for (goal_state, glyph) in expected {
+            let line = pane_label(
+                &PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, goal_state),
+                "Goal work",
+                0,
+                false,
+                &settings,
+                None,
+            );
+            assert_eq!(line.spans[2].content.trim_end(), glyph, "{goal_state:?}");
+        }
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Completion-driven queued-prompt delivery.
 //!
 //! The detection loop alone decides when an agent has finished. This module
-//! then writes exactly one FIFO head plus Enter, and advances that head only
-//! after the PTY accepts the complete payload.
+//! then submits exactly one FIFO head plus Enter in separate input stages, and
+//! advances that head only after the PTY accepts both stages.
 
 use ilium_agent_debug::{
     AgentDebugEventDraft, AgentDebugEventKind, AgentDebugField, AgentDebugSeverity,
@@ -11,7 +11,7 @@ use ilium_agent_debug::{
 use ilium_core::{NodeId, QueuedPrompt};
 use ilium_ipc::PromptSubmissionSource;
 
-use crate::ipc::handlers::{broadcast_and_persist, write_key_input};
+use crate::ipc::handlers::{broadcast_and_persist, submit_terminal_text};
 use crate::state::ServerState;
 
 /// Delivers one currently queued prompt after a verified agent completion.
@@ -38,14 +38,11 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     let Some(prompt) = prompt else {
         return;
     };
-    let mut bytes = Vec::with_capacity(prompt.text.len() + 1);
-    bytes.extend_from_slice(prompt.text.as_bytes());
-    bytes.push(b'\r');
-    if let Err(error) = write_key_input(
+    if let Err(error) = submit_terminal_text(
         state,
         pane_id,
-        &bytes,
-        Some(PromptSubmissionSource::QueuedPrompt),
+        &prompt.text,
+        PromptSubmissionSource::QueuedPrompt,
     )
     .await
     {

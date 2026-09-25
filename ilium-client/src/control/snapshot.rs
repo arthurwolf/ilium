@@ -125,13 +125,24 @@ fn pane_status_snapshot(status: &PaneStatus) -> Value {
             "agent_class": agent_class_key(class),
             "activity": agent_activity_key(activity),
         }),
-        PaneStatus::AgentWithGoal(class, activity) => json!({
+        PaneStatus::AgentWithGoal(class, activity, goal_state) => json!({
             "kind": "agent_with_goal",
             "agent_class": agent_class_key(class),
             "activity": agent_activity_key(activity),
+            "goal_state": goal_state_key(goal_state),
         }),
         PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
         PaneStatus::Board => json!({ "kind": "board" }),
+    }
+}
+
+fn goal_state_key(goal_state: &ilium_core::GoalState) -> &'static str {
+    match goal_state {
+        ilium_core::GoalState::Active => "active",
+        ilium_core::GoalState::Paused => "paused",
+        ilium_core::GoalState::Blocked => "blocked",
+        ilium_core::GoalState::UsageLimited => "usage_limited",
+        ilium_core::GoalState::Reached => "reached",
     }
 }
 
@@ -239,13 +250,13 @@ fn settings_snapshot(app: &App) -> Value {
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
-            "session.recovery_policy", "keyboard.shortcut_base", "keyboard.preset",
+            "session.recovery_policy", "session.backups_enabled", "keyboard.shortcut_base", "keyboard.preset",
             "keyboard.bindings.<action_name>", "kanban_board.card_preview_lines",
             "kanban_board.minimum_column_width", "sound.source", "sound.file",
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
             "triggers.<event_key>",
-            "inference.provider", "inference.kilo_gateway.model",
+            "inference.provider", "inference.title_style", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
@@ -296,6 +307,7 @@ fn settings_snapshot(app: &App) -> Value {
         },
         "session": {
             "recovery_policy": app.session_settings.recovery_policy.label(),
+            "backups_enabled": app.session_settings.backups_enabled,
         },
         "keyboard": {
             "shortcut_base": app.keyboard_settings.shortcut_base.label(),
@@ -313,6 +325,10 @@ fn settings_snapshot(app: &App) -> Value {
         },
         "inference": {
             "provider": app.inference_settings.selected_provider.label(),
+            "title_style": match app.inference_settings.title_style {
+                ilium_inference::TitleStyle::Labeling => "labeling",
+                ilium_inference::TitleStyle::Summarization => "summarization",
+            },
             "selected_model": app.inference_settings.selected_model(),
             "kilo_gateway": {
                 "model": app.inference_settings.kilo_gateway.model,
@@ -394,6 +410,8 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::InferenceSettingPrompt(_, _) => "inference_setting_prompt",
         Mode::VoiceSettingPrompt(_, _) => "voice_setting_prompt",
         Mode::ApiSettingPrompt(_) => "api_setting_prompt",
+        Mode::AgentSetupPathPrompt(_, _) => "agent_setup_path_prompt",
+        Mode::AgentSetupPrompt(_) => "agent_setup_prompt",
         Mode::VoicePromptEditor(_) => "voice_prompt_editor",
         Mode::SaveAs(..) => "save_as",
         Mode::Help => "help",
@@ -409,6 +427,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",
         Mode::QueuePrompt(_) => "queue_prompt",
+        Mode::TextTriggerDialog(_) => "text_trigger_dialog",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",
         Mode::CreateAgentFromLine(_) => "create_agent",
         Mode::CreateGroup(_) => "create_group",
@@ -446,6 +465,20 @@ fn suffix_start_index(text: &str, maximum_characters: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_snapshot_exposes_title_style_as_a_writable_choice() {
+        let mut app = App::new(
+            "default".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        );
+        app.inference_settings.title_style = ilium_inference::TitleStyle::Labeling;
+        let snapshot = settings_snapshot(&app);
+        assert_eq!(snapshot["inference"]["title_style"], "labeling");
+        assert!(snapshot["writable_path_patterns"]
+            .as_array()
+            .is_some_and(|paths| paths.iter().any(|path| path == "inference.title_style")));
+    }
 
     #[test]
     fn redaction_suffix_keeps_valid_unicode_and_the_requested_limit() {

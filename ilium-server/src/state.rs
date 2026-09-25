@@ -9,13 +9,13 @@
 //! every call site that needs both takes `tree` first, does its
 //! `panes`-locked work, and drops both before returning.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
 use ilium_core::{NodeId, Tree};
 use ilium_detect::AgentSignature;
 use ilium_ipc::ServerEvent;
-use tokio::sync::{broadcast, Mutex, Notify, RwLock};
+use tokio::sync::{broadcast, watch, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::agent_debug::AgentDebugRecorder;
@@ -35,6 +35,45 @@ use crate::sounds::PlaybackRequest;
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
 
 pub type PaneRegistry = HashMap<NodeId, PaneResource>;
+
+pub(crate) const MAXIMUM_CACHED_PROGRESS_SET_REQUESTS: usize = 512;
+pub(crate) type ProgressSetResult =
+    Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProgressSetRequestIdentity {
+    pub pane_id: NodeId,
+    pub command: String,
+    pub interval_seconds: u32,
+    pub goal_policy: ilium_ipc::ProgressGoalPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ProgressSetRequestOutcome {
+    Pending(tokio::sync::watch::Sender<Option<ProgressSetResult>>),
+    Complete(ProgressSetResult),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProgressSetRequestRecord {
+    pub identity: ProgressSetRequestIdentity,
+    pub outcome: ProgressSetRequestOutcome,
+}
+
+#[derive(Default)]
+pub(crate) struct ProgressSetRequestCache {
+    pub records: HashMap<u64, ProgressSetRequestRecord>,
+    pub completed_order: VecDeque<u64>,
+}
+
+/// One accepted rule set and its execution generation. A queued delivery
+/// belongs to the generation that matched it, even if settings later cycle
+/// back to identical values.
+#[derive(Default)]
+pub struct VersionedTextTriggerSettings {
+    pub settings: ilium_ipc::TextTriggerSettings,
+    pub revision: u64,
+}
 
 #[derive(Default)]
 struct TerminalSubscriptionCounts {
@@ -77,6 +116,9 @@ pub struct ServerState {
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
     pub sound_settings: RwLock<ilium_sound::SoundSettings>,
+    /// Last server-accepted Text Trigger configuration. Execution state is
+    /// added separately so a rejected candidate never replaces this value.
+    pub text_trigger_settings: RwLock<VersionedTextTriggerSettings>,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
     /// User-configured agent signatures checked alongside `ilium-detect`'s
     /// built-in registry on every detection-loop tick (see
@@ -95,7 +137,7 @@ pub struct ServerState {
     /// restores only that project's subtree, leaving concurrent work in
     /// every other project intact.
     pub restructure_undo: Mutex<HashMap<NodeId, Tree>>,
-    pub snapshot_write_lock: Mutex<()>,
+    pub snapshot_write_lock: std::sync::Arc<Mutex<()>>,
     /// Serializes schedule replacement with the executor's final freshness
     /// check and PTY write. Lock ordering is this mutex, then `tree`, then
     /// `panes`; no other workflow acquires it, so a replaced timer cannot fire
@@ -106,10 +148,12 @@ pub struct ServerState {
     pub prompt_queue_transaction: Mutex<()>,
     /// Whether the on-disk crash-recovery snapshot still matches
     /// `tree`/`panes`, and whether this session wants one at all. Request
-    /// handlers (`crate::ipc::handlers`) mark it through
+    /// Ordinary request handlers (`crate::ipc::handlers`) mark it through
     /// [`ServerState::request_snapshot_save`] instead of writing to disk
     /// inline on the request path (see
-    /// `crate::persistence::spawn_snapshot_writer`).
+    /// `crate::persistence::spawn_snapshot_writer`). Explicit durability
+    /// barriers serialize on `snapshot_write_lock` independently of this
+    /// best-effort dirty flag.
     ///
     /// Private, and reached only through the methods below: its two
     /// interesting transitions -- "a mutation needs persisting" and "this
@@ -164,6 +208,18 @@ pub struct ServerState {
     /// on every `SetPaneProgressMonitor` and updated only by its own
     /// handler.
     progress_monitor_enabled: std::sync::atomic::AtomicBool,
+    /// Live setting observed by the owned rolling-backup task. A watch
+    /// channel lets disabling stop future captures promptly without adding
+    /// a versioned IPC request that older servers could not understand.
+    session_backups_enabled: watch::Sender<bool>,
+    /// Allocates process-local monitor generations. Zero is reserved for
+    /// "no monitor"; persisted registrations receive a fresh generation
+    /// when restored so stale clients can never clear their successor.
+    next_progress_monitor_id: std::sync::atomic::AtomicU64,
+    /// Bounded session-scoped replay cache for `SetPaneProgressMonitor`.
+    /// Request IDs remain meaningful across a CLI reconnect to this server;
+    /// argument collisions are rejected instead of replacing a monitor twice.
+    pub(crate) progress_set_requests: Mutex<ProgressSetRequestCache>,
 }
 
 impl ServerState {
@@ -184,6 +240,7 @@ impl ServerState {
             detection_config: options.detection_config,
             notifications_config: options.notifications_config,
             sound_settings: RwLock::new(options.sound_settings),
+            text_trigger_settings: RwLock::new(VersionedTextTriggerSettings::default()),
             sound_requests: options.sound_requests,
             custom_signatures: options.custom_signatures,
             tree: RwLock::new(tree),
@@ -192,7 +249,7 @@ impl ServerState {
             last_terminal_working_directory: Mutex::new(None),
             pending_session_recovery: Mutex::new(None),
             restructure_undo: Mutex::new(HashMap::new()),
-            snapshot_write_lock: Mutex::new(()),
+            snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
             snapshot_state: SnapshotState::new(),
@@ -209,6 +266,9 @@ impl ServerState {
             progress_monitor_enabled: std::sync::atomic::AtomicBool::new(
                 options.progress_monitor_enabled,
             ),
+            session_backups_enabled: watch::channel(true).0,
+            next_progress_monitor_id: std::sync::atomic::AtomicU64::new(1),
+            progress_set_requests: Mutex::new(ProgressSetRequestCache::default()),
         }
     }
 
@@ -225,6 +285,27 @@ impl ServerState {
     pub fn set_progress_monitor_enabled(&self, enabled: bool) {
         self.progress_monitor_enabled
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn session_backups_enabled(&self) -> bool {
+        *self.session_backups_enabled.borrow()
+    }
+
+    pub fn set_session_backups_enabled(&self, enabled: bool) {
+        if self.session_backups_enabled() != enabled {
+            self.session_backups_enabled.send_replace(enabled);
+        }
+    }
+
+    pub fn watch_session_backups_enabled(&self) -> watch::Receiver<bool> {
+        self.session_backups_enabled.subscribe()
+    }
+
+    /// Returns a non-zero, monotonically increasing generation used to fence
+    /// replacement, terminal delivery, and clear requests for one monitor.
+    pub fn allocate_progress_monitor_id(&self) -> u64 {
+        self.next_progress_monitor_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Registers a spawned connection task's handle for shutdown-time

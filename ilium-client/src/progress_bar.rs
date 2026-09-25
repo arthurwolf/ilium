@@ -1,56 +1,55 @@
-//! The optional footer reserved at the *bottom* of a pane with an active
-//! server-run progress monitor (see `ilium_core::PaneProgress`,
-//! `ilium-server`'s `progress_monitor` module doc for how a value gets
-//! there): a one-row percent gauge, followed by the monitor's freeform
-//! status message.
+//! Status-aware footer for a server-owned long-task monitor.
 //!
-//! Placement is deliberately the opposite end of the pane from
-//! `crate::last_prompt_banner`, which sits at the *top* (below the agent
-//! toolbar) -- see `split_layout::PaneViewport::with_progress_reserved`.
-//! The message is word-wrapped and middle-truncated the exact same way an
-//! over-budget last prompt is, reusing
-//! [`crate::last_prompt_banner::wrap_lines`]/
-//! [`crate::last_prompt_banner::truncate_middle_rows`] rather than
-//! duplicating that logic.
+//! The task's own status and Ilium's ability to observe it are deliberately
+//! distinct. A degraded/failed monitor therefore changes the leading label
+//! and adds a warning without repainting the task itself as failed. Terminal
+//! task evidence remains visible until it is explicitly cleared or replaced.
 
-use ilium_core::PaneProgress;
+use ilium_core::{PaneProgress, ProgressMonitorHealth, ProgressTaskStatus};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{LineGauge, Paragraph};
 use ratatui::Frame;
 
-use crate::last_prompt_banner::{truncate_middle_rows, wrap_lines};
+use crate::last_prompt_banner::wrap_lines;
 use crate::theme::{self, ColorScheme};
 
-/// The exact number of rows the footer needs for `progress` at `width`
-/// columns: 0 when there is no active progress, otherwise 1 (the percent
-/// gauge) plus however many rows the message wraps/truncates to (0 when the
-/// message is empty) -- never a fixed budget regardless of content, the
-/// same discipline `last_prompt_banner::reserved_height` follows.
-pub fn reserved_height(progress: Option<&PaneProgress>, width: u16, max_message_lines: u16) -> u16 {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DetailTone {
+    Normal,
+    Error,
+    Warning,
+    Identity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetailRow {
+    text: String,
+    tone: DetailTone,
+    is_seam: bool,
+}
+
+/// The exact number of rows the footer needs for `progress` at `width`:
+/// one status/gauge row plus the bounded detail rows. Job/monitor identity is
+/// included only when the configured detail budget has room after task and
+/// monitor-health evidence.
+pub fn reserved_height(progress: Option<&PaneProgress>, width: u16, max_detail_lines: u16) -> u16 {
     let Some(progress) = progress else {
         return 0;
     };
-    let message_rows = if progress.message.is_empty() {
-        0
-    } else {
-        truncate_middle_rows(wrap_lines(&progress.message, width), max_message_lines).len() as u16
-    };
-    1 + message_rows
+    1 + detail_rows(progress, width, max_detail_lines).len() as u16
 }
 
-/// Renders the progress footer into `area`: a background fill spanning the
-/// whole reserved region (reusing [`theme::last_prompt_style`] so both
-/// footers read as one consistent visual language), a one-row percent gauge
-/// on the first row, and the wrapped/middle-truncated message on the rows
-/// below. A `None` progress or a zero-height `area` renders nothing.
+/// Renders task state, percent, task details, monitor-health warnings, and a
+/// compact identity line. A `None` progress or zero-height area renders
+/// nothing.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     progress: Option<&PaneProgress>,
-    max_message_lines: u16,
+    max_detail_lines: u16,
     scheme: ColorScheme,
 ) {
     let Some(progress) = progress else {
@@ -64,62 +63,220 @@ pub fn render(
         area,
     );
 
-    let [gauge_area, message_area] = Layout::default()
+    let [gauge_area, detail_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .areas(area);
 
-    // Defensive re-clamp: `ilium_core::Tree::set_pane_progress` already
-    // clamps to `0.0..=100.0` before this ever reaches the tree, but
-    // `LineGauge::ratio` panics outside `0.0..=1.0` -- a render path must
-    // never be able to crash the whole TUI over a value that slipped past
-    // an earlier guard some other way.
-    let ratio = (f64::from(progress.percent) / 100.0).clamp(0.0, 1.0);
-    let label = format!("{:.0}%", progress.percent.clamp(0.0, 100.0));
-    // Distinct glyphs (solid vs. light shade) rather than same-character
-    // filled/unfilled runs distinguished only by color/`Modifier::DIM` --
-    // `DIM` renders inconsistently across terminals (often not at all), which
-    // left the unfilled run looking identical to the filled one in practice.
+    // Domain validation rejects non-finite/out-of-range reports, but the
+    // renderer remains defensive because one bad restored value must never
+    // crash the entire TUI.
+    let percent = progress.report.percent.clamp(0.0, 100.0);
+    let ratio = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
+    let (icon, status_label, status_tone) = status_presentation(progress);
+    let status_color = tone_color(status_tone, scheme);
+    let label = format!("{icon} {status_label}  {percent:.0}%");
     let gauge = LineGauge::default()
         .ratio(ratio)
-        .label(label)
+        .label(Line::from(Span::styled(
+            label,
+            Style::new().fg(status_color).add_modifier(Modifier::BOLD),
+        )))
         .filled_symbol(symbols::shade::FULL)
         .unfilled_symbol(symbols::shade::LIGHT)
-        .filled_style(
-            Style::new()
-                .fg(theme::accent_bg())
-                .add_modifier(Modifier::BOLD),
-        )
+        .filled_style(Style::new().fg(status_color).add_modifier(Modifier::BOLD))
         .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
     frame.render_widget(gauge, gauge_area);
 
-    if !progress.message.is_empty() {
-        let lines: Vec<Line> = truncate_middle_rows(
-            wrap_lines(&progress.message, message_area.width),
-            max_message_lines,
-        )
+    let lines: Vec<Line> = detail_rows(progress, detail_area.width, max_detail_lines)
         .into_iter()
-        .map(|(line, is_seam)| {
-            if is_seam {
-                Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
-            } else {
-                Line::from(line)
+        .map(|row| {
+            let mut style = Style::new();
+            if let Some(color) = detail_tone_color(row.tone, scheme) {
+                style = style.fg(color);
             }
+            if row.tone == DetailTone::Identity || row.is_seam {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            Line::from(Span::styled(row.text, style))
         })
         .collect();
-        frame.render_widget(Paragraph::new(lines), message_area);
+    frame.render_widget(
+        Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
+        detail_area,
+    );
+}
+
+fn status_presentation(progress: &PaneProgress) -> (&'static str, &'static str, DetailTone) {
+    match &progress.monitor_health {
+        ProgressMonitorHealth::Failed { .. } => ("⚠", "MONITOR FAILED", DetailTone::Warning),
+        ProgressMonitorHealth::Degraded { .. } => ("⚠", "MONITOR DEGRADED", DetailTone::Warning),
+        ProgressMonitorHealth::Healthy => match progress.report.status {
+            ProgressTaskStatus::NotStartedYet => ("○", "NOT STARTED", DetailTone::Warning),
+            ProgressTaskStatus::Running => ("▶", "RUNNING", DetailTone::Normal),
+            ProgressTaskStatus::Error => ("✕", "ERROR", DetailTone::Error),
+            ProgressTaskStatus::Done => ("✓", "DONE", DetailTone::Identity),
+        },
+    }
+}
+
+fn detail_rows(progress: &PaneProgress, width: u16, maximum_rows: u16) -> Vec<DetailRow> {
+    if maximum_rows == 0 {
+        return Vec::new();
+    }
+
+    let mut critical = Vec::new();
+    if let Some(error) = &progress.report.error {
+        push_wrapped(
+            &mut critical,
+            format!("Task error: {error}"),
+            DetailTone::Error,
+            width,
+        );
+    }
+    if !progress.report.message.is_empty() {
+        push_wrapped(
+            &mut critical,
+            progress.report.message.clone(),
+            DetailTone::Normal,
+            width,
+        );
+    }
+    match &progress.monitor_health {
+        ProgressMonitorHealth::Healthy => {}
+        ProgressMonitorHealth::Degraded {
+            consecutive_failures,
+            last_error,
+        } => push_wrapped(
+            &mut critical,
+            format!("Observation degraded ({consecutive_failures}): {last_error}"),
+            DetailTone::Warning,
+            width,
+        ),
+        ProgressMonitorHealth::Failed {
+            consecutive_failures,
+            last_error,
+        } => push_wrapped(
+            &mut critical,
+            format!("Observation stopped ({consecutive_failures}): {last_error}"),
+            DetailTone::Warning,
+            width,
+        ),
+    }
+
+    let maximum_rows = usize::from(maximum_rows);
+    let mut rows = truncate_detail_rows(critical, maximum_rows);
+    if rows.len() < maximum_rows {
+        let identity = format!(
+            "Job {} · monitor #{}",
+            progress.report.job_id, progress.monitor_id
+        );
+        let mut identity_rows = Vec::new();
+        push_wrapped(&mut identity_rows, identity, DetailTone::Identity, width);
+        let available = maximum_rows - rows.len();
+        if identity_rows.len() <= available {
+            rows.extend(identity_rows);
+        }
+    }
+    rows
+}
+
+fn push_wrapped(rows: &mut Vec<DetailRow>, text: String, tone: DetailTone, width: u16) {
+    rows.extend(wrap_lines(&text, width).into_iter().map(|text| DetailRow {
+        text,
+        tone,
+        is_seam: false,
+    }));
+}
+
+fn truncate_detail_rows(mut rows: Vec<DetailRow>, maximum_rows: usize) -> Vec<DetailRow> {
+    if rows.len() <= maximum_rows {
+        return rows;
+    }
+    let head = maximum_rows.div_ceil(2);
+    let tail = maximum_rows - head;
+    let mut truncated = Vec::with_capacity(maximum_rows);
+    truncated.extend(rows.drain(..head));
+    if let Some(last_head) = truncated.last_mut() {
+        last_head.is_seam = true;
+    }
+    if tail > 0 {
+        let mut tail_rows = rows.split_off(rows.len() - tail);
+        if let Some(first_tail) = tail_rows.first_mut() {
+            first_tail.is_seam = true;
+        }
+        truncated.extend(tail_rows);
+    }
+    truncated
+}
+
+fn tone_color(tone: DetailTone, scheme: ColorScheme) -> Color {
+    match (tone, scheme) {
+        (DetailTone::Error, ColorScheme::Dark) => Color::Rgb(0xff, 0x75, 0x75),
+        (DetailTone::Error, ColorScheme::Light) => Color::Rgb(0xa8, 0x00, 0x00),
+        (DetailTone::Warning, ColorScheme::Dark) => Color::Rgb(0xff, 0xd1, 0x66),
+        (DetailTone::Warning, ColorScheme::Light) => Color::Rgb(0x8a, 0x5a, 0x00),
+        (DetailTone::Identity, ColorScheme::Dark) => Color::Rgb(0x7d, 0xd8, 0x93),
+        (DetailTone::Identity, ColorScheme::Light) => Color::Rgb(0x1b, 0x6f, 0x32),
+        (DetailTone::Normal, _) => theme::accent_bg(),
+    }
+}
+
+fn detail_tone_color(tone: DetailTone, scheme: ColorScheme) -> Option<Color> {
+    match tone {
+        DetailTone::Normal => None,
+        _ => Some(tone_color(tone, scheme)),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ilium_core::{ProgressTaskReport, ProgressValidationError};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
     use super::*;
 
-    fn progress(percent: f32, message: &str) -> PaneProgress {
-        PaneProgress {
-            percent,
-            message: message.to_string(),
-        }
+    fn progress(
+        status: ProgressTaskStatus,
+        percent: f32,
+        message: &str,
+        error: Option<&str>,
+    ) -> Result<PaneProgress, ProgressValidationError> {
+        PaneProgress::new(
+            17,
+            ProgressTaskReport::new(
+                "render-42".to_string(),
+                status,
+                percent,
+                message.to_string(),
+                error.map(str::to_string),
+            )?,
+            123,
+        )
+    }
+
+    fn rendered_rows(progress: &PaneProgress, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Some(progress),
+                    height.saturating_sub(1),
+                    ColorScheme::Dark,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
     }
 
     #[test]
@@ -128,58 +285,85 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_percent_with_no_message_reserves_only_the_gauge_row() {
-        assert_eq!(reserved_height(Some(&progress(50.0, "")), 80, 4), 1);
+    fn running_task_reserves_status_message_and_identity_rows() {
+        let progress = progress(ProgressTaskStatus::Running, 50.0, "frame 10/100", None).unwrap();
+        assert_eq!(reserved_height(Some(&progress), 80, 4), 3);
     }
 
     #[test]
-    fn a_short_message_reserves_the_gauge_plus_one_row() {
-        assert_eq!(
-            reserved_height(Some(&progress(50.0, "frame 10/100")), 80, 4),
-            2
-        );
+    fn zero_detail_budget_reserves_only_the_status_row() {
+        let progress = progress(ProgressTaskStatus::Running, 50.0, "working", None).unwrap();
+        assert_eq!(reserved_height(Some(&progress), 80, 0), 1);
     }
 
     #[test]
-    fn a_long_message_is_capped_at_the_gauge_plus_max_message_lines() {
-        let message = "one two three four five six seven eight nine ten eleven twelve";
-        assert_eq!(reserved_height(Some(&progress(50.0, message)), 4, 3), 4);
+    fn terminal_statuses_have_distinct_labels_and_details() {
+        let done = progress(ProgressTaskStatus::Done, 12.0, "render complete", None).unwrap();
+        let error = progress(
+            ProgressTaskStatus::Error,
+            63.0,
+            "encoder stopped",
+            Some("exit status 7"),
+        )
+        .unwrap();
+
+        let done_rows = rendered_rows(&done, 64, 3);
+        assert!(done_rows[0].contains("✓ DONE  100%"));
+        assert!(done_rows.iter().any(|row| row.contains("render complete")));
+        assert!(done_rows.iter().any(|row| row.contains("Job render-42")));
+
+        let error_rows = rendered_rows(&error, 64, 4);
+        assert!(error_rows[0].contains("✕ ERROR  63%"));
+        assert!(error_rows
+            .iter()
+            .any(|row| row.contains("Task error: exit status 7")));
     }
 
-    /// The filled and unfilled runs of the gauge must be told apart by glyph
-    /// (solid block vs. light shade), not merely by color/`Modifier::DIM` --
-    /// `DIM` renders inconsistently across terminals, which previously left
-    /// both runs using the same `─` character and reading as one solid,
-    /// undifferentiated line.
     #[test]
-    fn the_gauge_row_uses_a_solid_glyph_up_to_the_ratio_and_a_light_glyph_after() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-        let mut terminal = Terminal::new(TestBackend::new(24, 1)).unwrap();
-        terminal
-            .draw(|frame| {
-                render(
-                    frame,
-                    frame.area(),
-                    Some(&progress(50.0, "")),
-                    2,
-                    ColorScheme::Dark,
-                );
-            })
-            .unwrap();
-        let buf = terminal.backend().buffer();
-        // "50% " occupies the first 4 columns, leaving 20 for the bar itself
-        // -- half filled, half not, at a 50% ratio.
-        let bar_symbols: String = (4..24).map(|x| buf[(x, 0)].symbol()).collect();
-        assert_eq!(
-            bar_symbols,
-            format!(
-                "{}{}",
-                symbols::shade::FULL.repeat(10),
-                symbols::shade::LIGHT.repeat(10)
-            )
-        );
-        assert_eq!(buf[(4, 0)].fg, theme::accent_bg());
-        assert_eq!(buf[(23, 0)].fg, theme::muted_accent_bg(ColorScheme::Dark));
+    fn monitor_failure_is_not_rendered_as_task_error() {
+        let mut progress =
+            progress(ProgressTaskStatus::Running, 42.0, "last valid report", None).unwrap();
+        progress.monitor_health = ProgressMonitorHealth::Failed {
+            consecutive_failures: 5,
+            last_error: "probe timed out".to_string(),
+        };
+
+        let rows = rendered_rows(&progress, 72, 4);
+        assert!(rows[0].contains("⚠ MONITOR FAILED  42%"));
+        assert!(rows
+            .iter()
+            .any(|row| row.contains("Observation stopped (5): probe timed out")));
+        assert!(!rows.iter().any(|row| row.contains("Task error:")));
+    }
+
+    #[test]
+    fn identity_is_omitted_before_critical_evidence_when_space_is_tight() {
+        let mut progress = progress(
+            ProgressTaskStatus::Error,
+            80.0,
+            "phase message",
+            Some("task failed"),
+        )
+        .unwrap();
+        progress.monitor_health = ProgressMonitorHealth::Degraded {
+            consecutive_failures: 2,
+            last_error: "probe unavailable".to_string(),
+        };
+
+        let rows = detail_rows(&progress, 80, 2);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| !row.text.contains("monitor #")));
+        assert!(rows.iter().any(|row| row.text.contains("Task error")));
+        assert!(rows
+            .iter()
+            .any(|row| row.text.contains("Observation degraded")));
+    }
+
+    #[test]
+    fn the_gauge_uses_distinct_filled_and_unfilled_glyphs() {
+        let progress = progress(ProgressTaskStatus::Running, 50.0, "", None).unwrap();
+        let rows = rendered_rows(&progress, 40, 2);
+        assert!(rows[0].contains(symbols::shade::FULL));
+        assert!(rows[0].contains(symbols::shade::LIGHT));
     }
 }

@@ -120,6 +120,9 @@ pub struct ServerConfig {
     /// point this list feeds.
     pub custom_signatures: Vec<AgentSignature>,
     pub session_recovery: SessionRecoveryConfig,
+    /// Whether native session JSON files are copied to the project-local
+    /// rolling backup store. Missing config defaults to enabled.
+    pub session_backups_enabled: bool,
     pub debug: DebugConfig,
     pub http_api: HttpApiConfig,
     pub agent_debug_menu_enabled: bool,
@@ -147,6 +150,7 @@ impl Default for ServerConfig {
             sound: SoundSettings::default(),
             custom_signatures: Vec::new(),
             session_recovery: SessionRecoveryConfig::default(),
+            session_backups_enabled: true,
             debug: DebugConfig::default(),
             http_api: HttpApiConfig::default(),
             agent_debug_menu_enabled: false,
@@ -205,6 +209,7 @@ struct RawUiConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
     recovery_policy: Option<String>,
+    backups_enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -397,6 +402,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         sound: raw.sound,
         custom_signatures,
         session_recovery,
+        session_backups_enabled: raw.session.backups_enabled.unwrap_or(true),
         debug: DebugConfig {
             file_logging_enabled: raw.debug.file_logging_enabled.unwrap_or(false),
         },
@@ -739,5 +745,27 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn session_backups_default_on_and_can_be_disabled() {
+        let directory = tempfile::tempdir().expect("config directory");
+        assert!(
+            load(directory.path())
+                .expect("absent config")
+                .session_backups_enabled
+        );
+
+        std::fs::write(
+            directory.path().join("config.toml"),
+            "[session]\nrecovery_policy = \"ask_before_restore\"\nbackups_enabled = false\n",
+        )
+        .expect("write config");
+        let config = load(directory.path()).expect("valid config");
+        assert!(!config.session_backups_enabled);
+        assert_eq!(
+            config.session_recovery,
+            SessionRecoveryConfig::AskBeforeRestore
+        );
     }
 }
