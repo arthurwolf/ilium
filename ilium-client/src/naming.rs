@@ -27,6 +27,10 @@ const STRUCTURED_OUTPUT_MAX_ATTEMPTS: u8 = 2;
 /// production code uses the settings-backed provider adapter below.
 pub trait PromptCompletionClient {
     fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError>;
+
+    fn title_style(&self) -> ilium_inference::TitleStyle {
+        ilium_inference::TitleStyle::Summarization
+    }
 }
 
 /// Settings-backed adapter. The concrete provider is constructed only when a
@@ -36,6 +40,10 @@ impl PromptCompletionClient for InferenceSettings {
         provider_from_settings(self)
             .complete(&InferenceRequest::json_only(prompt))
             .map(|response| response.text)
+    }
+
+    fn title_style(&self) -> ilium_inference::TitleStyle {
+        self.title_style
     }
 }
 

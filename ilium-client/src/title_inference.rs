@@ -33,6 +33,55 @@ use ilium_core::{AgentClass, NodeId, NodeKind, PaneStatus};
 
 use crate::app::{App, PaneRuntime};
 
+/// Local navigation context for labels. Include the route to the parent so a
+/// label can stand alone when its ancestors are collapsed in the tree.
+pub fn nearby_title_context(app: &App, pane_id: NodeId) -> (String, Vec<String>) {
+    let Some(parent_id) = app.tree.parent_of(pane_id) else {
+        return (String::new(), Vec::new());
+    };
+    let mut ancestor_names = Vec::new();
+    let mut ancestor_id = Some(parent_id);
+    while let Some(id) = ancestor_id {
+        if id == ilium_core::ROOT_ID {
+            break;
+        }
+        let Some(node) = app.tree.get(id) else {
+            break;
+        };
+        ancestor_names.push(node.name.clone());
+        if node.is_project() {
+            break;
+        }
+        ancestor_id = app.tree.parent_of(id);
+    }
+    ancestor_names.reverse();
+    let ancestor_path = ancestor_names.join(" > ");
+
+    let Ok(siblings) = app.tree.children_of(parent_id) else {
+        return (ancestor_path, Vec::new());
+    };
+    // A bounded window around the pane keeps relevant neighbors even when a
+    // large group has many older entries ahead of it.
+    let target_index = siblings.iter().position(|id| *id == pane_id).unwrap_or(0);
+    let window_start = target_index
+        .saturating_sub(20)
+        .min(siblings.len().saturating_sub(41));
+    let nearby_titles = siblings
+        .iter()
+        .skip(window_start)
+        .filter(|sibling_id| **sibling_id != pane_id)
+        .filter_map(|sibling_id| app.tree.get(*sibling_id))
+        .take(40)
+        .map(|sibling| match sibling.short_name.as_deref() {
+            Some(short) if short != sibling.name.as_str() => {
+                format!("short: {short}; long: {}", sibling.name)
+            }
+            _ => sibling.name.clone(),
+        })
+        .collect();
+    (ancestor_path, nearby_titles)
+}
+
 /// Bounds the retry path so a pane whose transcript genuinely never has
 /// anything summarizable (e.g. a resumed session ilium can't read, or a
 /// provider that's consistently down) doesn't retry on every single `Done`
@@ -66,7 +115,7 @@ pub fn session_title_input(
     }
     let (class, activity, has_persistent_goal) = match status {
         PaneStatus::Agent(class, activity) => (class, activity, false),
-        PaneStatus::AgentWithGoal(class, activity) => (class, activity, true),
+        PaneStatus::AgentWithGoal(class, activity, _) => (class, activity, true),
         PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
     };
     class.provider()?;
@@ -80,6 +129,7 @@ pub fn session_title_input(
         .and_then(|project_id| app.tree.get(project_id))
         .map(|project| project.name.clone())
         .unwrap_or_default();
+    let (parent_group, nearby_titles) = nearby_title_context(app, pane_id);
     Some(crate::session_naming::SessionTitleInput {
         pane_id,
         project_name,
@@ -98,6 +148,8 @@ pub fn session_title_input(
         activity: *activity,
         has_persistent_goal,
         terminal_screen,
+        parent_group,
+        nearby_titles,
     })
 }
 
@@ -142,7 +194,7 @@ pub fn pane_ready_for_inference(
         return None;
     }
     let NodeKind::Pane {
-        status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+        status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
         title_source,
         ..
     } = &app.tree.get(pane_id)?.kind
@@ -183,6 +235,57 @@ mod tests {
             .set_pane_status(pane_id, PaneStatus::Agent(class, activity))
             .unwrap();
         (app, pane_id)
+    }
+
+    #[test]
+    fn nearby_context_includes_ancestors_and_visible_short_titles() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let parent = app.tree.add_group(ROOT_ID, "components").unwrap();
+        let nested = app.tree.add_group(parent, "catalog").unwrap();
+        let sibling = app
+            .tree
+            .add_pane(nested, "Cut Paper Component", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .rename_node(
+                sibling,
+                "Cut Paper Component",
+                Some("CUT PAPER".to_string()),
+                None,
+            )
+            .unwrap();
+        let target = app
+            .tree
+            .add_pane(nested, "Coding Session", PaneContentKind::Terminal)
+            .unwrap();
+
+        let (path, nearby) = nearby_title_context(&app, target);
+        assert_eq!(path, "components > catalog");
+        assert_eq!(nearby, vec!["short: CUT PAPER; long: Cut Paper Component"]);
+    }
+
+    #[test]
+    fn nearby_context_keeps_the_target_end_of_a_large_group() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        for index in 0..60 {
+            app.tree
+                .add_pane(
+                    group,
+                    format!("neighbor {index}"),
+                    PaneContentKind::Terminal,
+                )
+                .unwrap();
+        }
+        let target = app
+            .tree
+            .add_pane(group, "Coding Session", PaneContentKind::Terminal)
+            .unwrap();
+
+        let (_, nearby) = nearby_title_context(&app, target);
+        assert_eq!(nearby.len(), 40);
+        assert!(nearby.contains(&"neighbor 59".to_string()));
+        assert!(!nearby.contains(&"neighbor 0".to_string()));
     }
 
     #[test]

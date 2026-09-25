@@ -1,6 +1,6 @@
 //! Dotted-path adapter over ilium's existing validated settings methods.
 
-use ilium_inference::InferenceProviderKind;
+use ilium_inference::{InferenceProviderKind, TitleStyle};
 use ilium_sound::{SoundEvent, SoundSourceKind};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use serde_json::Value;
@@ -255,6 +255,13 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             ensure_reached(app.session_settings.recovery_policy == target)?;
         }
+        "session.backups_enabled" => {
+            let target = boolean(&value)?;
+            if app.session_settings.backups_enabled != target {
+                app.settings_adjust_session_row(SessionRow::BackupsEnabled, 1);
+            }
+            ensure_reached(app.session_settings.backups_enabled == target)?;
+        }
         "keyboard.shortcut_base" => {
             let shortcut = crate::keymap::ShortcutBase::parse(string(&value)?)
                 .ok_or("shortcut base must be one ASCII letter")?;
@@ -376,6 +383,9 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "inference.provider" => {
             let provider = parse_inference_provider(string(&value)?)?;
             app.settings_select_inference_provider(provider);
+        }
+        "inference.title_style" => {
+            app.settings_select_title_style(parse_title_style(string(&value)?)?);
         }
         "inference.kilo_gateway.model" => {
             let model = string(&value)?.trim();
@@ -532,6 +542,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         }
         "session.recovery_policy" => {
             app.settings_adjust_session_row(SessionRow::RecoveryPolicy, direction)
+        }
+        "session.backups_enabled" => {
+            app.settings_adjust_session_row(SessionRow::BackupsEnabled, direction)
         }
         "keyboard.shortcut_base" => app.settings_adjust_shortcut_base(direction),
         "kanban_board.card_preview_lines" => app.settings_adjust_card_preview_lines(direction),
@@ -738,6 +751,14 @@ fn parse_inference_provider(value: &str) -> Result<InferenceProviderKind, String
     }
 }
 
+fn parse_title_style(value: &str) -> Result<TitleStyle, String> {
+    match normalized(value).as_str() {
+        "labeling" | "labelling" => Ok(TitleStyle::Labeling),
+        "summarization" | "summarisation" => Ok(TitleStyle::Summarization),
+        _ => Err("invalid title style".to_owned()),
+    }
+}
+
 fn parse_voice_model(value: &str) -> Result<VoiceModel, String> {
     let value = normalized(value);
     VoiceModel::ALL
@@ -811,6 +832,10 @@ mod tests {
             set_setting(&mut app, "triggers.agent_finished_work", json!(["made_up"]),).is_err()
         );
         assert!(set_setting(&mut app, "ui.made_up", json!(true)).is_err());
+        set_setting(&mut app, "inference.title_style", json!("Labelling")).unwrap();
+        assert_eq!(app.inference_settings.title_style, TitleStyle::Labeling);
+        assert!(set_setting(&mut app, "inference.title_style", json!("outline")).is_err());
+        assert_eq!(app.inference_settings.title_style, TitleStyle::Labeling);
     }
 
     #[test]

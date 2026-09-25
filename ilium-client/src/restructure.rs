@@ -24,7 +24,9 @@ use ilium_core::{
     AgentActivity, AgentClass, NodeId, NodeKind, PaneStatus, RestructureNode, RestructurePlan,
     SplitOrientation, Tree,
 };
-use ilium_inference::{InferenceRequest, InferenceSettings, UNKNOWN_MODEL_MAX_OUTPUT_TOKENS};
+use ilium_inference::{
+    InferenceRequest, InferenceSettings, TitleStyle, UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::app::PaneRuntime;
@@ -77,7 +79,7 @@ Each entry in "children" (and in any nested "children") is exactly one of:
 - {"kind":"existing_group","id":<existing-group-id>,"children":[...]} -- an existing group marked name-fixed in the current structure; keep its id and omit title/icon because they remain unchanged
 - {"kind":"split_view","id":<existing-split-id>,"children":[...]} -- one existing protected split view listed below; its "children" must be the exact listed pane ids in the exact listed order
 
-"title" is the full descriptive title and must use at most 7 words; this is a maximum, not a target or a minimum. "short_title" is a short form of 2 to 3 words; "icon" is one compact UTF-8 icon/emoticon. Choose the most accurate title first, then keep it within its limit. A one- or two-word "title" is correct when it best names the item; never add filler merely to make it longer. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
+{{{title_instructions}}} "icon" is one compact UTF-8 icon/emoticon. Existing items include their current icon in the context: preserve that exact icon across restructures. Changing a familiar icon is confusing, so only choose an icon for an item with no existing icon, and keep equivalent recreated groups' icons stable when the current structure already shows one. Group items together under one new "group" only when they share a clear common task (e.g. an agent and a terminal working on the same feature); an item with no clear relation to anything else should stay directly in the outermost "children" array instead of being forced into a group.
 
 Split views are user-created presentation layouts and are immutable structural units during AI restructure. Every split in <protected-split-views> must appear exactly once using its existing id. Never invent, omit, duplicate, dissolve, or nest a split view. Never add, remove, replace, duplicate, or reorder its pane children. The split's orientation, container title, icon, expanded state, and layout are deliberately absent from the output shape because they remain unchanged. You may move the whole split as one indivisible entry inside a new ordinary group, and you may change the title fields of its existing pane children.
 
@@ -116,7 +118,7 @@ The following complete list is a hard structural constraint, not advisory contex
 The prior answer was rejected by the local validator. Correct this specific issue while still returning every listed id exactly once: {{{retry_feedback}}}
 </retry-feedback>
 {{/if}}
-<output-example>{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧","command_hint":""},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️","command_hint":"npm run dev"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}</output-example>
+<output-example>{{{output_example}}}</output-example>
 <response-format>Return exactly one JSON object following the output example's shape. Do not wrap it in Markdown.</response-format>"#;
 
 /// One pane or folder's current identity and content, as sent to the LLM.
@@ -158,9 +160,17 @@ pub struct ProtectedSplitViewContext {
 /// call can ask for a larger budget than every other naming call does.
 pub trait RestructureCompletionClient {
     fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String>;
+
+    fn title_style(&self) -> TitleStyle {
+        TitleStyle::Summarization
+    }
 }
 
 impl RestructureCompletionClient for InferenceSettings {
+    fn title_style(&self) -> TitleStyle {
+        self.title_style
+    }
+
     fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String> {
         let request = InferenceRequest {
             system_prompt: "Return concise, valid JSON only.".to_string(),
@@ -204,7 +214,7 @@ pub fn gather_leaf_contexts(
         match (panes.get(&pane_id), status) {
             (
                 Some(PaneRuntime::Terminal(view)),
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _),
+                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
             ) if agent_session_ids.contains_key(&pane_id) => {
                 context.automatic_content_fingerprint =
                     stable_restructure_fingerprint(&view.with_screen(|screen| screen.contents()));
@@ -488,7 +498,7 @@ fn format_transcript_entries(entries: &[crate::transcript_context::TranscriptEnt
 fn describe_pane_status(status: &PaneStatus) -> String {
     match status {
         PaneStatus::PlainShell => "Plain shell".to_string(),
-        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity) => {
+        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
             format!("{} agent ({})", class.label(), describe_activity(activity))
         }
         PaneStatus::Editor { .. } => "Editor".to_string(),
@@ -523,6 +533,8 @@ fn clip_lines(text: &str) -> String {
 
 #[derive(Serialize)]
 struct RestructurePromptContext {
+    title_instructions: &'static str,
+    output_example: &'static str,
     items: Vec<PromptLeafContext>,
     current_structure: String,
     protected_split_views: Vec<PromptProtectedSplitViewContext>,
@@ -550,6 +562,7 @@ struct PromptProtectedSplitViewContext {
 
 impl RestructurePromptContext {
     fn new(
+        title_style: TitleStyle,
         items: &[LeafContext],
         current_structure: &str,
         protected_split_views: &[ProtectedSplitViewContext],
@@ -559,6 +572,14 @@ impl RestructurePromptContext {
     ) -> Self {
         let evidence_budget_per_item = item_evidence_budget / items.len().max(1);
         Self {
+            title_instructions: match title_style {
+                TitleStyle::Labeling => crate::session_naming::LABEL_INSTRUCTIONS,
+                TitleStyle::Summarization => "\"title\" is the full descriptive title and must use at most 7 words; this is a maximum, not a target or a minimum. \"short_title\" is a short form of 2 to 3 words. Choose the most accurate title first, then keep it within its limit. A one- or two-word \"title\" is correct when it best names the item; never add filler merely to make it longer.",
+            },
+            output_example: match title_style {
+                TitleStyle::Labeling => r#"{"children":[{"kind":"group","title":"AUTH","short_title":"AUTH","icon":"🔐","children":[{"kind":"pane","id":12,"title":"LOGIN BUG","short_title":"LOGIN BUG","icon":"🔧","command_hint":""},{"kind":"pane","id":7,"title":"DEV SERVER","short_title":"DEV SERVER","icon":"🖥️","command_hint":"npm run dev"}]},{"kind":"folder","id":3,"title":"PROJECT ROOT","short_title":"PROJECT ROOT","icon":"📁"}]}"#,
+                TitleStyle::Summarization => r#"{"children":[{"kind":"group","title":"Auth Refactor Across Backend And Frontend","short_title":"Auth Refactor","icon":"🔐","children":[{"kind":"pane","id":12,"title":"Backend Agent Fixing Login Bug","short_title":"Backend Agent","icon":"🔧","command_hint":""},{"kind":"pane","id":7,"title":"Frontend Dev Server Watching Auth","short_title":"Frontend Shell","icon":"🖥️","command_hint":"npm run dev"}]},{"kind":"folder","id":3,"title":"Project Root Directory","short_title":"Project Root","icon":"📁"}]}"#,
+            },
             items: items
                 .iter()
                 .map(|item| PromptLeafContext::from_leaf(item, evidence_budget_per_item))
@@ -678,6 +699,7 @@ fn clip_restructure_evidence(value: &str, maximum_characters: usize) -> String {
 /// can expand JSON/control characters, so render-and-measure rather than
 /// assuming raw input character budgets map one-to-one onto wire size.
 fn render_restructure_prompt(
+    title_style: TitleStyle,
     items: &[LeafContext],
     current_structure: &str,
     protected_split_views: &[ProtectedSplitViewContext],
@@ -691,6 +713,7 @@ fn render_restructure_prompt(
         handlebars.register_escape_fn(handlebars::no_escape);
         handlebars.register_template_string("restructure", RESTRUCTURE_TEMPLATE)?;
         let prompt_context = RestructurePromptContext::new(
+            title_style,
             items,
             current_structure,
             protected_split_views,
@@ -825,6 +848,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     let mut retry_feedback = None;
     for attempt in 1..=RESTRUCTURE_MAX_ATTEMPTS {
         let prompt = render_restructure_prompt(
+            generator.title_style(),
             contexts,
             current_structure,
             protected_split_views,
@@ -863,7 +887,12 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
         );
         tracing::info!(operation_id, attempt, response = %response, "restructure inference response");
 
-        match parse_restructure_response(&response, contexts, protected_split_views) {
+        match parse_restructure_response(
+            &response,
+            contexts,
+            protected_split_views,
+            generator.title_style(),
+        ) {
             Ok(plan) => {
                 tracing::info!(
                     operation_id,
@@ -898,6 +927,7 @@ fn parse_restructure_response(
     response: &str,
     contexts: &[LeafContext],
     protected_split_views: &[ProtectedSplitViewContext],
+    title_style: TitleStyle,
 ) -> anyhow::Result<RestructurePlan> {
     let candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
     let mut parsed: LlmRestructurePlan = serde_json::from_value(candidate).map_err(|error| {
@@ -976,6 +1006,14 @@ fn parse_restructure_response(
     preserve_existing_leaf_icons(&mut parsed.children, contexts);
     normalize_generated_icons(&mut parsed.children);
     validate_titles(&parsed.children)?;
+    let fixed_name_ids: HashSet<NodeId> = contexts
+        .iter()
+        .filter(|context| context.is_name_fixed)
+        .map(|context| context.id)
+        .collect();
+    if title_style == TitleStyle::Labeling {
+        validate_generated_label_bounds(&parsed.children, &fixed_name_ids)?;
+    }
 
     // The "[cmd] " prefix rule is terminal-only (see the prompt's
     // "command_hint" instructions): a model that mislabels some other pane
@@ -986,12 +1024,11 @@ fn parse_restructure_response(
         .filter(|context| context.kind_label == "Plain shell")
         .map(|context| context.id)
         .collect();
-
     Ok(RestructurePlan {
         children: parsed
             .children
             .into_iter()
-            .map(|node| convert_node(node, &terminal_pane_ids))
+            .map(|node| convert_node(node, &terminal_pane_ids, &fixed_name_ids, title_style))
             .collect(),
     })
 }
@@ -1213,6 +1250,64 @@ fn validate_titles(nodes: &[LlmRestructureNode]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Label limits apply to AI-generated names, while user-owned names retain
+/// their existing form even when they exceed those limits.
+fn validate_generated_label_bounds(
+    nodes: &[LlmRestructureNode],
+    fixed_name_ids: &HashSet<NodeId>,
+) -> anyhow::Result<()> {
+    for node in nodes {
+        match node {
+            LlmRestructureNode::Pane {
+                id,
+                title,
+                short_title,
+                ..
+            }
+            | LlmRestructureNode::Folder {
+                id,
+                title,
+                short_title,
+                ..
+            } => {
+                if !fixed_name_ids.contains(id) {
+                    validate_label_pair(title, short_title)?;
+                }
+            }
+            LlmRestructureNode::Group {
+                title,
+                short_title,
+                children,
+                ..
+            } => {
+                validate_label_pair(title, short_title)?;
+                validate_generated_label_bounds(children, fixed_name_ids)?;
+            }
+            LlmRestructureNode::ExistingGroup { children, .. }
+            | LlmRestructureNode::SplitView { children, .. } => {
+                validate_generated_label_bounds(children, fixed_name_ids)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_label_pair(title: &str, short_title: &Option<String>) -> anyhow::Result<()> {
+    if crate::naming::normalize_word_bounded(title, 1, 7).is_none() {
+        anyhow::bail!(
+            "restructure label title must contain 1 to 7 words and at most 64 characters"
+        );
+    }
+    if short_title.as_deref().is_some_and(|short| {
+        !short.trim().is_empty() && crate::naming::normalize_word_bounded(short, 1, 3).is_none()
+    }) {
+        anyhow::bail!(
+            "restructure short label must contain 1 to 3 words and at most 64 characters"
+        );
+    }
+    Ok(())
+}
+
 /// Rejects a blank title, or one containing a control character (e.g. an
 /// embedded terminal escape sequence), before it can reach
 /// `ilium_core::Node::name` and be rendered verbatim in the tree UI.
@@ -1247,7 +1342,12 @@ fn validate_optional_title_field(short_title: &Option<String>) -> anyhow::Result
 /// `terminal_pane_ids` down so the `Pane` arm can gate its "[cmd] " prefix
 /// (see `parse_restructure_response`) on the item actually being a plain-shell
 /// terminal rather than trusting the model's own `command_hint` placement.
-fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -> RestructureNode {
+fn convert_node(
+    node: LlmRestructureNode,
+    terminal_pane_ids: &HashSet<NodeId>,
+    fixed_name_ids: &HashSet<NodeId>,
+    title_style: TitleStyle,
+) -> RestructureNode {
     match node {
         LlmRestructureNode::Pane {
             id,
@@ -1263,11 +1363,18 @@ fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -
             RestructureNode::Pane {
                 id,
                 title: crate::naming::format_with_command_hint(
-                    title.trim().to_string(),
+                    normalize_restructure_title(title, title_style, fixed_name_ids.contains(&id)),
                     command_hint.as_deref(),
                 ),
                 short_title: normalize_optional(short_title).map(|short| {
-                    crate::naming::format_with_command_hint(short, command_hint.as_deref())
+                    crate::naming::format_with_command_hint(
+                        normalize_restructure_title(
+                            short,
+                            title_style,
+                            fixed_name_ids.contains(&id),
+                        ),
+                        command_hint.as_deref(),
+                    )
                 }),
                 icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
             }
@@ -1279,8 +1386,10 @@ fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -
             icon,
         } => RestructureNode::Folder {
             id,
-            title: title.trim().to_string(),
-            short_title: normalize_optional(short_title),
+            title: normalize_restructure_title(title, title_style, fixed_name_ids.contains(&id)),
+            short_title: normalize_optional(short_title).map(|short| {
+                normalize_restructure_title(short, title_style, fixed_name_ids.contains(&id))
+            }),
             icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
         },
         LlmRestructureNode::Group {
@@ -1289,28 +1398,42 @@ fn convert_node(node: LlmRestructureNode, terminal_pane_ids: &HashSet<NodeId>) -
             icon,
             children,
         } => RestructureNode::Group {
-            title: title.trim().to_string(),
-            short_title: normalize_optional(short_title),
+            title: normalize_restructure_title(title, title_style, false),
+            short_title: normalize_optional(short_title)
+                .map(|short| normalize_restructure_title(short, title_style, false)),
             icon: icon.and_then(|value| crate::naming::normalize_icon(&value)),
             children: children
                 .into_iter()
-                .map(|child| convert_node(child, terminal_pane_ids))
+                .map(|child| convert_node(child, terminal_pane_ids, fixed_name_ids, title_style))
                 .collect(),
         },
         LlmRestructureNode::ExistingGroup { id, children } => RestructureNode::ExistingGroup {
             id,
             children: children
                 .into_iter()
-                .map(|child| convert_node(child, terminal_pane_ids))
+                .map(|child| convert_node(child, terminal_pane_ids, fixed_name_ids, title_style))
                 .collect(),
         },
         LlmRestructureNode::SplitView { id, children } => RestructureNode::ExistingSplitView {
             id,
             children: children
                 .into_iter()
-                .map(|child| convert_node(child, terminal_pane_ids))
+                .map(|child| convert_node(child, terminal_pane_ids, fixed_name_ids, title_style))
                 .collect(),
         },
+    }
+}
+
+fn normalize_restructure_title(
+    title: impl AsRef<str>,
+    style: TitleStyle,
+    is_name_fixed: bool,
+) -> String {
+    let title = title.as_ref().trim();
+    if style == TitleStyle::Labeling && !is_name_fixed {
+        title.to_uppercase()
+    } else {
+        title.to_string()
     }
 }
 
@@ -1361,6 +1484,18 @@ mod tests {
                 return Ok(responses.remove(0));
             }
             Ok(responses[0].clone())
+        }
+    }
+
+    struct LabelGenerator(FakeGenerator);
+
+    impl RestructureCompletionClient for LabelGenerator {
+        fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String> {
+            self.0.complete_restructure_prompt(prompt)
+        }
+
+        fn title_style(&self) -> TitleStyle {
+            TitleStyle::Labeling
         }
     }
 
@@ -1927,6 +2062,82 @@ mod tests {
         assert!(prompt
             .contains("must use at most 7 words; this is a maximum, not a target or a minimum"));
         assert!(prompt.contains("never add filler merely to make it longer"));
+    }
+
+    #[test]
+    fn labeling_restructure_names_items_for_tree_retrieval() {
+        let prompt = render_restructure_prompt(
+            TitleStyle::Labeling,
+            &[leaf(1, "Coding Session")],
+            "Current project",
+            &[],
+            None,
+        )
+        .unwrap();
+
+        assert!(prompt.contains("thing the user will look for again in a large tree"));
+        assert!(prompt.contains("scope the user intends to return to"));
+        assert!(prompt.contains("Rewrite an automatic activity summary"));
+        assert!(prompt.contains("\"title\":\"LOGIN BUG\""));
+        assert!(prompt.contains("Every name-fixed ordinary group must appear exactly once"));
+        assert!(prompt.contains("Split views are user-created presentation layouts"));
+        assert!(!prompt.contains("Backend Agent Fixing Login Bug"));
+    }
+
+    #[test]
+    fn labeling_normalizes_generated_names_without_changing_fixed_names() {
+        let generator = LabelGenerator(FakeGenerator::new(
+            r#"{"children":[{"kind":"group","title":"related work","short_title":"work","icon":"📁","children":[{"kind":"pane","id":1,"title":"user's original mixed Case title with many words","short_title":"user's Case","icon":"📌","command_hint":""},{"kind":"pane","id":2,"title":"diagnose icon state","short_title":"icon state","icon":"🔧","command_hint":""}]}]}"#,
+        ));
+        let mut fixed = leaf(1, "user's original mixed Case title with many words");
+        fixed.is_name_fixed = true;
+        let plan = infer_restructure_plan(&generator, &[fixed, leaf(2, "Coding Session")]).unwrap();
+        let RestructureNode::Group {
+            title,
+            short_title,
+            children,
+            ..
+        } = &plan.children[0]
+        else {
+            panic!("expected generated group");
+        };
+        assert_eq!(title, "RELATED WORK");
+        assert_eq!(short_title.as_deref(), Some("WORK"));
+        let RestructureNode::Pane {
+            title, short_title, ..
+        } = &children[0]
+        else {
+            panic!("expected fixed pane");
+        };
+        assert_eq!(title, "user's original mixed Case title with many words");
+        assert_eq!(short_title.as_deref(), Some("user's Case"));
+        let RestructureNode::Pane {
+            title, short_title, ..
+        } = &children[1]
+        else {
+            panic!("expected generated pane");
+        };
+        assert_eq!(title, "DIAGNOSE ICON STATE");
+        assert_eq!(short_title.as_deref(), Some("ICON STATE"));
+    }
+
+    #[test]
+    fn labeling_retries_a_generated_label_beyond_its_word_limit() {
+        let generator = LabelGenerator(FakeGenerator::sequence([
+            r#"{"children":[{"kind":"pane","id":1,"title":"one two three four five six seven eight","short_title":"one two","icon":"📌","command_hint":""}]}"#.to_string(),
+            r#"{"children":[{"kind":"pane","id":1,"title":"search issue","short_title":"search issue","icon":"📌","command_hint":""}]}"#.to_string(),
+        ]));
+
+        let plan = infer_restructure_plan(&generator, &[leaf(1, "Coding Session")]).unwrap();
+        assert_eq!(generator.0.calls.get(), 2);
+        let RestructureNode::Pane {
+            title, short_title, ..
+        } = &plan.children[0]
+        else {
+            panic!("expected generated pane");
+        };
+        assert_eq!(title, "SEARCH ISSUE");
+        assert_eq!(short_title.as_deref(), Some("SEARCH ISSUE"));
     }
 
     #[test]

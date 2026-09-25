@@ -21,7 +21,7 @@ pub fn decorate_agent_title(activity: AgentActivity, title: &str) -> String {
 /// title unchanged.
 pub fn decorate_pane_title(status: &PaneStatus, title: &str) -> String {
     match status {
-        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity) => {
+        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity, _) => {
             decorate_agent_title(*activity, title)
         }
         PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => title.to_string(),
@@ -45,7 +45,11 @@ mod tests {
         );
         assert_eq!(
             decorate_pane_title(
-                &PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done),
+                &PaneStatus::AgentWithGoal(
+                    AgentClass::Claude,
+                    AgentActivity::Done,
+                    ilium_core::GoalState::Active
+                ),
                 "[done] Goal"
             ),
             "[done] Goal"
