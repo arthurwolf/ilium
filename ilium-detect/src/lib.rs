@@ -23,8 +23,9 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider};
+use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, GoalState};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use unicode_width::UnicodeWidthChar;
 
 /// Ensures process detection never consumes the host's file-descriptor budget.
 ///
@@ -353,16 +354,61 @@ pub fn is_fresh_agent_screen(class: &AgentClass, screen_text: &str) -> bool {
 /// composer marker must still be combined with the shared activity gate --
 /// otherwise a one-shot initial prompt gets injected into the modal instead
 /// of the composer it was meant for.
+///
+/// This text-only entry point deliberately accepts only Codex composers whose
+/// emptiness is unambiguous in plain text. Current Codex releases draw rotating
+/// placeholder text after `›`; once terminal formatting is stripped, that is
+/// indistinguishable from a user-authored draft. Callers with a live terminal
+/// cursor and cell styling should use [`is_agent_prompt_ready_at_cursor`]
+/// instead.
 pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
     let normalized = screen_text.to_ascii_lowercase();
     let composer_visible = match class {
-        AgentClass::Codex => {
-            normalized.contains("send a message") || screen_has_codex_composer_cursor(screen_text)
-        }
+        AgentClass::Codex => screen_has_unambiguously_empty_codex_composer(screen_text),
         AgentClass::Claude => screen_has_claude_composer_cursor(screen_text),
         AgentClass::Antigravity => normalized.contains("type a message"),
         AgentClass::Other(_) => return false,
     };
+    composer_visible
+        && !matches!(
+            classify_activity_for_agent(class, screen_text),
+            AgentActivity::Working
+                | AgentActivity::WaitingBackground
+                | AgentActivity::WaitingApproval
+        )
+}
+
+/// Cursor-aware prompt readiness for callers that own a live terminal screen.
+///
+/// Codex renders rotating placeholder text in the same cells a typed draft
+/// later occupies. Plain text therefore cannot distinguish `› Explain this
+/// codebase` as a placeholder from the same words entered by a user. The
+/// terminal cursor is one necessary signal: for an empty composer it remains
+/// at the first input cell immediately after `› `, while ordinary typed input
+/// advances it. It is not sufficient by itself because a user can move a dirty
+/// draft back to the first cell. Codex renders placeholder text dim and
+/// user-authored text normally, so every visible placeholder cell must also be
+/// present in `dimmed_cells`. Rows and columns are zero-based, matching
+/// `vt100::Screen::cursor_position`. Other providers retain their existing
+/// text-only contracts.
+pub fn is_agent_prompt_ready_at_cursor(
+    class: &AgentClass,
+    screen_text: &str,
+    cursor_row: u16,
+    cursor_column: u16,
+    dimmed_cells: &[(u16, u16)],
+) -> bool {
+    if !matches!(class, AgentClass::Codex) {
+        return is_agent_prompt_ready(class, screen_text);
+    }
+
+    let composer_visible = screen_has_unambiguously_empty_codex_composer(screen_text)
+        || screen_has_empty_codex_composer_at_cursor(
+            screen_text,
+            cursor_row,
+            cursor_column,
+            dimmed_cells,
+        );
     composer_visible
         && !matches!(
             classify_activity_for_agent(class, screen_text),
@@ -435,17 +481,113 @@ pub fn interstitial_prompt_response(class: &AgentClass, screen_text: &str) -> Op
         .map(|prompt| prompt.key_to_send)
 }
 
-/// Current Codex releases rotate contextual placeholder text instead of
-/// retaining the older literal `Send a message` label. The stable composer
-/// contract is its leading `›` cursor; numbered modal choices are excluded so
-/// an approval surface cannot masquerade as the free-form composer.
-fn screen_has_codex_composer_cursor(screen_text: &str) -> bool {
-    screen_text.lines().any(|line| {
-        let Some(composer_content) = line.trim_start().strip_prefix('›') else {
-            return false;
-        };
-        !is_numbered_option_line(composer_content)
+/// Recognizes Codex composer forms whose emptiness survives conversion to
+/// plain text: a bare modern `›` prompt or the older empty bordered field.
+fn screen_has_unambiguously_empty_codex_composer(screen_text: &str) -> bool {
+    let lines: Vec<&str> = screen_text.lines().collect();
+    lines.iter().enumerate().any(|(line_index, line)| {
+        let trimmed = line.trim_start();
+        if let Some(composer_content) = trimmed.strip_prefix('›') {
+            return composer_content.trim().is_empty();
+        }
+        trimmed.eq_ignore_ascii_case("send a message")
+            && codex_legacy_composer_box_is_empty(&lines[..line_index])
     })
+}
+
+/// Recognizes an empty modern Codex composer by requiring the live cursor to
+/// remain at its first input cell. Placeholder wording is intentionally not
+/// enumerated because Codex rotates it between releases.
+fn screen_has_empty_codex_composer_at_cursor(
+    screen_text: &str,
+    cursor_row: u16,
+    cursor_column: u16,
+    dimmed_cells: &[(u16, u16)],
+) -> bool {
+    let Some(line) = screen_text.lines().nth(usize::from(cursor_row)) else {
+        return false;
+    };
+    let leading_space_columns = line
+        .chars()
+        .take_while(|character| *character == ' ')
+        .count();
+    let Some(composer_content) = line
+        .get(leading_space_columns..)
+        .and_then(|trimmed| trimmed.strip_prefix('›'))
+    else {
+        return false;
+    };
+    if is_numbered_option_line(composer_content) {
+        return false;
+    }
+
+    // `Screen::contents()` drops trailing blank cells. Accept either the cell
+    // directly after `›` or the conventional first input cell after `› `.
+    let first_column_after_marker = leading_space_columns.saturating_add(1);
+    let first_input_column = first_column_after_marker.saturating_add(1);
+    let cursor_is_at_first_input = usize::from(cursor_column) == first_column_after_marker
+        || usize::from(cursor_column) == first_input_column;
+    if !cursor_is_at_first_input {
+        return false;
+    }
+
+    let mut column = first_column_after_marker;
+    let mut saw_visible_placeholder_cell = false;
+    for character in composer_content.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if !character.is_whitespace() && character_width > 0 {
+            saw_visible_placeholder_cell = true;
+            let Ok(column) = u16::try_from(column) else {
+                return false;
+            };
+            if !dimmed_cells.contains(&(cursor_row, column)) {
+                return false;
+            }
+        }
+        column = column.saturating_add(character_width);
+    }
+
+    saw_visible_placeholder_cell
+}
+
+fn codex_legacy_composer_box_is_empty(lines_before_label: &[&str]) -> bool {
+    let mut preceding_lines = lines_before_label
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .skip_while(|line| line.is_empty());
+    let Some(bottom_border) = preceding_lines.next() else {
+        return false;
+    };
+    if !is_codex_box_border(bottom_border, '╰', '╯') {
+        return false;
+    }
+
+    let mut saw_empty_content_row = false;
+    for line in preceding_lines {
+        if is_codex_box_border(line, '╭', '╮') {
+            return saw_empty_content_row;
+        }
+        if !is_empty_codex_box_row(line) {
+            return false;
+        }
+        saw_empty_content_row = true;
+    }
+    false
+}
+
+fn is_codex_box_border(line: &str, left_corner: char, right_corner: char) -> bool {
+    line.starts_with(left_corner)
+        && line.ends_with(right_corner)
+        && line.chars().all(|character| {
+            matches!(character, '─' | ' ') || character == left_corner || character == right_corner
+        })
+}
+
+fn is_empty_codex_box_row(line: &str) -> bool {
+    line.starts_with('│')
+        && line.ends_with('│')
+        && line.chars().all(|character| matches!(character, '│' | ' '))
 }
 
 /// Claude's empty composer is a bordered terminal field whose content row is
@@ -484,7 +626,7 @@ fn screen_has_only_empty_composer_chrome(screen_text: &str, composer_label: &str
 /// it only on explicit terminal evidence or process replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GoalEvidence {
-    Active,
+    State(GoalState),
     Inactive,
     Unknown,
 }
@@ -497,11 +639,15 @@ pub struct GoalClassification {
 
 /// Extracts provider-owned goal evidence from the current visible screen.
 ///
-/// Goal status may be a standalone row or the final segment of a shared footer.
-/// Current wide Codex layouts render metadata first and end the same line with
-/// `Pursuing goal (16m)`, so matching only the beginning of a line is
-/// width-dependent. Lines are inspected newest-first: a current `Goal achieved`
-/// footer must override an older positive row that is still visible above it.
+/// Goal status is read only from the provider's own status chrome next to its
+/// composer, never from arbitrary transcript text: agent prose and tool output
+/// routinely quote goal wording (`Goal paused`, `Pursuing goal (5m)`), and a
+/// stale transcript row must not outrank the live footer. Each provider has an
+/// anchor row located structurally relative to its composer; when the anchor
+/// cannot be located (overlay, approval dialog, partial redraw) the result is
+/// `Unknown` so the server can retain the previously confirmed phase.
+///
+/// See `docs/research/agent-goal-indicators.md` for the captured layouts.
 pub fn goal_evidence_for_agent(class: &AgentClass, screen_text: &str) -> GoalEvidence {
     goal_evidence_for_agent_detailed(class, screen_text).evidence
 }
@@ -510,130 +656,300 @@ pub fn goal_evidence_for_agent_detailed(
     class: &AgentClass,
     screen_text: &str,
 ) -> GoalClassification {
-    let inconclusive = GoalClassification {
-        evidence: GoalEvidence::Unknown,
-        matched_line: None,
+    // Resolved once per screen: a provider with no goal surface skips the
+    // line collection entirely on every detection tick.
+    let Some(goal_evidence_of_screen) = provider_goal_reader(class) else {
+        return GoalClassification {
+            evidence: GoalEvidence::Unknown,
+            matched_line: None,
+        };
     };
-    // Resolved once per screen rather than once per line: a provider with no
-    // goal surface would otherwise normalize (and allocate) every visible line
-    // of every one of its panes, on every detection tick, only to conclude
-    // `Unknown` for each of them.
-    let Some(goal_evidence_of_line) = provider_goal_vocabulary(class) else {
-        return inconclusive;
-    };
-    for original_line in screen_text.lines().rev() {
-        let evidence = goal_evidence_of_line(&normalize_goal_status_line(original_line));
-        if evidence != GoalEvidence::Unknown {
-            return GoalClassification {
-                evidence,
-                matched_line: Some(bounded_terminal_evidence(original_line)),
-            };
-        }
-    }
-    inconclusive
+    let lines: Vec<&str> = screen_text.lines().collect();
+    goal_evidence_of_screen(&lines)
 }
 
-/// The provider-owned goal-footer vocabulary, or `None` for a provider that
-/// renders no goal status at all. Keeping this a lookup rather than a branch
-/// inside the scan loop is what lets the scan be skipped entirely.
-fn provider_goal_vocabulary(class: &AgentClass) -> Option<fn(&str) -> GoalEvidence> {
+/// The provider-owned goal reader, or `None` for a provider that renders no
+/// goal status at all.
+fn provider_goal_reader(class: &AgentClass) -> Option<fn(&[&str]) -> GoalClassification> {
     match class {
-        AgentClass::Codex => Some(codex_goal_evidence),
-        AgentClass::Claude => Some(claude_goal_evidence),
+        AgentClass::Codex => Some(codex_goal_classification),
+        AgentClass::Claude => Some(claude_goal_classification),
         AgentClass::Antigravity | AgentClass::Other(_) => None,
     }
 }
 
-/// Recognizes Codex's active, paused, blocked, limited, and completed footer
-/// phases. Exact elapsed-time suffixes are high-signal terminal chrome and may
-/// appear after arbitrary model/cwd/context metadata on the same line.
-fn codex_goal_evidence(line: &str) -> GoalEvidence {
-    if has_elapsed_status_suffix(line, "goal achieved (")
-        || line_ends_with_status(line, "goal achieved")
-    {
-        return GoalEvidence::Inactive;
-    }
-
-    if [
-        "pursuing goal (",
-        "goal paused (",
-        "goal blocked (",
-        "goal hit usage limits (",
-    ]
-    .iter()
-    .any(|marker| has_elapsed_status_suffix(line, marker))
-        || line.starts_with("goal active objective:")
-        || line_ends_with_status(line, "goal paused (/goal resume)")
-        || line_ends_with_status(line, "goal blocked (/goal resume)")
-        || line_ends_with_status(line, "goal hit usage limits (/goal resume)")
-        || line
-            .strip_prefix("goal:")
-            .is_some_and(|goal_value| !goal_value.trim().is_empty())
-    {
-        return GoalEvidence::Active;
-    }
-
-    GoalEvidence::Unknown
-}
-
-/// Recognizes Claude Code's provider-owned active-goal footer forms without
-/// requiring them to be the first status segment on the line.
-fn claude_goal_evidence(line: &str) -> GoalEvidence {
-    if has_elapsed_status_suffix(line, "goal active (") || line.starts_with("goal active:") {
-        GoalEvidence::Active
-    } else {
-        GoalEvidence::Unknown
+fn goal_classification(evidence: GoalEvidence, line: Option<&str>) -> GoalClassification {
+    GoalClassification {
+        evidence,
+        matched_line: line.map(bounded_terminal_evidence),
     }
 }
 
-/// Normalizes case and removes decoration only from the beginning of a line.
-/// Interior separators remain available to establish status-segment boundaries.
-fn normalize_goal_status_line(line: &str) -> String {
-    line.trim()
-        .trim_start_matches(|character: char| !character.is_alphanumeric())
-        .to_ascii_lowercase()
+/// How far above Codex's footer its composer may start. The composer grows
+/// with a multi-line draft; anything further away is not the live composer.
+const CODEX_COMPOSER_SEARCH_ROWS: usize = 10;
+
+/// Codex renders its status footer as the last non-blank screen row, directly
+/// below the `›` composer. The goal segment is right-pinned in that row: wide
+/// layouts truncate the metadata on its left with `…` and may append a
+/// `⚠ 1 warning · f2 to view` notice to its right, so the segment is found by
+/// marker, not by line position.
+fn codex_goal_classification(lines: &[&str]) -> GoalClassification {
+    let Some(footer) = codex_footer_row(lines) else {
+        return goal_classification(GoalEvidence::Unknown, None);
+    };
+    let normalized_footer = footer.to_lowercase();
+    if let Some(goal_state) = codex_footer_goal_state(&normalized_footer) {
+        return goal_classification(GoalEvidence::State(goal_state), Some(footer));
+    }
+    // A goal-free footer is decisive only when it is recognizably Codex's
+    // metadata status line. Popups that replace the footer (slash-command
+    // lists, key hints under a selection menu) stay inconclusive so a
+    // transient overlay never clears a confirmed goal.
+    if is_codex_metadata_footer(&normalized_footer) {
+        return goal_classification(GoalEvidence::Inactive, Some(footer));
+    }
+    goal_classification(GoalEvidence::Unknown, None)
 }
 
-/// Matches a status label followed by a well-formed elapsed-time token at the
-/// end of a line. This accepts a footer suffix after arbitrary metadata while
-/// rejecting ordinary prose such as "the footer says Pursuing goal (16m) here".
-fn has_elapsed_status_suffix(line: &str, marker: &str) -> bool {
-    let Some(marker_index) = line.rfind(marker) else {
+/// The footer row, provided the live composer sits a few rows above it.
+fn codex_footer_row<'screen>(lines: &[&'screen str]) -> Option<&'screen str> {
+    let footer_index = lines.iter().rposition(|line| !line.trim().is_empty())?;
+    let search_start = footer_index.saturating_sub(CODEX_COMPOSER_SEARCH_ROWS);
+    lines[search_start..footer_index]
+        .iter()
+        .any(|line| is_codex_composer_row(line))
+        .then_some(lines[footer_index])
+}
+
+/// The composer row starts with `›`. Numbered menu options use the same
+/// selection glyph (`› 1. Trust and continue`) and are rejected so a modal's
+/// hint row is not mistaken for the footer.
+fn is_codex_composer_row(line: &str) -> bool {
+    let Some(after_glyph) = line.trim_start().strip_prefix('›') else {
         return false;
     };
-    if !has_status_boundary_before(line, marker_index) {
-        return false;
-    }
+    let content = after_glyph.trim_start();
+    let digit_count = content.chars().take_while(char::is_ascii_digit).count();
+    !(digit_count > 0 && content[digit_count..].starts_with('.'))
+}
 
-    let duration_and_tail = &line[marker_index + marker.len()..];
-    let Some(closing_parenthesis) = duration_and_tail.find(')') else {
+/// Every goal phase Codex renders in its footer, as extracted from the Codex
+/// CLI 0.156 binary and confirmed live where noted in the research document.
+/// Only the rightmost marker counts: the goal segment is the footer's final
+/// status segment.
+fn codex_footer_goal_state(normalized_footer: &str) -> Option<GoalState> {
+    const ELAPSED_MARKERS: [(&str, GoalState); 3] = [
+        ("pursuing goal (", GoalState::Active),
+        ("goal achieved (", GoalState::Reached),
+        // Budget-limited goals: the thread's token budget ran out.
+        ("goal unmet (", GoalState::UsageLimited),
+    ];
+    const EXACT_MARKERS: [(&str, GoalState); 4] = [
+        ("goal paused (/goal resume)", GoalState::Paused),
+        ("goal stalled (/goal resume)", GoalState::Blocked),
+        // Older Codex releases named the stalled phase "blocked".
+        ("goal blocked (/goal resume)", GoalState::Blocked),
+        (
+            "goal hit usage limits (/goal resume)",
+            GoalState::UsageLimited,
+        ),
+    ];
+
+    let elapsed_matches = ELAPSED_MARKERS.iter().filter_map(|(marker, goal_state)| {
+        rightmost_segment_start(normalized_footer, marker)
+            .filter(|&index| has_elapsed_token_after(normalized_footer, index + marker.len()))
+            .map(|index| (index, *goal_state))
+    });
+    let exact_matches = EXACT_MARKERS.iter().filter_map(|(marker, goal_state)| {
+        rightmost_segment_start(normalized_footer, marker).map(|index| (index, *goal_state))
+    });
+    elapsed_matches
+        .chain(exact_matches)
+        .max_by_key(|(index, _)| *index)
+        .map(|(_, goal_state)| goal_state)
+}
+
+/// The last occurrence of `marker` that begins a word, so `repursuing goal (`
+/// cannot match inside a longer token.
+fn rightmost_segment_start(line: &str, marker: &str) -> Option<usize> {
+    line.rmatch_indices(marker)
+        .map(|(index, _)| index)
+        .find(|&index| {
+            line[..index]
+                .chars()
+                .next_back()
+                .is_none_or(|character| !character.is_alphanumeric())
+        })
+}
+
+/// Accepts `16m)`, `1h 5m)`, `45s)` — a digit-bearing elapsed duration closed
+/// by a parenthesis.
+fn has_elapsed_token_after(line: &str, duration_start: usize) -> bool {
+    let tail = &line[duration_start..];
+    let Some(closing_parenthesis) = tail.find(')') else {
         return false;
     };
-    let duration = &duration_and_tail[..closing_parenthesis];
-    let trailing = &duration_and_tail[closing_parenthesis + 1..];
-    !duration.is_empty()
-        && duration.chars().any(|character| character.is_ascii_digit())
+    let duration = &tail[..closing_parenthesis];
+    duration.chars().any(|character| character.is_ascii_digit())
         && duration.chars().all(|character| {
             character.is_ascii_digit()
                 || character.is_ascii_whitespace()
                 || matches!(character, '.' | ':' | 'd' | 'h' | 'm' | 's')
         })
-        // Nothing but chrome may follow the closing parenthesis: whitespace is
-        // already covered by "not alphanumeric", so the rule is simply that no
-        // further word may appear after the status segment.
-        && !trailing.chars().any(char::is_alphanumeric)
 }
 
-/// Matches an exact terminal status suffix after optional shared-footer chrome.
-fn line_ends_with_status(line: &str, marker: &str) -> bool {
-    let trimmed = line.trim_end_matches(|character: char| {
-        character.is_whitespace() || (!character.is_alphanumeric() && character != ')')
-    });
-    let Some(marker_index) = trimmed.rfind(marker) else {
-        return false;
+/// Codex's status line is a `·`-separated metadata row that carries at least
+/// one of its run-state or context items.
+fn is_codex_metadata_footer(normalized_footer: &str) -> bool {
+    const STATUS_ITEMS: [&str; 7] = [
+        "context", "% left", "ready", "working", "idle", "waiting", "thinking",
+    ];
+    normalized_footer.contains(" · ")
+        && STATUS_ITEMS
+            .iter()
+            .any(|item| normalized_footer.contains(item))
+}
+
+/// How far above Claude Code's indicator row the current turn's closing
+/// notices are searched. The turn summary, a goal notice, and an optional
+/// feedback box fit well inside this bound.
+const CLAUDE_TURN_END_SEARCH_ROWS: usize = 30;
+
+/// Claude Code renders `◎ /goal active (2m)` right-aligned on the indicator
+/// row directly above the composer's top rule for as long as a goal is set.
+/// That row cannot express any other phase, so the closing notices of the
+/// current turn — the rows between the indicator and the last user prompt —
+/// refine it: `Goal paused · <reason>` while the indicator persists, and
+/// `Goal achieved` / `Goal could not be achieved` / `Goal cleared` once it is
+/// gone.
+fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
+    let Some(indicator_index) = claude_indicator_row_index(lines) else {
+        return goal_classification(GoalEvidence::Unknown, None);
     };
-    has_status_boundary_before(trimmed, marker_index)
-        && marker_index + marker.len() == trimmed.len()
+    let indicator = lines[indicator_index];
+    let turn_end = claude_turn_end_goal_notice(lines, indicator_index);
+    if claude_indicator_shows_goal(indicator) {
+        return match turn_end {
+            Some((ClaudeGoalNotice::Paused(goal_state), line)) => {
+                goal_classification(GoalEvidence::State(goal_state), Some(line))
+            }
+            _ => goal_classification(GoalEvidence::State(GoalState::Active), Some(indicator)),
+        };
+    }
+    match turn_end {
+        Some((ClaudeGoalNotice::Achieved, line)) => {
+            goal_classification(GoalEvidence::State(GoalState::Reached), Some(line))
+        }
+        Some((ClaudeGoalNotice::Failed, line)) => {
+            goal_classification(GoalEvidence::State(GoalState::Blocked), Some(line))
+        }
+        Some((ClaudeGoalNotice::Cleared, line)) => {
+            goal_classification(GoalEvidence::Inactive, Some(line))
+        }
+        // A notice that the goal is still running (or paused) without its
+        // indicator is a redraw in progress, not proof the goal ended.
+        Some((ClaudeGoalNotice::Running | ClaudeGoalNotice::Paused(_), _)) => {
+            goal_classification(GoalEvidence::Unknown, None)
+        }
+        None => goal_classification(GoalEvidence::Inactive, Some(indicator)),
+    }
+}
+
+/// The row immediately above the rule that tops the last `❯` composer.
+fn claude_indicator_row_index(lines: &[&str]) -> Option<usize> {
+    let composer_index = (2..lines.len()).rev().find(|&index| {
+        lines[index].trim_start().starts_with('❯') && is_horizontal_rule(lines[index - 1])
+    })?;
+    Some(composer_index - 2)
+}
+
+fn is_horizontal_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().count() >= 10 && trimmed.chars().all(|character| character == '─')
+}
+
+/// The indicator may share its row with other right-aligned status items
+/// (`● high · /effort · ◎ /goal active (3m)`), so it is matched as that row's
+/// final segment.
+fn claude_indicator_shows_goal(indicator: &str) -> bool {
+    let normalized = indicator.trim_end().to_lowercase();
+    if normalized.ends_with("/goal active") {
+        return true;
+    }
+    rightmost_segment_start(&normalized, "/goal active (").is_some_and(|index| {
+        let duration_start = index + "/goal active (".len();
+        has_elapsed_token_after(&normalized, duration_start)
+            && normalized[duration_start..]
+                .find(')')
+                .is_some_and(|offset| normalized[duration_start + offset + 1..].trim().is_empty())
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudeGoalNotice {
+    Paused(GoalState),
+    Achieved,
+    Failed,
+    Cleared,
+    /// `Goal set:` or `Goal not yet met… continuing`: the goal is running.
+    Running,
+}
+
+/// The newest goal notice of the current turn, scanning upward from the
+/// indicator row. The scan stops at the previous user prompt (`❯ text`), at
+/// any later assistant message (`● text` that is not itself a goal notice),
+/// and at a live spinner row, because each of those proves the agent has
+/// moved past an older notice.
+fn claude_turn_end_goal_notice<'screen>(
+    lines: &[&'screen str],
+    indicator_index: usize,
+) -> Option<(ClaudeGoalNotice, &'screen str)> {
+    let search_start = indicator_index.saturating_sub(CLAUDE_TURN_END_SEARCH_ROWS);
+    for line in lines[search_start..indicator_index].iter().rev() {
+        let trimmed = line.trim_start();
+        let normalized = normalize_goal_status_line(line);
+        if let Some(notice) = claude_goal_notice(&normalized) {
+            return Some((notice, line));
+        }
+        let is_user_prompt = trimmed.starts_with('❯');
+        let is_assistant_message = trimmed.starts_with('●');
+        if is_user_prompt || is_assistant_message || is_live_status_line(line) {
+            return None;
+        }
+    }
+    None
+}
+
+fn claude_goal_notice(normalized: &str) -> Option<ClaudeGoalNotice> {
+    if normalized.starts_with("goal paused") {
+        let goal_state = if normalized.contains("usage limit") {
+            GoalState::UsageLimited
+        } else {
+            GoalState::Paused
+        };
+        return Some(ClaudeGoalNotice::Paused(goal_state));
+    }
+    if normalized.starts_with("goal achieved") {
+        return Some(ClaudeGoalNotice::Achieved);
+    }
+    if normalized.starts_with("goal could not be achieved") {
+        return Some(ClaudeGoalNotice::Failed);
+    }
+    if normalized.starts_with("goal cleared") {
+        return Some(ClaudeGoalNotice::Cleared);
+    }
+    if normalized.starts_with("goal set:") || normalized.starts_with("goal not yet met") {
+        return Some(ClaudeGoalNotice::Running);
+    }
+    None
+}
+
+/// Normalizes case and removes decoration only from the beginning of a line.
+fn normalize_goal_status_line(line: &str) -> String {
+    line.trim()
+        .trim_start_matches(|character: char| !character.is_alphanumeric())
+        .to_lowercase()
 }
 
 /// Requires a marker to begin at the normalized line start or after an actual
@@ -753,7 +1069,7 @@ fn is_live_status_line(line: &str) -> bool {
 /// (`"• Working (18m 26s • esc to interrupt)"`, see
 /// `tests/fixtures/codex_goal_active_wide_footer.txt`). A bare `starts_with`
 /// check only catches the first shape; reusing `has_status_boundary_before`
-/// (the same segment-boundary rule `codex_goal_evidence` already relies on)
+/// (the footer-segment boundary rule shared with other status chrome)
 /// catches both while still rejecting the word mid-sentence or embedded in a
 /// longer word (e.g. "regenerating").
 fn looks_like_codex_live_status_line(screen_text: &str) -> bool {
@@ -836,11 +1152,11 @@ fn is_confirmation_prompt_line(line: &str) -> bool {
 /// `❯` (U+276F) is what Claude Code and Codex's approval dialogs render;
 /// `›` (U+203A) is what Codex's numbered-choice modals use -- the same glyph
 /// its composer draws, which is precisely why a numbered option line has to be
-/// distinguished from a composer line rather than from the cursor alone (see
-/// `screen_has_codex_composer_cursor`). Recognizing only the first glyph left a
-/// whole family of real Codex modals classified `Idle`, i.e. silently not
-/// reported as blocked on the user, whenever their footer hint was absent or
-/// scrolled away.
+/// distinguished from a composer line rather than from the glyph alone (see
+/// `screen_has_empty_codex_composer_at_cursor`). Recognizing only the first
+/// glyph left a whole family of real Codex modals classified `Idle`, i.e.
+/// silently not reported as blocked on the user, whenever their footer hint
+/// was absent or scrolled away.
 const SELECTION_CURSORS: &[char] = &['\u{276f}', '\u{203a}'];
 
 /// True if the screen looks like a general multiple-choice / selection
@@ -1446,6 +1762,17 @@ mod tests {
         })
     }
 
+    fn dimmed_ascii_cells(row: u16, start_column: u16, text: &str) -> Vec<(u16, u16)> {
+        (0..text.len())
+            .map(|offset| {
+                (
+                    row,
+                    start_column.saturating_add(u16::try_from(offset).expect("short fixture")),
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn claude_code_mid_turn_is_working() {
         assert_eq!(
@@ -1726,9 +2053,12 @@ mod tests {
             &AgentClass::Codex,
             &fixture("codex_idle.txt")
         ));
-        assert!(is_agent_prompt_ready(
+        assert!(is_agent_prompt_ready_at_cursor(
             &AgentClass::Codex,
-            &fixture("codex_dynamic_placeholder_idle.txt")
+            &fixture("codex_dynamic_placeholder_idle.txt"),
+            10,
+            2,
+            &dimmed_ascii_cells(10, 2, "Explain this codebase"),
         ));
         assert!(is_agent_prompt_ready(
             &AgentClass::Claude,
@@ -1768,6 +2098,103 @@ mod tests {
         assert!(!is_agent_prompt_ready(&AgentClass::Codex, screen));
     }
 
+    #[test]
+    fn codex_dirty_composer_is_not_prompt_ready() {
+        let screen = fixture("codex_dirty_composer.txt");
+        let draft_column = screen
+            .lines()
+            .nth(2)
+            .expect("dirty composer row")
+            .chars()
+            .count();
+        assert!(!is_agent_prompt_ready(&AgentClass::Codex, &screen));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &screen,
+            2,
+            draft_column.try_into().expect("draft column fits in u16"),
+            &[],
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &screen,
+            2,
+            2,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn codex_cursor_aware_readiness_requires_the_first_input_cell() {
+        let placeholder_screen = fixture("codex_dynamic_placeholder_idle.txt");
+        assert!(!is_agent_prompt_ready(
+            &AgentClass::Codex,
+            &placeholder_screen
+        ));
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &placeholder_screen,
+            10,
+            2,
+            &dimmed_ascii_cells(10, 2, "Explain this codebase"),
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &placeholder_screen,
+            10,
+            8,
+            &dimmed_ascii_cells(10, 2, "Explain this codebase"),
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &placeholder_screen,
+            9,
+            2,
+            &dimmed_ascii_cells(10, 2, "Explain this codebase"),
+        ));
+
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            "  › rotating placeholder\nReady",
+            0,
+            4,
+            &dimmed_ascii_cells(0, 4, "rotating placeholder"),
+        ));
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            "›\nReady",
+            0,
+            1,
+            &[],
+        ));
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            &fixture("codex_goal_achieved_wide_footer.txt"),
+            2,
+            2,
+            &dimmed_ascii_cells(2, 2, "Send a message"),
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Codex,
+            "Select a mode\n› 1. Read only\n  2. Full access",
+            1,
+            2,
+            &dimmed_ascii_cells(1, 2, "1. Read only"),
+        ));
+    }
+
+    #[test]
+    fn legacy_codex_box_must_be_visibly_empty() {
+        assert!(is_agent_prompt_ready(
+            &AgentClass::Codex,
+            &fixture("codex_idle.txt")
+        ));
+        assert!(!is_agent_prompt_ready(
+            &AgentClass::Codex,
+            "╭────╮\n│draft│\n╰────╯\nSend a message"
+        ));
+    }
+
     /// Codex marks the highlighted entry of its numbered modals with `›`, not
     /// with Claude Code's `❯`. Recognizing only the latter left that whole
     /// family of dialogs classified `Idle` -- the sidebar never reported the
@@ -1805,120 +2232,236 @@ mod tests {
         );
     }
 
+    /// Every fixture below is a real `tmux capture-pane` frame from the
+    /// recorded sessions described in `docs/research/agent-goal-indicators.md`.
     #[test]
-    fn visible_goal_status_is_detected_for_current_codex_and_claude_code() {
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Codex,
-                "  • Goal active Objective: Finish the detection pass"
+    fn captured_codex_goal_footers_map_to_their_goal_phase() {
+        for (fixture_name, expected) in [
+            (
+                "codex_goal_pursuing_warning_footer.txt",
+                GoalEvidence::State(GoalState::Active),
             ),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, "  ◒ Pursuing goal (5m)"),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, "🏁 Goal: keep the goal paused"),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Claude, "◎ /goal active (11s)"),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Claude,
-                " /goal active: finish the detection pass"
+            // The originally reported bug: the footer ends with a warning
+            // notice after the goal segment, and the turn is still Working.
+            (
+                "codex_goal_paused_while_turn_finishes.txt",
+                GoalEvidence::State(GoalState::Paused),
             ),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, "Goal achieved"),
-            GoalEvidence::Inactive
-        );
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Codex,
-                "This thread does not currently have a goal."
+            (
+                "codex_goal_paused_after_interrupt.txt",
+                GoalEvidence::State(GoalState::Paused),
             ),
-            GoalEvidence::Unknown
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, "Goal:"),
-            GoalEvidence::Unknown
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, "The project's goal: keep tests green."),
-            GoalEvidence::Unknown
-        );
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Claude,
-                "Goal set: an old transcript row is still visible"
+            (
+                "codex_goal_stalled_narrow.txt",
+                GoalEvidence::State(GoalState::Blocked),
             ),
-            GoalEvidence::Unknown
-        );
+            (
+                "codex_goal_achieved_warning_footer.txt",
+                GoalEvidence::State(GoalState::Reached),
+            ),
+            ("codex_goal_cleared.txt", GoalEvidence::Inactive),
+            ("codex_no_goal_metadata_footer.txt", GoalEvidence::Inactive),
+            (
+                "codex_goal_active_wide_footer.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
+            (
+                "codex_goal_achieved_wide_footer.txt",
+                GoalEvidence::State(GoalState::Reached),
+            ),
+        ] {
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Codex, &fixture(fixture_name)),
+                expected,
+                "{fixture_name}"
+            );
+        }
     }
 
     #[test]
-    fn codex_goal_footer_is_detected_after_wide_layout_metadata() {
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Codex,
-                &fixture("codex_goal_active_wide_footer.txt")
+    fn every_codex_footer_goal_phase_is_recognized_between_other_segments() {
+        for (segment, expected_state) in [
+            ("Pursuing goal (1h 5m)", GoalState::Active),
+            ("Goal paused (/goal resume)", GoalState::Paused),
+            ("Goal stalled (/goal resume)", GoalState::Blocked),
+            ("Goal blocked (/goal resume)", GoalState::Blocked),
+            (
+                "Goal hit usage limits (/goal resume)",
+                GoalState::UsageLimited,
             ),
-            GoalEvidence::Active
-        );
-        assert_eq!(
-            goal_evidence_for_agent(
-                &AgentClass::Codex,
-                "gpt-5.6-sol xhigh · workspace · Waiting · Context … Pursuing goal (3m)"
-            ),
-            GoalEvidence::Active,
-            "a narrow footer can collapse hidden metadata into an ellipsis"
-        );
+            ("Goal unmet (12m)", GoalState::UsageLimited),
+            ("Goal achieved (20m)", GoalState::Reached),
+        ] {
+            let screen = format!(
+                "• Done\n\n› Ask Codex to do anything\n\n  model · workspace · Ready · Conte… {segment}    ⚠ 1 warning · f2 to view"
+            );
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Codex, &screen),
+                GoalEvidence::State(expected_state),
+                "{segment}"
+            );
+        }
     }
 
+    /// Transcript rows, command output, and prose that quote goal wording are
+    /// never goal evidence: only the footer below the composer is.
     #[test]
-    fn newest_explicit_completion_overrides_an_older_visible_goal_row() {
-        let screen = format!(
-            "Pursuing goal (5m)\n{}",
-            fixture("codex_goal_achieved_wide_footer.txt")
-        );
-        assert_eq!(
-            goal_evidence_for_agent(&AgentClass::Codex, &screen),
-            GoalEvidence::Inactive
-        );
-    }
+    fn codex_goal_wording_outside_the_footer_is_ignored() {
+        let transcript_mentions = "\
+• Goal paused Objective: Create files one at a time. Time: 1m.
+The footer says Pursuing goal (16m) in the bottom-right corner.
+Goal achieved (3m)
+• Goal cleared
 
-    #[test]
-    fn goal_phases_remain_attached_while_paused_blocked_or_limited() {
-        for status in [
+› Ask Codex to do anything
+
+  model · workspace · Working · Context 88% left … Pursuing goal (19s)";
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Codex, transcript_mentions),
+            GoalEvidence::State(GoalState::Active)
+        );
+
+        // No composer above the last row: that row is not the footer, even
+        // when it spells a goal phase.
+        for screen in [
             "Goal paused (/goal resume)",
-            "Goal blocked (/goal resume)",
-            "Goal hit usage limits (/goal resume)",
-            "model · workspace · Goal paused (2m)",
+            "model · workspace · Pursuing goal (5m)\nCogitating (esc to interrupt)",
+            "",
         ] {
             assert_eq!(
-                goal_evidence_for_agent(&AgentClass::Codex, status),
-                GoalEvidence::Active,
-                "expected an attached goal for {status:?}"
+                goal_evidence_for_agent(&AgentClass::Codex, screen),
+                GoalEvidence::Unknown,
+                "{screen:?}"
+            );
+        }
+    }
+
+    /// A popup that replaces the footer (selection-menu hints, slash-command
+    /// lists) is inconclusive rather than proof that the goal ended.
+    #[test]
+    fn codex_overlays_that_replace_the_footer_are_inconclusive() {
+        for screen in [
+            "› 1. Trust and continue\n  2. Quit\n\n  enter continue · esc quit",
+            "› /goal\n\n  /goal   set or view the goal for a long-running task",
+        ] {
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Codex, screen),
+                GoalEvidence::Unknown,
+                "{screen:?}"
             );
         }
     }
 
     #[test]
-    fn prose_that_only_mentions_a_goal_footer_is_inconclusive() {
-        for prose in [
-            "The footer says Pursuing goal (16m) in the bottom-right corner.",
-            "The footer says Pursuing goal (16m).",
+    fn captured_claude_code_goal_screens_map_to_their_goal_phase() {
+        for (fixture_name, expected) in [
+            (
+                "claude_goal_active_working.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
+            (
+                "claude_goal_active_shared_indicator_row.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
+            // Esc does not pause a Claude Code goal: the indicator stays.
+            (
+                "claude_goal_interrupted_still_active.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
+            (
+                "claude_goal_paused_checks_capped.txt",
+                GoalEvidence::State(GoalState::Paused),
+            ),
+            (
+                "claude_goal_achieved.txt",
+                GoalEvidence::State(GoalState::Reached),
+            ),
+            ("claude_goal_cleared.txt", GoalEvidence::Inactive),
+            ("claude_no_goal_idle.txt", GoalEvidence::Inactive),
         ] {
             assert_eq!(
-                goal_evidence_for_agent(&AgentClass::Codex, prose),
-                GoalEvidence::Unknown
+                goal_evidence_for_agent(&AgentClass::Claude, &fixture(fixture_name)),
+                expected,
+                "{fixture_name}"
             );
         }
+    }
+
+    const CLAUDE_COMPOSER: &str = "\
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)";
+
+    #[test]
+    fn claude_code_goal_notices_only_count_inside_the_current_turn() {
+        let resumed_after_pause = format!(
+            "● Goal paused · usage limit reached · send a message after it resets to continue\n\
+             ❯ continue\n\
+             ● Working on it again.\n\
+             {:>40}\n{CLAUDE_COMPOSER}",
+            "◎ /goal active (4m)"
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, &resumed_after_pause),
+            GoalEvidence::State(GoalState::Active)
+        );
+
+        let usage_limited = format!(
+            "● Goal paused · usage limit reached · continues automatically when it resets\n\
+             ✻ Baked for 1m 59s · done 12:45 AM\n\
+             {:>40}\n{CLAUDE_COMPOSER}",
+            "◎ /goal active (4m)"
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, &usage_limited),
+            GoalEvidence::State(GoalState::UsageLimited)
+        );
+
+        let failed = format!(
+            "✗ Goal could not be achieved (3m · 2 turns)\n\
+             ✻ Worked for 3m · done 12:45 AM\n\n{CLAUDE_COMPOSER}"
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, &failed),
+            GoalEvidence::State(GoalState::Blocked)
+        );
+
+        // An achievement from an earlier turn is not current.
+        let later_prompt = format!(
+            "✔ Goal achieved (3m · 2 turns · 2.6k tokens)\n❯ thanks\n● You're welcome.\n\n{CLAUDE_COMPOSER}"
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, &later_prompt),
+            GoalEvidence::Inactive
+        );
+    }
+
+    #[test]
+    fn claude_code_without_a_visible_composer_is_inconclusive() {
+        for screen in [
+            "◎ /goal active (11s)",
+            "● Goal paused · a hook ended the turn · send a message to continue",
+            "Do you want to proceed?\n❯ 1. Yes\n  2. No",
+        ] {
+            assert_eq!(
+                goal_evidence_for_agent(&AgentClass::Claude, screen),
+                GoalEvidence::Unknown,
+                "{screen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_code_goal_wording_outside_the_indicator_row_is_ignored() {
+        let screen = format!(
+            "● The footer shows ◎ /goal active (11s) while a goal runs.\n{:>40}\n{CLAUDE_COMPOSER}",
+            "● high · /effort"
+        );
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, &screen),
+            GoalEvidence::Inactive
+        );
     }
 
     #[test]
@@ -1976,10 +2519,13 @@ mod tests {
     fn detailed_goal_classification_retains_the_provider_status_line() {
         let classification = goal_evidence_for_agent_detailed(
             &AgentClass::Codex,
-            "old output\nmodel · workspace · Pursuing goal (16m)",
+            "old output\n› Send a message\nmodel · workspace · Pursuing goal (16m)",
         );
 
-        assert_eq!(classification.evidence, GoalEvidence::Active);
+        assert_eq!(
+            classification.evidence,
+            GoalEvidence::State(GoalState::Active)
+        );
         assert_eq!(
             classification.matched_line.as_deref(),
             Some("model · workspace · Pursuing goal (16m)")

@@ -533,6 +533,8 @@ async fn run_due_panes(
                     .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
                         generation: due_pane.screen_generation,
                         text: String::new(),
+                        cursor_position: (0, 0),
+                        dimmed_cells: Vec::new(),
                     });
                 let classification = classify_identity(
                     identity.as_ref(),
@@ -834,7 +836,7 @@ async fn run_due_panes(
             let screen_changed_after_snapshot = classified_pane.identity.is_some()
                 && runtime.session.screen_generation() != classified_pane.screen_generation;
 
-            runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
+            runtime.update_confirmed_goal_owner(classified_pane.confirmed_goal_owner.clone());
             runtime.detection_schedule.identity_system_generation = Some(system_generation);
             runtime.detection_schedule.cached_identity = classified_pane.identity.clone();
             runtime.detection_schedule.cached_screen_classification =
@@ -856,10 +858,13 @@ async fn run_due_panes(
                     class,
                     promote_to_done(previous_status.as_ref(), raw_activity),
                 ),
-                PaneStatus::AgentWithGoal(class, raw_activity) => PaneStatus::AgentWithGoal(
-                    class,
-                    promote_to_done(previous_status.as_ref(), raw_activity),
-                ),
+                PaneStatus::AgentWithGoal(class, raw_activity, goal_state) => {
+                    PaneStatus::AgentWithGoal(
+                        class,
+                        promote_to_done(previous_status.as_ref(), raw_activity),
+                        goal_state,
+                    )
+                }
                 other => other,
             };
 
@@ -1408,7 +1413,9 @@ async fn run_due_panes(
 
 fn status_activity(status: &PaneStatus) -> Option<AgentActivity> {
     match status {
-        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity) => Some(*activity),
+        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity, _) => {
+            Some(*activity)
+        }
         PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
     }
 }
@@ -1525,12 +1532,15 @@ fn explain_goal_decision(
         return "Goal state was not evaluated because no agent process was detected.".to_string();
     }
     if goal_was_retained {
-        return "Kept active — this frame had no decisive goal footer, but the exact same agent process and provider previously confirmed the goal. Transient redraws therefore do not clear it.".to_string();
+        return "Kept the prior goal phase — this frame had no decisive goal footer, but the exact same agent process and provider previously confirmed it. Transient redraws therefore do not clear it.".to_string();
     }
     match evidence {
-        Some(ilium_detect::GoalEvidence::Active) => "Active — the newest provider-owned status line explicitly reports an active, paused, blocked, or usage-limited goal.".to_string(),
-        Some(ilium_detect::GoalEvidence::Inactive) => "Inactive — the newest provider-owned status line explicitly reports that the goal was achieved or cleared.".to_string(),
-        Some(ilium_detect::GoalEvidence::Unknown) => "Inactive — no provider-owned goal marker was visible and this exact agent process had no previously confirmed goal to retain.".to_string(),
+        Some(ilium_detect::GoalEvidence::State(goal_state)) => format!(
+            "{} — the provider's goal status row next to its composer reports this goal phase.",
+            sentence_case(goal_state_name(goal_state))
+        ),
+        Some(ilium_detect::GoalEvidence::Inactive) => "Inactive — the provider's goal status row is visible and shows no goal, or the current turn reports that the goal was cleared.".to_string(),
+        Some(ilium_detect::GoalEvidence::Unknown) => "Inactive — the provider's goal status row was not visible (overlay or redraw) and this exact agent process had no previously confirmed goal to retain.".to_string(),
         None => "Goal evidence was unavailable.".to_string(),
     }
 }
@@ -1561,10 +1571,11 @@ fn describe_pane_status(status: &PaneStatus) -> String {
             agent_class_name(class),
             activity_name(*activity),
         ),
-        PaneStatus::AgentWithGoal(class, activity) => format!(
-            "{} agent; activity is {}; active goal badge shown.",
+        PaneStatus::AgentWithGoal(class, activity, goal_state) => format!(
+            "{} agent; activity is {}; {} goal badge shown.",
             agent_class_name(class),
             activity_name(*activity),
+            goal_state_name(*goal_state),
         ),
         PaneStatus::Editor { .. } => "Editor pane; agent detection does not apply.".to_string(),
         PaneStatus::Board => "Board pane; agent detection does not apply.".to_string(),
@@ -1577,6 +1588,16 @@ fn agent_class_name(class: &ilium_core::AgentClass) -> &str {
         ilium_core::AgentClass::Codex => "Codex",
         ilium_core::AgentClass::Antigravity => "Antigravity",
         ilium_core::AgentClass::Other(name) => name.as_str(),
+    }
+}
+
+const fn goal_state_name(goal_state: ilium_core::GoalState) -> &'static str {
+    match goal_state {
+        ilium_core::GoalState::Active => "active",
+        ilium_core::GoalState::Paused => "paused",
+        ilium_core::GoalState::Blocked => "blocked",
+        ilium_core::GoalState::UsageLimited => "usage limited",
+        ilium_core::GoalState::Reached => "reached",
     }
 }
 
@@ -1642,10 +1663,10 @@ fn is_agent_finished_transition(previous: Option<&PaneStatus>, next: &PaneStatus
         (
             Some(
                 PaneStatus::Agent(_, AgentActivity::Working)
-                    | PaneStatus::AgentWithGoal(_, AgentActivity::Working)
+                    | PaneStatus::AgentWithGoal(_, AgentActivity::Working, _)
             ),
             PaneStatus::Agent(_, AgentActivity::Done)
-                | PaneStatus::AgentWithGoal(_, AgentActivity::Done)
+                | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
         )
     )
 }
@@ -1768,27 +1789,37 @@ fn classify_identity(
             let activity_classification =
                 ilium_detect::classify_activity_for_agent_detailed(&identity.class, screen_text);
             let activity = activity_classification.activity;
-            let current_owner = ConfirmedGoalOwner {
+            let identity_owner = ConfirmedGoalOwner {
                 process_id: identity.pid,
                 agent_class: identity.class.clone(),
+                goal_state: ilium_core::GoalState::Active,
             };
             let goal_classification =
                 ilium_detect::goal_evidence_for_agent_detailed(&identity.class, screen_text);
             let goal_was_retained = goal_classification.evidence
                 == ilium_detect::GoalEvidence::Unknown
-                && previous_goal_owner == Some(&current_owner);
+                && previous_goal_owner.is_some_and(|owner| {
+                    owner.process_id == identity_owner.process_id
+                        && owner.agent_class == identity_owner.agent_class
+                });
             let confirmed_goal_owner = match goal_classification.evidence {
-                ilium_detect::GoalEvidence::Active => Some(current_owner),
+                ilium_detect::GoalEvidence::State(goal_state) => Some(ConfirmedGoalOwner {
+                    goal_state,
+                    ..identity_owner.clone()
+                }),
                 ilium_detect::GoalEvidence::Inactive => None,
                 ilium_detect::GoalEvidence::Unknown
-                    if previous_goal_owner == Some(&current_owner) =>
+                    if previous_goal_owner.is_some_and(|owner| {
+                        owner.process_id == identity_owner.process_id
+                            && owner.agent_class == identity_owner.agent_class
+                    }) =>
                 {
-                    Some(current_owner)
+                    previous_goal_owner.cloned()
                 }
                 ilium_detect::GoalEvidence::Unknown => None,
             };
-            let status = if confirmed_goal_owner.is_some() {
-                PaneStatus::AgentWithGoal(identity.class.clone(), activity)
+            let status = if let Some(goal_owner) = &confirmed_goal_owner {
+                PaneStatus::AgentWithGoal(identity.class.clone(), activity, goal_owner.goal_state)
             } else {
                 PaneStatus::Agent(identity.class.clone(), activity)
             };
@@ -1836,15 +1867,15 @@ fn promote_to_done(
     match previous {
         Some(
             PaneStatus::Agent(_, ilium_core::AgentActivity::Working)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working, _)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingApproval)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingApproval, _)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingBackground)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingBackground, _)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::BackgroundTaskStillRunning)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::BackgroundTaskStillRunning)
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::BackgroundTaskStillRunning, _)
             | PaneStatus::Agent(_, ilium_core::AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Done),
+            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Done, _),
         ) => ilium_core::AgentActivity::Done,
         _ => ilium_core::AgentActivity::Idle,
     }
@@ -1901,6 +1932,7 @@ fn interval_for(
             | ilium_core::AgentActivity::WaitingBackground
             | ilium_core::AgentActivity::BackgroundTaskStillRunning
             | ilium_core::AgentActivity::WaitingApproval,
+            _,
         ) => detection_config.working_poll_interval,
         _ => detection_config.idle_poll_interval,
     }
@@ -2000,12 +2032,12 @@ mod tests {
         };
         let active = classify_identity(
             Some(&codex),
-            "model · workspace · Working · Pursuing goal (16m)",
+            "› Send a message\n\nmodel · workspace · Working · Pursuing goal (16m)",
             None,
         );
         assert!(matches!(
             active.status,
-            PaneStatus::AgentWithGoal(AgentClass::Codex, _)
+            PaneStatus::AgentWithGoal(AgentClass::Codex, _, ilium_core::GoalState::Active)
         ));
         let owner = active
             .confirmed_goal_owner
@@ -2014,16 +2046,26 @@ mod tests {
         let transient = classify_identity(Some(&codex), "Working (esc to interrupt)", Some(&owner));
         assert!(matches!(
             transient.status,
-            PaneStatus::AgentWithGoal(AgentClass::Codex, _)
+            PaneStatus::AgentWithGoal(AgentClass::Codex, _, ilium_core::GoalState::Active)
         ));
         assert_eq!(transient.confirmed_goal_owner.as_ref(), Some(&owner));
 
-        let completed = classify_identity(Some(&codex), "Goal achieved (20m)", Some(&owner));
+        let completed = classify_identity(
+            Some(&codex),
+            "› Send a message\n\nmodel · workspace · Ready · Goal achieved (20m)",
+            Some(&owner),
+        );
         assert!(matches!(
             completed.status,
-            PaneStatus::Agent(AgentClass::Codex, _)
+            PaneStatus::AgentWithGoal(AgentClass::Codex, _, ilium_core::GoalState::Reached)
         ));
-        assert_eq!(completed.confirmed_goal_owner, None);
+        assert_eq!(
+            completed
+                .confirmed_goal_owner
+                .as_ref()
+                .map(|owner| owner.goal_state),
+            Some(ilium_core::GoalState::Reached)
+        );
 
         let replacement = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
@@ -2057,7 +2099,11 @@ mod tests {
 
     #[test]
     fn debug_explanations_state_why_goal_and_activity_decisions_were_applied() {
-        let status = PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done);
+        let status = PaneStatus::AgentWithGoal(
+            AgentClass::Codex,
+            AgentActivity::Done,
+            ilium_core::GoalState::Active,
+        );
 
         assert!(
             explain_goal_decision(&status, Some(ilium_detect::GoalEvidence::Unknown), true,)

@@ -404,7 +404,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                 if *changed_id == pane_id
                     && matches!(
                         status,
-                        PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working)
+                        PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working, ilium_core::GoalState::Active)
                     )
         )
     })
@@ -415,7 +415,11 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     assert!(
         matches!(
             status,
-            PaneStatus::AgentWithGoal(ilium_core::AgentClass::Codex, _)
+            PaneStatus::AgentWithGoal(
+                ilium_core::AgentClass::Codex,
+                _,
+                ilium_core::GoalState::Active
+            )
         ),
         "expected the real process tree walk to identify this pane as Codex, got {status:?}"
     );
@@ -443,7 +447,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                         status,
                         PaneStatus::AgentWithGoal(
                             ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Done
+                            ilium_core::AgentActivity::Done,
+                            ilium_core::GoalState::Active
                         )
                     )
         )
@@ -456,7 +461,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         status,
         PaneStatus::AgentWithGoal(
             ilium_core::AgentClass::Codex,
-            ilium_core::AgentActivity::Done
+            ilium_core::AgentActivity::Done,
+            ilium_core::GoalState::Active
         ),
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
@@ -473,7 +479,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                         status,
                         PaneStatus::AgentWithGoal(
                             ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Idle
+                            ilium_core::AgentActivity::Idle,
+                            ilium_core::GoalState::Active
                         )
                     )
         )
@@ -1152,6 +1159,212 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
+async fn progress_completion_notifies_and_resumes_only_the_owned_codex_goal() {
+    let fixture_directory = tempfile::tempdir().expect("create progress lifecycle fixtures");
+    let lifecycle_log = fixture_directory.path().join("goal-lifecycle.log");
+    let probe_report = fixture_directory.path().join("progress.json");
+    std::fs::write(
+        &probe_report,
+        r#"{"job_id":"live-render","status":"running","percent":10,"message":"started"}"#,
+    )
+    .unwrap();
+    let fake_codex = install(
+        fixture_directory.path(),
+        "codex",
+        &FixtureBehavior::GoalLifecycle {
+            log_path: lifecycle_log.clone(),
+        },
+    )
+    .path;
+    let probe = install(
+        fixture_directory.path(),
+        "progress-probe",
+        &FixtureBehavior::PrintFile {
+            path: probe_report.clone(),
+        },
+    )
+    .path;
+    let session_id = "e3046ca2-444e-4c3c-bbf0-3a875bd02cc1";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
+    };
+    let mut server =
+        TestServer::start_with_detection_config("live-progress-goal-test", detection_config).await;
+    write_verified_codex_transcript(&server, session_id);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "live-progress-goal-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(format!("{} resume {session_id}", fake_codex.display())),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!();
+    };
+    let pane_id = first_launch_project_pane(&tree);
+
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneSessionIdResolved {
+                pane_id: changed_id,
+                session_id: resolved,
+                ..
+            } if *changed_id == pane_id && resolved == session_id
+        )
+    })
+    .await;
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged {
+                pane_id: changed_id,
+                status: PaneStatus::AgentWithGoal(
+                    ilium_core::AgentClass::Codex,
+                    _,
+                    ilium_core::GoalState::Active,
+                ),
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+
+    write_frame(
+        &mut client,
+        &ClientRequest::SetPaneProgressMonitor {
+            request_id: 7001,
+            pane_id,
+            command: probe.to_string_lossy().to_string(),
+            interval_seconds: 1,
+            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
+        },
+    )
+    .await
+    .unwrap();
+    let accepted = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 7001,
+                result: Ok(_),
+                ..
+            }
+        )
+    })
+    .await;
+    let ServerEvent::ProgressMonitorSetCompleted {
+        result: Ok(accepted),
+        ..
+    } = accepted
+    else {
+        unreachable!();
+    };
+
+    write_frame(
+        &mut client,
+        &ClientRequest::ArmProgressGoalResume {
+            request_id: 7002,
+            pane_id,
+            monitor_id: accepted.monitor_id,
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::ProgressMonitorGoalPolicyChanged {
+                request_id: 7002,
+                result: Ok(ilium_ipc::ProgressGoalPolicy::PauseAndResume),
+                ..
+            }
+        )
+    })
+    .await;
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged {
+                pane_id: changed_id,
+                status: PaneStatus::AgentWithGoal(
+                    ilium_core::AgentClass::Codex,
+                    _,
+                    ilium_core::GoalState::Paused,
+                ),
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+
+    std::fs::write(
+        &probe_report,
+        r#"{"job_id":"live-render","status":"done","percent":100,"message":"render complete"}"#,
+    )
+    .unwrap();
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneProgressChanged {
+                pane_id: changed_id,
+                progress: Some(progress),
+            } if *changed_id == pane_id
+                && progress.report.status == ilium_core::ProgressTaskStatus::Done
+        )
+    })
+    .await;
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged {
+                pane_id: changed_id,
+                status: PaneStatus::AgentWithGoal(
+                    ilium_core::AgentClass::Codex,
+                    _,
+                    ilium_core::GoalState::Active,
+                ),
+            } if *changed_id == pane_id
+        )
+    })
+    .await;
+
+    let submissions = std::fs::read_to_string(&lifecycle_log).unwrap();
+    let lines = submissions.lines().collect::<Vec<_>>();
+    assert_eq!(lines.first(), Some(&"/goal pause"));
+    assert!(lines.get(1).is_some_and(|line| {
+        line.contains("Ilium progress monitor")
+            && line.contains("live-render completed successfully")
+    }));
+    assert_eq!(lines.get(2), Some(&"/goal resume"));
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
