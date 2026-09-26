@@ -11,7 +11,6 @@ pub use ilium_kilo_gateway::PaidProxy;
 use ilium_kilo_gateway::{
     choose_random_paid_proxy, ChatMessage, CompletionRequest, CompletionStreamEvent, GatewayError,
     KiloGatewayClient, DEFAULT_BASE_URL as DEFAULT_KILO_GATEWAY_URL,
-    DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL,
     FALLBACK_FREE_MODELS as KILO_GATEWAY_FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
@@ -22,6 +21,13 @@ pub const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_ANTHROPIC_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
+/// The Kilo Gateway model a fresh install selects. A concrete free model is
+/// used instead of the `kilo-auto/free` router because every request here asks
+/// for `UNKNOWN_MODEL_MAX_OUTPUT_TOKENS` (1,000,000) output tokens, and the
+/// router's 1,000,000-token context window rejects that with HTTP 400
+/// (`context_length_exceeded`, observed 2026-09-26), which would make the
+/// default-on AI titling and restructuring fail on first boot.
+pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "stepfun/step-3.7-flash:free";
 pub const DEFAULT_PROXY_DATABASE_URI: &str = "mongodb://127.0.0.1:27017";
 pub const DEFAULT_PROXY_DATABASE_NAME: &str = "money";
 pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";
@@ -68,8 +74,8 @@ impl InferenceProviderKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleStyle {
-    Labeling,
     #[default]
+    Labeling,
     Summarization,
 }
 
@@ -181,7 +187,7 @@ impl Default for ProxyDatabaseStructure {
 impl Default for KiloGatewaySettings {
     fn default() -> Self {
         Self {
-            model: DEFAULT_KILO_GATEWAY_MODEL.to_string(),
+            model: DEFAULT_KILO_GATEWAY_SELECTED_MODEL.to_string(),
             paid_proxies_enabled: false,
             proxy_database: ProxyDatabaseSettings::default(),
             paid_proxies: Vec::new(),
@@ -1186,23 +1192,28 @@ fn anthropic_response_text(value: &serde_json::Value) -> Result<InferenceRespons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ilium_kilo_gateway::DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL;
 
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
 
     #[test]
-    fn title_style_defaults_to_existing_summary_and_round_trips_labeling() {
-        let old_config: InferenceSettings =
+    fn title_style_defaults_to_labeling_and_round_trips_summarization() {
+        let bare_config: InferenceSettings =
             serde_json::from_str(r#"{"selected_provider":"ollama"}"#).unwrap();
-        assert_eq!(old_config.title_style, TitleStyle::Summarization);
+        assert_eq!(bare_config.title_style, TitleStyle::Labeling);
+        assert_eq!(
+            InferenceSettings::default().title_style,
+            TitleStyle::Labeling
+        );
 
-        let mut labeled = old_config;
-        labeled.title_style = TitleStyle::Labeling;
-        let encoded = serde_json::to_string(&labeled).unwrap();
-        assert!(encoded.contains("\"title_style\":\"labeling\""));
+        let mut summarized = bare_config;
+        summarized.title_style = TitleStyle::Summarization;
+        let encoded = serde_json::to_string(&summarized).unwrap();
+        assert!(encoded.contains("\"title_style\":\"summarization\""));
         let restored: InferenceSettings = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(restored.title_style, TitleStyle::Labeling);
+        assert_eq!(restored.title_style, TitleStyle::Summarization);
     }
 
     fn spawn_http_response(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
@@ -1265,7 +1276,10 @@ mod tests {
             settings.selected_provider,
             InferenceProviderKind::KiloGateway
         );
-        assert_eq!(settings.kilo_gateway.model, "kilo-auto/free");
+        assert_eq!(
+            settings.kilo_gateway.model,
+            DEFAULT_KILO_GATEWAY_SELECTED_MODEL
+        );
         assert_eq!(settings.openrouter.model, DEFAULT_OPENROUTER_MODEL);
         assert_eq!(
             InferenceRequest::json_only("{}").max_tokens,
