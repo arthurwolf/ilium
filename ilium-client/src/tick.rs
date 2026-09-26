@@ -36,6 +36,7 @@ pub fn on_tick(
     let autosave_wrote = app.tick_autosave();
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
+    let session_stats_changed = app.tick_session_stats(now);
     app.drain_pending_staged_keystrokes(now);
     let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     app.maybe_show_agent_setup_prompt();
@@ -47,6 +48,7 @@ pub fn on_tick(
         || autosave_wrote
         || workspace_search_started
         || chatroom_changed
+        || session_stats_changed
         || setup_prompt_changed
 }
 
