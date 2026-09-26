@@ -75,7 +75,14 @@ pub fn render(
     let ratio = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
     let (icon, status_label, status_tone) = status_presentation(progress);
     let status_color = tone_color(status_tone, scheme);
-    let label = format!("{icon} {status_label}  {percent:.0}%");
+    // Mirrors the sidebar's bold/dim result glyph: an outcome nobody has
+    // looked at yet says so until the pane is focused or typed into.
+    let unread = if progress.has_unread_outcome() {
+        "  · unread"
+    } else {
+        ""
+    };
+    let label = format!("{icon} {status_label}  {percent:.0}%{unread}");
     let gauge = LineGauge::default()
         .ratio(ratio)
         .label(Line::from(Span::styled(

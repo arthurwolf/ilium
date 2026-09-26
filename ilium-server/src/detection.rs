@@ -853,17 +853,31 @@ async fn run_due_panes(
             // "just went idle" into the durable completed-turn state; see its
             // doc comment.
             let raw_status = classified_pane.status.clone();
+            // An agent that ends its turn while one of this pane's progress
+            // monitors still observes a live task is parked, not finished:
+            // Ilium will deliver the task result as its next message. It must
+            // therefore never become an unread `Done` (bell, sound, desktop
+            // notification) -- `ilium_core::project_pane_signals` shows it as
+            // parked instead.
+            let is_parked_on_monitor = runtime
+                .progress_monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.latest_progress.is_live());
+            let settle = |raw_activity| {
+                if is_parked_on_monitor {
+                    // Raw classification never yields `Done`, so passing it
+                    // through also clears any completion left from before.
+                    raw_activity
+                } else {
+                    promote_to_done(previous_status.as_ref(), raw_activity)
+                }
+            };
             let new_status = match classified_pane.status {
-                PaneStatus::Agent(class, raw_activity) => PaneStatus::Agent(
-                    class,
-                    promote_to_done(previous_status.as_ref(), raw_activity),
-                ),
+                PaneStatus::Agent(class, raw_activity) => {
+                    PaneStatus::Agent(class, settle(raw_activity))
+                }
                 PaneStatus::AgentWithGoal(class, raw_activity, goal_state) => {
-                    PaneStatus::AgentWithGoal(
-                        class,
-                        promote_to_done(previous_status.as_ref(), raw_activity),
-                        goal_state,
-                    )
+                    PaneStatus::AgentWithGoal(class, settle(raw_activity), goal_state)
                 }
                 other => other,
             };

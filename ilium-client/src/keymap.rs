@@ -1,6 +1,6 @@
 //! Single source of truth for ilium's leader-key bindings.
 //!
-//! ilium's general shortcut base defaults to `Ctrl+A` (Screen's classic
+//! ilium's general shortcut base defaults to `Ctrl+B` (tmux's classic
 //! prefix),
 //! followed by a configured key. The base is configurable to any
 //! ASCII letter through the Keyboard settings tab. [`LEADER_BINDINGS`] is
@@ -62,7 +62,7 @@ impl ShortcutBase {
 
 impl Default for ShortcutBase {
     fn default() -> Self {
-        Self::A
+        Self::B
     }
 }
 
@@ -246,9 +246,9 @@ pub enum Action {
 
 impl Action {
     /// Tree traversal has its own `Ctrl+B` prefix so the requested defaults
-    /// coexist with ilium's historical configurable general leader (`Ctrl+A`
-    /// on a fresh install). When the general leader is also `Ctrl+B`, normal
-    /// leader dispatch naturally owns these actions too.
+    /// coexist with any other configured general leader (for example
+    /// `Ctrl+A`). On a fresh install the general leader is also `Ctrl+B`,
+    /// so normal leader dispatch naturally owns these actions too.
     pub const fn uses_navigation_prefix(self) -> bool {
         matches!(
             self,
@@ -261,8 +261,8 @@ impl Action {
 }
 
 /// The dedicated default prefix for tree traversal. It is intentionally
-/// separate from the general leader so existing `Ctrl+A` workflows survive
-/// while `Ctrl+B ↓/↑/Pg↓/Pg↑` remain the documented defaults.
+/// separate from the general leader so a user who moves the general leader
+/// (for example to `Ctrl+A`) keeps `Ctrl+B ↓/↑/Pg↓/Pg↑` for tree traversal.
 pub const DEFAULT_NAVIGATION_SHORTCUT_BASE: ShortcutBase = ShortcutBase::B;
 
 /// Chooses the prefix rendered for one action in Help. Navigation actions
@@ -406,17 +406,17 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "New group (choose where in a dialog)",
     },
     KeyBinding {
-        key: BindingKey::Character('W'),
+        key: BindingKey::Character('"'),
         action: Action::NewSplitView,
         description: "New vertical or horizontal split view",
     },
     KeyBinding {
-        key: BindingKey::Character('f'),
+        key: BindingKey::Character('F'),
         action: Action::NewFolder,
         description: "Open a folder in the sidebar",
     },
     KeyBinding {
-        key: BindingKey::Character('r'),
+        key: BindingKey::Character(','),
         action: Action::Rename,
         description: "Rename the selected node",
     },
@@ -431,7 +431,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Focus the tree panel",
     },
     KeyBinding {
-        key: BindingKey::Character('p'),
+        key: BindingKey::Character('P'),
         action: Action::FocusPane,
         description: "Focus the active pane",
     },
@@ -486,7 +486,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Prompt for a command, run it in a new terminal pane in the selected group",
     },
     KeyBinding {
-        key: BindingKey::Character('/'),
+        key: BindingKey::Character('f'),
         action: Action::Search,
         description: "Search terminal history and open editor buffers",
     },
@@ -511,7 +511,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Toggle autosave (debounced ~1s after each edit) in the focused editor pane",
     },
     KeyBinding {
-        key: BindingKey::Character('S'),
+        key: BindingKey::Character(':'),
         action: Action::Settings,
         description: "Open settings (also: use the tree footer gear)",
     },
@@ -526,7 +526,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Detach this client and leave the session running",
     },
     KeyBinding {
-        key: BindingKey::Character('Q'),
+        key: BindingKey::Character('&'),
         action: Action::Quit,
         description: "Kill this project session and disconnect every client",
     },
@@ -1371,7 +1371,7 @@ mod tests {
 
     #[test]
     fn default_navigation_actions_use_the_requested_arrow_and_page_keys() {
-        assert_eq!(ShortcutBase::default(), ShortcutBase::A);
+        assert_eq!(ShortcutBase::default(), ShortcutBase::B);
         assert_eq!(DEFAULT_NAVIGATION_SHORTCUT_BASE, ShortcutBase::B);
         assert_eq!(
             action_for_table(LEADER_BINDINGS, BindingKey::Down),
@@ -1464,7 +1464,7 @@ mod tests {
             Err(Action::NewTerminal)
         );
         assert_eq!(
-            action_for_table(&bindings, BindingKey::Character('Q')),
+            action_for_table(&bindings, BindingKey::Character('&')),
             Some(Action::Quit)
         );
     }

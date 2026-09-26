@@ -247,7 +247,6 @@ pub async fn handle_request(
             pane_id,
             command,
             interval_seconds,
-            goal_policy,
         } => {
             handle_set_pane_progress_monitor(
                 state,
@@ -255,7 +254,6 @@ pub async fn handle_request(
                 pane_id,
                 command,
                 interval_seconds,
-                goal_policy,
                 direct_tx,
             )
             .await;
@@ -278,38 +276,6 @@ pub async fn handle_request(
                 request_id,
                 pane_id,
                 expected_monitor_id,
-                direct_tx,
-            )
-            .await;
-            false
-        }
-        ClientRequest::ArmProgressGoalResume {
-            request_id,
-            pane_id,
-            monitor_id,
-        } => {
-            handle_progress_goal_policy_change(
-                state,
-                request_id,
-                pane_id,
-                monitor_id,
-                ilium_ipc::ProgressGoalPolicy::PauseAndResume,
-                direct_tx,
-            )
-            .await;
-            false
-        }
-        ClientRequest::DisarmProgressGoalResume {
-            request_id,
-            pane_id,
-            monitor_id,
-        } => {
-            handle_progress_goal_policy_change(
-                state,
-                request_id,
-                pane_id,
-                monitor_id,
-                ilium_ipc::ProgressGoalPolicy::KeepRunning,
                 direct_tx,
             )
             .await;
@@ -383,6 +349,52 @@ pub async fn handle_request(
             if let Err(message) = submit_terminal_text(state, pane_id, &text, source).await {
                 send_direct_error(direct_tx, message).await;
             }
+            false
+        }
+        ClientRequest::GetPaneGoalStatus {
+            request_id,
+            pane_id,
+        } => {
+            let event = crate::goal_control::goal_status_event(state, request_id, pane_id).await;
+            send_direct(direct_tx, event).await;
+            false
+        }
+        ClientRequest::RequestPaneGoalResume {
+            request_id,
+            pane_id,
+        } => {
+            let event = crate::goal_control::request_resume_event(state, request_id, pane_id).await;
+            send_direct(direct_tx, event).await;
+            false
+        }
+        ClientRequest::RegisterVoiceTextReceiver => {
+            state.voice_text.register_receiver(direct_tx.clone());
+            false
+        }
+        ClientRequest::SubmitVoiceText {
+            request_id,
+            sentences,
+            start_voice,
+        } => {
+            tracing::info!(
+                request_id,
+                sentence_count = sentences.len(),
+                start_voice,
+                "voice text request received"
+            );
+            let result = state
+                .voice_text
+                .submit(request_id, sentences, start_voice)
+                .await;
+            send_direct(
+                direct_tx,
+                ServerEvent::VoiceTextResult { request_id, result },
+            )
+            .await;
+            false
+        }
+        ClientRequest::AnswerVoiceText { request_id, result } => {
+            state.voice_text.answer(request_id, result);
             false
         }
         ClientRequest::MouseInput {
@@ -1612,14 +1624,12 @@ async fn handle_set_pane_progress_monitor(
     pane_id: NodeId,
     command: String,
     interval_seconds: u32,
-    goal_policy: ilium_ipc::ProgressGoalPolicy,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let identity = ProgressSetRequestIdentity {
         pane_id,
         command,
         interval_seconds,
-        goal_policy,
     };
     let result = idempotent_install_progress_monitor(state, request_id, identity).await;
     send_direct(
@@ -1710,7 +1720,6 @@ async fn idempotent_install_progress_monitor(
         identity.pane_id,
         identity.command.clone(),
         identity.interval_seconds,
-        identity.goal_policy,
     )
     .await;
     let completed = {
@@ -1743,7 +1752,6 @@ async fn install_progress_monitor(
     pane_id: NodeId,
     command: String,
     interval_seconds: u32,
-    goal_policy: ilium_ipc::ProgressGoalPolicy,
 ) -> Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection> {
     if !state.is_progress_monitor_enabled() {
         return Err(progress_rejection(
@@ -1800,18 +1808,16 @@ async fn install_progress_monitor(
         interval,
         initial_progress: progress.clone(),
     };
-    commit_progress_monitor(state, registration, goal_policy, effect_gate).await?;
+    commit_progress_monitor(state, registration, effect_gate).await?;
     Ok(ilium_ipc::ProgressMonitorAccepted {
         monitor_id,
         progress,
-        goal_policy,
     })
 }
 
 async fn commit_progress_monitor(
     state: &Arc<ServerState>,
     registration: crate::progress_monitor::ProgressMonitorRegistration,
-    goal_policy: ilium_ipc::ProgressGoalPolicy,
     effect_gate: Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), ilium_ipc::ProgressMonitorRejection> {
     let pane_id = registration.pane_id;
@@ -1837,11 +1843,8 @@ async fn commit_progress_monitor(
         pane_id,
         command: registration.command.clone(),
         interval_seconds: registration.interval.as_secs(),
-        goal_policy,
         latest_progress: progress.clone(),
-        goal_resume_armed: goal_policy == ilium_ipc::ProgressGoalPolicy::PauseAndResume,
         result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
-        goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
     };
     let snapshot_write_guard =
         crate::persistence::await_progress_monitor_durability_barrier(state, &durable_candidate)
@@ -1880,15 +1883,11 @@ async fn commit_progress_monitor(
         )
         .await);
     }
-    let fence = match runtime.install_progress_monitor(registration.clone(), goal_policy) {
+    let fence = match runtime.install_progress_monitor(registration.clone()) {
         Ok(fence) => fence,
         Err(message) => {
             let rejection = progress_rejection(
-                if goal_policy == ilium_ipc::ProgressGoalPolicy::PauseAndResume {
-                    ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable
-                } else {
-                    ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest
-                },
+                ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
                 message,
             );
             drop(panes);
@@ -1922,7 +1921,6 @@ async fn commit_progress_monitor(
         }
     });
     runtime.set_progress_monitor_task(outcome_task);
-    let armed_binding = runtime.armed_progress_goal_binding(monitor_id);
     drop(panes);
     drop(tree);
     // The live monitor now exactly matches the staged bytes. Releasing this
@@ -1935,10 +1933,6 @@ async fn commit_progress_monitor(
         progress: Some(progress),
     });
     state.request_snapshot_save();
-
-    if let Some(binding) = armed_binding {
-        start_progress_goal_pause(state, pane_id, binding).await;
-    }
     Ok(())
 }
 
@@ -1975,11 +1969,30 @@ async fn handle_progress_monitor_outcome(
         let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
             return;
         };
-        if !runtime.update_progress_monitor_progress(monitor_id, progress) {
+        if !runtime.update_progress_monitor_progress(monitor_id, progress.clone()) {
             return;
         }
         drop(panes);
         state.request_snapshot_save();
+        if state.notifications_config.enabled {
+            let pane_name = state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .map(|node| node.name.clone())
+                .unwrap_or_default();
+            if let Some(pending) = crate::notifications::PendingNotification::for_task_outcome(
+                state.session_name.clone(),
+                pane_name,
+                &progress,
+            ) {
+                // `send` never fails and runs the blocking D-Bus call on its
+                // own blocking thread; delivery below waits for a ready
+                // composer anyway, so this short await does not delay it.
+                crate::notifications::send(pending).await;
+            }
+        }
     }
     let message = match outcome {
         crate::progress_monitor::ProgressMonitorOutcome::TaskTerminal(progress) => {
@@ -1992,13 +2005,8 @@ async fn handle_progress_monitor_outcome(
         | crate::progress_monitor::ProgressMonitorOutcome::Superseded
         | crate::progress_monitor::ProgressMonitorOutcome::PaneUnavailable => return,
     };
-    if let Err(error) = crate::agent_delivery::deliver_result_then_resume(
-        Arc::clone(state),
-        pane_id,
-        monitor_id,
-        message,
-    )
-    .await
+    if let Err(error) =
+        crate::agent_delivery::deliver_result(Arc::clone(state), pane_id, monitor_id, message).await
     {
         tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "progress result delivery stopped");
     }
@@ -2107,130 +2115,8 @@ async fn handle_clear_pane_progress_monitor(
     .await;
 }
 
-async fn handle_progress_goal_policy_change(
-    state: &Arc<ServerState>,
-    request_id: u64,
-    pane_id: NodeId,
-    monitor_id: u64,
-    goal_policy: ilium_ipc::ProgressGoalPolicy,
-    direct_tx: &mpsc::Sender<ServerEvent>,
-) {
-    let effect_gate = {
-        let panes = state.panes.read().await;
-        match panes.get(&pane_id) {
-            Some(PaneResource::Terminal(runtime)) => {
-                Some(Arc::clone(&runtime.progress_effect_gate))
-            }
-            _ => None,
-        }
-    };
-    let (result, armed_binding) =
-        if let Some(effect_gate) = effect_gate {
-            let _effect_guard = effect_gate.lock().await;
-            let mut panes = state.panes.write().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
-                drop(panes);
-                return send_direct(
-                    direct_tx,
-                    ServerEvent::ProgressMonitorGoalPolicyChanged {
-                        request_id,
-                        pane_id,
-                        monitor_id,
-                        result: Err(progress_rejection(
-                            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
-                            format!("pane {pane_id:?} closed before goal-policy change"),
-                        )),
-                    },
-                )
-                .await;
-            };
-            if !runtime.is_current_progress_monitor(monitor_id) {
-                (
-                    Err(progress_rejection(
-                        ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
-                        format!("progress monitor {monitor_id} is not current"),
-                    )),
-                    None,
-                )
-            } else {
-                match goal_policy {
-                    ilium_ipc::ProgressGoalPolicy::PauseAndResume => {
-                        match runtime.arm_progress_goal_resume(monitor_id) {
-                        Ok(binding) => (Ok(goal_policy), Some(binding)),
-                        Err(message) => (Err(progress_rejection(
-                            ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable,
-                            message,
-                        )), None),
-                    }
-                    }
-                    ilium_ipc::ProgressGoalPolicy::KeepRunning => {
-                        match runtime.disarm_progress_goal_resume(monitor_id) {
-                            Ok(()) => (Ok(goal_policy), None),
-                            Err(message) => (
-                                Err(progress_rejection(
-                                    ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
-                                    message,
-                                )),
-                                None,
-                            ),
-                        }
-                    }
-                }
-            }
-        } else {
-            (
-                Err(progress_rejection(
-                    ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
-                    format!("pane {pane_id:?} is not a live terminal pane"),
-                )),
-                None,
-            )
-        };
-    if result.is_ok() {
-        state.request_snapshot_save();
-        crate::persistence::flush_pending_snapshot(state).await;
-    }
-    if let Some(binding) = armed_binding {
-        start_progress_goal_pause(state, pane_id, binding).await;
-    }
-    send_direct(
-        direct_tx,
-        ServerEvent::ProgressMonitorGoalPolicyChanged {
-            request_id,
-            pane_id,
-            monitor_id,
-            result,
-        },
-    )
-    .await;
-}
-
-async fn start_progress_goal_pause(
-    state: &Arc<ServerState>,
-    pane_id: NodeId,
-    binding: crate::pane::ProgressGoalBinding,
-) {
-    let monitor_id = binding.monitor_id;
-    let pause_state = Arc::clone(state);
-    let task = tokio::spawn(async move {
-        if let Err(error) =
-            crate::agent_delivery::pause_goal_for_monitor(pause_state, pane_id, binding).await
-        {
-            tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "progress-owned goal pause stopped");
-        }
-    });
-    let mut panes = state.panes.write().await;
-    if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-        if runtime.is_current_progress_monitor(monitor_id) {
-            runtime.set_progress_delivery_task(task);
-            return;
-        }
-    }
-    task.abort();
-}
-
 /// Reconstitutes one persisted registration after its pane has respawned.
-/// Monitor IDs and goal ownership never cross the process boundary. Only a
+/// Monitor IDs never cross the process boundary. Only a
 /// nonterminal report whose fresh preflight has the same job identity resumes
 /// recurring observation, and only delivery known never to have been
 /// attempted is eligible for replay.
@@ -2309,13 +2195,10 @@ pub(crate) async fn restore_persisted_progress_monitor(
         ));
     };
     let fence = runtime
-        .install_progress_monitor(
-            registration.clone(),
-            ilium_ipc::ProgressGoalPolicy::KeepRunning,
-        )
+        .install_progress_monitor(registration.clone())
         .map_err(|error| format!("persisted monitor was rejected: {error}"))?;
     runtime
-        .restore_progress_delivery_state(persisted.result_delivery, persisted.goal_resume_delivery)
+        .restore_progress_delivery_state(persisted.result_delivery)
         .map_err(|error| format!("persisted delivery state was rejected: {error}"))?;
     tree.set_pane_progress(pane_id, Some(progress.clone()))
         .map_err(|error| error.to_string())?;
@@ -2353,13 +2236,9 @@ pub(crate) async fn restore_persisted_progress_monitor(
         };
         let delivery_state = Arc::clone(state);
         let task = tokio::spawn(async move {
-            if let Err(error) = crate::agent_delivery::deliver_result_then_resume(
-                delivery_state,
-                pane_id,
-                monitor_id,
-                message,
-            )
-            .await
+            if let Err(error) =
+                crate::agent_delivery::deliver_result(delivery_state, pane_id, monitor_id, message)
+                    .await
             {
                 tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "restored progress result delivery stopped");
             }
@@ -2499,6 +2378,9 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
     }
     if let Some(status) = acknowledged_status {
         state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
+    }
+    if focused && is_terminal {
+        acknowledge_progress_outcome(state, pane_id).await;
     }
     let _ = crate::agent_debug::record(
         state,
@@ -3328,6 +3210,43 @@ async fn handle_resize_pane(
     }
 }
 
+/// Marks a pane's unread task outcome as seen and tells every client. Only
+/// genuine human attention calls this (pane focus, client keyboard input);
+/// automated PTY deliveries never do, because a written result message is not
+/// proof that anyone read it.
+pub(crate) async fn acknowledge_progress_outcome(state: &ServerState, pane_id: NodeId) {
+    let acknowledged = {
+        let mut tree = state.tree.write().await;
+        let acknowledged = match tree.acknowledge_progress_outcome(pane_id) {
+            Ok(acknowledged) => acknowledged,
+            Err(error) => {
+                tracing::error!(
+                    pane_id = pane_id.0,
+                    %error,
+                    "progress outcome acknowledgement rejected"
+                );
+                None
+            }
+        };
+        if let Some(progress) = acknowledged.as_ref() {
+            // The runtime copy is what crash-recovery persists; keep both in
+            // step so a restart does not resurrect an already-read outcome.
+            let mut panes = state.panes.write().await;
+            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+                runtime.update_progress_monitor_progress(progress.monitor_id, progress.clone());
+            }
+        }
+        acknowledged
+    };
+    if let Some(progress) = acknowledged {
+        state.request_snapshot_save();
+        state.broadcast(ServerEvent::PaneProgressChanged {
+            pane_id,
+            progress: Some(progress),
+        });
+    }
+}
+
 async fn handle_key_input(
     state: &Arc<ServerState>,
     pane_id: NodeId,
@@ -3335,7 +3254,11 @@ async fn handle_key_input(
     submission: Option<PromptSubmissionSource>,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    if let Err(message) = write_key_input(state, pane_id, bytes, submission).await {
+    let result = write_key_input(state, pane_id, bytes, submission).await;
+    if result.is_ok() && !bytes.is_empty() {
+        acknowledge_progress_outcome(state, pane_id).await;
+    }
+    if let Err(message) = result {
         // `write_key_input` returns this same `Err(String)` both for an
         // actual PTY write failure and for a downstream bookkeeping failure
         // (e.g. `record_node_activity` rejecting a pane removed concurrently
@@ -3648,6 +3571,15 @@ async fn write_key_input_unlocked(
                     .as_ref()
                     .and_then(|submission| submission.exact_text().map(str::to_owned));
                 tracked_submission = submitted_input;
+                if let (
+                    Some(PromptSubmissionSource::Keyboard | PromptSubmissionSource::VoiceControl),
+                    Some(line),
+                ) = (submission, submitted_line.as_deref())
+                {
+                    // Only a human's `/goal pause` binds agent-requested
+                    // resume; Ilium's own progress pause is not user intent.
+                    runtime.observe_user_goal_command(line);
+                }
                 if submitted_line
                     .as_deref()
                     .is_some_and(crate::pane::clears_agent_goal)
@@ -4821,7 +4753,6 @@ mod tests {
             pane_id,
             command,
             interval_seconds: 60,
-            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             latest_progress: ilium_core::PaneProgress::new(
                 99,
                 ilium_core::ProgressTaskReport::new(
@@ -4835,9 +4766,7 @@ mod tests {
                 1_700_000_000_000,
             )
             .unwrap(),
-            goal_resume_armed: false,
             result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
-            goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
         }
     }
 
@@ -4857,7 +4786,6 @@ mod tests {
                     command: r#"printf '%s' '{"job_id":"render-11","status":"running","percent":42.5,"message":"frame 10/100"}'"#
                         .to_string(),
                     interval_seconds: 1,
-                    goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
                 },
                 &direct_tx,
             )
@@ -4912,7 +4840,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"kept-job","status":"running","percent":25,"message":"healthy"}'"#.to_string(),
                 interval_seconds: 60,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -4932,7 +4859,6 @@ mod tests {
                 pane_id,
                 command: "printf '%s' 'not-json'".to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5006,7 +4932,6 @@ mod tests {
             pane_id,
             command: command.clone(),
             interval_seconds: 60,
-            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
         };
 
         let (first_handled, second_handled) = tokio::join!(
@@ -5044,7 +4969,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"collision","status":"running","percent":1,"message":"different"}'"#.to_string(),
                 interval_seconds: 60,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5075,7 +4999,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"durable-job","status":"running","percent":17,"message":"running"}'"#.to_string(),
                 interval_seconds: 60,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5135,7 +5058,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"preserved-job","status":"running","percent":23,"message":"running"}'"#.to_string(),
                 interval_seconds: 60,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5161,7 +5083,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"unacknowledged-job","status":"running","percent":24,"message":"running"}'"#.to_string(),
                 interval_seconds: 60,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5302,7 +5223,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"render-21","status":"running","percent":10,"message":"starting"}'"#.to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5404,7 +5324,6 @@ mod tests {
                 pane_id,
                 command: "   ".to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5429,7 +5348,6 @@ mod tests {
                 pane_id: missing_pane_id,
                 command: "true".to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5463,7 +5381,6 @@ mod tests {
                 pane_id,
                 command: r#"printf '%s' '{"job_id":"render-41","status":"running","percent":5,"message":"running"}'"#.to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )
@@ -5524,7 +5441,6 @@ mod tests {
                 pane_id,
                 command: "true".to_string(),
                 interval_seconds: 1,
-                goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
             },
             &direct_tx,
         )

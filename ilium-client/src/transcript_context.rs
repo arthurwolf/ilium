@@ -284,6 +284,12 @@ fn assistant_content(content: Option<&Value>) -> Option<String> {
 /// reasoning, and tool-call requests are excluded.
 fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
     let mut recent = RecentEntries::default();
+    // Codex has used two different user-turn records. Keep their bounded
+    // windows separate, then prefer the complete response-item stream when
+    // present so duplicate event records cannot evict genuine user turns.
+    let mut event_users = KindEntries::default();
+    let mut response_users = KindEntries::default();
+    let mut has_response_user = false;
     for entry in lines.filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
         match entry.get("type").and_then(Value::as_str) {
             Some("event_msg") => {
@@ -293,7 +299,7 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
                 match payload.get("type").and_then(Value::as_str) {
                     Some("user_message") => {
                         if let Some(message) = payload.get("message").and_then(Value::as_str) {
-                            recent.push(TranscriptEntryKind::User, message.to_string());
+                            push_codex_user(&mut recent, &mut event_users, message);
                         }
                     }
                     Some("thread_goal_updated") => {
@@ -302,7 +308,7 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
                             .and_then(|goal| goal.get("objective"))
                             .and_then(Value::as_str)
                         {
-                            recent.push(TranscriptEntryKind::User, objective.to_string());
+                            push_codex_user(&mut recent, &mut event_users, objective);
                         }
                     }
                     Some("agent_message") => {
@@ -317,6 +323,17 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
                 let Some(payload) = entry.get("payload") else {
                     continue;
                 };
+                if payload.get("type").and_then(Value::as_str) == Some("message")
+                    && payload.get("role").and_then(Value::as_str) == Some("user")
+                {
+                    if let Some(message) = textual_value(payload.get("content")) {
+                        if !is_codex_context_envelope(&message) {
+                            push_codex_user(&mut recent, &mut response_users, &message);
+                            has_response_user = true;
+                        }
+                    }
+                    continue;
+                }
                 if !matches!(
                     payload.get("type").and_then(Value::as_str),
                     Some("custom_tool_call_output" | "function_call_output")
@@ -330,12 +347,41 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
             Some(_) | None => {}
         }
     }
+    recent.user = if has_response_user {
+        response_users
+    } else {
+        event_users
+    };
     recent.finish()
+}
+
+fn push_codex_user(recent: &mut RecentEntries, queue: &mut KindEntries, content: &str) {
+    let content = content.trim();
+    if content.is_empty() {
+        return;
+    }
+    queue.push(
+        recent.next_sequence,
+        TranscriptEntry {
+            kind: TranscriptEntryKind::User,
+            content: content.to_string(),
+        },
+    );
+    recent.next_sequence = recent.next_sequence.wrapping_add(1);
+}
+
+pub(crate) fn is_codex_context_envelope(message: &str) -> bool {
+    let message = message.trim_start();
+    message.starts_with("# AGENTS.md instructions for ")
+        || message.starts_with("<environment_context>")
+        || message.starts_with("<codex_internal_context ")
+        || message.starts_with("<task-notification>")
+        || message.starts_with("Ilium progress monitor ")
 }
 
 /// Extracts text from the string/array/block shapes used by Claude and Codex
 /// tool results. Image/base64 blocks have no textual field and are omitted.
-fn textual_value(value: Option<&Value>) -> Option<String> {
+pub(crate) fn textual_value(value: Option<&Value>) -> Option<String> {
     match value? {
         Value::String(text) => non_empty(text),
         Value::Array(items) => {
@@ -461,6 +507,32 @@ mod tests {
                 TranscriptEntry {
                     kind: TranscriptEntryKind::Tool,
                     content: "test output\nsecond block".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_response_item_user_turns_supersede_sparse_goal_events() {
+        let contents = [
+            r#"{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"objective":"old advisor setup"}}}"#,
+            r##"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /project\n<INSTRUCTIONS>policy</INSTRUCTIONS>"}]}}"##,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"extension boards"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">continuation</codex_internal_context>"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"add board folders"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Ilium progress monitor 42 reports completion"}]}}"#,
+        ]
+        .join("\n");
+        assert_eq!(
+            codex_entries(lines_of(&contents)),
+            vec![
+                TranscriptEntry {
+                    kind: TranscriptEntryKind::User,
+                    content: "extension boards".to_string(),
+                },
+                TranscriptEntry {
+                    kind: TranscriptEntryKind::User,
+                    content: "add board folders".to_string(),
                 },
             ]
         );

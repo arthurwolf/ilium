@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Fresh-install width used while a focus-dependent left panel is inactive.
-pub const DEFAULT_UNFOCUSED_TREE_WIDTH: u16 = 32;
+pub const DEFAULT_UNFOCUSED_TREE_WIDTH: u16 = 24;
 /// Fresh-install width used while a focus-dependent left panel is active.
-pub const DEFAULT_FOCUSED_TREE_WIDTH: u16 = 64;
+pub const DEFAULT_FOCUSED_TREE_WIDTH: u16 = 44;
 /// Fresh-install width used by the fixed policy.
 pub const DEFAULT_FIXED_TREE_WIDTH: u16 = 32;
 /// Fresh-install terminal-width breakpoint for the responsive policy.
@@ -301,7 +301,12 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 mod tests {
     use super::*;
 
-    const EXPANDED_TREE_WIDTH: u16 = DEFAULT_FOCUSED_TREE_WIDTH;
+    /// The animation and expanded-width assertions below use fixed 32/64
+    /// widths (a 1:2 ratio) so their arithmetic does not move whenever the
+    /// user-tunable fresh-install defaults do.
+    const TEST_COLLAPSED_TREE_WIDTH: u16 = 32;
+    const TEST_EXPANDED_TREE_WIDTH: u16 = 64;
+    const EXPANDED_TREE_WIDTH: u16 = TEST_EXPANDED_TREE_WIDTH;
 
     #[test]
     fn pane_content_excludes_status_tree_and_border() {
@@ -312,9 +317,17 @@ mod tests {
         );
         assert_eq!(
             layout.pane_area,
-            Rect::new(DEFAULT_UNFOCUSED_TREE_WIDTH, 0, 88, 39)
+            Rect::new(
+                DEFAULT_UNFOCUSED_TREE_WIDTH,
+                0,
+                120 - DEFAULT_UNFOCUSED_TREE_WIDTH,
+                39
+            )
         );
-        assert_eq!(layout.pane_content_size(), (37, 86));
+        assert_eq!(
+            layout.pane_content_size(),
+            (37, 120 - DEFAULT_UNFOCUSED_TREE_WIDTH - 2)
+        );
         assert_eq!(layout.status_area, Rect::new(0, 39, 98, 1));
         assert_eq!(layout.voice_control_area, Rect::new(98, 39, 22, 1));
         assert_eq!(layout.status_area.right(), layout.voice_control_area.x);
@@ -370,11 +383,11 @@ mod tests {
     #[test]
     fn tree_width_animation_eases_between_explicit_policy_widths() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
+        let mut animation = TreeWidthAnimation::new(started_at, TEST_COLLAPSED_TREE_WIDTH);
 
         assert_eq!(
-            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at),
-            DEFAULT_UNFOCUSED_TREE_WIDTH
+            animation.update(TEST_EXPANDED_TREE_WIDTH, started_at),
+            TEST_COLLAPSED_TREE_WIDTH
         );
         assert!(animation.is_animating());
 
@@ -382,21 +395,21 @@ mod tests {
         let midpoint = started_at + TREE_WIDTH_ANIMATION_DURATION / 2;
         let three_quarters = started_at + TREE_WIDTH_ANIMATION_DURATION * 3 / 4;
         assert!(
-            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, quarter)
-                < DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH / 4
+            animation.update(TEST_EXPANDED_TREE_WIDTH, quarter)
+                < TEST_COLLAPSED_TREE_WIDTH + TEST_COLLAPSED_TREE_WIDTH / 4
         );
         assert_eq!(
-            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, midpoint),
-            DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH / 2
+            animation.update(TEST_EXPANDED_TREE_WIDTH, midpoint),
+            TEST_COLLAPSED_TREE_WIDTH + TEST_COLLAPSED_TREE_WIDTH / 2
         );
         assert!(
-            animation.update(DEFAULT_FOCUSED_TREE_WIDTH, three_quarters)
-                > DEFAULT_UNFOCUSED_TREE_WIDTH + DEFAULT_UNFOCUSED_TREE_WIDTH * 3 / 4
+            animation.update(TEST_EXPANDED_TREE_WIDTH, three_quarters)
+                > TEST_COLLAPSED_TREE_WIDTH + TEST_COLLAPSED_TREE_WIDTH * 3 / 4
         );
 
         assert_eq!(
             animation.update(
-                DEFAULT_FOCUSED_TREE_WIDTH,
+                TEST_EXPANDED_TREE_WIDTH,
                 started_at + TREE_WIDTH_ANIMATION_DURATION
             ),
             EXPANDED_TREE_WIDTH
@@ -407,13 +420,13 @@ mod tests {
     #[test]
     fn repeated_expansion_requests_do_not_restart_or_reverse_progress() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
-        animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at);
+        let mut animation = TreeWidthAnimation::new(started_at, TEST_COLLAPSED_TREE_WIDTH);
+        animation.update(TEST_EXPANDED_TREE_WIDTH, started_at);
 
         let mut sampled_widths = Vec::new();
         for step in 1..=12 {
             let sampled_at = started_at + TREE_WIDTH_ANIMATION_DURATION * step / 12;
-            sampled_widths.push(animation.update(DEFAULT_FOCUSED_TREE_WIDTH, sampled_at));
+            sampled_widths.push(animation.update(TEST_EXPANDED_TREE_WIDTH, sampled_at));
         }
 
         assert!(sampled_widths.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -424,24 +437,24 @@ mod tests {
     #[test]
     fn tree_width_animation_reverses_from_the_visible_width() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
-        animation.update(DEFAULT_FOCUSED_TREE_WIDTH, started_at);
+        let mut animation = TreeWidthAnimation::new(started_at, TEST_COLLAPSED_TREE_WIDTH);
+        animation.update(TEST_EXPANDED_TREE_WIDTH, started_at);
 
         let midpoint = started_at + TREE_WIDTH_ANIMATION_DURATION / 2;
-        assert_eq!(animation.update(DEFAULT_FOCUSED_TREE_WIDTH, midpoint), 48);
-        assert_eq!(animation.update(DEFAULT_UNFOCUSED_TREE_WIDTH, midpoint), 48);
+        assert_eq!(animation.update(TEST_EXPANDED_TREE_WIDTH, midpoint), 48);
+        assert_eq!(animation.update(TEST_COLLAPSED_TREE_WIDTH, midpoint), 48);
 
         let collapse_midpoint = midpoint + TREE_WIDTH_ANIMATION_DURATION / 2;
         assert_eq!(
-            animation.update(DEFAULT_UNFOCUSED_TREE_WIDTH, collapse_midpoint),
+            animation.update(TEST_COLLAPSED_TREE_WIDTH, collapse_midpoint),
             40
         );
         assert_eq!(
             animation.update(
-                DEFAULT_UNFOCUSED_TREE_WIDTH,
+                TEST_COLLAPSED_TREE_WIDTH,
                 midpoint + TREE_WIDTH_ANIMATION_DURATION
             ),
-            DEFAULT_UNFOCUSED_TREE_WIDTH
+            TEST_COLLAPSED_TREE_WIDTH
         );
         assert!(!animation.is_animating());
     }
@@ -469,7 +482,7 @@ mod tests {
     #[test]
     fn snap_to_applies_a_settings_width_without_animating() {
         let started_at = Instant::now();
-        let mut animation = TreeWidthAnimation::new(started_at, DEFAULT_UNFOCUSED_TREE_WIDTH);
+        let mut animation = TreeWidthAnimation::new(started_at, TEST_COLLAPSED_TREE_WIDTH);
 
         let width = animation.snap_to(20, started_at);
         assert_eq!(width, 20);

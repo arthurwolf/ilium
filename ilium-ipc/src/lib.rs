@@ -15,6 +15,7 @@ mod error;
 mod framing;
 mod protocol;
 mod text_trigger;
+mod voice_text;
 
 pub use error::IpcError;
 pub use framing::{read_frame, write_frame, FrameReader, FrameWriter, MAX_FRAME_LEN};
@@ -25,11 +26,16 @@ pub use ilium_agent_debug::{
 };
 pub use protocol::{
     ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, ProgressGoalPolicy, ProgressMonitorAccepted, ProgressMonitorPreflight,
-    ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus,
-    PromptSubmissionSource, ServerEvent,
+    NewPaneWorkingDirectory, PaneGoalResumability, PaneGoalStatus, ProgressMonitorAccepted,
+    ProgressMonitorPreflight, ProgressMonitorRejection, ProgressMonitorRejectionCode,
+    ProgressMonitorStatus, PromptSubmissionSource, ServerEvent,
 };
 pub use text_trigger::{TextTrigger, TextTriggerSettings, TextTriggerTarget};
+pub use voice_text::{
+    normalize_voice_sentences, VoiceTextAccepted, VoiceTextPhase, VoiceTextRejection,
+    VoiceTextRejectionCode, VoiceTextResult, MAX_VOICE_TEXT_SENTENCES,
+    MAX_VOICE_TEXT_SENTENCE_CHARS,
+};
 
 /// Environment variables `ilium-server` injects into every spawned terminal
 /// pane (see `ilium-server`'s `pane::spawn_terminal_session`), so a process
@@ -217,16 +223,6 @@ mod tests {
                 text: "Task completed".to_string(),
                 source: PromptSubmissionSource::ProgressResult,
             },
-            ClientRequest::SubmitTerminalText {
-                pane_id: NodeId(2),
-                text: "/goal pause".to_string(),
-                source: PromptSubmissionSource::ProgressGoalPause,
-            },
-            ClientRequest::SubmitTerminalText {
-                pane_id: NodeId(2),
-                text: "/goal resume".to_string(),
-                source: PromptSubmissionSource::ProgressGoalResume,
-            },
             ClientRequest::EnqueuePrompt {
                 pane_id: NodeId(2),
                 text: "cargo test".to_string(),
@@ -362,7 +358,6 @@ mod tests {
                 pane_id: NodeId(2),
                 command: "/tmp/render_progress.sh".to_string(),
                 interval_seconds: 1,
-                goal_policy: ProgressGoalPolicy::KeepRunning,
             },
             ClientRequest::GetPaneProgressMonitorStatus {
                 request_id: 42,
@@ -373,17 +368,46 @@ mod tests {
                 pane_id: NodeId(2),
                 expected_monitor_id: Some(7),
             },
-            ClientRequest::ArmProgressGoalResume {
-                request_id: 44,
-                pane_id: NodeId(2),
-                monitor_id: 7,
-            },
-            ClientRequest::DisarmProgressGoalResume {
-                request_id: 45,
-                pane_id: NodeId(2),
-                monitor_id: 7,
-            },
             ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "/goal resume".to_string(),
+                source: PromptSubmissionSource::AgentGoalResume,
+            },
+            ClientRequest::SubmitTerminalText {
+                pane_id: NodeId(2),
+                text: "Ilium: your /goal has stayed paused".to_string(),
+                source: PromptSubmissionSource::GoalPauseReminder,
+            },
+            ClientRequest::GetPaneGoalStatus {
+                request_id: 46,
+                pane_id: NodeId(2),
+            },
+            ClientRequest::RequestPaneGoalResume {
+                request_id: 47,
+                pane_id: NodeId(2),
+            },
+            ClientRequest::RegisterVoiceTextReceiver,
+            ClientRequest::SubmitVoiceText {
+                request_id: 50,
+                sentences: vec!["open the settings".to_string(), "close it".to_string()],
+                start_voice: true,
+            },
+            ClientRequest::AnswerVoiceText {
+                request_id: 50,
+                result: Ok(VoiceTextAccepted {
+                    sentence_count: 2,
+                    phase: VoiceTextPhase::Listening,
+                    started_voice: false,
+                }),
+            },
+            ClientRequest::AnswerVoiceText {
+                request_id: 51,
+                result: Err(VoiceTextRejection::new(
+                    VoiceTextRejectionCode::VoiceOff,
+                    "voice control is off",
+                )),
+            },
         ]
     }
 
@@ -543,7 +567,6 @@ mod tests {
                 result: Ok(ProgressMonitorAccepted {
                     monitor_id: 7,
                     progress: sample_progress(),
-                    goal_policy: ProgressGoalPolicy::PauseAndResume,
                 }),
             },
             ServerEvent::ProgressMonitorStatusReported {
@@ -552,20 +575,67 @@ mod tests {
                 result: Ok(ProgressMonitorStatus {
                     pane_id: NodeId(2),
                     progress: Some(sample_progress()),
-                    goal_policy: Some(ProgressGoalPolicy::KeepRunning),
-                    goal_resume_armed: false,
                 }),
-            },
-            ServerEvent::ProgressMonitorGoalPolicyChanged {
-                request_id: 44,
-                pane_id: NodeId(2),
-                monitor_id: 7,
-                result: Ok(ProgressGoalPolicy::PauseAndResume),
             },
             ServerEvent::ProgressMonitorCleared {
                 request_id: 43,
                 pane_id: NodeId(2),
                 result: Ok(Some(7)),
+            },
+            ServerEvent::PaneGoalStatusReported {
+                request_id: 46,
+                pane_id: NodeId(2),
+                result: Ok(PaneGoalStatus {
+                    pane_id: NodeId(2),
+                    agent: Some("Codex".to_string()),
+                    goal_state: Some(ilium_core::GoalState::Paused),
+                    resumability: PaneGoalResumability::Resumable,
+                }),
+            },
+            ServerEvent::PaneGoalResumeRequested {
+                request_id: 47,
+                pane_id: NodeId(2),
+                result: Err((
+                    "the user paused this goal".to_string(),
+                    Some(PaneGoalStatus {
+                        pane_id: NodeId(2),
+                        agent: Some("Codex".to_string()),
+                        goal_state: Some(ilium_core::GoalState::Paused),
+                        resumability: PaneGoalResumability::PausedByUser,
+                    }),
+                )),
+            },
+            ServerEvent::PaneGoalStatusReported {
+                request_id: 48,
+                pane_id: NodeId(2),
+                result: Ok(PaneGoalStatus {
+                    pane_id: NodeId(2),
+                    agent: None,
+                    goal_state: None,
+                    resumability: PaneGoalResumability::Unsupported {
+                        reason: "no agent".to_string(),
+                    },
+                }),
+            },
+            ServerEvent::VoiceTextOffered {
+                request_id: 50,
+                sentences: vec!["open the settings".to_string()],
+                start_voice: false,
+            },
+            ServerEvent::VoiceTextResult {
+                request_id: 50,
+                result: Ok(VoiceTextAccepted {
+                    sentence_count: 1,
+                    phase: VoiceTextPhase::Connecting,
+                    started_voice: true,
+                }),
+            },
+            ServerEvent::VoiceTextResult {
+                request_id: 51,
+                result: Err(VoiceTextRejection::new(
+                    VoiceTextRejectionCode::NoVoiceClient,
+                    "no voice client is attached",
+                )),
             },
         ]
     }
@@ -617,6 +687,57 @@ mod tests {
             submission: Some(PromptSubmissionSource::Keyboard),
         };
         assert!(!submitted_key.is_high_frequency_diagnostic());
+    }
+
+    /// The voice-text messages were appended after the goal messages, so a
+    /// peer built before them still decodes every earlier variant. bincode's
+    /// fixed-width encoding puts the variant index in the first four bytes.
+    #[test]
+    fn voice_text_variants_are_appended_after_the_goal_variants() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
+        let goal_resume = variant_index(&ClientRequest::RequestPaneGoalResume {
+            request_id: 1,
+            pane_id: NodeId(2),
+        });
+        let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);
+        let submit = variant_index(&ClientRequest::SubmitVoiceText {
+            request_id: 1,
+            sentences: Vec::new(),
+            start_voice: false,
+        });
+        let answer = variant_index(&ClientRequest::AnswerVoiceText {
+            request_id: 1,
+            result: Err(VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceOff,
+                "",
+            )),
+        });
+        assert_eq!(
+            [register, submit, answer],
+            [goal_resume + 1, goal_resume + 2, goal_resume + 3]
+        );
+
+        let goal_event = variant_index(&ServerEvent::PaneGoalResumeRequested {
+            request_id: 1,
+            pane_id: NodeId(2),
+            result: Err((String::new(), None)),
+        });
+        let offered = variant_index(&ServerEvent::VoiceTextOffered {
+            request_id: 1,
+            sentences: Vec::new(),
+            start_voice: false,
+        });
+        let result = variant_index(&ServerEvent::VoiceTextResult {
+            request_id: 1,
+            result: Err(VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceOff,
+                "",
+            )),
+        });
+        assert_eq!([offered, result], [goal_event + 1, goal_event + 2]);
     }
 
     #[tokio::test]

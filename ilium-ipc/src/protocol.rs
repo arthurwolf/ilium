@@ -107,19 +107,12 @@ pub enum PromptSubmissionSource {
     /// A task-terminal or monitor-failure notification emitted by the progress
     /// lifecycle coordinator.
     ProgressResult,
-    /// The progress lifecycle coordinator's causally tracked `/goal pause`.
-    ProgressGoalPause,
-    /// The progress lifecycle coordinator's causally tracked `/goal resume`.
-    ProgressGoalResume,
-}
-
-/// Whether the agent continues useful work while Ilium monitors or asks Ilium
-/// to pause and later resume its currently active persistent goal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProgressGoalPolicy {
-    KeepRunning,
-    PauseAndResume,
+    /// `/goal resume` requested by the agent itself through `ilium goal
+    /// resume`.
+    AgentGoalResume,
+    /// Ilium's one-time reminder to an idle agent whose goal stayed paused
+    /// and resumable. It never resumes the goal itself.
+    GoalPauseReminder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,7 +128,6 @@ pub enum ProgressMonitorRejectionCode {
     ProbeIoFailed,
     PaneNotFound,
     StaleMonitor,
-    GoalOwnershipUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,7 +149,6 @@ pub struct ProgressMonitorPreflight {
 pub struct ProgressMonitorAccepted {
     pub monitor_id: u64,
     pub progress: PaneProgress,
-    pub goal_policy: ProgressGoalPolicy,
 }
 
 /// Correlated machine-readable status returned by `ilium progress status`.
@@ -165,8 +156,39 @@ pub struct ProgressMonitorAccepted {
 pub struct ProgressMonitorStatus {
     pub pane_id: NodeId,
     pub progress: Option<PaneProgress>,
-    pub goal_policy: Option<ProgressGoalPolicy>,
-    pub goal_resume_armed: bool,
+}
+
+/// Whether the agent in a pane may ask Ilium to resume its paused `/goal`,
+/// and if not, who owns the decision. Returned by `ilium goal status` and the
+/// agents' Stop hook so an idle agent never leaves an unblocked goal paused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneGoalResumability {
+    /// No goal is confirmed for this pane's agent.
+    NoGoal,
+    /// A goal exists but is not paused (see `PaneGoalStatus::goal_state`).
+    NotPaused,
+    /// The user typed `/goal pause`; only the user resumes it.
+    PausedByUser,
+    /// An agent-requested `/goal resume` waits for the current turn to end.
+    ResumeQueued,
+    /// Paused, unowned, and not paused by the user: the agent may resume it.
+    Resumable,
+    /// The provider or pane state does not support agent-requested resume.
+    Unsupported { reason: String },
+    /// Ilium never saw this goal active (for example, it was already paused
+    /// when the server started), so it cannot tell whether the user paused
+    /// it. Treated like a user pause: only the user resumes it.
+    PauseOriginUnknown,
+}
+
+/// Correlated goal status for one pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneGoalStatus {
+    pub pane_id: NodeId,
+    /// Provider display name of the agent that owns the goal, if any.
+    pub agent: Option<String>,
+    pub goal_state: Option<ilium_core::GoalState>,
+    pub resumability: PaneGoalResumability,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here
@@ -469,7 +491,6 @@ pub enum ClientRequest {
         pane_id: NodeId,
         command: String,
         interval_seconds: u32,
-        goal_policy: ProgressGoalPolicy,
     },
     /// Returns the live registration/report state for one pane.
     GetPaneProgressMonitorStatus { request_id: u64, pane_id: NodeId },
@@ -479,18 +500,6 @@ pub enum ClientRequest {
         request_id: u64,
         pane_id: NodeId,
         expected_monitor_id: Option<u64>,
-    },
-    /// Arms safe pause/resume orchestration for an existing monitor.
-    ArmProgressGoalResume {
-        request_id: u64,
-        pane_id: NodeId,
-        monitor_id: u64,
-    },
-    /// Disarms goal orchestration without clearing the task monitor.
-    DisarmProgressGoalResume {
-        request_id: u64,
-        pane_id: NodeId,
-        monitor_id: u64,
     },
     /// Applies the Settings tab's progress-monitor toggle to the
     /// already-running detached server -- same live-toggle shape as
@@ -512,6 +521,34 @@ pub enum ClientRequest {
         pane_id: NodeId,
         text: String,
         source: PromptSubmissionSource,
+    },
+    /// Reports whether `pane_id`'s goal is paused and who may resume it.
+    /// Appended to preserve every earlier bincode variant discriminant.
+    GetPaneGoalStatus { request_id: u64, pane_id: NodeId },
+    /// Queues `/goal resume` for `pane_id` after its current turn, only when
+    /// the status is `Resumable`. Idempotent while a resume is queued.
+    RequestPaneGoalResume { request_id: u64, pane_id: NodeId },
+    /// Announces that this connection hosts a voice session (an interactive
+    /// TUI client) and can be offered typed sentences. One-shot CLI
+    /// connections use the same attach handshake, so the server cannot infer
+    /// this from `AttachInteractive`. Appended to preserve every earlier
+    /// bincode variant discriminant.
+    RegisterVoiceTextReceiver,
+    /// `ilium voice say`: delivers sentences to the running voice session as
+    /// if they had been spoken. The server offers them to registered clients
+    /// (see [`ServerEvent::VoiceTextOffered`]) and answers this connection
+    /// with [`ServerEvent::VoiceTextResult`]. `start_voice` allows the
+    /// request to switch voice control on when it is off.
+    SubmitVoiceText {
+        request_id: u64,
+        sentences: Vec<String>,
+        start_voice: bool,
+    },
+    /// A voice-hosting client's answer to a [`ServerEvent::VoiceTextOffered`];
+    /// the server relays it to the requesting connection.
+    AnswerVoiceText {
+        request_id: u64,
+        result: crate::VoiceTextResult,
     },
 }
 
@@ -567,11 +604,14 @@ impl ClientRequest {
             Self::SetPaneProgressMonitor { .. } => "set_pane_progress_monitor",
             Self::GetPaneProgressMonitorStatus { .. } => "get_pane_progress_monitor_status",
             Self::ClearPaneProgressMonitor { .. } => "clear_pane_progress_monitor",
-            Self::ArmProgressGoalResume { .. } => "arm_progress_goal_resume",
-            Self::DisarmProgressGoalResume { .. } => "disarm_progress_goal_resume",
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
             Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SubmitTerminalText { .. } => "submit_terminal_text",
+            Self::GetPaneGoalStatus { .. } => "get_pane_goal_status",
+            Self::RequestPaneGoalResume { .. } => "request_pane_goal_resume",
+            Self::RegisterVoiceTextReceiver => "register_voice_text_receiver",
+            Self::SubmitVoiceText { .. } => "submit_voice_text",
+            Self::AnswerVoiceText { .. } => "answer_voice_text",
         }
     }
 
@@ -798,17 +838,41 @@ pub enum ServerEvent {
         pane_id: NodeId,
         result: Result<ProgressMonitorStatus, ProgressMonitorRejection>,
     },
-    /// Confirms a monitor's goal policy changed after generation validation.
-    ProgressMonitorGoalPolicyChanged {
-        request_id: u64,
-        pane_id: NodeId,
-        monitor_id: u64,
-        result: Result<ProgressGoalPolicy, ProgressMonitorRejection>,
-    },
     /// Confirms a fenced clear. `None` means the pane had no active monitor.
     ProgressMonitorCleared {
         request_id: u64,
         pane_id: NodeId,
         result: Result<Option<u64>, ProgressMonitorRejection>,
+    },
+    /// Correlated reply to `GetPaneGoalStatus`. `Err` names why the pane has
+    /// no status (for example, it is not a live terminal pane).
+    PaneGoalStatusReported {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<PaneGoalStatus, String>,
+    },
+    /// Correlated reply to `RequestPaneGoalResume`. `Ok` carries the status
+    /// after queueing (`ResumeQueued`); `Err` carries the refusal reason and
+    /// the status that caused it.
+    PaneGoalResumeRequested {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<PaneGoalStatus, (String, Option<PaneGoalStatus>)>,
+    },
+    /// A `SubmitVoiceText` offered to this one voice-hosting client. Sent
+    /// only to the registered client currently being asked (never broadcast),
+    /// so exactly one voice session can act on the text. The client answers
+    /// with `AnswerVoiceText`. Appended last to preserve every existing
+    /// bincode discriminant.
+    VoiceTextOffered {
+        request_id: u64,
+        sentences: Vec<String>,
+        start_voice: bool,
+    },
+    /// Correlated outcome of a `SubmitVoiceText`, sent to the requesting
+    /// connection only.
+    VoiceTextResult {
+        request_id: u64,
+        result: crate::VoiceTextResult,
     },
 }

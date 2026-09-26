@@ -45,7 +45,6 @@ pub(crate) struct ProgressSetRequestIdentity {
     pub pane_id: NodeId,
     pub command: String,
     pub interval_seconds: u32,
-    pub goal_policy: ilium_ipc::ProgressGoalPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +219,9 @@ pub struct ServerState {
     /// Request IDs remain meaningful across a CLI reconnect to this server;
     /// argument collisions are rejected instead of replacing a monitor twice.
     pub(crate) progress_set_requests: Mutex<ProgressSetRequestCache>,
+    /// Broker between `ilium voice say` connections and the interactive
+    /// client that hosts the voice session (see `crate::voice_relay`).
+    pub(crate) voice_text: crate::voice_relay::VoiceTextRelay,
 }
 
 impl ServerState {
@@ -269,6 +271,7 @@ impl ServerState {
             session_backups_enabled: watch::channel(true).0,
             next_progress_monitor_id: std::sync::atomic::AtomicU64::new(1),
             progress_set_requests: Mutex::new(ProgressSetRequestCache::default()),
+            voice_text: crate::voice_relay::VoiceTextRelay::default(),
         }
     }
 

@@ -36,6 +36,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_base_layer(frame, area, app);
     draw_voice_control(frame, layout.voice_control_area, app);
+    if app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
+        draw_status_tooltip(frame, app);
+        draw_stats_popover(frame, app);
+    }
 
     // Every suspended parent draws before its child. This makes stack depth
     // a rendering concern rather than forcing child modes to clone or embed
@@ -44,6 +48,94 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_mode_overlay(frame, area, app, mode);
     }
     draw_mode_overlay(frame, area, app, &app.mode);
+}
+
+/// Explains the tree-row state glyph under the pointer. The slot's signal is
+/// re-projected from the current tree at draw time, so the popover can never
+/// describe a state the row no longer shows.
+fn draw_status_tooltip(frame: &mut Frame, app: &App) {
+    use crate::status_icons::{now_explanation, objective_explanation, StatusSlot};
+
+    let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
+        return;
+    };
+    let Some(NodeKind::Pane {
+        status,
+        progress,
+        scheduled_input,
+        ..
+    }) = app.tree.get(node_id).map(|node| &node.kind)
+    else {
+        return;
+    };
+    let shell_output = app
+        .terminal_activity
+        .phase(node_id, app.started_at.elapsed().as_millis())
+        .map(tree_ui::shell_output_phase);
+    let signals = ilium_core::project_pane_signals(
+        status,
+        progress.as_deref(),
+        scheduled_input.is_some(),
+        shell_output,
+    );
+    let explanation = match slot {
+        StatusSlot::Objective => objective_explanation(signals.objective),
+        StatusSlot::Now => now_explanation(signals.now),
+    };
+    if let Some(explanation) = explanation {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
+    }
+}
+
+/// Draws the costs-and-stats popover of the pane whose second header icon was
+/// hovered or clicked. The popover state is taken out of `app` for the draw so
+/// rendering can record scroll bounds on it while reading everything else.
+fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
+    let Some(mut popover) = app.stats_popover.take() else {
+        return;
+    };
+    let anchor = app
+        .pane_viewport(popover.pane_id)
+        .map(|viewport| theme::chrome_stats_cell(viewport.outer_area));
+    if let Some(anchor) = anchor {
+        let entry = app.session_stats.entry(popover.pane_id);
+        let idle = crate::session_stats_store::LoadState::Idle;
+        let view = crate::session_stats_ui::StatsView {
+            stats: entry.and_then(|entry| entry.stats.as_deref()),
+            load: entry.map_or(&idle, |entry| &entry.state),
+            supported: app.stats_agent_is_supported(popover.pane_id),
+            has_session: app.agent_session_ids.contains_key(&popover.pane_id),
+            now_ms: chrono::Utc::now().timestamp_millis(),
+            animation_ms: app.started_at.elapsed().as_millis(),
+            scheme: app.ui_settings.color_scheme,
+        };
+        crate::session_stats_ui::render(frame, app.layout.pane_area, anchor, &mut popover, &view);
+    }
+    app.stats_popover = Some(popover);
+}
+
+/// Styles the second header icon of an agent pane as the popover's handle:
+/// accent-coloured when idle, filled while its popover is open.
+fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
+    if viewport.outer_area.width < 10 || !app.is_detected_agent_pane(viewport.pane_id) {
+        return;
+    }
+    let is_open = app
+        .stats_popover
+        .as_ref()
+        .is_some_and(|popover| popover.pane_id == viewport.pane_id);
+    let style = if is_open {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD)
+    };
+    let cell = theme::chrome_stats_cell(viewport.outer_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled("●", style)),
+        Rect::new(cell.x, cell.y, 1, 1),
+    );
 }
 
 /// Draws the one full-screen root behind every stacked overlay. Settings and
@@ -1319,6 +1411,8 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
         }
     }
 
+    draw_stats_icon(frame, app, viewport);
+
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
             if let Some(session) = app
@@ -1540,7 +1634,7 @@ fn draw_completed_agent_close_action(frame: &mut Frame, area: Rect) {
 
 /// Draws a vertical scrollbar merged into the terminal pane block's right
 /// border, mirroring `tree_ui::draw_scrollbar` -- shown only once the pane
-/// actually has scrollback history to navigate (`Ctrl+A` isn't involved:
+/// actually has scrollback history to navigate (the leader key isn't involved:
 /// see `App::handle_pane_key`/`handle_pane_mouse` for Shift+PageUp/
 /// PageDown, Shift+End, and wheel navigation).
 fn draw_terminal_scrollbar(frame: &mut Frame, area: Rect, term: &terminal_view::TerminalView) {
@@ -2298,10 +2392,11 @@ mod tests {
         // the expected row is composed through the same helper the renderer
         // uses; pinning the literal pair would break whenever that icon
         // changes or the user turns context-menu icons off entirely.
-        let active_row = format!(
-            "✓{} Age down (oldest first)",
-            context_menu_icon(&app.ui_settings, IconTarget::TopLevel)
-        );
+        // A double-width glyph occupies two buffer cells, and the second cell
+        // is read back as one extra space.
+        let icon = context_menu_icon(&app.ui_settings, IconTarget::TopLevel);
+        let wide_cell_padding = " ".repeat(icon.width().saturating_sub(icon.chars().count()));
+        let active_row = format!("✓{icon}{wide_cell_padding} Age down (oldest first)");
         assert!(rendered.contains(&active_row));
         assert_eq!(rendered.matches('✓').count(), 1);
     }

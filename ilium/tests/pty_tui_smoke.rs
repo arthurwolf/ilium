@@ -154,6 +154,7 @@ struct IsolatedXdgDirs {
     /// interactions this test performs land here, so a surface that does not
     /// respond can be told apart from a click that never arrived.
     mouse_trace_file: PathBuf,
+    agent_setup_home: PathBuf,
     /// Keeps the short runtime directory alive; dropping it removes the
     /// directory. Declared last so it outlives nothing that still needs it.
     _runtime_root: tempfile::TempDir,
@@ -168,7 +169,14 @@ impl IsolatedXdgDirs {
         let ilium_config_dir = config_home.join("ilium");
         let debug_log_dir = root.join("debug-logs");
         let mouse_trace_file = root.join("mouse-events.log");
-        for dir in [&data_home, &config_home, &ilium_config_dir, &debug_log_dir] {
+        let agent_setup_home = root.join("agent-home");
+        for dir in [
+            &data_home,
+            &config_home,
+            &ilium_config_dir,
+            &debug_log_dir,
+            &agent_setup_home,
+        ] {
             std::fs::create_dir_all(dir)?;
         }
         // Unrelated smoke scenarios must never inspect or offer to modify the
@@ -178,6 +186,7 @@ impl IsolatedXdgDirs {
             ilium_config_dir.join("config.toml"),
             "[agent_setup]\nnever_ask_global = true\n",
         )?;
+        pin_presentation_baseline(&ilium_config_dir)?;
         // The runtime directory deliberately does *not* live under `root`. A
         // session socket must fit `sockaddr_un` (100 bytes here), and a
         // platform temporary directory can spend most of that budget on its
@@ -206,6 +215,7 @@ impl IsolatedXdgDirs {
             runtime_dir,
             socket_dir,
             mouse_trace_file,
+            agent_setup_home,
             _runtime_root: runtime_root,
         })
     }
@@ -217,7 +227,7 @@ impl IsolatedXdgDirs {
     /// own `.env("SHELL", ...)`, and these pairs are applied afterwards, so
     /// pinning here would silently overwrite that fixture. Tests that need a
     /// deterministic shell set it themselves.
-    fn as_pairs(&self) -> [(&'static str, &Path); 7] {
+    fn as_pairs(&self) -> [(&'static str, &Path); 8] {
         [
             ("XDG_DATA_HOME", &self.data_home),
             ("XDG_CONFIG_HOME", &self.config_home),
@@ -243,6 +253,10 @@ impl IsolatedXdgDirs {
                 ilium_client::mouse::MOUSE_TRACE_FILE_ENV,
                 &self.mouse_trace_file,
             ),
+            // Automatic agent setup is mandatory, so without this override
+            // every smoke run rewrites the real `~/.claude/CLAUDE.md` and
+            // `~/.codex/AGENTS.md`.
+            (ilium_client::AGENT_SETUP_HOME_ENV, &self.agent_setup_home),
         ]
     }
 }
@@ -343,6 +357,13 @@ const IDLE_PANE_LABEL: &str = "cat";
 const IDLE_PANE_ARGUMENTS: &[&str] = &["findstr", "x"];
 #[cfg(windows)]
 const IDLE_PANE_LABEL: &str = "findstr x";
+/// The tree icon of a plain-shell pane in these scenarios. Pinned in the
+/// isolated config by `pin_presentation_baseline` (the compiled-in default is
+/// tunable and is asserted by `ilium-client`'s config unit tests), so the row
+/// assertions below do not move when a default glyph changes.
+const TERMINAL_ICON: &str = "\u{1f4df}";
+/// The tree icon of a board pane, pinned the same way.
+const BOARD_ICON: &str = "\u{25a6}";
 
 /// The full argument list for the one-shot subcommand that creates one idle
 /// pane, so the command and the label asserted against it cannot drift apart.
@@ -588,6 +609,68 @@ fn seed_project_config(xdg: &IsolatedXdgDirs, cwd: &Path) {
         .expect("suppress setup offers in unrelated smoke scenarios");
 }
 
+/// The smoke scenarios verify behaviour, not the fresh-install look, and many
+/// of them locate rows by text or click fixed columns. So they run on a fixed
+/// presentation baseline (text agent identifiers, full motion, the 32/64
+/// focus-dependent panel) instead of the tunable compiled-in defaults, and keep
+/// the boot-time AI restructure off so no scenario makes a provider call. The
+/// defaults themselves are pinned by `ilium-client`'s config unit tests.
+fn pin_presentation_baseline(ilium_config_dir: &Path) -> std::io::Result<()> {
+    use ilium_client::config::{
+        AgentIdentifierMode, LeftPanelSizingMode, LeftPanelSizingSettings, MotionLevel,
+    };
+    let mut config = ilium_client::config::load(ilium_config_dir).map_err(std::io::Error::other)?;
+    config.ui.agent_identifiers.mode = AgentIdentifierMode::FullName;
+    config.ui.motion_level = MotionLevel::Full;
+    config.ui.left_panel_sizing = LeftPanelSizingSettings {
+        mode: LeftPanelSizingMode::FocusDependent,
+        fixed_width: 32,
+        unfocused_width: 32,
+        focused_width: 64,
+        minimum_terminal_width: 120,
+    };
+    config.triggers.startup_complete.clear();
+    // The Titles scenario selects Labeling and Summarization in turn, so it
+    // starts from the style that is not the default.
+    let mut inference = serde_json::to_value(&config.inference).map_err(std::io::Error::other)?;
+    inference["title_style"] = serde_json::json!("summarization");
+    config.inference = serde_json::from_value(inference).map_err(std::io::Error::other)?;
+    config.ui.icons.set(
+        ilium_client::icon_settings::IconTarget::Terminal,
+        TERMINAL_ICON.to_string(),
+    );
+    config.ui.icons.set(
+        ilium_client::icon_settings::IconTarget::Board,
+        BOARD_ICON.to_string(),
+    );
+    config.kanban_board = ilium_client::config::KanbanBoardSettings {
+        card_preview_lines: 3,
+        minimum_column_width: 20,
+    };
+    ilium_client::config::save_kanban_board_settings(ilium_config_dir, &config.kanban_board)
+        .map_err(std::io::Error::other)?;
+    ilium_client::config::save_ui_settings(ilium_config_dir, &config.ui)
+        .map_err(std::io::Error::other)?;
+    ilium_client::config::save_trigger_settings(ilium_config_dir, &config.triggers)
+        .map_err(std::io::Error::other)?;
+    ilium_client::config::save_inference_settings(ilium_config_dir, &config.inference)
+        .map_err(std::io::Error::other)
+}
+
+/// Loads the isolated config, lets `change` edit its `[ui]` table, and saves
+/// it back, so a scenario's setting merges into the baseline table instead of
+/// declaring a second `[ui]` table.
+fn update_isolated_ui_settings(
+    xdg: &IsolatedXdgDirs,
+    change: impl FnOnce(&mut ilium_client::config::UiSettings),
+) {
+    let mut config =
+        ilium_client::config::load(&xdg.ilium_config_dir).expect("read the isolated client config");
+    change(&mut config.ui);
+    ilium_client::config::save_ui_settings(&xdg.ilium_config_dir, &config.ui)
+        .expect("write the isolated ui settings");
+}
+
 /// Writes the user-wide client config inside this test's isolated XDG root,
 /// proving the TUI reads a non-default shortcut base through the real config
 /// path rather than only exercising an in-memory unit-test value.
@@ -609,19 +692,7 @@ fn seed_keyboard_config(xdg: &IsolatedXdgDirs) {
 /// Enables only the row-management controls in smoke scenarios that assert
 /// direct rename/reorder mouse gestures. The product default remains off.
 fn seed_tree_row_management_controls(xdg: &IsolatedXdgDirs) {
-    let ilium_config_dir = xdg.config_home.join("ilium");
-    std::fs::create_dir_all(&ilium_config_dir).expect("create isolated ilium config dir");
-    let config_path = ilium_config_dir.join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let separator = (!existing.is_empty() && !existing.ends_with('\n')).then_some("\n");
-    std::fs::write(
-        config_path,
-        format!(
-            "{existing}{}[ui]\nshow_tree_row_management_controls = true\n",
-            separator.unwrap_or_default()
-        ),
-    )
-    .expect("write isolated row-management config");
+    update_isolated_ui_settings(xdg, |ui| ui.show_tree_row_management_controls = true);
 }
 
 /// Enables the otherwise opt-in agent-debug surface for an isolated client
@@ -633,9 +704,10 @@ fn seed_agent_debug_config(xdg: &IsolatedXdgDirs) {
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     std::fs::write(
         config_path,
-        format!("{existing}\n[debug]\nfile_logging_enabled = true\n\n[detection]\nworking_poll_seconds = 1\n\n[ui]\nagent_debug_menu_enabled = true\n"),
+        format!("{existing}\n[debug]\nfile_logging_enabled = true\n\n[detection]\nworking_poll_seconds = 1\n"),
     )
     .expect("write isolated agent-debug config");
+    update_isolated_ui_settings(xdg, |ui| ui.agent_debug_menu_enabled = true);
 }
 
 /// Finds the timestamped private process log that contains this test's exact
@@ -950,7 +1022,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let pane_listed = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains(IDLE_PANE_LABEL) && screen.contains("📟")
+            screen.contains(IDLE_PANE_LABEL) && screen.contains(TERMINAL_ICON)
         },
         WAIT_TIMEOUT,
     )
@@ -1120,8 +1192,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the final PTY-rendered action strip, not only its in-memory TestBackend
     // buffer: every action must remain visible, ordered, and separated after
     // crossterm writes it to a vt100 terminal surface.
-    let terminal_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", IDLE_PANE_LABEL]));
+    let terminal_rows = tui
+        .with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, IDLE_PANE_LABEL]));
     assert_eq!(
         terminal_rows.len(),
         1,
@@ -1345,8 +1417,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected Help to close before opening Settings"
     );
-    tui.write(b"\x02S")
-        .expect("opening Settings with Ctrl+B then S");
+    tui.write(b"\x02:")
+        .expect("opening Settings with Ctrl+B then :");
     let settings_shown = wait_until(
         || tui.screen_text().contains("\u{2699} Settings"),
         WAIT_TIMEOUT,
@@ -2117,7 +2189,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
 
     // The project and its default group are restored expanded, so select the
     // default group directly before opening the split dialog.
-    tui.write(b"\x01t").expect("focus tree");
+    tui.write(b"\x02t").expect("focus tree");
     tui.write(b"\x1b[B").expect("select default group");
     let both_fixture_panes = wait_until(
         || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
@@ -2129,7 +2201,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         "two fixture panes did not render in the tree: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x01W").expect("open split orientation dialog");
+    tui.write(b"\x02\"").expect("open split orientation dialog");
     let orientation_dialog = wait_until(
         || {
             let screen = tui.screen_text();
@@ -2194,8 +2266,8 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         "split child rows did not render: {:?}",
         tui.screen_text()
     );
-    let split_child_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", IDLE_PANE_LABEL]));
+    let split_child_rows = tui
+        .with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, IDLE_PANE_LABEL]));
     assert_eq!(split_child_rows.len(), 2, "expected two split child rows");
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[0]))
         .expect("focus first split child");
@@ -2207,7 +2279,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     let first_routed = wait_until(|| tui.screen_text().contains("left-route"), WAIT_TIMEOUT).await;
     assert!(first_routed, "first split child did not receive input");
 
-    tui.write(b"\x01t").expect("return focus to split tree");
+    tui.write(b"\x02t").expect("return focus to split tree");
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[1]))
         .expect("focus second split child");
     tui.write(&sgr_mouse_up(8, split_child_rows[1]))
@@ -2643,7 +2715,7 @@ fn sgr_mouse_move(column: u16, row: u16) -> Vec<u8> {
 /// `ilium_client::tree_ui`'s `apply_recent_pulse`). The flash must fade once
 /// its window elapses, including when several panes are created in one burst.
 ///
-/// `Ctrl+A c` (`ilium_client::keymap::Action::NewTerminal`) drives exactly
+/// `Ctrl+B c` (`ilium_client::keymap::Action::NewTerminal`) drives exactly
 /// the same `App::action_new_terminal` the tree panel's "new shell"
 /// toolbar button (`TreeToolbarAction::Shell`) calls -- the pulse itself
 /// lives entirely downstream of that call, in `render_cache`/`tree_ui`, so
@@ -2688,10 +2760,10 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // between, so both `NewPane` requests are in flight (and very likely
     // land in the same or an immediately following tree snapshot) before
     // either pane's flash window has a chance to elapse.
-    tui.write(b"\x01c")
-        .expect("writing Ctrl+A then c (NewTerminal) once");
-    tui.write(b"\x01c")
-        .expect("writing Ctrl+A then c (NewTerminal) again");
+    tui.write(b"\x02c")
+        .expect("writing Ctrl+B then c (NewTerminal) once");
+    tui.write(b"\x02c")
+        .expect("writing Ctrl+B then c (NewTerminal) again");
 
     // Both requests create their pane under the tree's default group
     // (freshly created server-side by the first request, since this
@@ -2709,8 +2781,8 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 
     // The restored project/default hierarchy is already expanded, so select
     // the default group without toggling it closed.
-    tui.write(b"\x01t")
-        .expect("writing Ctrl+A then t (FocusTree)");
+    tui.write(b"\x02t")
+        .expect("writing Ctrl+B then t (FocusTree)");
     tui.write(b"\x1b[B").expect("writing Down arrow");
 
     // Wait for the spatial insertion transition itself to settle, not merely
@@ -2718,7 +2790,11 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // moving right. The creation pulse starts only after this condition can
     // become true, which pins the requested slide-then-blink sequence.
     let both_panes_listed = wait_until(
-        || tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]).len() == 2),
+        || {
+            tui.with_screen(|screen| {
+                rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 2
+            })
+        },
         WAIT_TIMEOUT,
     )
     .await;
@@ -2728,10 +2804,12 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
 
-    // A `PlainShell` pane row is `📟` plus either an empty activity slot or
-    // its event-driven Angular frame, followed by the title. Match those
-    // stable ordered fields rather than assuming the activity slot is idle.
-    let rows = tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]));
+    // A `PlainShell` pane row is the terminal icon plus either an empty
+    // activity slot or its event-driven Angular frame, followed by the title.
+    // Match those stable ordered fields rather than assuming the activity slot
+    // is idle.
+    let rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]));
     assert_eq!(
         rows.len(),
         2,
@@ -2798,7 +2876,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("select the populated default group");
     tui.write(&sgr_mouse_up(8, default_row))
         .expect("release the populated default group click");
-    tui.write(b"\x01x")
+    tui.write(b"\x02x")
         .expect("open close confirmation for the populated default group");
     assert!(
         wait_until(
@@ -2841,7 +2919,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 2
+                    rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 2
                 })
             },
             WAIT_TIMEOUT,
@@ -2857,7 +2935,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // left. Two names plus only one settled fixed-width label distinguishes
     // that exit frame from both the pre-close and post-transition states.
     let first_pane_row = tui.with_screen(|screen| {
-        rows_containing_in_order(screen, &["📟", "shell"])
+        rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"])
             .first()
             .copied()
     });
@@ -2866,13 +2944,13 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("select the first pane for closing");
     tui.write(&sgr_mouse_up(8, first_pane_row))
         .expect("release first pane selection click");
-    tui.write(b"\x01x")
-        .expect("writing Ctrl+A then x (ClosePane)");
+    tui.write(b"\x02x")
+        .expect("writing Ctrl+B then x (ClosePane)");
     let removal_motion_observed = wait_for_transient_frame(
         || {
             tui.screen_text().matches("shell").count() >= 3
                 && tui.with_screen(|screen| {
-                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 1
+                    rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 1
                 })
         },
         Duration::from_millis(500),
@@ -2888,7 +2966,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
             .expect("tree-entry transition duration should fit u64");
     tokio::time::sleep(Duration::from_millis(transition_duration_ms + 100)).await;
     let remaining_pane_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]).len());
+        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len());
     assert_eq!(
         remaining_pane_rows,
         1,
@@ -2920,7 +2998,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         .expect("select the final populated default group");
     tui.write(&sgr_mouse_up(8, default_row))
         .expect("release the final populated default group click");
-    tui.write(b"\x01x")
+    tui.write(b"\x02x")
         .expect("open close confirmation for the final populated group");
     assert!(
         wait_until(|| tui.screen_text().contains("Keep open"), WAIT_TIMEOUT).await,
@@ -2939,7 +3017,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
             || {
                 !tui.screen_text().contains("Keep open")
                     && tui.with_screen(|screen| {
-                        rows_containing_in_order(screen, &["📟", "shell"]).is_empty()
+                        rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).is_empty()
                     })
             },
             WAIT_TIMEOUT,
@@ -3047,7 +3125,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         "expected initial TUI frame, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x01e").expect("open editor file picker");
+    tui.write(b"\x02e").expect("open editor file picker");
     assert!(
         wait_until(|| tui.screen_text().contains("task.txt"), WAIT_TIMEOUT).await,
         "expected task.txt in file picker, got: {:?}",
@@ -3221,7 +3299,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 
     // Open context.md as an editor, then use the general board dialog to bind
     // a board to the same existing Markdown document.
-    tui.write(b"\x01e").expect("open editor file picker");
+    tui.write(b"\x02e").expect("open editor file picker");
     assert!(
         wait_until(|| tui.screen_text().contains("context.md"), WAIT_TIMEOUT).await,
         "expected Markdown files in editor picker, got: {:?}",
@@ -3244,7 +3322,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         "expected context.md in editor, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x01B")
+    tui.write(b"\x02B")
         .expect("open context board creation dialog");
     assert!(
         wait_until(|| tui.screen_text().contains("New board"), WAIT_TIMEOUT).await,
@@ -3442,7 +3520,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     // The generic New board path must make the same adapter decision. Its
     // picker starts on `..`; context.md is first and dialog.md second, so two
     // Down events select dialog.md before Enter returns to the create form.
-    tui.write(b"\x01B").expect("open New board dialog");
+    tui.write(b"\x02B").expect("open New board dialog");
     assert!(
         wait_until(|| tui.screen_text().contains("New board"), WAIT_TIMEOUT).await,
         "expected New board dialog, got: {:?}",
@@ -3704,7 +3782,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 
     // Detach this client and attach a fresh one to the same detached server.
     // The new client must hydrate the board from the final Markdown state.
-    tui.write(b"\x01d").expect("detach first board client");
+    tui.write(b"\x02d").expect("detach first board client");
     assert!(
         wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await,
         "first board client should exit after detach"
@@ -3720,11 +3798,19 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         });
     let mut tui = PtySession::spawn(reattach_command).expect("reattach board TUI under a PTY");
     assert!(
-        wait_until(|| tui.screen_text().contains("▦    Board"), WAIT_TIMEOUT).await,
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains(BOARD_ICON) && screen.contains("Board")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
         "fresh client should list the dialog-backed board, got: {:?}",
         tui.screen_text()
     );
-    let dialog_board_rows = tui.with_screen(|screen| rows_containing(screen, "▦    Board"));
+    let dialog_board_rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &[BOARD_ICON, "Board"]));
     assert_eq!(dialog_board_rows.len(), 1);
     tui.write(&sgr_mouse_down(0, 8, dialog_board_rows[0]))
         .expect("focus dialog-backed board after reattach");
@@ -3805,7 +3891,9 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Chatroom") && screen.contains("\u{1f4df}   cat")
+                screen.contains("Chatroom")
+                    && screen.contains(TERMINAL_ICON)
+                    && screen.contains("cat")
             },
             WAIT_TIMEOUT
         )
@@ -3815,7 +3903,8 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     );
     // Locate the actual rendered row and right-click it. The popup's second
     // content row is the terminal-only scheduled-input action.
-    let terminal_rows = tui.with_screen(|screen| rows_containing(screen, "\u{1f4df}   cat"));
+    let terminal_rows =
+        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "cat"]));
     assert_eq!(
         terminal_rows.len(),
         1,
@@ -3957,13 +4046,13 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected default group in boundary-move TUI, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x01t\x1b[B\x1b[C")
+    tui.write(b"\x02t\x1b[B\x1b[C")
         .expect("focus tree, select default group, and expand it");
 
     // The selected default group is the create dialog's preselected parent.
     // Typing a name and pressing Enter therefore creates a genuinely nested
     // group through the same UI path a user follows.
-    tui.write(b"\x01gnested\r")
+    tui.write(b"\x02gnested\r")
         .expect("create nested group through the real dialog");
     assert!(
         wait_until(|| tui.screen_text().contains("nested"), WAIT_TIMEOUT).await,
@@ -3979,13 +4068,13 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .expect("press nested group row");
     tui.write(&sgr_mouse_up(8, nested_row))
         .expect("release nested group row");
-    tui.write(b"\x1b[C\x01c")
+    tui.write(b"\x1b[C\x02c")
         .expect("expand nested group and create its pane");
     assert!(
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    rows_containing_in_order(screen, &["📟", "shell"]).len() == 1
+                    rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 1
                 })
             },
             WAIT_TIMEOUT,
@@ -3997,7 +4086,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
 
     let nested_row_before = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
     let shell_row_before =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &["📟", "shell"]))[0];
+        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]))[0];
     assert!(
         nested_row_before < shell_row_before,
         "fixture pane must begin below its nested parent: {:?}",
@@ -4045,7 +4134,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
             || {
                 tui.with_screen(|screen| {
                     let nested_rows = rows_containing(screen, "nested");
-                    let shell_rows = rows_containing_in_order(screen, &["📟", "shell"]);
+                    let shell_rows = rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]);
                     nested_rows.len() == 1
                         && shell_rows.len() == 1
                         && shell_rows[0] < nested_rows[0]
@@ -4112,7 +4201,7 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
 
     // Folder pickers navigate on Enter; Tab then Enter explicitly commits
     // the current directory through the bottom action without displaying files.
-    tui.write(b"\x01f").expect("open folder picker");
+    tui.write(b"\x02F").expect("open folder picker");
     assert!(
         wait_until(|| tui.screen_text().contains("Open Folder"), WAIT_TIMEOUT).await,
         "expected folder picker, got: {:?}",
@@ -4323,10 +4412,10 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     // Exercise focus-owned expansion and contraction explicitly instead of
     // relying on pointer hover duration. Waiting past the 180 ms transition
     // ensures both endpoints reached the PTY/server journal before opening it.
-    tui.write(b"\x01t")
+    tui.write(b"\x02t")
         .expect("focus the left tree panel for resize provenance");
     tokio::time::sleep(Duration::from_millis(300)).await;
-    tui.write(b"\x01p")
+    tui.write(b"\x02P")
         .expect("return focus to the active pane for resize provenance");
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -5062,4 +5151,199 @@ async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
         tui.kill().expect("force-kill short-prompt TUI");
     }
     assert!(exited, "short-prompt TUI did not exit after cleanup");
+}
+
+/// The costs-and-stats popover on a detected agent pane's second header icon:
+/// hovering previews it, clicking pins it (revealing a close control), and
+/// the close control removes it. The fake Codex has no session transcript, so
+/// the popover must say it is still waiting for one rather than show numbers.
+#[tokio::test]
+async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
+    let temp_root = tempfile::tempdir().expect("create tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    let project_dir = temp_root.path().join("stats-popover-project");
+    let fixture_directory = temp_root.path().join("fixture-bin");
+    std::fs::create_dir_all(&project_dir).expect("create project directory");
+    std::fs::create_dir_all(&fixture_directory).expect("create fixture directory");
+    seed_project_config(&xdg, &project_dir);
+    let fake_codex = write_change_only_fake_codex(&fixture_directory);
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+
+    let fake_codex_argument = fake_codex.to_string_lossy().to_string();
+    let new_pane_output = run_one_shot(
+        &xdg,
+        &project_dir,
+        &["new-pane", "--", &fake_codex_argument],
+    )
+    .await;
+    assert!(
+        new_pane_output.status.success(),
+        "creating fake Codex pane failed: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&new_pane_output.stdout),
+        String::from_utf8_lossy(&new_pane_output.stderr)
+    );
+
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 140)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("spawn stats-popover TUI");
+
+    assert!(
+        wait_until(
+            || {
+                tui.with_screen(|screen| {
+                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+                })
+            },
+            DETECTION_TIMEOUT,
+        )
+        .await,
+        "expected a detected Codex row.\n{}\nscreen: {:?}",
+        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+        tui.screen_text()
+    );
+    let agent_row =
+        tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60))[0];
+    tui.write(&sgr_mouse_down(0, 8, agent_row))
+        .expect("select the detected Codex row");
+    tui.write(&sgr_mouse_up(8, agent_row))
+        .expect("release the detected Codex row");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Cogitating (esc to interrupt)"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the fake Codex terminal, got: {:?}",
+        tui.screen_text()
+    );
+
+    // Both panels draw an "≡ ● ·" cluster on the top border; the agent pane's
+    // is the right-most one, and its big dot is two cells past the hamburger.
+    // The layout animates when the pointer crosses the tree, so the cell is
+    // re-located from the live screen before every use.
+    let locate_icon = |tui: &PtySession| -> (u16, u16) {
+        tui.with_screen(|screen| {
+            let columns = screen.size().1;
+            let mut found = None;
+            for column in 0..columns {
+                if screen
+                    .cell(0, column)
+                    .is_some_and(|cell| cell.contents() == "≡")
+                {
+                    found = Some((column + 2, 0));
+                }
+            }
+            found.expect("the pane header shows the icon cluster")
+        })
+    };
+    let (icon_column, icon_row) = locate_icon(&tui);
+    assert!(
+        tui.with_screen(|screen| screen
+            .cell(icon_row, icon_column)
+            .is_some_and(|cell| cell.contents() == "●")),
+        "the second icon cell must hold the big dot"
+    );
+
+    // Hover previews the popover and says how to pin it.
+    tui.write(&sgr_mouse_move(icon_column, icon_row))
+        .expect("hover the second header icon");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Costs & stats"), WAIT_TIMEOUT).await,
+        "hovering the icon should preview the popover: {:?}",
+        tui.screen_text()
+    );
+    let hovered = tui.screen_text();
+    assert!(
+        hovered.contains("Waiting for the agent's session"),
+        "{hovered}"
+    );
+    assert!(hovered.contains("click ● to pin"), "{hovered}");
+    assert!(
+        !hovered.contains("✕ close "),
+        "a preview has no close control"
+    );
+
+    // Leaving the icon and popover dismisses the preview.
+    tui.write(&sgr_mouse_move(icon_column + 60, 42))
+        .expect("move away from the popover");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("Costs & stats"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "moving away should dismiss the preview: {:?}",
+        tui.screen_text()
+    );
+
+    // Clicking pins it, and it survives the pointer moving away.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let (icon_column, icon_row) = locate_icon(&tui);
+    tui.write(&sgr_mouse_down(0, icon_column, icon_row))
+        .expect("click the second header icon");
+    tui.write(&sgr_mouse_up(icon_column, icon_row))
+        .expect("release the second header icon");
+    assert!(
+        wait_until(|| tui.screen_text().contains("✕ close "), WAIT_TIMEOUT).await,
+        "a pinned popover shows its close control: icon=({icon_column},{icon_row}) trace={:?} top={:?}",
+        std::fs::read_to_string(&xdg.mouse_trace_file).unwrap_or_default(),
+        tui.screen_text().lines().take(4).collect::<Vec<_>>()
+    );
+    tui.write(&sgr_mouse_move(icon_column + 60, 42))
+        .expect("wander away from the pinned popover");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        tui.screen_text().contains("Costs & stats"),
+        "a pinned popover must stay open: {:?}",
+        tui.screen_text()
+    );
+
+    // Tabs are clickable, and the close control removes the popover.
+    let (tokens_column, tokens_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Tokens").first()?;
+            Some((column_of_text_in_row(screen, row, "Tokens")?, row))
+        })
+        .expect("the Tokens tab is drawn");
+    tui.write(&sgr_mouse_down(0, tokens_column + 1, tokens_row))
+        .expect("click the Tokens tab");
+    tui.write(&sgr_mouse_up(tokens_column + 1, tokens_row))
+        .expect("release the Tokens tab");
+    let (close_column, close_row) = tui
+        .with_screen(|screen| first_cell_containing(screen, "✕"))
+        .expect("the close control is drawn");
+    tui.write(&sgr_mouse_down(0, close_column, close_row))
+        .expect("click the close control");
+    tui.write(&sgr_mouse_up(close_column, close_row))
+        .expect("release the close control");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("Costs & stats"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the close control should remove the popover: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill-session should succeed");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill stats-popover TUI");
+    }
+    assert!(exited, "stats-popover TUI did not exit after cleanup");
 }

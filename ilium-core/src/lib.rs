@@ -167,6 +167,21 @@ pub struct PaneProgress {
     pub report: ProgressTaskReport,
     pub monitor_health: ProgressMonitorHealth,
     pub last_observed_unix_millis: u64,
+    /// Whether a human has seen this monitor's outcome. Meaningful only once
+    /// the task is terminal or observation has failed; it is the task-result
+    /// counterpart of an agent's unread `Done` and is cleared by the same
+    /// acknowledgement (pane focus or typed input), never by a PTY delivery.
+    #[serde(default)]
+    pub attention: ProgressAttention,
+}
+
+/// Unread/seen state of a terminal task result or a failed monitor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressAttention {
+    #[default]
+    Unread,
+    Acknowledged,
 }
 
 impl PaneProgress {
@@ -180,9 +195,22 @@ impl PaneProgress {
             report,
             monitor_health: ProgressMonitorHealth::Healthy,
             last_observed_unix_millis,
+            attention: ProgressAttention::Unread,
         };
         progress.validate()?;
         Ok(progress)
+    }
+
+    /// A monitor that still observes a task which has not finished: the
+    /// state in which an idle agent is parked rather than finished.
+    pub const fn is_live(&self) -> bool {
+        !self.is_terminal() && !self.monitor_health.is_failed()
+    }
+
+    /// True when the outcome (task result or lost observation) exists and no
+    /// human has acknowledged it yet.
+    pub fn has_unread_outcome(&self) -> bool {
+        !self.is_live() && self.attention == ProgressAttention::Unread
     }
 
     pub fn validate(&self) -> Result<(), ProgressValidationError> {
@@ -652,7 +680,7 @@ pub enum AgentActivity {
 /// independent from [`AgentActivity`]: an agent can be working while a goal is
 /// paused or blocked, and a reached goal remains useful context after the
 /// agent becomes idle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GoalState {
     Active,
     Paused,
@@ -675,6 +703,150 @@ pub enum PaneStatus {
     Editor { dirty: bool },
     /// A client-local kanban board backed by a user-selected path.
     Board,
+}
+
+/// Output liveness of a plain shell. Only the client observes raw output
+/// edges, so callers without that knowledge pass `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShellOutputPhase {
+    Fast,
+    Slow,
+}
+
+/// Number of fill steps a running task's progress glyph distinguishes above
+/// zero. `0` is reserved for "nothing done yet" so an empty bar stays visible.
+pub const TASK_PROGRESS_BUCKETS: u8 = 12;
+
+/// The presentation-relevant state of a pane's progress monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TaskSignal {
+    Pending,
+    Running { bucket: u8, degraded: bool },
+    Done { unread: bool },
+    Error { unread: bool },
+    MonitorFailed { unread: bool },
+}
+
+impl TaskSignal {
+    pub fn from_progress(progress: &PaneProgress) -> Self {
+        let unread = progress.attention == ProgressAttention::Unread;
+        match (progress.report.status, progress.monitor_health.is_failed()) {
+            (ProgressTaskStatus::Done, _) => Self::Done { unread },
+            (ProgressTaskStatus::Error, _) => Self::Error { unread },
+            (_, true) => Self::MonitorFailed { unread },
+            (ProgressTaskStatus::NotStartedYet, false) => Self::Pending,
+            (ProgressTaskStatus::Running, false) => Self::Running {
+                bucket: task_progress_bucket(progress.report.percent),
+                degraded: matches!(
+                    progress.monitor_health,
+                    ProgressMonitorHealth::Degraded { .. }
+                ),
+            },
+        }
+    }
+}
+
+/// Maps a percentage to `0..=TASK_PROGRESS_BUCKETS`. Exactly zero is bucket
+/// 0; any started work shows at least one step, and only 100 fills the bar.
+pub fn task_progress_bucket(percent: f32) -> u8 {
+    if !percent.is_finite() || percent <= 0.0 {
+        return 0;
+    }
+    let step = 100.0 / f32::from(TASK_PROGRESS_BUCKETS);
+    // Truncation is the intent after `ceil`; the clamp bounds the result.
+    ((percent / step).ceil() as u8).clamp(1, TASK_PROGRESS_BUCKETS)
+}
+
+/// The long-term slot: what this pane is committed to beyond the current
+/// turn. A provider goal always owns it when one exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObjectiveSignal {
+    None,
+    Goal(GoalState),
+    Task(TaskSignal),
+    ScheduledInput,
+}
+
+/// The right-now slot: what the process in this pane is doing at this
+/// moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NowSignal {
+    None,
+    NeedsApproval,
+    Working,
+    WaitingSubagents,
+    Settling,
+    /// Idle while a live progress monitor watches its task: asleep until
+    /// Ilium delivers the result, not finished.
+    Parked,
+    /// Idle, and the goal already owns the long-term slot, so the monitored
+    /// task (what the agent is waiting on, or its unread outcome) shows here.
+    Task(TaskSignal),
+    FinishedUnread,
+    Idle,
+    ShellOutput(ShellOutputPhase),
+}
+
+/// Both state slots of one sidebar row. Identity is rendered separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PaneSignals {
+    pub objective: ObjectiveSignal,
+    pub now: NowSignal,
+}
+
+/// The single projection from server-owned pane facts to the two sidebar
+/// state slots. It is pure so the server (sounds, notifications) and every
+/// client (rendering, tooltips) derive identical answers from the same facts.
+///
+/// Long-term slot: goal, else the monitored task, else a scheduled input.
+/// Now slot: the agent's turn; while the turn is idle a live monitor makes
+/// the agent parked (shown as the task itself when the goal occupies the
+/// long-term slot), and an unread task outcome hidden by the goal surfaces
+/// before the ordinary finished/idle markers.
+pub fn project_pane_signals(
+    status: &PaneStatus,
+    progress: Option<&PaneProgress>,
+    has_scheduled_input: bool,
+    shell_output: Option<ShellOutputPhase>,
+) -> PaneSignals {
+    let task = progress.map(TaskSignal::from_progress);
+    let unattached_objective = match (task, has_scheduled_input) {
+        (Some(task), _) => ObjectiveSignal::Task(task),
+        (None, true) => ObjectiveSignal::ScheduledInput,
+        (None, false) => ObjectiveSignal::None,
+    };
+    let (activity, goal) = match status {
+        PaneStatus::Agent(_, activity) => (*activity, None),
+        PaneStatus::AgentWithGoal(_, activity, goal) => (*activity, Some(*goal)),
+        PaneStatus::PlainShell => {
+            return PaneSignals {
+                objective: unattached_objective,
+                now: shell_output.map_or(NowSignal::None, NowSignal::ShellOutput),
+            };
+        }
+        PaneStatus::Editor { .. } | PaneStatus::Board => {
+            return PaneSignals {
+                objective: ObjectiveSignal::None,
+                now: NowSignal::None,
+            };
+        }
+    };
+    let objective = goal.map_or(unattached_objective, ObjectiveSignal::Goal);
+    let is_monitor_live = progress.is_some_and(PaneProgress::is_live);
+    let has_unread_outcome = progress.is_some_and(PaneProgress::has_unread_outcome);
+    let now = match activity {
+        AgentActivity::WaitingApproval => NowSignal::NeedsApproval,
+        AgentActivity::Working => NowSignal::Working,
+        AgentActivity::WaitingBackground => NowSignal::WaitingSubagents,
+        AgentActivity::BackgroundTaskStillRunning => NowSignal::Settling,
+        AgentActivity::Done | AgentActivity::Idle => match (task, goal) {
+            (Some(task), Some(_)) if is_monitor_live || has_unread_outcome => NowSignal::Task(task),
+            (Some(_), None) if is_monitor_live => NowSignal::Parked,
+            _ if activity == AgentActivity::Done => NowSignal::FinishedUnread,
+            _ => NowSignal::Idle,
+        },
+    };
+    PaneSignals { objective, now }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2777,6 +2949,27 @@ impl Tree {
             }
             NodeKind::Container(_) | NodeKind::Folder { .. } => Err(TreeError::NotAPane(id)),
         }
+    }
+
+    /// Marks a pane's unread task outcome (terminal result or failed
+    /// monitor) as seen. Returns the updated progress only when something
+    /// changed, so callers broadcast exactly one event per real transition.
+    /// A still-live monitor is never touched: there is no outcome to read.
+    pub fn acknowledge_progress_outcome(
+        &mut self,
+        id: NodeId,
+    ) -> Result<Option<PaneProgress>, TreeError> {
+        let NodeKind::Pane { progress, .. } = &mut self.get_mut(id)?.kind else {
+            return Err(TreeError::NotAPane(id));
+        };
+        let Some(progress) = progress.as_deref_mut() else {
+            return Ok(None);
+        };
+        if !progress.has_unread_outcome() {
+            return Ok(None);
+        }
+        progress.attention = ProgressAttention::Acknowledged;
+        Ok(Some(progress.clone()))
     }
 
     /// Acknowledges that the user has seen a completed agent turn. Only
@@ -6056,5 +6249,152 @@ mod tests {
             tree.panes_eligible_for_update(first_idle_pane),
             vec![first_idle_pane]
         );
+    }
+}
+
+#[cfg(test)]
+mod pane_signal_tests {
+    use super::*;
+
+    fn progress(
+        status: ProgressTaskStatus,
+        percent: f32,
+        health: ProgressMonitorHealth,
+        attention: ProgressAttention,
+    ) -> PaneProgress {
+        let mut progress = PaneProgress::new(
+            3,
+            ProgressTaskReport::new(
+                "job".to_string(),
+                status,
+                percent,
+                String::new(),
+                (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
+            )
+            .unwrap(),
+            1,
+        )
+        .unwrap();
+        progress.monitor_health = health;
+        progress.attention = attention;
+        progress
+    }
+
+    fn running(percent: f32) -> PaneProgress {
+        progress(
+            ProgressTaskStatus::Running,
+            percent,
+            ProgressMonitorHealth::Healthy,
+            ProgressAttention::Unread,
+        )
+    }
+
+    fn done(attention: ProgressAttention) -> PaneProgress {
+        progress(
+            ProgressTaskStatus::Done,
+            100.0,
+            ProgressMonitorHealth::Healthy,
+            attention,
+        )
+    }
+
+    #[test]
+    fn bucket_boundaries_keep_zero_distinct_and_only_full_fills_the_bar() {
+        assert_eq!(task_progress_bucket(0.0), 0);
+        assert_eq!(task_progress_bucket(0.1), 1);
+        assert_eq!(task_progress_bucket(8.33), 1);
+        assert_eq!(task_progress_bucket(8.34), 2);
+        assert_eq!(task_progress_bucket(99.9), 12);
+        assert_eq!(task_progress_bucket(100.0), 12);
+        assert_eq!(task_progress_bucket(f32::NAN), 0);
+    }
+
+    #[test]
+    fn goal_always_owns_the_long_term_slot_even_while_a_task_runs() {
+        let status =
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working, GoalState::Active);
+        let signals = project_pane_signals(&status, Some(&running(42.0)), false, None);
+        assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Active));
+        assert_eq!(signals.now, NowSignal::Working);
+    }
+
+    #[test]
+    fn idle_agent_with_live_monitor_is_parked_not_finished() {
+        let without_goal = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done);
+        let signals = project_pane_signals(&without_goal, Some(&running(84.0)), false, None);
+        assert_eq!(
+            signals.objective,
+            ObjectiveSignal::Task(TaskSignal::Running {
+                bucket: 11,
+                degraded: false
+            })
+        );
+        assert_eq!(signals.now, NowSignal::Parked);
+
+        let with_goal =
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Paused);
+        let signals = project_pane_signals(&with_goal, Some(&running(84.0)), false, None);
+        assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Paused));
+        assert!(matches!(
+            signals.now,
+            NowSignal::Task(TaskSignal::Running { bucket: 11, .. })
+        ));
+    }
+
+    #[test]
+    fn unread_outcome_hidden_by_a_goal_surfaces_in_the_now_slot_until_seen() {
+        let status =
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Active);
+        let unread =
+            project_pane_signals(&status, Some(&done(ProgressAttention::Unread)), false, None);
+        assert_eq!(
+            unread.now,
+            NowSignal::Task(TaskSignal::Done { unread: true })
+        );
+        let seen = project_pane_signals(
+            &status,
+            Some(&done(ProgressAttention::Acknowledged)),
+            false,
+            None,
+        );
+        assert_eq!(seen.now, NowSignal::Idle);
+    }
+
+    #[test]
+    fn scheduled_input_never_replaces_the_turn_and_yields_to_goals_and_tasks() {
+        let status = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
+        let signals = project_pane_signals(&status, None, true, None);
+        assert_eq!(signals.objective, ObjectiveSignal::ScheduledInput);
+        assert_eq!(signals.now, NowSignal::Working);
+        let with_task = project_pane_signals(&status, Some(&running(10.0)), true, None);
+        assert!(matches!(with_task.objective, ObjectiveSignal::Task(_)));
+    }
+
+    #[test]
+    fn plain_shell_shows_its_task_and_output_liveness() {
+        let signals = project_pane_signals(
+            &PaneStatus::PlainShell,
+            Some(&running(50.0)),
+            false,
+            Some(ShellOutputPhase::Fast),
+        );
+        assert!(matches!(signals.objective, ObjectiveSignal::Task(_)));
+        assert_eq!(signals.now, NowSignal::ShellOutput(ShellOutputPhase::Fast));
+    }
+
+    #[test]
+    fn acknowledging_an_outcome_is_idempotent_and_ignores_live_monitors() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_progress(pane, Some(running(5.0))).unwrap();
+        assert_eq!(tree.acknowledge_progress_outcome(pane).unwrap(), None);
+        tree.set_pane_progress(pane, Some(done(ProgressAttention::Unread)))
+            .unwrap();
+        let acknowledged = tree.acknowledge_progress_outcome(pane).unwrap().unwrap();
+        assert_eq!(acknowledged.attention, ProgressAttention::Acknowledged);
+        assert_eq!(tree.acknowledge_progress_outcome(pane).unwrap(), None);
     }
 }

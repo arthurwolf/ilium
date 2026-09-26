@@ -322,6 +322,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    // The costs-and-stats popover floats over the pane surface, so it claims
+    // its own pointer events before the tree or the pane can see them.
+    if app.handle_stats_popover_mouse(mouse, position) {
+        return;
+    }
+
     if app.layout.tree_area.contains(position) {
         handle_tree_mouse(app, mouse, position);
         return;
@@ -895,6 +901,7 @@ const TREE_DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 fn update_tree_hover(app: &mut App, position: Position) {
     let hit = app.tree_node_at(position);
     app.set_hovered_tree_node(hit);
+    app.hovered_status_slot = app.tree_status_slot_at(position);
     let toolbar_action = tree_ui::toolbar_action_at(app.layout.tree_area, position);
     let toolbar_hovered = tree_ui::toolbar_area(app.layout.tree_area).contains(position);
     app.set_tree_toolbar_hover(toolbar_hovered, toolbar_action);

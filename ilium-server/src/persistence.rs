@@ -41,7 +41,6 @@ use ilium_agent_session::TranscriptLocator;
 use ilium_core::{
     AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, PaneProgress, Tree,
 };
-use ilium_ipc::ProgressGoalPolicy;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
@@ -139,7 +138,7 @@ pub struct PaneSnapshot {
 ///
 /// Only `Queued` is safe to retry after a server restart. `Attempted`,
 /// `DeliveredToPty`, and `Uncertain` may already have reached the agent, so
-/// replaying any of them could duplicate a result or resume a goal twice.
+/// replaying any of them could duplicate a result.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PersistedProgressDeliveryState {
@@ -167,14 +166,9 @@ pub(crate) struct PersistedProgressMonitor {
     pub pane_id: NodeId,
     pub command: String,
     pub interval_seconds: u64,
-    pub goal_policy: ProgressGoalPolicy,
     pub latest_progress: PaneProgress,
     #[serde(default)]
-    pub goal_resume_armed: bool,
-    #[serde(default)]
     pub result_delivery: PersistedProgressDeliveryState,
-    #[serde(default)]
-    pub goal_resume_delivery: PersistedProgressDeliveryState,
 }
 
 impl PersistedProgressMonitor {
@@ -207,19 +201,6 @@ impl PersistedProgressMonitor {
         };
         registration.validate()?;
         Ok(registration)
-    }
-
-    /// Goal ownership cannot be reconstructed from a snapshot alone. A
-    /// restored record may retain that the user requested pause/resume for
-    /// diagnostics, but automatic resume is always disarmed on boot.
-    pub(crate) fn disarm_ambiguous_goal_resume(&mut self) {
-        self.goal_resume_armed = false;
-        if !matches!(
-            self.goal_resume_delivery,
-            PersistedProgressDeliveryState::NotQueued
-        ) {
-            self.goal_resume_delivery = PersistedProgressDeliveryState::Uncertain;
-        }
     }
 }
 
@@ -828,7 +809,6 @@ mod tests {
             pane_id,
             command: "/usr/local/bin/progress-probe".to_string(),
             interval_seconds: 15,
-            goal_policy: ProgressGoalPolicy::PauseAndResume,
             latest_progress: PaneProgress::new(
                 41,
                 ProgressTaskReport::new(
@@ -842,9 +822,7 @@ mod tests {
                 1_700_000_000_000,
             )
             .unwrap(),
-            goal_resume_armed: true,
             result_delivery: PersistedProgressDeliveryState::NotQueued,
-            goal_resume_delivery: PersistedProgressDeliveryState::Queued,
         }
     }
 
@@ -994,21 +972,37 @@ mod tests {
             .and_then(|monitors| monitors.first_mut())
             .and_then(serde_json::Value::as_object_mut)
             .expect("fixture has one serialized progress monitor");
-        monitor.remove("goal_resume_armed");
         monitor.remove("result_delivery");
-        monitor.remove("goal_resume_delivery");
 
         let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
         let monitor = &loaded.progress_monitors[0];
-        assert!(!monitor.goal_resume_armed);
         assert_eq!(
             monitor.result_delivery,
             PersistedProgressDeliveryState::NotQueued
         );
-        assert_eq!(
-            monitor.goal_resume_delivery,
-            PersistedProgressDeliveryState::NotQueued
-        );
+    }
+
+    #[test]
+    fn snapshots_written_with_goal_policy_fields_still_load() {
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        snapshot
+            .progress_monitors
+            .push(sample_persisted_progress(pane_id));
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        let monitor = old_shape
+            .get_mut("progress_monitors")
+            .and_then(serde_json::Value::as_array_mut)
+            .and_then(|monitors| monitors.first_mut())
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("fixture has one serialized progress monitor");
+        monitor.insert("goal_policy".to_string(), "pause-and-resume".into());
+        monitor.insert("goal_resume_armed".to_string(), true.into());
+        monitor.insert("goal_resume_delivery".to_string(), "queued".into());
+
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert_eq!(loaded.progress_monitors.len(), 1);
     }
 
     #[tokio::test]
@@ -1027,20 +1021,13 @@ mod tests {
     }
 
     #[test]
-    fn restore_rewrites_generation_and_disarms_ambiguous_goal_ownership() {
-        let mut persisted = sample_persisted_progress(NodeId(17));
-        persisted.disarm_ambiguous_goal_resume();
+    fn restore_rewrites_the_monitor_generation() {
+        let persisted = sample_persisted_progress(NodeId(17));
         let restored = persisted.restored_registration(99).unwrap();
 
         assert_eq!(restored.monitor_id, 99);
         assert_eq!(restored.initial_progress.monitor_id, 99);
         assert_eq!(restored.initial_progress.report.job_id, "render-job-7");
-        assert!(!persisted.goal_resume_armed);
-        assert_eq!(
-            persisted.goal_resume_delivery,
-            PersistedProgressDeliveryState::Uncertain
-        );
-        assert!(!persisted.goal_resume_delivery.may_retry_after_restart());
     }
 
     #[test]

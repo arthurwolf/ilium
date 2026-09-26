@@ -221,9 +221,12 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
             _,
         )
     ) && matches!(
+        // Only `Done` is a finished turn. The server leaves an agent `Idle`
+        // after busy work exactly when it parked on a live progress monitor
+        // (`detection.rs`), and a parked agent has not finished anything.
         new,
-        PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done, _)
+        PaneStatus::Agent(_, AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
     ) {
         return Some(SoundEvent::AgentFinished);
     }

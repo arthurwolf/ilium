@@ -36,6 +36,7 @@ pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_toolbar;
 pub mod app;
+pub mod ascii_chart;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
@@ -82,11 +83,16 @@ pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
 pub mod session_naming;
+pub mod session_stats;
+pub mod session_stats_popover;
+pub mod session_stats_store;
+pub mod session_stats_ui;
 pub mod settings_ui;
 pub mod setup_prompt;
 pub mod smart_copy;
 pub mod smart_copy_workers;
 pub mod split_layout;
+pub mod status_icons;
 pub mod syntax;
 pub mod terminal_activity;
 pub mod terminal_context_menu;
@@ -135,6 +141,12 @@ use crate::search_workers::SearchWorkers;
 use crate::smart_copy_workers::{SmartCopyWorkerUpdate, SmartCopyWorkers};
 use crate::terminal_guard::TerminalGuard;
 use crate::trigger_execution_lease::TriggerExecutionLease;
+
+/// Overrides the home directory whose global agent instruction files
+/// (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) automatic agent setup
+/// maintains. Test harnesses point it at a temporary directory so a smoke run
+/// never rewrites the developer's real instruction files.
+pub const AGENT_SETUP_HOME_ENV: &str = "ILIUM_AGENT_SETUP_HOME";
 
 /// Everything [`run`] needs to attach to one already-running
 /// `ilium-server` session and start rendering it.
@@ -489,8 +501,11 @@ async fn run_inner(
     let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
 
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
-    app.agent_setup_home_dir =
-        directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf());
+    app.agent_setup_home_dir = std::env::var_os(AGENT_SETUP_HOME_ENV)
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf())
+        });
     app.is_agent_setup_policy_available = is_agent_setup_policy_available;
     // The one place a terminal capability query belongs: a real process with a
     // real terminal attached, once. See `App::probe_terminal_image_support`.
@@ -528,6 +543,10 @@ async fn run_inner(
     let mut connection =
         Connection::connect(&options.socket_path, options.session_name.clone()).await?;
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
+    // Tells the server this connection hosts the voice session, so
+    // `ilium voice say` can offer typed sentences to it. One-shot CLI
+    // connections never send this.
+    app.queue_request(ilium_ipc::ClientRequest::RegisterVoiceTextReceiver);
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
@@ -769,6 +788,7 @@ async fn run_inner(
             )
             .await;
             deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+            deliver_voice_text_offers(&mut app, voice_service.as_ref()).await;
         }
 
         // Raw terminal output is useful only for panes occupying this
@@ -816,6 +836,7 @@ async fn run_inner(
             )
             .await;
             deliver_voice_interactions(&mut app, voice_service.as_ref()).await;
+            deliver_voice_text_offers(&mut app, voice_service.as_ref()).await;
         }
 
         record_client_surface_change(&app, &mut last_recorded_surface);
@@ -1155,6 +1176,96 @@ async fn deliver_voice_interactions(
             ));
             break;
         }
+    }
+}
+
+/// Answers every pending `ilium voice say` offer: the sentences go into the
+/// live voice session's command queue -- the same `VoiceCommand::SendText`
+/// path the accessibility/live-protocol seam uses, so the model receives them
+/// as user turns and routes them exactly like recognised speech -- and the
+/// server is told what happened. Runs after lifecycle reconciliation, so an
+/// offer that asked to start voice finds its session (or its failure).
+async fn deliver_voice_text_offers(
+    app: &mut App,
+    voice_service: Option<&ilium_voice::VoiceService>,
+) {
+    let offers = app.take_voice_text_offers();
+    if offers.is_empty() {
+        return;
+    }
+    let commands = voice_service.map(ilium_voice::VoiceService::command_sender);
+    for offer in offers {
+        let result = voice_text_offer_result(app, commands.as_ref(), &offer).await;
+        if result.is_ok() {
+            app.record_typed_voice_text(&offer.sentences);
+        }
+        app.queue_request(ilium_ipc::ClientRequest::AnswerVoiceText {
+            request_id: offer.request_id,
+            result,
+        });
+    }
+}
+
+/// Hands one offer to the voice actor, or explains why it cannot. "Accepted"
+/// means the sentences are in the live session's queue (it may still be
+/// connecting); the provider gives no per-turn acknowledgement to wait for.
+async fn voice_text_offer_result(
+    app: &App,
+    commands: Option<&mpsc::Sender<ilium_voice::VoiceCommand>>,
+    offer: &crate::app::VoiceTextOffer,
+) -> ilium_ipc::VoiceTextResult {
+    use ilium_ipc::{VoiceTextAccepted, VoiceTextRejection, VoiceTextRejectionCode};
+
+    let Some(commands) = commands else {
+        return Err(if app.voice_settings.enabled {
+            let reason = match &app.voice_connection_state {
+                ilium_voice::VoiceConnectionState::Failed(error) => error.clone(),
+                _ => "the voice session is not running".to_owned(),
+            };
+            VoiceTextRejection::new(VoiceTextRejectionCode::VoiceUnavailable, reason)
+        } else {
+            VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceOff,
+                "voice control is off; press F8 in the Ilium client or pass --start",
+            )
+        });
+    };
+    if let ilium_voice::VoiceConnectionState::Failed(error) = &app.voice_connection_state {
+        return Err(VoiceTextRejection::new(
+            VoiceTextRejectionCode::VoiceUnavailable,
+            error.clone(),
+        ));
+    }
+    for sentence in &offer.sentences {
+        if commands
+            .send(ilium_voice::VoiceCommand::SendText(sentence.clone()))
+            .await
+            .is_err()
+        {
+            return Err(VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceUnavailable,
+                "the voice session ended before the text could be delivered",
+            ));
+        }
+    }
+    Ok(VoiceTextAccepted {
+        sentence_count: u32::try_from(offer.sentences.len()).unwrap_or(u32::MAX),
+        phase: voice_text_phase(&app.voice_connection_state),
+        started_voice: offer.started_voice,
+    })
+}
+
+fn voice_text_phase(state: &ilium_voice::VoiceConnectionState) -> ilium_ipc::VoiceTextPhase {
+    use ilium_ipc::VoiceTextPhase;
+    use ilium_voice::VoiceConnectionState;
+    match state {
+        VoiceConnectionState::Disabled
+        | VoiceConnectionState::Connecting
+        | VoiceConnectionState::Failed(_) => VoiceTextPhase::Connecting,
+        VoiceConnectionState::Listening => VoiceTextPhase::Listening,
+        VoiceConnectionState::Recording => VoiceTextPhase::Recording,
+        VoiceConnectionState::Thinking => VoiceTextPhase::Thinking,
+        VoiceConnectionState::Speaking => VoiceTextPhase::Speaking,
     }
 }
 
@@ -1840,5 +1951,157 @@ mod responsiveness_tests {
             ilium_voice::VoiceConnectionState::Disabled
         );
         assert!(app.take_voice_runtime_request().is_none());
+    }
+
+    fn voice_text_app() -> App {
+        App::new(
+            "voice-text".to_owned(),
+            std::path::PathBuf::from("/tmp/project"),
+        )
+    }
+
+    fn offer(sentences: &[&str], started_voice: bool) -> crate::app::VoiceTextOffer {
+        crate::app::VoiceTextOffer {
+            request_id: 77,
+            sentences: sentences
+                .iter()
+                .map(|sentence| (*sentence).to_owned())
+                .collect(),
+            started_voice,
+        }
+    }
+
+    #[tokio::test]
+    async fn typed_sentences_reach_a_running_session_in_order_as_send_text_commands() {
+        let mut app = voice_text_app();
+        app.voice_settings.enabled = true;
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Listening);
+        let (commands, mut received) = mpsc::channel(8);
+
+        let result = voice_text_offer_result(
+            &app,
+            Some(&commands),
+            &offer(&["open the settings", "close it"], false),
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Ok(ilium_ipc::VoiceTextAccepted {
+                sentence_count: 2,
+                phase: ilium_ipc::VoiceTextPhase::Listening,
+                started_voice: false,
+            })
+        );
+        for expected in ["open the settings", "close it"] {
+            match received.try_recv() {
+                Ok(ilium_voice::VoiceCommand::SendText(text)) => assert_eq!(text, expected),
+                other => panic!("expected SendText({expected:?}), got {other:?}"),
+            }
+        }
+        assert!(received.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn typed_sentences_are_refused_with_the_reason_when_no_session_can_take_them() {
+        use ilium_ipc::VoiceTextRejectionCode::{VoiceOff, VoiceUnavailable};
+
+        // Voice switched off.
+        let app = voice_text_app();
+        let refusal = voice_text_offer_result(&app, None, &offer(&["hi"], false))
+            .await
+            .unwrap_err();
+        assert_eq!(refusal.code, VoiceOff);
+        assert!(refusal.message.contains("--start"));
+
+        // Enabled, but the session failed to start: the failure is the reason.
+        let mut app = voice_text_app();
+        app.voice_settings.enabled = true;
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "OpenAI API key must not be empty".to_owned(),
+        ));
+        let refusal = voice_text_offer_result(&app, None, &offer(&["hi"], false))
+            .await
+            .unwrap_err();
+        assert_eq!(refusal.code, VoiceUnavailable);
+        assert!(refusal.message.contains("API key"));
+
+        // A session handle exists but its actor already ended.
+        let (commands, received) = mpsc::channel(1);
+        drop(received);
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Listening);
+        let refusal = voice_text_offer_result(&app, Some(&commands), &offer(&["hi"], false))
+            .await
+            .unwrap_err();
+        assert_eq!(refusal.code, VoiceUnavailable);
+    }
+
+    #[test]
+    fn a_start_request_switches_voice_on_only_when_it_is_off_or_failed() {
+        let mut app = voice_text_app();
+        app.receive_voice_text_offer(1, vec!["hi".to_owned()], false);
+        assert!(
+            !app.voice_settings.enabled,
+            "no --start, nothing is switched on"
+        );
+        assert!(app.take_voice_runtime_request().is_none());
+
+        app.receive_voice_text_offer(2, vec!["hi".to_owned()], true);
+        assert!(app.voice_settings.enabled);
+        assert_eq!(
+            app.take_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Start)
+        );
+
+        // Already running: --start changes nothing.
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Listening);
+        app.receive_voice_text_offer(3, vec!["hi".to_owned()], true);
+        assert!(app.take_voice_runtime_request().is_none());
+
+        // Enabled but failed: --start asks for a restart.
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "boom".to_owned(),
+        ));
+        app.receive_voice_text_offer(4, vec!["hi".to_owned()], true);
+        assert_eq!(
+            app.take_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Reconfigure)
+        );
+
+        let offers = app.take_voice_text_offers();
+        assert_eq!(
+            offers
+                .iter()
+                .map(|offer| (offer.request_id, offer.started_voice))
+                .collect::<Vec<_>>(),
+            [(1, false), (2, true), (3, false), (4, true)]
+        );
+    }
+
+    #[test]
+    fn a_server_offer_becomes_a_pending_offer_for_the_voice_owner() {
+        let mut app = voice_text_app();
+        let event = ilium_ipc::ServerEvent::VoiceTextOffered {
+            request_id: 5,
+            sentences: vec!["open the settings".to_owned()],
+            start_voice: false,
+        };
+        assert!(crate::render_cache::apply(&mut app, event).is_none());
+        assert_eq!(
+            app.take_voice_text_offers(),
+            [crate::app::VoiceTextOffer {
+                request_id: 5,
+                sentences: vec!["open the settings".to_owned()],
+                started_voice: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_typed_turn_leaves_the_same_trace_as_a_recognised_utterance() {
+        let mut app = voice_text_app();
+        app.record_typed_voice_text(&["first".to_owned(), "second".to_owned()]);
+        assert_eq!(app.voice_last_user_transcript.as_deref(), Some("second"));
+        assert_eq!(app.status_message.as_deref(), Some("Voice (typed): second"));
     }
 }

@@ -9,6 +9,8 @@
 //! text. Progress instructions carry a schema version so startup
 //! reconciliation can distinguish a current managed contract from one that
 //! Ilium must refresh. User-authored lookalike text never grants ownership.
+//! Every CLI reads the same text: progress monitoring says nothing about
+//! `/goal`, so no per-provider variant exists.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -16,6 +18,14 @@ use std::path::{Path, PathBuf};
 
 use ilium_platform::file_lock::ExclusiveFileLock;
 use regex::Regex;
+
+const CHATROOM_INSTRUCTION: &str = "If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message \"...\"` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.";
+
+const PROGRESS_INSTRUCTION: &str = r#"For every task expected to take at least three minutes inside an Ilium pane, you MUST use the Ilium progress-monitor lifecycle. Start the task first and verify that its process or job is alive. Then construct a cheap absolute-path probe which prints exactly one JSON object containing a stable non-empty `job_id`, a `status` of `not-started-yet`, `running`, `error`, or `done`, a finite `percent` from 0 through 100, and bounded `message`/`error` details. The probe runs from the Ilium server's project root and receives no pane-shell aliases or transient environment, so use absolute paths or an explicit absolute `cd`.
+
+You MUST run `ilium progress check --command '<probe>'` and confirm its JSONL validation result before registration. Then run `ilium progress set --command '<probe>' --interval-seconds <n>` and wait for Ilium's positive JSONL registration acknowledgement containing the monitor ID and accepted first report. After registration, the agent MUST NOT poll in any form: do not make repeated tool calls, run checking loops, sleep then recheck, repeatedly inspect logs or files, issue recurring status commands, or spend conversational turns checking progress. Ilium's detached server is the sole recurring poller, and it will send you a message when the task reaches `done` or `error`. You MAY perform other useful work that does not poll the task.
+
+Do not manually clear a terminal result before handling its notification. Retain the task identity, final process exit evidence, progress evidence, and failure details for verification; use `ilium progress clear --monitor-id <id>` only after the lifecycle is complete or when explicitly cancelling it."#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentFeature {
@@ -43,7 +53,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(2),
+            Self::Progress => Some(5),
         }
     }
 
@@ -60,12 +70,8 @@ impl AgentFeature {
 
     fn instruction(self) -> &'static str {
         match self {
-            Self::Chatroom => "If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message \"...\"` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.",
-            Self::Progress => r#"For every task expected to take at least three minutes inside an Ilium pane, you MUST use the Ilium progress-monitor lifecycle. Start the task first and verify that its process or job is alive. Then construct a cheap absolute-path probe which prints exactly one JSON object containing a stable non-empty `job_id`, a `status` of `not-started-yet`, `running`, `error`, or `done`, a finite `percent` from 0 through 100, and bounded `message`/`error` details. The probe runs from the Ilium server's project root and receives no pane-shell aliases or transient environment, so use absolute paths or an explicit absolute `cd`.
-
-You MUST run `ilium progress check --command '<probe>'` and confirm its JSONL validation result before registration. Then run `ilium progress set --command '<probe>' --interval-seconds <n>` and wait for Ilium's positive JSONL registration acknowledgement containing the monitor ID and accepted first report. After registration, the agent MUST NOT poll in any form: do not make repeated tool calls, run checking loops, sleep then recheck, repeatedly inspect logs or files, issue recurring status commands, or spend conversational turns checking progress. Ilium's detached server is the sole recurring poller. You MAY perform other useful work that does not poll the task.
-
-If no useful work remains and a `/goal` is active, you MUST run `ilium progress arm-goal-resume --monitor-id <id>`; Ilium will safely pause the current goal, notify the agent when the task reaches `done` or `error`, and resume only the same still-paused goal whose pause that monitor owns. If no `/goal` is active, end the turn instead of simulating a wait. After arming or ending the turn, do nothing until Ilium sends the terminal message; never consume turns merely because the task is still running. Leave terminal detection, result delivery, and owned goal resumption to Ilium. Do not manually clear a terminal result before handling its notification. Retain the task identity, final process exit evidence, progress evidence, and failure details for verification; use `ilium progress clear --monitor-id <id>` only after the lifecycle is complete or when explicitly cancelling it."#,
+            Self::Chatroom => CHATROOM_INSTRUCTION,
+            Self::Progress => PROGRESS_INSTRUCTION,
         }
     }
 
@@ -89,10 +95,7 @@ If no useful work remains and a `/goal` is active, you MUST run `ilium progress 
                 Regex::new(r"(?i)positive JSONL registration acknowledgement")
                     .expect("fixed acknowledgement regex"),
                 Regex::new(r"(?i)job_id.*status.*percent").expect("fixed report contract regex"),
-                Regex::new(r"(?i)ilium progress arm-goal-resume").expect("fixed goal-resume regex"),
-                Regex::new(r"(?i)(do nothing until Ilium|end the turn instead of)")
-                    .expect("fixed no-work waiting regex"),
-                Regex::new(r"(?i)notify the agent.*resume only")
+                Regex::new(r"(?i)send you a message when the task reaches")
                     .expect("fixed terminal-delivery regex"),
             ],
         }
@@ -571,7 +574,7 @@ mod tests {
     #[test]
     fn stale_managed_progress_copy_is_detected_and_replaced_in_place() {
         let directory = tempfile::tempdir().unwrap();
-        let target = directory.path().join("CLAUDE.md");
+        let target = directory.path().join("AGENTS.md");
         fs::write(
             &target,
             "<!-- ilium-agent-feature: progress -->\nUse ilium progress as a progress monitor and clear it when finished.\n<!-- /ilium-agent-feature: progress -->\n",
@@ -586,20 +589,79 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=2"));
+        assert!(contents.contains("ilium-agent-feature: progress version=5"));
         assert!(contents.contains("at least three minutes"));
         assert!(contents.contains("MUST NOT poll"));
         assert!(contents.contains("sole recurring poller"));
         assert!(contents.contains("ilium progress check --command"));
         assert!(contents.contains("positive JSONL registration acknowledgement"));
         assert!(contents.contains("`job_id`"));
-        assert!(contents.contains("ilium progress arm-goal-resume --monitor-id"));
         assert!(contents.contains("ilium progress set --command"));
         assert!(contents.contains("ilium progress clear"));
+        assert!(contents.contains("send you a message when the task reaches `done` or `error`"));
         assert_eq!(
             status(&target, AgentFeature::Progress).unwrap(),
             FeatureSetupStatus::Managed
         );
+    }
+
+    #[test]
+    fn progress_instruction_never_mentions_goals_pausing_or_resuming() {
+        let instruction = AgentFeature::Progress.instruction().to_lowercase();
+        for forbidden in [
+            "/goal",
+            "goal",
+            "pause",
+            "resume",
+            "stop hook",
+            "arm-goal-resume",
+            "end the turn",
+        ] {
+            assert!(
+                !instruction.contains(forbidden),
+                "progress instruction must not mention {forbidden:?}"
+            );
+        }
+        assert!(instruction.contains("must not poll"));
+    }
+
+    #[test]
+    fn every_provider_target_gets_the_same_progress_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let claude_target = directory.path().join("CLAUDE.md");
+        let codex_target = directory.path().join("AGENTS.md");
+        install(&claude_target, AgentFeature::Progress).unwrap();
+        install(&codex_target, AgentFeature::Progress).unwrap();
+        assert_eq!(
+            fs::read_to_string(&claude_target).unwrap(),
+            fs::read_to_string(&codex_target).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_agents_file_symlinked_to_claude_stays_one_stable_shared_file() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let claude_file = directory.path().join("CLAUDE.md");
+        let codex_link = directory.path().join("AGENTS.md");
+        fs::write(&claude_file, "Keep this.\n").unwrap();
+        symlink(&claude_file, &codex_link).unwrap();
+
+        install(&claude_file, AgentFeature::Progress).unwrap();
+        let contents = fs::read_to_string(&claude_file).unwrap();
+        assert!(contents.starts_with("Keep this.\n"));
+        // Both views of the one file accept it, so neither rewrites it.
+        for path in [&claude_file, &codex_link] {
+            assert_eq!(
+                status(path, AgentFeature::Progress).unwrap(),
+                FeatureSetupStatus::Managed
+            );
+        }
+        install(&codex_link, AgentFeature::Progress).unwrap();
+        assert_eq!(fs::read_to_string(&claude_file).unwrap(), contents);
+        assert!(codex_link.is_symlink());
     }
 
     #[test]
@@ -646,9 +708,8 @@ mod tests {
                 "Start the task and verify its process is alive. ",
                 "Run ilium progress check, then wait for a positive JSONL registration acknowledgement. ",
                 "The report has job_id, status, and percent. The agent MUST NOT poll; ",
-                "Ilium is the sole recurring poller. If appropriate run ",
-                "ilium progress arm-goal-resume. Ilium will notify the agent and resume only ",
-                "the owned goal. If there is no more work, do nothing until Ilium reports completion.\n",
+                "Ilium is the sole recurring poller and will send you a message when the task ",
+                "reaches done or error.\n",
             ),
         )
         .unwrap();
@@ -776,7 +837,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=2"));
+        assert!(updated.contains("version=5"));
         assert!(!updated.contains("version=99"));
     }
 

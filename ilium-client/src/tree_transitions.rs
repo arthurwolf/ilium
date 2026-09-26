@@ -14,10 +14,11 @@ use ilium_core::{NodeId, Tree};
 /// blocked behind presentation work.
 pub const TREE_ENTRY_TRANSITION_MS: u128 = 220;
 
-/// Ten terminal cells produces visible movement in both the ordinary and
-/// expanded sidebar while leaving enough of a typical label visible to retain
-/// context during the transition.
-const TREE_ENTRY_SLIDE_COLUMNS: u16 = 10;
+/// Thirteen terminal cells move a row past its fixed identity and two state
+/// slots (eight cells plus indentation), so the title itself visibly slides
+/// in both the ordinary and expanded sidebar while enough of a typical label
+/// stays visible to retain context during the transition.
+const TREE_ENTRY_SLIDE_COLUMNS: u16 = 13;
 
 /// One row's horizontal transform after easing has been sampled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

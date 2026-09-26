@@ -911,44 +911,62 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
     } else {
         let mut preview = vec![Line::from("")];
         let icons = &app.ui_settings.icons;
+        let row = |identity: IconTarget, objective: &str, now: &str, title: &str| {
+            Line::from(format!(
+                "    {} {objective} {now} {title}",
+                icons.glyph(identity)
+            ))
+        };
         preview.extend([
             Line::from(format!("{} Workspace", icons.glyph(IconTarget::Group))),
             Line::from(format!(
                 "  {} vertical build",
                 icons.glyph(IconTarget::SplitVertical)
             )),
-            Line::from(format!(
-                "    {} {} {} Claude task",
-                icons.glyph(IconTarget::Claude),
+            row(
+                IconTarget::Claude,
+                icons.glyph(IconTarget::GoalActive),
                 icons.glyph(IconTarget::Working),
-                icons.glyph(IconTarget::GoalActive)
-            )),
-            Line::from(format!(
-                "    {} {} Codex review",
-                icons.glyph(IconTarget::Codex),
-                icons.glyph(IconTarget::WaitingApproval)
-            )),
+                "goal, working",
+            ),
+            row(
+                IconTarget::Codex,
+                icons.glyph(IconTarget::GoalPaused),
+                crate::status_icons::TASK_PROGRESS_FRAMES[10],
+                "goal, parked on task",
+            ),
+            row(
+                IconTarget::Codex,
+                crate::status_icons::TASK_PROGRESS_FRAMES[5],
+                icons.glyph(IconTarget::Parked),
+                "parked on task",
+            ),
+            row(
+                IconTarget::Claude,
+                icons.glyph(IconTarget::GoalBlocked),
+                icons.glyph(IconTarget::WaitingApproval),
+                "needs approval",
+            ),
+            row(
+                IconTarget::OtherAgent,
+                icons.glyph(IconTarget::TaskDone),
+                icons.glyph(IconTarget::Done),
+                "finished, task done",
+            ),
+            row(
+                IconTarget::Antigravity,
+                icons.glyph(IconTarget::ScheduledInput),
+                icons.glyph(IconTarget::WaitingBackground),
+                "subagents, timer",
+            ),
+            row(
+                IconTarget::Terminal,
+                icons.glyph(IconTarget::MonitorFailed),
+                icons.glyph(IconTarget::Idle),
+                "shell, task lost",
+            ),
             Line::from(format!("  {} Notes", icons.glyph(IconTarget::Folder))),
             Line::from(format!("    {} README.md", icons.glyph(IconTarget::Editor))),
-            Line::from(format!(
-                "    {} Planning board",
-                icons.glyph(IconTarget::Board)
-            )),
-            Line::from(format!(
-                "  {} {} shell",
-                icons.glyph(IconTarget::Terminal),
-                icons.glyph(IconTarget::Idle)
-            )),
-            Line::from(format!(
-                "  {} {} background task",
-                icons.glyph(IconTarget::OtherAgent),
-                icons.glyph(IconTarget::WaitingBackground)
-            )),
-            Line::from(format!(
-                "  {} {} finished agent",
-                icons.glyph(IconTarget::Antigravity),
-                icons.glyph(IconTarget::Done)
-            )),
         ]);
         frame.render_widget(
             Paragraph::new(preview).block(
@@ -4533,7 +4551,7 @@ mod tests {
             .join("\n");
         assert!(recommended.contains("[GNU Screen preset] Ctrl+A"));
         assert!(recommended.contains("[tmux preset] Ctrl+B"));
-        assert!(recommended.contains("Recommended: Ctrl+A"));
+        assert!(recommended.contains("Recommended: Ctrl+B"));
         assert!(recommended.contains("Tree navigation prefix"));
         assert!(recommended.contains("[ Ctrl+B ]"));
         assert!(recommended.contains("Cycle next"));

@@ -232,6 +232,14 @@ pub fn chrome_hamburger_cell(outer_area: ratatui::layout::Rect) -> ratatui::layo
     )
 }
 
+/// The cell of `CHROME_ICONS`' second glyph (the big dot), two cells right of
+/// the hamburger: an agent pane makes it the hover/click target of its
+/// costs-and-stats popover.
+pub fn chrome_stats_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::Position {
+    let hamburger = chrome_hamburger_cell(outer_area);
+    ratatui::layout::Position::new(hamburger.x + 2, hamburger.y)
+}
+
 /// Nerd Font powerline round-cap glyphs used to give the status bar rounded
 /// ends: each is rendered with `fg` = the bar's own accent color and no
 /// explicit `bg` (so it blends into whatever sits outside the bar), the
@@ -332,6 +340,12 @@ mod tests {
         // The first icon starts two cells after the title area's left edge,
         // which itself begins immediately after the rounded border corner.
         assert_eq!(buffer[(3, 0)].symbol(), "≡");
+        // The second icon is the costs-and-stats popover's hit target.
+        assert_eq!(buffer[(5, 0)].symbol(), "●");
+        assert_eq!(
+            chrome_stats_cell(pane_area),
+            ratatui::layout::Position::new(37, 0)
+        );
         assert_eq!(buffer[(35, 0)].symbol(), "≡");
         assert_eq!(buffer[(9, 0)].symbol(), "I");
         assert_eq!(chrome_title("Ilium").width(), 13);

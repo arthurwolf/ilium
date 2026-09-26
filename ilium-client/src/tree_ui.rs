@@ -10,8 +10,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use ilium_core::{
-    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, ContainerKind, GoalState, Node,
-    NodeId, NodeKind, PaneStatus, ScheduledPaneInput, Tree, ROOT_ID,
+    project_pane_signals, AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider,
+    ContainerKind, Node, NodeId, NodeKind, PaneProgress, PaneStatus, ShellOutputPhase, Tree,
+    ROOT_ID,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
@@ -24,10 +25,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
 use crate::icon_settings::{IconSettings, IconTarget};
-use crate::terminal_activity::{
-    TerminalActivityPhase, TerminalActivityTracker, TERMINAL_ACTIVITY_FAST_FRAME_MS,
-    TERMINAL_ACTIVITY_SLOW_FRAME_MS,
-};
+use crate::terminal_activity::{TerminalActivityPhase, TerminalActivityTracker};
 use crate::theme;
 use crate::tree_ordering;
 use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
@@ -40,13 +38,14 @@ pub(crate) const SPINNER_FRAME_MS: u128 = 90;
 
 /// The selected one-cell Angular loop for ordinary terminals with activity
 /// inside the current sixty-second presentation window.
-const TERMINAL_ACTIVITY_FRAMES: &[char] = &['⠋', '⠙', '⠚', '⠞', '⠖', '⠦', '⠴', '⠲', '⠳', '⠓'];
+pub(crate) const TERMINAL_ACTIVITY_FRAMES: &[char] =
+    &['⠋', '⠙', '⠚', '⠞', '⠖', '⠦', '⠴', '⠲', '⠳', '⠓'];
 
 /// Every half-hour clock face in chronological order for a
 /// `WaitingBackground` agent pane. The slower cadence keeps the full clock
 /// sweep distinct from `Working`'s dense braille churn while clearly reading
 /// as time passing for background work.
-const BACKGROUND_CLOCK_FRAMES: &[char] = &[
+pub(crate) const BACKGROUND_CLOCK_FRAMES: &[char] = &[
     '🕛', '🕧', '🕐', '🕜', '🕑', '🕝', '🕒', '🕞', '🕓', '🕟', '🕔', '🕠', '🕕', '🕡', '🕖', '🕢',
     '🕗', '🕣', '🕘', '🕤', '🕙', '🕥', '🕚', '🕦',
 ];
@@ -78,22 +77,12 @@ const AGENT_ICON: &str = "\u{1F916}";
 /// single vertical column on terminals that support those glyphs.
 const NODE_ICON_COLUMN_WIDTH: usize = 3;
 
-/// Agent activity is a separate visual dimension from a row's node kind.
-/// Keeping its column on every row means a shell/group/editor title starts
-/// at the same horizontal position as an agent's class label.
-const ACTIVITY_ICON_COLUMN_WIDTH: usize = 2;
-
-/// Goal state is independent of an agent's current activity. Its fixed
-/// column places a double-width checkered flag immediately after the status
-/// indicator whenever a goal is present.
-const GOAL_ICON_COLUMN_WIDTH: usize = 3;
-
 /// Panel width (the outer tree `Rect`'s column count, borders and icon
 /// columns included) at or above which a pane shows its long-form title
 /// instead of its short-form one -- see `crate::naming::DualTitle` and
 /// `display_title` below. Sits between the tree panel's default collapsed
-/// width (33 columns: `layout::DEFAULT_UNFOCUSED_TREE_WIDTH` plus the shared-border
-/// column) and its default expanded (focused/hovered) width of 65 columns,
+/// width (25 columns: `layout::DEFAULT_UNFOCUSED_TREE_WIDTH` plus the shared-border
+/// column) and its default expanded (focused/hovered) width of 45 columns,
 /// so the default collapsed<->expanded transition is exactly the
 /// thin<->wide switch this constant draws -- see `crate::layout::TreeWidthAnimation`.
 /// A user-configured wider base width naturally shows the long title even
@@ -667,10 +656,17 @@ fn build_item(
                     prompt_queue.len()
                 )
             };
-            let display_name = match progress {
-                Some(progress) => format!(
-                    "[{:.0}%] {display_name}",
-                    progress.report.percent.clamp(0.0, 100.0)
+            // A pending scheduled input's countdown is a number, so it belongs
+            // in the text; the long-term slot carries its marker only when no
+            // goal or task claims that slot.
+            let display_name = match scheduled_input.as_ref() {
+                Some(scheduled_input) => format!(
+                    "{} {display_name}",
+                    human_readable_countdown(
+                        scheduled_input
+                            .execute_at_unix_millis
+                            .saturating_sub(context.current_unix_millis)
+                    )
                 ),
                 None => display_name,
             };
@@ -683,36 +679,20 @@ fn build_item(
                 node.is_bookmarked,
                 context.icons,
             );
-            let label = scheduled_input.as_ref().map_or_else(
-                || {
-                    pane_label_with_icons(
-                        status,
-                        &display_name,
-                        PaneLabelContext {
-                            elapsed_ms: context.elapsed_ms,
-                            is_title_loading: context.titles_loading.contains(&node.id),
-                            terminal_activity_phase: context
-                                .terminal_activity
-                                .phase(node.id, context.terminal_activity_elapsed_ms),
-                            agent_identifiers: context.agent_identifiers,
-                            icons: context.icons,
-                            editor_filename: editor_filename.as_deref(),
-                        },
-                    )
-                },
-                |scheduled_input| {
-                    scheduled_pane_label(
-                        status,
-                        &display_name,
-                        context.elapsed_ms,
-                        context.current_unix_millis,
-                        scheduled_input,
-                        ScheduledPaneLabelContext {
-                            is_title_loading: context.titles_loading.contains(&node.id),
-                            agent_identifiers: context.agent_identifiers,
-                            editor_filename: editor_filename.as_deref(),
-                        },
-                    )
+            let label = pane_label_with_icons(
+                status,
+                &display_name,
+                PaneLabelContext {
+                    elapsed_ms: context.elapsed_ms,
+                    is_title_loading: context.titles_loading.contains(&node.id),
+                    terminal_activity_phase: context
+                        .terminal_activity
+                        .phase(node.id, context.terminal_activity_elapsed_ms),
+                    agent_identifiers: context.agent_identifiers,
+                    icons: context.icons,
+                    editor_filename: editor_filename.as_deref(),
+                    progress: progress.as_deref(),
+                    has_scheduled_input: scheduled_input.is_some(),
                 },
             );
             let label = apply_unread_title_bold(
@@ -1125,11 +1105,25 @@ struct PaneLabelContext<'a> {
     agent_identifiers: &'a AgentIdentifierSettings,
     icons: &'a IconSettings,
     editor_filename: Option<&'a str>,
+    /// The pane's monitored task, if any; feeds both state slots.
+    progress: Option<&'a PaneProgress>,
+    /// Whether a durable scheduled input is pending (its countdown is part
+    /// of the title text; the long-term slot may show its marker).
+    has_scheduled_input: bool,
 }
 
-/// Builds the icon+color-prefixed label for a single pane, based on its
-/// current `PaneStatus`. The context's elapsed time selects the current
-/// activity frame without moving presentation state into the domain tree.
+/// Maps the client-local output tracker onto the domain's shell phase.
+pub(crate) const fn shell_output_phase(phase: TerminalActivityPhase) -> ShellOutputPhase {
+    match phase {
+        TerminalActivityPhase::Fast => ShellOutputPhase::Fast,
+        TerminalActivityPhase::Slow => ShellOutputPhase::Slow,
+    }
+}
+
+/// Builds one pane row: identity icon, long-term slot, right-now slot, then
+/// the title. Which state each slot shows comes solely from
+/// `ilium_core::project_pane_signals`; this function only decides identity
+/// and title styling.
 fn pane_label_with_icons(
     status: &PaneStatus,
     name: &str,
@@ -1142,20 +1136,19 @@ fn pane_label_with_icons(
         agent_identifiers,
         icons,
         editor_filename,
+        progress,
+        has_scheduled_input,
     } = context;
 
     // While `session_naming::infer_pane_title` is still awaiting a result
     // for this pane, its name renders as the same braille spinner
-    // `sidebar_title` uses for the project name -- the activity glyph
-    // ahead of it (spinner/bell/question mark/dot) is a separate concept
-    // and keeps animating independently.
-    let title = || -> String {
-        if is_title_loading {
-            let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-            SPINNER_FRAMES[frame_index].to_string()
-        } else {
-            name.to_string()
-        }
+    // `sidebar_title` uses for the project name -- the state slots ahead of
+    // it are a separate concept and keep animating independently.
+    let title = if is_title_loading {
+        let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+        SPINNER_FRAMES[frame_index].to_string()
+    } else {
+        name.to_string()
     };
     // A restructure's title is a genuinely descriptive title, distinct from
     // an editor's filename (unlike a plain rename or the pre-restructure
@@ -1170,67 +1163,70 @@ fn pane_label_with_icons(
             _ => current_title,
         }
     };
-    match status {
-        PaneStatus::PlainShell => node_label(
+    let signals = project_pane_signals(
+        status,
+        progress,
+        has_scheduled_input,
+        terminal_activity_phase.map(shell_output_phase),
+    );
+    let (identity, text) = match status {
+        PaneStatus::PlainShell => (
             Span::styled(
                 icons.glyph(IconTarget::Terminal).to_string(),
                 Style::new().fg(Color::Gray),
             ),
-            terminal_activity_phase.map(|phase| {
-                let frame_duration_ms = match phase {
-                    TerminalActivityPhase::Fast => TERMINAL_ACTIVITY_FAST_FRAME_MS,
-                    TerminalActivityPhase::Slow => TERMINAL_ACTIVITY_SLOW_FRAME_MS,
-                };
-                let frame_index = (elapsed_ms / u128::from(frame_duration_ms)) as usize
-                    % TERMINAL_ACTIVITY_FRAMES.len();
-
-                Span::raw(TERMINAL_ACTIVITY_FRAMES[frame_index].to_string())
-            }),
-            Span::raw(title()),
+            Span::raw(title),
         ),
-        PaneStatus::Agent(class, activity) => agent_pane_label(
-            class,
-            *activity,
-            None,
-            title(),
-            elapsed_ms,
-            agent_identifiers,
-            icons,
-        ),
-        PaneStatus::AgentWithGoal(class, activity, goal_state) => agent_pane_label(
-            class,
-            *activity,
-            Some(*goal_state),
-            title(),
-            elapsed_ms,
-            agent_identifiers,
-            icons,
-        ),
-        PaneStatus::Editor { dirty: true } => node_label(
+        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
+            let identity = Span::raw(agent_node_icon(class, agent_identifiers, icons).to_string());
+            let text = agent_title(class, &title, agent_identifiers.mode);
+            let text = match activity {
+                AgentActivity::Done => {
+                    let style = if (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2) {
+                        Style::new().add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new()
+                    };
+                    Span::styled(
+                        crate::pane_title::decorate_agent_title(*activity, &text),
+                        style,
+                    )
+                }
+                AgentActivity::WaitingApproval => {
+                    Span::styled(text, Style::new().add_modifier(Modifier::BOLD))
+                }
+                _ => Span::raw(text),
+            };
+            (identity, text)
+        }
+        PaneStatus::Editor { dirty: true } => (
             Span::styled(
                 icons.glyph(IconTarget::Editor).to_string(),
                 Style::new().fg(Color::Magenta),
             ),
-            None,
             Span::styled(
-                format!("{}*", editor_text(title())),
+                format!("{}*", editor_text(title)),
                 Style::new().fg(Color::Magenta),
             ),
         ),
-        PaneStatus::Editor { dirty: false } => node_label(
+        PaneStatus::Editor { dirty: false } => (
             Span::raw(icons.glyph(IconTarget::Editor).to_string()),
-            None,
-            Span::raw(editor_text(title())),
+            Span::raw(editor_text(title)),
         ),
-        PaneStatus::Board => node_label(
+        PaneStatus::Board => (
             Span::styled(
                 icons.glyph(IconTarget::Board).to_string(),
                 Style::new().fg(Color::Cyan),
             ),
-            None,
             Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
         ),
-    }
+    };
+    status_row_label(
+        identity,
+        crate::status_icons::objective_span(signals.objective, icons),
+        crate::status_icons::now_span(signals.now, icons, elapsed_ms),
+        text,
+    )
 }
 
 /// Default-icon wrapper retained for focused unit tests and callers that do
@@ -1268,201 +1264,10 @@ fn pane_label(
             agent_identifiers,
             icons: &icons,
             editor_filename,
+            progress: None,
+            has_scheduled_input: false,
         },
     )
-}
-
-/// Builds the agent portion of a tree row from independent activity and goal
-/// signals. Every activity therefore preserves the same checkered-flag rule.
-fn agent_pane_label(
-    class: &AgentClass,
-    activity: AgentActivity,
-    goal_state: Option<GoalState>,
-    title: String,
-    elapsed_ms: u128,
-    agent_identifiers: &AgentIdentifierSettings,
-    icons: &IconSettings,
-) -> Line<'static> {
-    let node_icon = Span::raw(agent_node_icon(class, agent_identifiers, icons).to_string());
-    match activity {
-        AgentActivity::Working => {
-            let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-            agent_node_label(
-                node_icon,
-                Some(Span::raw(
-                    if icons.glyph(IconTarget::Working) == IconTarget::Working.default_glyph() {
-                        SPINNER_FRAMES[frame_index].to_string()
-                    } else {
-                        icons.glyph(IconTarget::Working).to_string()
-                    },
-                )),
-                goal_state,
-                icons,
-                Span::raw(agent_title(class, &title, agent_identifiers.mode)),
-            )
-        }
-        AgentActivity::WaitingBackground => {
-            let frame_index =
-                (elapsed_ms / BACKGROUND_FRAME_MS) as usize % BACKGROUND_CLOCK_FRAMES.len();
-            agent_node_label(
-                node_icon,
-                Some(Span::raw(
-                    if icons.glyph(IconTarget::WaitingBackground)
-                        == IconTarget::WaitingBackground.default_glyph()
-                    {
-                        BACKGROUND_CLOCK_FRAMES[frame_index].to_string()
-                    } else {
-                        icons.glyph(IconTarget::WaitingBackground).to_string()
-                    },
-                )),
-                goal_state,
-                icons,
-                Span::raw(agent_title(class, &title, agent_identifiers.mode)),
-            )
-        }
-        AgentActivity::BackgroundTaskStillRunning => agent_node_label(
-            node_icon,
-            Some(Span::raw(
-                icons
-                    .glyph(IconTarget::BackgroundTaskStillRunning)
-                    .to_string(),
-            )),
-            goal_state,
-            icons,
-            Span::raw(agent_title(class, &title, agent_identifiers.mode)),
-        ),
-        AgentActivity::Done => {
-            let style = if (elapsed_ms / DONE_PULSE_MS).is_multiple_of(2) {
-                Style::new().add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            agent_node_label(
-                node_icon,
-                Some(Span::styled(
-                    icons.glyph(IconTarget::Done).to_string(),
-                    style,
-                )),
-                goal_state,
-                icons,
-                Span::styled(
-                    crate::pane_title::decorate_agent_title(
-                        activity,
-                        &agent_title(class, &title, agent_identifiers.mode),
-                    ),
-                    style,
-                ),
-            )
-        }
-        AgentActivity::WaitingApproval => {
-            let style = Style::new().add_modifier(Modifier::BOLD);
-            agent_node_label(
-                node_icon,
-                Some(Span::styled(
-                    icons.glyph(IconTarget::WaitingApproval).to_string(),
-                    style,
-                )),
-                goal_state,
-                icons,
-                Span::styled(agent_title(class, &title, agent_identifiers.mode), style),
-            )
-        }
-        AgentActivity::Idle => agent_node_label(
-            node_icon,
-            Some(Span::raw(icons.glyph(IconTarget::Idle).to_string())),
-            goal_state,
-            icons,
-            Span::raw(agent_title(class, &title, agent_identifiers.mode)),
-        ),
-    }
-}
-
-/// Overrides the ordinary activity glyph while a durable input is pending.
-/// The clock frame is indexed by remaining time, so as the quotient decreases
-/// the familiar half-hour sequence visibly runs backwards.
-/// Bundles `scheduled_pane_label`'s trailing presentation-only inputs into
-/// one value, purely to stay under clippy's argument-count lint -- the same
-/// reason `TreeItemBuildContext` exists for `build_item`'s own growing
-/// parameter list.
-struct ScheduledPaneLabelContext<'a> {
-    is_title_loading: bool,
-    agent_identifiers: &'a AgentIdentifierSettings,
-    editor_filename: Option<&'a str>,
-}
-
-fn scheduled_pane_label(
-    status: &PaneStatus,
-    name: &str,
-    elapsed_ms: u128,
-    current_unix_millis: u64,
-    scheduled_input: &ScheduledPaneInput,
-    label_context: ScheduledPaneLabelContext<'_>,
-) -> Line<'static> {
-    let ScheduledPaneLabelContext {
-        is_title_loading,
-        agent_identifiers,
-        editor_filename,
-    } = label_context;
-    let icons = IconSettings::default();
-    let remaining_millis = scheduled_input
-        .execute_at_unix_millis
-        .saturating_sub(current_unix_millis);
-    let frame_index = usize::try_from(
-        u128::from(remaining_millis) / BACKGROUND_FRAME_MS % BACKGROUND_CLOCK_FRAMES.len() as u128,
-    )
-    .unwrap_or(0);
-    let clock = BACKGROUND_CLOCK_FRAMES[frame_index];
-    let title = if is_title_loading {
-        let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-        SPINNER_FRAMES[frame_index].to_string()
-    } else {
-        name.to_string()
-    };
-    let countdown = human_readable_countdown(remaining_millis);
-    match status {
-        PaneStatus::PlainShell => node_label(
-            Span::styled(
-                icons.glyph(IconTarget::Terminal).to_string(),
-                Style::new().fg(Color::Gray),
-            ),
-            Some(Span::raw(clock.to_string())),
-            Span::raw(format!("{countdown} {title}")),
-        ),
-        PaneStatus::Agent(class, _) => agent_node_label(
-            Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
-            Some(Span::raw(clock.to_string())),
-            None,
-            &icons,
-            Span::raw(format!(
-                "{countdown} {}",
-                agent_title(class, &title, agent_identifiers.mode)
-            )),
-        ),
-        PaneStatus::AgentWithGoal(class, _, goal_state) => agent_node_label(
-            Span::raw(agent_node_icon(class, agent_identifiers, &icons).to_string()),
-            Some(Span::raw(clock.to_string())),
-            Some(*goal_state),
-            &icons,
-            Span::raw(format!(
-                "{countdown} {}",
-                agent_title(class, &title, agent_identifiers.mode)
-            )),
-        ),
-        // The domain rejects scheduled input for non-terminal panes. Falling
-        // back keeps a malformed old snapshot renderable instead of panicking.
-        PaneStatus::Editor { .. } | PaneStatus::Board => pane_label_with_icons(
-            status,
-            name,
-            PaneLabelContext {
-                elapsed_ms,
-                is_title_loading,
-                terminal_activity_phase: None,
-                agent_identifiers,
-                icons: &icons,
-                editor_filename,
-            },
-        ),
-    }
 }
 
 /// Rounds partial seconds up so a newly accepted 30-second timer says `30s`
@@ -1484,59 +1289,40 @@ fn human_readable_countdown(remaining_millis: u64) -> String {
     "now".to_string()
 }
 
-/// Builds a row label with fixed node-kind and activity icon columns, then
-/// the descriptive text. The columns are based on terminal display cells,
-/// not Rust string length, so a double-width emoji cannot shift one row's
-/// text relative to another's.
+/// Builds a non-pane row (container, folder, chatroom) with the same fixed
+/// columns as a pane row, both state slots blank, so every title in the
+/// sidebar starts at the same column.
 fn node_label(
     node_icon: Span<'static>,
-    activity_icon: Option<Span<'static>>,
+    now_icon: Option<Span<'static>>,
+    text: Span<'static>,
+) -> Line<'static> {
+    status_row_label(node_icon, Span::raw(""), now_icon.unwrap_or_default(), text)
+}
+
+/// The one row layout: identity, long-term slot, right-now slot, title. The
+/// columns are measured in terminal display cells, not Rust string length,
+/// so a double-width emoji cannot shift one row's text relative to another's.
+fn status_row_label(
+    identity: Span<'static>,
+    objective: Span<'static>,
+    now: Span<'static>,
     text: Span<'static>,
 ) -> Line<'static> {
     Line::from(vec![
-        fixed_width_icon_span(node_icon, NODE_ICON_COLUMN_WIDTH),
-        fixed_width_icon_span(
-            activity_icon.unwrap_or_default(),
-            ACTIVITY_ICON_COLUMN_WIDTH,
-        ),
+        fixed_width_icon_span(identity, NODE_ICON_COLUMN_WIDTH),
+        fixed_width_icon_span(objective, crate::status_icons::OBJECTIVE_COLUMN_WIDTH),
+        fixed_width_icon_span(now, crate::status_icons::NOW_COLUMN_WIDTH),
         text,
     ])
 }
 
-/// Builds an agent row with the persistent-goal badge beside its activity.
-fn agent_node_label(
-    node_icon: Span<'static>,
-    activity_icon: Option<Span<'static>>,
-    goal_state: Option<GoalState>,
-    icons: &IconSettings,
-    text: Span<'static>,
-) -> Line<'static> {
-    let Some(goal_state) = goal_state else {
-        return node_label(node_icon, activity_icon, text);
-    };
-    Line::from(vec![
-        fixed_width_icon_span(node_icon, NODE_ICON_COLUMN_WIDTH),
-        fixed_width_icon_span(
-            activity_icon.unwrap_or_default(),
-            ACTIVITY_ICON_COLUMN_WIDTH,
-        ),
-        fixed_width_icon_span(
-            Span::raw(icons.glyph(goal_icon_target(goal_state)).to_string()),
-            GOAL_ICON_COLUMN_WIDTH,
-        ),
-        text,
-    ])
-}
-
-const fn goal_icon_target(goal_state: GoalState) -> IconTarget {
-    match goal_state {
-        GoalState::Active => IconTarget::GoalActive,
-        GoalState::Paused => IconTarget::GoalPaused,
-        GoalState::Blocked => IconTarget::GoalBlocked,
-        GoalState::UsageLimited => IconTarget::GoalUsageLimited,
-        GoalState::Reached => IconTarget::GoalReached,
-    }
-}
+/// Terminal-cell offset of the long-term slot within a row label, measured
+/// from the label's first cell (after sidebar-density padding).
+pub(crate) const OBJECTIVE_SLOT_OFFSET: u16 = NODE_ICON_COLUMN_WIDTH as u16;
+/// Terminal-cell offset of the right-now slot within a row label.
+pub(crate) const NOW_SLOT_OFFSET: u16 =
+    (NODE_ICON_COLUMN_WIDTH + crate::status_icons::OBJECTIVE_COLUMN_WIDTH) as u16;
 
 /// Pads an icon span without losing its color or emphasis, so status cues
 /// stay intact while every label shares the same text start column.
@@ -1801,6 +1587,51 @@ pub fn node_at_position(
         row: position.y,
     })
 }
+
+/// Which state slot (if any) of which row `position` is over, and the cell
+/// where that slot's glyph starts (the tooltip anchor). Mirrors the vendored
+/// tree widget's row layout: one guide cell per depth level, a two-cell
+/// expand symbol, the sidebar-density padding, then the label's fixed
+/// identity/long-term/right-now columns.
+pub fn status_slot_at_position(
+    items: &[TreeItem<'static, NodeId>],
+    state: &TreeState<NodeId>,
+    area: Rect,
+    position: Position,
+    density: SidebarDensity,
+) -> Option<(NodeId, crate::status_icons::StatusSlot, Position)> {
+    use crate::status_icons::{StatusSlot, NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
+
+    let list = list_area(area);
+    if !list.contains(position) {
+        return None;
+    }
+    let visible_index = state.get_offset() + usize::from(position.y.saturating_sub(list.y));
+    let flattened = state.flatten(items);
+    let row = flattened.get(visible_index)?;
+    let id = row.identifier.last().copied()?;
+    let depth = u16::try_from(row.depth()).ok()?;
+    let density_padding = match density {
+        SidebarDensity::Compact => 0,
+        SidebarDensity::Standard => 1,
+        SidebarDensity::Comfortable => 2,
+    };
+    let label_x = list.x + depth + TREE_EXPAND_SYMBOL_WIDTH + density_padding;
+    let objective_x = label_x + OBJECTIVE_SLOT_OFFSET;
+    let now_x = label_x + NOW_SLOT_OFFSET;
+    let slot = if (objective_x..objective_x + OBJECTIVE_COLUMN_WIDTH as u16).contains(&position.x) {
+        (StatusSlot::Objective, objective_x)
+    } else if (now_x..now_x + NOW_COLUMN_WIDTH as u16).contains(&position.x) {
+        (StatusSlot::Now, now_x)
+    } else {
+        return None;
+    };
+    Some((id, slot.0, Position::new(slot.1, position.y)))
+}
+
+/// Width of the vendored tree widget's expand/collapse symbol (`▶ `, `▼ `,
+/// or two spaces for a leaf).
+const TREE_EXPAND_SYMBOL_WIDTH: u16 = 2;
 
 /// Caches the structural `TreeItem` list built with fixed/empty
 /// animation inputs (`elapsed_ms: 0`, no loading/recently-created state) --
@@ -2313,6 +2144,10 @@ mod tests {
     use ratatui::Terminal;
 
     use super::*;
+    use crate::terminal_activity::{
+        TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+    };
+    use ilium_core::GoalState;
 
     #[test]
     fn node_label_aligns_text_after_narrow_and_wide_icons() {
@@ -2327,14 +2162,11 @@ mod tests {
         ];
 
         for label in labels {
-            let icon_width = label.spans[..2]
+            let icon_width = label.spans[..3]
                 .iter()
                 .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
                 .sum::<usize>();
-            assert_eq!(
-                icon_width,
-                NODE_ICON_COLUMN_WIDTH + ACTIVITY_ICON_COLUMN_WIDTH
-            );
+            assert_eq!(icon_width, usize::from(NOW_SLOT_OFFSET) + 2);
         }
     }
 
@@ -2583,7 +2415,10 @@ mod tests {
     #[test]
     fn agent_identifier_modes_render_full_names_letters_icons_or_nothing() {
         let status = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
-        let mut settings = AgentIdentifierSettings::default();
+        let mut settings = AgentIdentifierSettings {
+            mode: AgentIdentifierMode::FullName,
+            ..AgentIdentifierSettings::default()
+        };
 
         let full_name = pane_label(&status, "Fix auth", 0, false, &settings, None);
         assert_eq!(full_name.spans[0].content.trim(), "");
@@ -2655,7 +2490,7 @@ mod tests {
                 None,
             );
             assert_eq!(line.spans[0].content.trim(), "");
-            assert!(!line.spans[1].content.trim().is_empty());
+            assert!(!line.spans[2].content.trim().is_empty());
             assert!(!line_text(&line).contains("Claude:"));
         }
     }
@@ -2709,7 +2544,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_goal_flag_sits_directly_after_the_activity_indicator() {
+    fn goal_owns_the_long_term_slot_before_the_right_now_slot() {
         let settings = AgentIdentifierSettings::default();
         let goal_line = pane_label(
             &PaneStatus::AgentWithGoal(
@@ -2732,16 +2567,18 @@ mod tests {
             None,
         );
 
+        assert_eq!(goal_line.spans[1].content.trim_end(), "🎯");
         assert_eq!(
-            goal_line.spans[1].content.trim(),
+            goal_line.spans[2].content.trim(),
             SPINNER_FRAMES[0].to_string()
         );
-        assert_eq!(goal_line.spans[2].content.trim_end(), "🎯");
         assert_eq!(
-            UnicodeWidthStr::width(goal_line.spans[2].content.as_ref()),
-            GOAL_ICON_COLUMN_WIDTH
+            UnicodeWidthStr::width(goal_line.spans[1].content.as_ref()),
+            crate::status_icons::OBJECTIVE_COLUMN_WIDTH
         );
-        assert_eq!(ordinary_line.spans.len(), 3);
+        // Every row reserves both slots so titles share one start column.
+        assert_eq!(ordinary_line.spans.len(), 4);
+        assert_eq!(ordinary_line.spans[1].content.trim(), "");
     }
 
     #[test]
@@ -2764,7 +2601,7 @@ mod tests {
                 &settings,
                 None,
             );
-            assert_eq!(line.spans[2].content.trim_end(), glyph, "{goal_state:?}");
+            assert_eq!(line.spans[1].content.trim_end(), glyph, "{goal_state:?}");
         }
     }
 
@@ -2788,10 +2625,12 @@ mod tests {
                         agent_identifiers: &settings,
                         icons: &icons,
                         editor_filename: None,
+                        progress: None,
+                        has_scheduled_input: false,
                     },
                 );
 
-                assert_eq!(line.spans[1].content.trim(), expected_frame.to_string());
+                assert_eq!(line.spans[2].content.trim(), expected_frame.to_string());
             }
         }
 
@@ -2805,6 +2644,8 @@ mod tests {
                 agent_identifiers: &settings,
                 icons: &icons,
                 editor_filename: None,
+                progress: None,
+                has_scheduled_input: false,
             },
         );
         assert!(inactive.spans[1].content.trim().is_empty());
@@ -2982,16 +2823,18 @@ mod tests {
                 agent_identifiers: &agent_identifiers,
                 icons: &icons,
                 editor_filename: None,
+                progress: None,
+                has_scheduled_input: false,
             },
         );
 
         // Activity icon lives in the second fixed-width column (no goal
         // flag present here), distinct from both `WaitingBackground`'s
         // clock and the goal flag -- never reused for this state.
-        assert_eq!(label.spans[1].content.trim_end(), "🧵");
-        assert_ne!(label.spans[1].content.trim_end(), "🏁");
+        assert_eq!(label.spans[2].content.trim_end(), "🧵");
+        assert_ne!(label.spans[2].content.trim_end(), "🏁");
         assert_ne!(
-            label.spans[1].content.trim_end(),
+            label.spans[2].content.trim_end(),
             icons.glyph(IconTarget::WaitingBackground)
         );
     }
@@ -3581,10 +3424,10 @@ mod tests {
                 &AgentIdentifierSettings::default(),
                 None,
             );
-            assert_eq!(line.spans[1].content.trim_end(), expected_clock.to_string());
+            assert_eq!(line.spans[2].content.trim_end(), expected_clock.to_string());
             assert_eq!(
-                UnicodeWidthStr::width(line.spans[1].content.as_ref()),
-                ACTIVITY_ICON_COLUMN_WIDTH
+                UnicodeWidthStr::width(line.spans[2].content.as_ref()),
+                crate::status_icons::NOW_COLUMN_WIDTH
             );
         }
 
@@ -3597,74 +3440,36 @@ mod tests {
             None,
         );
         assert_eq!(
-            wrapped.spans[1].content.trim_end(),
+            wrapped.spans[2].content.trim_end(),
             BACKGROUND_CLOCK_FRAMES[0].to_string()
         );
     }
 
     #[test]
-    fn scheduled_pane_label_places_human_countdown_before_the_title() {
-        let line = scheduled_pane_label(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
-            "Fix auth",
-            0,
-            1_000_000,
-            &ScheduledPaneInput {
-                execute_at_unix_millis: 4_661_000,
-                text: "continue".to_string(),
-                send_enter: true,
-            },
-            ScheduledPaneLabelContext {
-                is_title_loading: false,
-                agent_identifiers: &AgentIdentifierSettings::default(),
-                editor_filename: None,
-            },
-        );
-
-        assert_eq!(line.spans[2].content, "1h 01m 01s Claude: Fix auth");
-    }
-
-    #[test]
-    fn scheduled_clock_frames_move_backwards_as_remaining_time_decreases() {
-        let deadline = 10_000 + 10 * BACKGROUND_FRAME_MS as u64;
-        let scheduled_input = ScheduledPaneInput {
-            execute_at_unix_millis: deadline,
-            text: String::new(),
-            send_enter: true,
+    fn scheduled_input_keeps_the_turn_glyph_and_marks_the_long_term_slot() {
+        let settings = AgentIdentifierSettings {
+            mode: AgentIdentifierMode::FullName,
+            ..AgentIdentifierSettings::default()
         };
-        let first = scheduled_pane_label(
-            &PaneStatus::PlainShell,
-            "shell",
-            0,
-            10_000,
-            &scheduled_input,
-            ScheduledPaneLabelContext {
+        let icons = IconSettings::default();
+        let line = pane_label_with_icons(
+            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            "1h 01m 01s Fix auth",
+            PaneLabelContext {
+                elapsed_ms: 0,
                 is_title_loading: false,
-                agent_identifiers: &AgentIdentifierSettings::default(),
+                terminal_activity_phase: None,
+                agent_identifiers: &settings,
+                icons: &icons,
                 editor_filename: None,
+                progress: None,
+                has_scheduled_input: true,
             },
         );
-        let second = scheduled_pane_label(
-            &PaneStatus::PlainShell,
-            "shell",
-            0,
-            10_000 + BACKGROUND_FRAME_MS as u64,
-            &scheduled_input,
-            ScheduledPaneLabelContext {
-                is_title_loading: false,
-                agent_identifiers: &AgentIdentifierSettings::default(),
-                editor_filename: None,
-            },
-        );
-
-        assert_eq!(
-            first.spans[1].content.trim_end(),
-            BACKGROUND_CLOCK_FRAMES[10].to_string()
-        );
-        assert_eq!(
-            second.spans[1].content.trim_end(),
-            BACKGROUND_CLOCK_FRAMES[9].to_string()
-        );
+        assert_eq!(line.spans[1].content.trim_end(), "⏰");
+        assert_eq!(line.spans[2].content.trim(), SPINNER_FRAMES[0].to_string());
+        assert_eq!(line.spans[3].content, "Claude: 1h 01m 01s Fix auth");
+        assert_eq!(human_readable_countdown(3_661_000), "1h 01m 01s");
         assert_eq!(human_readable_countdown(0), "now");
         assert_eq!(human_readable_countdown(61_001), "1m 02s");
     }

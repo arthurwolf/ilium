@@ -245,10 +245,13 @@ pub struct TriggerSettings {
 impl Default for TriggerSettings {
     fn default() -> Self {
         Self {
-            // Startup is intentionally opt-in: attaching another client or
-            // restarting the UI should not spend one LLM call per project by
-            // surprise.
-            startup_complete: Vec::new(),
+            // AI restructuring is on by default: after the initial tree is
+            // loaded, every project with un-restructured activity gets one
+            // provider call. Projects without new activity are skipped
+            // without a call, and a failing provider is contained by the
+            // automatic-restructure retry breaker (see
+            // `App::record_automatic_restructure_failure`).
+            startup_complete: vec![TriggerAction::RestructureAllProjects],
             // Session readiness restores the existing automatic first title.
             agent_session_ready: vec![TriggerAction::RetitleElement],
             // A prompt is the earliest meaningful signal that the pane's task
@@ -258,7 +261,9 @@ impl Default for TriggerSettings {
             // title, while also providing a retry if transcript persistence
             // lagged behind the Enter event.
             agent_started_working: vec![TriggerAction::RetitleElement],
-            agent_waiting_background: Vec::new(),
+            // Background-task waits are a natural pause in the conversation,
+            // so the title is refreshed there as well.
+            agent_waiting_background: vec![TriggerAction::RetitleElement],
             agent_approval_required: Vec::new(),
             // Completion refreshes the element title with the finished turn
             // and reorganizes only its owning project, avoiding a global call
@@ -381,11 +386,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_update_titles_without_global_startup_cost() {
+    fn defaults_enable_ai_retitling_and_restructuring() {
         let settings = TriggerSettings::default();
 
+        assert_eq!(
+            settings.actions_for(TriggerEvent::StartupComplete),
+            &[TriggerAction::RestructureAllProjects]
+        );
+        assert_eq!(
+            settings.actions_for(TriggerEvent::AgentWaitingBackground),
+            &[TriggerAction::RetitleElement]
+        );
         assert!(settings
-            .actions_for(TriggerEvent::StartupComplete)
+            .actions_for(TriggerEvent::AgentApprovalRequired)
             .is_empty());
         assert_eq!(
             settings.actions_for(TriggerEvent::AgentPromptSubmitted),

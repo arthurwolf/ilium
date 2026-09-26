@@ -22,6 +22,9 @@
 
 use ilium::session;
 
+mod goal;
+mod voice;
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
@@ -29,7 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 
 use ilium::error::CliError;
 use ilium_platform::paths;
@@ -101,6 +104,20 @@ enum Command {
     Progress {
         #[command(subcommand)]
         command: ProgressCommand,
+    },
+    /// Paused-goal status and agent-requested `/goal resume` for the pane
+    /// this runs in, plus the Stop-hook adapter that keeps an agent from
+    /// ending a turn with an unblocked goal left paused. Run from inside an
+    /// Ilium pane, like `progress`.
+    Goal {
+        #[command(subcommand)]
+        command: goal::GoalCommand,
+    },
+    /// Voice control from the command line: `voice say` types sentences into
+    /// the running voice session as if they had been spoken. Output is JSONL.
+    Voice {
+        #[command(subcommand)]
+        command: voice::VoiceCommand,
     },
 }
 
@@ -180,24 +197,9 @@ enum ProgressCommand {
         /// performance notes above.
         #[arg(long, default_value_t = 1)]
         interval_seconds: u32,
-        /// Whether Ilium should leave an active goal alone or safely pause it
-        /// after this turn and resume only the causally owned pause.
-        #[arg(long, value_enum, default_value_t = ProgressGoalPolicyArgument::KeepRunning)]
-        goal_policy: ProgressGoalPolicyArgument,
     },
     /// Returns the current registration, latest report, and monitor health.
     Status,
-    /// Arms safe `/goal pause` and causally owned `/goal resume` delivery for
-    /// the active monitor after this agent turn finishes.
-    ArmGoalResume {
-        #[arg(long)]
-        monitor_id: u64,
-    },
-    /// Removes goal pause/resume intent from the specified active monitor.
-    DisarmGoalResume {
-        #[arg(long)]
-        monitor_id: u64,
-    },
     /// Stops the active monitor and clears its retained progress. Supplying a
     /// monitor ID fences the operation so a stale agent cannot clear a newer
     /// replacement.
@@ -213,24 +215,7 @@ impl ProgressCommand {
             Self::Check { .. } => "check",
             Self::Set { .. } => "set",
             Self::Status => "status",
-            Self::ArmGoalResume { .. } => "arm-goal-resume",
-            Self::DisarmGoalResume { .. } => "disarm-goal-resume",
             Self::Clear { .. } => "clear",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ProgressGoalPolicyArgument {
-    KeepRunning,
-    PauseAndResume,
-}
-
-impl From<ProgressGoalPolicyArgument> for ilium_ipc::ProgressGoalPolicy {
-    fn from(value: ProgressGoalPolicyArgument) -> Self {
-        match value {
-            ProgressGoalPolicyArgument::KeepRunning => Self::KeepRunning,
-            ProgressGoalPolicyArgument::PauseAndResume => Self::PauseAndResume,
         }
     }
 }
@@ -269,6 +254,8 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         }
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
+        Some(Command::Goal { command }) => goal::goal(command).await,
+        Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
     }
 }
 
@@ -378,8 +365,6 @@ enum ExpectedProgressResponse {
     Check,
     Set,
     Status,
-    ArmGoalResume,
-    DisarmGoalResume,
     Clear,
 }
 
@@ -395,12 +380,6 @@ enum ProgressResponse {
     Status {
         pane_id: ilium_core::NodeId,
         result: Result<ilium_ipc::ProgressMonitorStatus, ilium_ipc::ProgressMonitorRejection>,
-    },
-    GoalPolicyChanged {
-        operation: &'static str,
-        pane_id: ilium_core::NodeId,
-        monitor_id: u64,
-        result: Result<ilium_ipc::ProgressGoalPolicy, ilium_ipc::ProgressMonitorRejection>,
     },
     Clear {
         pane_id: ilium_core::NodeId,
@@ -456,14 +435,12 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         ProgressCommand::Set {
             command,
             interval_seconds,
-            goal_policy,
         } => (
             ilium_ipc::ClientRequest::SetPaneProgressMonitor {
                 request_id,
                 pane_id: identity.pane_id,
                 command,
                 interval_seconds,
-                goal_policy: goal_policy.into(),
             },
             ExpectedProgressResponse::Set,
         ),
@@ -473,22 +450,6 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
                 pane_id: identity.pane_id,
             },
             ExpectedProgressResponse::Status,
-        ),
-        ProgressCommand::ArmGoalResume { monitor_id } => (
-            ilium_ipc::ClientRequest::ArmProgressGoalResume {
-                request_id,
-                pane_id: identity.pane_id,
-                monitor_id,
-            },
-            ExpectedProgressResponse::ArmGoalResume,
-        ),
-        ProgressCommand::DisarmGoalResume { monitor_id } => (
-            ilium_ipc::ClientRequest::DisarmProgressGoalResume {
-                request_id,
-                pane_id: identity.pane_id,
-                monitor_id,
-            },
-            ExpectedProgressResponse::DisarmGoalResume,
         ),
         ProgressCommand::Clear { monitor_id } => (
             ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
@@ -600,25 +561,6 @@ async fn wait_for_progress_response(
                     Some(ProgressResponse::Status { pane_id, result })
                 }
                 (
-                    operation @ (ExpectedProgressResponse::ArmGoalResume
-                    | ExpectedProgressResponse::DisarmGoalResume),
-                    ilium_ipc::ServerEvent::ProgressMonitorGoalPolicyChanged {
-                        request_id: response_id,
-                        pane_id,
-                        monitor_id,
-                        result,
-                    },
-                ) if response_id == request_id => Some(ProgressResponse::GoalPolicyChanged {
-                    operation: match operation {
-                        ExpectedProgressResponse::ArmGoalResume => "arm-goal-resume",
-                        ExpectedProgressResponse::DisarmGoalResume => "disarm-goal-resume",
-                        _ => "goal-policy",
-                    },
-                    pane_id,
-                    monitor_id,
-                    result,
-                }),
-                (
                     ExpectedProgressResponse::Clear,
                     ilium_ipc::ServerEvent::ProgressMonitorCleared {
                         request_id: response_id,
@@ -661,10 +603,9 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
         ProgressResponse::Set { pane_id, result } => match result {
             Ok(accepted) => {
                 println!(
-                    "{{\"type\":\"progress_set\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{},\"goal_policy\":{},\"progress\":{}}}",
+                    "{{\"type\":\"progress_set\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{},\"progress\":{}}}",
                     pane_id.0,
                     accepted.monitor_id,
-                    json_string(progress_goal_policy_name(accepted.goal_policy)),
                     pane_progress_json(&accepted.progress)
                 );
                 Ok(())
@@ -677,36 +618,14 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
                     .progress
                     .as_ref()
                     .map_or_else(|| "null".to_string(), pane_progress_json);
-                let goal_policy = status.goal_policy.map_or_else(
-                    || "null".to_string(),
-                    |policy| json_string(progress_goal_policy_name(policy)),
-                );
                 println!(
-                    "{{\"type\":\"progress_status\",\"request_id\":{request_id},\"pane_id\":{},\"active\":{},\"progress\":{progress},\"goal_policy\":{goal_policy},\"goal_resume_armed\":{}}}",
+                    "{{\"type\":\"progress_status\",\"request_id\":{request_id},\"pane_id\":{},\"active\":{},\"progress\":{progress}}}",
                     pane_id.0,
-                    status.progress.is_some(),
-                    status.goal_resume_armed
+                    status.progress.is_some()
                 );
                 Ok(())
             }
             Err(rejection) => print_progress_rejection(request_id, pane_id, "status", rejection),
-        },
-        ProgressResponse::GoalPolicyChanged {
-            operation,
-            pane_id,
-            monitor_id,
-            result,
-        } => match result {
-            Ok(goal_policy) => {
-                println!(
-                    "{{\"type\":\"progress_goal_policy_changed\",\"operation\":{operation_json},\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{monitor_id},\"goal_policy\":{}}}",
-                    pane_id.0,
-                    json_string(progress_goal_policy_name(goal_policy)),
-                    operation_json = json_string(operation)
-                );
-                Ok(())
-            }
-            Err(rejection) => print_progress_rejection(request_id, pane_id, operation, rejection),
         },
         ProgressResponse::Clear { pane_id, result } => match result {
             Ok(cleared_monitor_id) => {
@@ -793,13 +712,6 @@ const fn progress_task_status_name(status: ilium_core::ProgressTaskStatus) -> &'
     }
 }
 
-const fn progress_goal_policy_name(policy: ilium_ipc::ProgressGoalPolicy) -> &'static str {
-    match policy {
-        ilium_ipc::ProgressGoalPolicy::KeepRunning => "keep-running",
-        ilium_ipc::ProgressGoalPolicy::PauseAndResume => "pause-and-resume",
-    }
-}
-
 const fn progress_rejection_code_name(
     code: ilium_ipc::ProgressMonitorRejectionCode,
 ) -> &'static str {
@@ -814,9 +726,6 @@ const fn progress_rejection_code_name(
         ilium_ipc::ProgressMonitorRejectionCode::ProbeIoFailed => "probe-io-failed",
         ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound => "pane-not-found",
         ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor => "stale-monitor",
-        ilium_ipc::ProgressMonitorRejectionCode::GoalOwnershipUnavailable => {
-            "goal-ownership-unavailable"
-        }
     }
 }
 
@@ -1309,15 +1218,14 @@ mod tests {
                 command: ProgressCommand::Set {
                     command,
                     interval_seconds: 1,
-                    goal_policy: super::ProgressGoalPolicyArgument::KeepRunning,
                 }
             }) if command == "/work/status --json"
         ));
     }
 
     #[test]
-    fn progress_set_accepts_pause_and_resume_goal_policy() {
-        let cli = Cli::try_parse_from([
+    fn progress_no_longer_exposes_goal_pause_or_resume_controls() {
+        assert!(Cli::try_parse_from([
             "ilium",
             "progress",
             "set",
@@ -1326,34 +1234,12 @@ mod tests {
             "--goal-policy",
             "pause-and-resume",
         ])
-        .unwrap();
-
-        assert!(matches!(
-            cli.command,
-            Some(Command::Progress {
-                command: ProgressCommand::Set {
-                    goal_policy: super::ProgressGoalPolicyArgument::PauseAndResume,
-                    ..
-                }
-            })
-        ));
-    }
-
-    #[test]
-    fn progress_lifecycle_commands_require_explicit_monitor_ids() {
+        .is_err());
         for operation in ["arm-goal-resume", "disarm-goal-resume"] {
-            assert!(Cli::try_parse_from(["ilium", "progress", operation]).is_err());
-
-            let cli = Cli::try_parse_from(["ilium", "progress", operation, "--monitor-id", "42"])
-                .unwrap();
-
-            assert!(matches!(
-                cli.command,
-                Some(Command::Progress {
-                    command: ProgressCommand::ArmGoalResume { monitor_id: 42 }
-                        | ProgressCommand::DisarmGoalResume { monitor_id: 42 }
-                })
-            ));
+            assert!(
+                Cli::try_parse_from(["ilium", "progress", operation, "--monitor-id", "42"])
+                    .is_err()
+            );
         }
     }
 

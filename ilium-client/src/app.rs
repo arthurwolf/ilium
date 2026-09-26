@@ -230,7 +230,7 @@ pub enum Mode {
     LeaderPending,
     /// A pending `Ctrl+B` tree-navigation sequence. It accepts only the four
     /// cycle/jump actions, so the dedicated default never silently turns into
-    /// a second general leader while `Ctrl+A` remains the primary prefix.
+    /// a second general leader while a different general prefix is configured.
     NavigationLeaderPending,
     Move,
     /// In-progress rename prompt for the selected node.
@@ -343,6 +343,19 @@ pub enum VoiceRuntimeRequest {
 pub enum VoiceInteractionRequest {
     StartPushToTalk,
     StopPushToTalk,
+}
+
+/// Sentences an `ilium voice say` process asked this client to feed into its
+/// voice session as if they had been spoken. Received from the server as an
+/// offer and answered by the async owner of the voice actor once it knows
+/// whether a session exists to take them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceTextOffer {
+    pub request_id: u64,
+    pub sentences: Vec<String>,
+    /// True when honouring the offer switched voice control on (or asked a
+    /// failed session to restart) in this very turn.
+    pub started_voice: bool,
 }
 
 /// Which tab is selected in the full-screen settings view. Add a new
@@ -1569,6 +1582,7 @@ pub struct App {
     pub voice_last_assistant_transcript: Option<String>,
     pending_voice_runtime_request: Option<VoiceRuntimeRequest>,
     pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
+    pending_voice_text_offers: Vec<VoiceTextOffer>,
     pending_debug_logging_enabled: Option<bool>,
     pending_agent_debug_menu_enabled: Option<bool>,
     pending_progress_monitor_enabled: Option<bool>,
@@ -1610,6 +1624,14 @@ pub struct App {
     /// starts a fresh pair instead of re-triggering.
     pub(crate) last_tree_click: Option<(NodeId, Instant)>,
     pub hovered_tree_node: Option<TreeNodeHit>,
+    /// The tree-row state slot under the pointer (node, slot, glyph cell),
+    /// which drives the status explanation popover.
+    pub hovered_status_slot: Option<(NodeId, crate::status_icons::StatusSlot, Position)>,
+    /// The costs-and-stats popover hanging off an agent pane's second header
+    /// icon: a hover preview or a pinned window (see `session_stats_popover`).
+    pub stats_popover: Option<crate::session_stats_ui::StatsPopover>,
+    /// Per-pane transcript statistics and the worker that reads them.
+    pub session_stats: crate::session_stats_store::SessionStatsStore,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Panes ever observed with a detected agent status. Once a pane's
@@ -1927,6 +1949,7 @@ impl App {
             voice_last_assistant_transcript: None,
             pending_voice_runtime_request: None,
             pending_voice_interaction_requests: Vec::new(),
+            pending_voice_text_offers: Vec::new(),
             pending_debug_logging_enabled: None,
             pending_agent_debug_menu_enabled: None,
             pending_progress_monitor_enabled: None,
@@ -1948,6 +1971,9 @@ impl App {
             tree_drag_in_progress: false,
             last_tree_click: None,
             hovered_tree_node: None,
+            hovered_status_slot: None,
+            stats_popover: None,
+            session_stats: crate::session_stats_store::SessionStatsStore::default(),
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
             agent_toolbar_latched_panes: HashSet::new(),
@@ -3481,6 +3507,53 @@ impl App {
 
     pub fn take_voice_interaction_requests(&mut self) -> Vec<VoiceInteractionRequest> {
         std::mem::take(&mut self.pending_voice_interaction_requests)
+    }
+
+    /// Accepts a `ilium voice say` offer from the server. With `start_voice`,
+    /// switches voice control on when it is off (persisting the setting, as
+    /// F8 does) or asks a session that failed to restart, so the async owner
+    /// reconciles the actor before it delivers the sentences. Without it a
+    /// stopped session stays stopped and the offer is answered with a refusal.
+    pub fn receive_voice_text_offer(
+        &mut self,
+        request_id: u64,
+        sentences: Vec<String>,
+        start_voice: bool,
+    ) {
+        let mut started_voice = false;
+        if start_voice {
+            if !self.voice_settings.enabled {
+                self.set_voice_control_enabled(true);
+                started_voice = true;
+            } else if matches!(
+                self.voice_connection_state,
+                ilium_voice::VoiceConnectionState::Failed(_)
+            ) {
+                self.pending_voice_runtime_request = Some(VoiceRuntimeRequest::Reconfigure);
+                started_voice = true;
+            }
+        }
+        self.pending_voice_text_offers.push(VoiceTextOffer {
+            request_id,
+            sentences,
+            started_voice,
+        });
+    }
+
+    pub fn take_voice_text_offers(&mut self) -> Vec<VoiceTextOffer> {
+        std::mem::take(&mut self.pending_voice_text_offers)
+    }
+
+    /// Mirrors what a recognised utterance leaves behind: the last user
+    /// transcript, plus a short visible note so the typed turn is not silent.
+    pub fn record_typed_voice_text(&mut self, sentences: &[String]) {
+        let Some(last) = sentences.last() else {
+            return;
+        };
+        self.voice_last_user_transcript = Some(last.clone());
+        let preview = last.chars().take(60).collect::<String>();
+        let ellipsis = if last.chars().count() > 60 { "..." } else { "" };
+        self.status_message = Some(format!("Voice (typed): {preview}{ellipsis}"));
     }
 
     pub fn update_voice_connection_state(&mut self, state: ilium_voice::VoiceConnectionState) {
@@ -5856,6 +5929,7 @@ impl App {
                 self.is_terminal_focused = false;
                 self.pointer_position = None;
                 self.hovered_tree_node = None;
+                self.hovered_status_slot = None;
                 self.tree_toolbar_hovered = false;
                 self.hovered_tree_toolbar_action = None;
             }
@@ -8609,6 +8683,38 @@ impl App {
     /// action controls (edit/move/close).
     pub fn set_hovered_tree_node(&mut self, hit: Option<TreeNodeHit>) {
         self.hovered_tree_node = hit;
+        if hit.is_none() {
+            self.hovered_status_slot = None;
+        }
+    }
+
+    /// State slot under `position` in the tree panel (see
+    /// `tree_ui::status_slot_at_position`), withheld during structural
+    /// transitions for the same reason as [`Self::tree_node_at`].
+    pub fn tree_status_slot_at(
+        &mut self,
+        position: Position,
+    ) -> Option<(NodeId, crate::status_icons::StatusSlot, Position)> {
+        if self
+            .tree_transitions
+            .presentation_tree(self.started_at.elapsed().as_millis())
+            .is_some()
+        {
+            return None;
+        }
+        let items = self.tree_hit_test_cache.get_or_build(
+            &self.tree,
+            self.tree_version,
+            self.ui_settings.tree_order,
+            self.tree_state.opened(),
+        );
+        tree_ui::status_slot_at_position(
+            items,
+            &self.tree_state,
+            self.layout.tree_area,
+            position,
+            self.ui_settings.sidebar_density,
+        )
     }
 
     pub fn set_tree_toolbar_hover(&mut self, hovered: bool, action: Option<TreeToolbarAction>) {
@@ -13286,7 +13392,7 @@ mod tests {
         assert!(resize_requests
             .iter()
             .all(|(_, rows, cols, cause)| *rows == 37
-                && *cols == 42
+                && *cols == (120 - crate::layout::DEFAULT_UNFOCUSED_TREE_WIDTH - 4) / 2
                 && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
             .iter()
@@ -15004,17 +15110,17 @@ mod tests {
         let provider = app.inference_settings.selected_provider;
         assert_eq!(
             app.inference_settings.title_style,
-            ilium_inference::TitleStyle::Summarization
+            ilium_inference::TitleStyle::Labeling
         );
-        app.settings_select_title_style(ilium_inference::TitleStyle::Labeling);
+        app.settings_select_title_style(ilium_inference::TitleStyle::Summarization);
         assert_eq!(
             app.inference_settings.title_style,
-            ilium_inference::TitleStyle::Labeling
+            ilium_inference::TitleStyle::Summarization
         );
         let loaded = crate::config::load(config_dir.path()).unwrap();
         assert_eq!(
             loaded.inference.title_style,
-            ilium_inference::TitleStyle::Labeling
+            ilium_inference::TitleStyle::Summarization
         );
         assert_eq!(loaded.inference.selected_provider, provider);
     }

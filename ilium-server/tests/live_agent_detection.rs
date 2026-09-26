@@ -1163,7 +1163,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
 }
 
 #[tokio::test]
-async fn progress_completion_notifies_and_resumes_only_the_owned_codex_goal() {
+async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() {
     let fixture_directory = tempfile::tempdir().expect("create progress lifecycle fixtures");
     let lifecycle_log = fixture_directory.path().join("goal-lifecycle.log");
     let probe_report = fixture_directory.path().join("progress.json");
@@ -1262,12 +1262,11 @@ async fn progress_completion_notifies_and_resumes_only_the_owned_codex_goal() {
             pane_id,
             command: probe.to_string_lossy().to_string(),
             interval_seconds: 1,
-            goal_policy: ilium_ipc::ProgressGoalPolicy::KeepRunning,
         },
     )
     .await
     .unwrap();
-    let accepted = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
             ServerEvent::ProgressMonitorSetCompleted {
@@ -1275,49 +1274,6 @@ async fn progress_completion_notifies_and_resumes_only_the_owned_codex_goal() {
                 result: Ok(_),
                 ..
             }
-        )
-    })
-    .await;
-    let ServerEvent::ProgressMonitorSetCompleted {
-        result: Ok(accepted),
-        ..
-    } = accepted
-    else {
-        unreachable!();
-    };
-
-    write_frame(
-        &mut client,
-        &ClientRequest::ArmProgressGoalResume {
-            request_id: 7002,
-            pane_id,
-            monitor_id: accepted.monitor_id,
-        },
-    )
-    .await
-    .unwrap();
-    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
-        matches!(
-            event,
-            ServerEvent::ProgressMonitorGoalPolicyChanged {
-                request_id: 7002,
-                result: Ok(ilium_ipc::ProgressGoalPolicy::PauseAndResume),
-                ..
-            }
-        )
-    })
-    .await;
-    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
-        matches!(
-            event,
-            ServerEvent::PaneStatusChanged {
-                pane_id: changed_id,
-                status: PaneStatus::AgentWithGoal(
-                    ilium_core::AgentClass::Codex,
-                    _,
-                    ilium_core::GoalState::Paused,
-                ),
-            } if *changed_id == pane_id
         )
     })
     .await;
@@ -1338,29 +1294,27 @@ async fn progress_completion_notifies_and_resumes_only_the_owned_codex_goal() {
         )
     })
     .await;
-    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
-        matches!(
-            event,
-            ServerEvent::PaneStatusChanged {
-                pane_id: changed_id,
-                status: PaneStatus::AgentWithGoal(
-                    ilium_core::AgentClass::Codex,
-                    _,
-                    ilium_core::GoalState::Active,
-                ),
-            } if *changed_id == pane_id
-        )
-    })
-    .await;
-
-    let submissions = std::fs::read_to_string(&lifecycle_log).unwrap();
+    // The result is delivered at the next ready composer. Progress must be
+    // the only thing written to the agent: no `/goal pause`, no `/goal resume`.
+    let deadline = std::time::Instant::now() + WAIT_TIMEOUT;
+    let submissions = loop {
+        let submissions = std::fs::read_to_string(&lifecycle_log).unwrap_or_default();
+        if submissions.contains("Ilium progress monitor") {
+            break submissions;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "progress result was never delivered; log: {submissions:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let submissions = std::fs::read_to_string(&lifecycle_log).unwrap_or(submissions);
     let lines = submissions.lines().collect::<Vec<_>>();
-    assert_eq!(lines.first(), Some(&"/goal pause"));
-    assert!(lines.get(1).is_some_and(|line| {
-        line.contains("Ilium progress monitor")
-            && line.contains("live-render completed successfully")
-    }));
-    assert_eq!(lines.get(2), Some(&"/goal resume"));
+    assert_eq!(lines.len(), 1, "unexpected submissions: {lines:?}");
+    assert!(lines[0].contains("Ilium progress monitor"));
+    assert!(lines[0].contains("live-render completed successfully"));
+    assert!(!submissions.contains("/goal"));
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -1861,4 +1815,248 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
         .await
         .expect("stop the auto-resume-prompt session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+/// A live Codex fixture pane whose verified goal is active, for the
+/// agent-requested resume tests below.
+struct ActiveCodexGoalPane {
+    _fixture_directory: tempfile::TempDir,
+    server: TestServer,
+    client: ilium_transport::SessionStream,
+    pane_id: NodeId,
+    lifecycle_log: std::path::PathBuf,
+}
+
+async fn start_active_codex_goal_pane(session_name: &str) -> ActiveCodexGoalPane {
+    let fixture_directory = tempfile::tempdir().expect("create goal fixtures");
+    let lifecycle_log = fixture_directory.path().join("goal-lifecycle.log");
+    let fake_codex = install(
+        fixture_directory.path(),
+        "codex",
+        &FixtureBehavior::GoalLifecycle {
+            log_path: lifecycle_log.clone(),
+        },
+    )
+    .path;
+    let session_id = "7c1f0b6e-2d4a-4f54-9a4e-5b0c1d2e3f40";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
+    };
+    let server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    write_verified_codex_transcript(&server, session_id);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session_name.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(_))
+    })
+    .await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(format!("{} resume {session_id}", fake_codex.display())),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let ServerEvent::TreeSnapshot(tree) =
+        expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::TreeSnapshot(_))
+        })
+        .await
+    else {
+        unreachable!();
+    };
+    let pane_id = first_launch_project_pane(&tree);
+    expect_goal_state(&mut client, pane_id, ilium_core::GoalState::Active).await;
+    ActiveCodexGoalPane {
+        _fixture_directory: fixture_directory,
+        server,
+        client,
+        pane_id,
+        lifecycle_log,
+    }
+}
+
+async fn expect_goal_state(
+    client: &mut ilium_transport::SessionStream,
+    pane_id: NodeId,
+    goal_state: ilium_core::GoalState,
+) {
+    let _ = expect_event(client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneStatusChanged {
+                pane_id: changed_id,
+                status: PaneStatus::AgentWithGoal(ilium_core::AgentClass::Codex, _, state),
+            } if *changed_id == pane_id && *state == goal_state
+        )
+    })
+    .await;
+}
+
+async fn goal_status(
+    client: &mut ilium_transport::SessionStream,
+    pane_id: NodeId,
+    request_id: u64,
+) -> ilium_ipc::PaneGoalStatus {
+    write_frame(
+        client,
+        &ClientRequest::GetPaneGoalStatus {
+            request_id,
+            pane_id,
+        },
+    )
+    .await
+    .unwrap();
+    let ServerEvent::PaneGoalStatusReported {
+        result: Ok(status), ..
+    } = expect_event(client, WAIT_TIMEOUT, |event| {
+        matches!(event, ServerEvent::PaneGoalStatusReported { request_id: id, .. } if *id == request_id)
+    })
+    .await
+    else {
+        panic!("goal status request {request_id} failed");
+    };
+    status
+}
+
+async fn request_goal_resume(
+    client: &mut ilium_transport::SessionStream,
+    pane_id: NodeId,
+    request_id: u64,
+) -> Result<ilium_ipc::PaneGoalStatus, (String, Option<ilium_ipc::PaneGoalStatus>)> {
+    write_frame(
+        client,
+        &ClientRequest::RequestPaneGoalResume {
+            request_id,
+            pane_id,
+        },
+    )
+    .await
+    .unwrap();
+    let ServerEvent::PaneGoalResumeRequested { result, .. } =
+        expect_event(client, WAIT_TIMEOUT, |event| {
+            matches!(event, ServerEvent::PaneGoalResumeRequested { request_id: id, .. } if *id == request_id)
+        })
+        .await
+    else {
+        unreachable!();
+    };
+    result
+}
+
+/// A pause nobody owns (here: a queued, non-keyboard `/goal pause`) is the
+/// case that used to wait for the user. The agent's request is queued once,
+/// is idempotent, and resumes the same goal through the ready composer.
+#[tokio::test]
+async fn an_agent_resumes_an_unowned_paused_codex_goal_through_ilium() {
+    let mut pane = start_active_codex_goal_pane("agent-goal-resume-test").await;
+    let pane_id = pane.pane_id;
+    write_frame(
+        &mut pane.client,
+        &ClientRequest::SubmitTerminalText {
+            pane_id,
+            text: "/goal pause".to_string(),
+            source: ilium_ipc::PromptSubmissionSource::QueuedPrompt,
+        },
+    )
+    .await
+    .unwrap();
+    expect_goal_state(&mut pane.client, pane_id, ilium_core::GoalState::Paused).await;
+
+    let status = goal_status(&mut pane.client, pane_id, 8101).await;
+    assert_eq!(status.goal_state, Some(ilium_core::GoalState::Paused));
+    assert_eq!(
+        status.resumability,
+        ilium_ipc::PaneGoalResumability::Resumable
+    );
+
+    let queued = request_goal_resume(&mut pane.client, pane_id, 8102).await;
+    assert!(
+        matches!(
+            &queued,
+            Ok(status) if status.resumability == ilium_ipc::PaneGoalResumability::ResumeQueued
+                || status.resumability == ilium_ipc::PaneGoalResumability::NotPaused
+        ),
+        "{queued:?}"
+    );
+    // A repeated request never queues a second resume.
+    let repeated = request_goal_resume(&mut pane.client, pane_id, 8103).await;
+    assert!(
+        matches!(
+            &repeated,
+            Ok(_)
+                | Err((
+                    _,
+                    Some(ilium_ipc::PaneGoalStatus {
+                        resumability: ilium_ipc::PaneGoalResumability::NotPaused,
+                        ..
+                    })
+                ))
+        ),
+        "{repeated:?}"
+    );
+
+    expect_goal_state(&mut pane.client, pane_id, ilium_core::GoalState::Active).await;
+    let submissions = std::fs::read_to_string(&pane.lifecycle_log).unwrap();
+    assert_eq!(
+        submissions.lines().collect::<Vec<_>>(),
+        vec!["/goal pause", "/goal resume"]
+    );
+
+    write_frame(&mut pane.client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut pane.server.server_task).await;
+}
+
+/// A `/goal pause` typed at the keyboard is the user's decision: the agent's
+/// request is refused with `PausedByUser` and nothing is submitted.
+#[tokio::test]
+async fn an_agent_cannot_resume_a_goal_the_user_paused() {
+    let mut pane = start_active_codex_goal_pane("user-goal-pause-test").await;
+    let pane_id = pane.pane_id;
+    write_frame(
+        &mut pane.client,
+        &ClientRequest::SubmitTerminalText {
+            pane_id,
+            text: "/goal pause".to_string(),
+            source: ilium_ipc::PromptSubmissionSource::Keyboard,
+        },
+    )
+    .await
+    .unwrap();
+    expect_goal_state(&mut pane.client, pane_id, ilium_core::GoalState::Paused).await;
+
+    let status = goal_status(&mut pane.client, pane_id, 8201).await;
+    assert_eq!(
+        status.resumability,
+        ilium_ipc::PaneGoalResumability::PausedByUser
+    );
+    let refused = request_goal_resume(&mut pane.client, pane_id, 8202).await;
+    assert!(
+        matches!(&refused, Err((reason, Some(status))) if reason.contains("user typed /goal pause")
+            && status.resumability == ilium_ipc::PaneGoalResumability::PausedByUser),
+        "{refused:?}"
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let submissions = std::fs::read_to_string(&pane.lifecycle_log).unwrap();
+    assert_eq!(submissions.lines().collect::<Vec<_>>(), vec!["/goal pause"]);
+
+    write_frame(&mut pane.client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut pane.server.server_task).await;
 }

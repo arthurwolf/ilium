@@ -7,4 +7,5 @@ target/
 # Published documentation lives at the repository root (README.md,
 # ARCHITECTURE.md, CLAUDE.md) so a clone never depends on this directory.
 /docs/
+/data/
 /CHATROOM.md

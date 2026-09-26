@@ -42,9 +42,12 @@ pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -
             _,
         )
     ) && matches!(
+        // Only `Done` is a finished turn. The server leaves an agent `Idle`
+        // after busy work exactly when it parked on a live progress monitor
+        // (`detection.rs`), and a parked agent has not finished anything.
         new,
-        PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Idle | AgentActivity::Done, _)
+        PaneStatus::Agent(_, AgentActivity::Done)
+            | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
     )
 }
 
@@ -56,6 +59,21 @@ pub struct PendingNotification {
     session_name: String,
     pane_name: String,
     agent_description: Option<String>,
+    /// A monitored task's outcome, when this notification reports that
+    /// rather than a finished agent turn.
+    task_outcome: Option<TaskOutcomeNotice>,
+}
+
+/// Presentation of a progress monitor's terminal outcome.
+struct TaskOutcomeNotice {
+    job_id: String,
+    kind: TaskOutcomeKind,
+}
+
+enum TaskOutcomeKind {
+    Done,
+    Failed,
+    Lost,
 }
 
 impl PendingNotification {
@@ -77,17 +95,60 @@ impl PendingNotification {
             session_name,
             pane_name,
             agent_description,
+            task_outcome: None,
         }
+    }
+
+    /// A monitored task reached `done`/`error`, or Ilium lost sight of it.
+    /// Returns `None` for a still-live monitor: there is no outcome yet.
+    pub fn for_task_outcome(
+        session_name: String,
+        pane_name: String,
+        progress: &ilium_core::PaneProgress,
+    ) -> Option<Self> {
+        let kind = match progress.report.status {
+            ilium_core::ProgressTaskStatus::Done => TaskOutcomeKind::Done,
+            ilium_core::ProgressTaskStatus::Error => TaskOutcomeKind::Failed,
+            _ if progress.monitor_health.is_failed() => TaskOutcomeKind::Lost,
+            _ => return None,
+        };
+        Some(Self {
+            session_name,
+            pane_name,
+            agent_description: None,
+            task_outcome: Some(TaskOutcomeNotice {
+                job_id: progress.report.job_id.clone(),
+                kind,
+            }),
+        })
     }
 
     /// Notification summary shown by the desktop shell.
     fn summary(&self) -> String {
-        format!("{} finished", self.pane_name)
+        match self.task_outcome.as_ref().map(|outcome| &outcome.kind) {
+            None => format!("{} finished", self.pane_name),
+            Some(TaskOutcomeKind::Done) => format!("{}: task done", self.pane_name),
+            Some(TaskOutcomeKind::Failed) => format!("{}: task failed", self.pane_name),
+            Some(TaskOutcomeKind::Lost) => format!("{}: task lost", self.pane_name),
+        }
     }
 
     /// Notification body, with a distinct long-form description appended as
     /// a second paragraph so the original completion text remains first.
     fn body(&self) -> String {
+        if let Some(outcome) = &self.task_outcome {
+            let what = match outcome.kind {
+                TaskOutcomeKind::Done => "completed successfully",
+                TaskOutcomeKind::Failed => "reported an error",
+                TaskOutcomeKind::Lost => {
+                    "can no longer be observed by Ilium; its outcome is unknown"
+                }
+            };
+            return format!(
+                "Session \"{}\": task {} in \"{}\" {what}.",
+                self.session_name, outcome.job_id, self.pane_name
+            );
+        }
         let current_text = format!(
             "Session \"{}\": the agent in \"{}\" is done and waiting on you.",
             self.session_name, self.pane_name
@@ -177,8 +238,10 @@ mod tests {
     }
 
     #[test]
-    fn working_to_idle_notifies() {
-        assert!(is_finished_transition(Some(&working()), &idle()));
+    fn working_to_idle_is_a_parked_agent_and_does_not_notify() {
+        // The detection loop promotes a finished busy->idle turn to Done; a
+        // busy->Idle edge only survives when the agent parked on a monitor.
+        assert!(!is_finished_transition(Some(&working()), &idle()));
     }
 
     #[test]
@@ -218,8 +281,11 @@ mod tests {
     }
 
     #[test]
-    fn waiting_background_to_idle_notifies() {
-        assert!(is_finished_transition(Some(&waiting_background()), &idle()));
+    fn waiting_background_to_idle_does_not_notify() {
+        assert!(!is_finished_transition(
+            Some(&waiting_background()),
+            &idle()
+        ));
     }
 
     #[test]
@@ -231,10 +297,10 @@ mod tests {
     }
 
     #[test]
-    fn background_task_still_running_to_idle_notifies() {
+    fn background_task_still_running_to_done_notifies() {
         assert!(is_finished_transition(
             Some(&background_task_still_running()),
-            &idle()
+            &done()
         ));
     }
 
@@ -289,36 +355,36 @@ mod tests {
     }
 
     #[test]
-    fn working_to_idle_notifies_regardless_of_which_agent_class() {
+    fn working_to_done_notifies_regardless_of_which_agent_class() {
         let claude_working = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
-        let codex_idle = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
-        assert!(is_finished_transition(Some(&claude_working), &codex_idle));
+        let codex_done = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done);
+        assert!(is_finished_transition(Some(&claude_working), &codex_done));
     }
 
     #[test]
-    fn agent_with_goal_working_to_agent_with_goal_idle_notifies() {
+    fn agent_with_goal_working_to_agent_with_goal_done_notifies() {
         let goal_working = PaneStatus::AgentWithGoal(
             AgentClass::Claude,
             AgentActivity::Working,
             ilium_core::GoalState::Active,
         );
-        let goal_idle = PaneStatus::AgentWithGoal(
+        let goal_done = PaneStatus::AgentWithGoal(
             AgentClass::Claude,
-            AgentActivity::Idle,
+            AgentActivity::Done,
             ilium_core::GoalState::Active,
         );
-        assert!(is_finished_transition(Some(&goal_working), &goal_idle));
+        assert!(is_finished_transition(Some(&goal_working), &goal_done));
     }
 
     #[test]
-    fn agent_with_goal_working_to_plain_agent_idle_notifies_when_goal_clears_on_completion() {
+    fn agent_with_goal_working_to_plain_agent_done_notifies_when_goal_clears_on_completion() {
         let goal_working = PaneStatus::AgentWithGoal(
             AgentClass::Claude,
             AgentActivity::Working,
             ilium_core::GoalState::Active,
         );
-        let plain_idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
-        assert!(is_finished_transition(Some(&goal_working), &plain_idle));
+        let plain_done = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done);
+        assert!(is_finished_transition(Some(&goal_working), &plain_done));
     }
 
     #[test]

@@ -440,11 +440,23 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         ServerEvent::ProgressMonitorCheckCompleted { .. }
         | ServerEvent::ProgressMonitorSetCompleted { .. }
         | ServerEvent::ProgressMonitorStatusReported { .. }
-        | ServerEvent::ProgressMonitorGoalPolicyChanged { .. }
-        | ServerEvent::ProgressMonitorCleared { .. } => {
+        | ServerEvent::ProgressMonitorCleared { .. }
+        | ServerEvent::PaneGoalStatusReported { .. }
+        | ServerEvent::PaneGoalResumeRequested { .. }
+        | ServerEvent::VoiceTextResult { .. } => {
             // These request-correlated replies are consumed by one-shot CLI
             // connections. An attached TUI may observe a broadcast from an
             // older server, but it has no local lifecycle state to update.
+            None
+        }
+        ServerEvent::VoiceTextOffered {
+            request_id,
+            sentences,
+            start_voice,
+        } => {
+            // Sent to this connection alone because it registered as the
+            // voice host; the async loop that owns the voice actor answers.
+            app.receive_voice_text_offer(request_id, sentences, start_voice);
             None
         }
     }
@@ -2089,7 +2101,7 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
             },
         );
 
@@ -2106,9 +2118,21 @@ mod tests {
                     AgentClass::Codex,
                     AgentActivity::WaitingBackground,
                 )),
-                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
             ),
             Some(ilium_sound::SoundEvent::AgentFinished)
+        );
+        // Busy -> Idle is the server's parked-on-a-monitor outcome, never a
+        // finished turn.
+        assert_eq!(
+            ilium_sound::event_for_transition(
+                Some(&PaneStatus::Agent(
+                    AgentClass::Codex,
+                    AgentActivity::Working
+                )),
+                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            ),
+            None
         );
     }
 

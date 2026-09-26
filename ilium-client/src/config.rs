@@ -207,8 +207,8 @@ impl VoiceSettings {
 /// removes spatial transitions, while off suppresses decorative animation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionLevel {
-    #[default]
     Full,
+    #[default]
     Reduced,
     Off,
 }
@@ -257,7 +257,7 @@ pub struct TerminalSettings {
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
-            scrollback_budget_mib: 32,
+            scrollback_budget_mib: 8,
             new_pane_directory: NewPaneDirectory::ProjectRoot,
         }
     }
@@ -416,10 +416,10 @@ impl Default for KeyboardSettings {
 
 pub const MIN_CARD_PREVIEW_LINES: u16 = 1;
 pub const MAX_CARD_PREVIEW_LINES: u16 = 10;
-pub const DEFAULT_CARD_PREVIEW_LINES: u16 = 3;
+pub const DEFAULT_CARD_PREVIEW_LINES: u16 = 4;
 pub const MIN_BOARD_COLUMN_WIDTH: u16 = 10;
 pub const MAX_BOARD_COLUMN_WIDTH: u16 = 80;
-pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 20;
+pub const DEFAULT_BOARD_COLUMN_WIDTH: u16 = 45;
 pub const MIN_LAST_PROMPT_MAX_LINES: u8 = 1;
 pub const MAX_LAST_PROMPT_MAX_LINES: u8 = 20;
 pub const DEFAULT_LAST_PROMPT_MAX_LINES: u8 = 4;
@@ -446,9 +446,9 @@ impl Default for KanbanBoardSettings {
 /// How a detected agent's type is identified in the left tree panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentIdentifierMode {
-    #[default]
     FullName,
     Letter,
+    #[default]
     Icon,
     Hidden,
 }
@@ -474,11 +474,11 @@ impl AgentIdentifierMode {
 /// from introducing an empty, over-wide, or otherwise unstable tree glyph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ClaudeAgentIcon {
-    #[default]
     Brain,
     MagicWand,
     Compass,
     Thread,
+    #[default]
     Crab,
     Lobster,
 }
@@ -524,12 +524,13 @@ impl ClaudeAgentIcon {
 /// impossible cross-agent selection cannot be represented in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodexAgentIcon {
-    #[default]
     Gear,
     Tools,
     Dna,
     Book,
     CrossMark,
+    #[default]
+    Turtle,
 }
 
 /// Antigravity-specific icon choices. Kept separate from the other provider
@@ -537,10 +538,10 @@ pub enum CodexAgentIcon {
 /// glyph for the provider it represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AntigravityAgentIcon {
-    #[default]
     Spark,
     Satellite,
     Orbit,
+    #[default]
     Atom,
 }
 
@@ -571,12 +572,13 @@ impl AntigravityAgentIcon {
 }
 
 impl CodexAgentIcon {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Gear,
         Self::Tools,
         Self::Dna,
         Self::Book,
         Self::CrossMark,
+        Self::Turtle,
     ];
 
     pub const fn glyph(self) -> &'static str {
@@ -586,6 +588,7 @@ impl CodexAgentIcon {
             Self::Dna => "🧬",
             Self::Book => "📖",
             Self::CrossMark => "❎",
+            Self::Turtle => "🐢",
         }
     }
 
@@ -596,6 +599,7 @@ impl CodexAgentIcon {
             Self::Dna => "🧬 DNA",
             Self::Book => "📖 Book",
             Self::CrossMark => "❎ Cross mark",
+            Self::Turtle => "🐢 Turtle",
         }
     }
 
@@ -733,7 +737,7 @@ impl LeftPanelSizingSettings {
 impl Default for LeftPanelSizingSettings {
     fn default() -> Self {
         Self {
-            mode: LeftPanelSizingMode::FocusDependent,
+            mode: LeftPanelSizingMode::TerminalWidthDependent,
             fixed_width: DEFAULT_FIXED_TREE_WIDTH,
             unfocused_width: DEFAULT_UNFOCUSED_TREE_WIDTH,
             focused_width: DEFAULT_FOCUSED_TREE_WIDTH,
@@ -831,7 +835,7 @@ impl Default for UiSettings {
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
-            motion_level: MotionLevel::Full,
+            motion_level: MotionLevel::default(),
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
             show_inferred_title_icons: false,
@@ -1198,8 +1202,8 @@ fn normalize_text_trigger_settings(mut settings: TextTriggerSettings) -> TextTri
 }
 
 /// Resolves both configurable keyboard prefixes while keeping an absent
-/// `[keyboard]` table on the portable `Ctrl+A` and dedicated `Ctrl+B`
-/// defaults.
+/// `[keyboard]` table on the default `Ctrl+B` general leader and `Ctrl+B`
+/// navigation prefix.
 fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoadError> {
     let shortcut_base = match raw.shortcut_base {
         Some(value) => {
@@ -1225,7 +1229,7 @@ fn merge_keyboard(raw: RawKeyboardConfig) -> Result<KeyboardSettings, ConfigLoad
     })
 }
 
-/// Applies the optional board preview height over the three-line default.
+/// Applies the optional board preview height over [`DEFAULT_CARD_PREVIEW_LINES`].
 fn merge_kanban_board(raw: RawKanbanBoardConfig) -> Result<KanbanBoardSettings, ConfigLoadError> {
     let card_preview_lines = match raw.card_preview_lines {
         Some(lines) if (MIN_CARD_PREVIEW_LINES..=MAX_CARD_PREVIEW_LINES).contains(&lines) => lines,
@@ -1310,13 +1314,13 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         .as_deref()
         .map(parse_motion_level)
         .transpose()?
-        .unwrap_or_default();
+        .unwrap_or(defaults.motion_level);
     let sidebar_density = raw
         .sidebar_density
         .as_deref()
         .map(parse_sidebar_density)
         .transpose()?
-        .unwrap_or_default();
+        .unwrap_or(defaults.sidebar_density);
     let icons = IconSettings::from_target(|target| {
         raw.icons
             .get(target.key())
@@ -1561,6 +1565,7 @@ fn parse_codex_agent_icon(value: &str) -> Result<CodexAgentIcon, ConfigLoadError
         "dna" => Ok(CodexAgentIcon::Dna),
         "book" => Ok(CodexAgentIcon::Book),
         "cross_mark" => Ok(CodexAgentIcon::CrossMark),
+        "turtle" => Ok(CodexAgentIcon::Turtle),
         _ => Err(ConfigLoadError::InvalidCodexAgentIcon(value.to_string())),
     }
 }
@@ -1638,6 +1643,7 @@ fn codex_agent_icon_name(icon: CodexAgentIcon) -> &'static str {
         CodexAgentIcon::Dna => "dna",
         CodexAgentIcon::Book => "book",
         CodexAgentIcon::CrossMark => "cross_mark",
+        CodexAgentIcon::Turtle => "turtle",
     }
 }
 
@@ -2440,7 +2446,113 @@ mod tests {
             config.inference.selected_provider,
             ilium_inference::InferenceProviderKind::KiloGateway
         );
-        assert_eq!(config.inference.kilo_gateway.model, "kilo-auto/free");
+        assert_eq!(
+            config.inference.kilo_gateway.model,
+            ilium_inference::DEFAULT_KILO_GATEWAY_SELECTED_MODEL
+        );
+    }
+
+    /// The compiled-in defaults are the maintainer's own settings (icons,
+    /// identifier mode, keyboard, triggers, panel sizing ...), so a new user
+    /// sees exactly what the demos show. Pinned here so they cannot regress
+    /// silently; secrets, accounts, and machine paths are deliberately absent.
+    #[test]
+    fn compiled_in_defaults_are_the_documented_profile() {
+        use crate::keymap::{action_for_table, Action, BindingKey};
+        use crate::trigger_settings::{TriggerAction, TriggerEvent};
+
+        let config = ClientConfig::default();
+        let ui = &config.ui;
+        assert_eq!(ui.agent_identifiers.mode, AgentIdentifierMode::Icon);
+        for (target, glyph) in [
+            (IconTarget::Claude, "🦀"),
+            (IconTarget::Codex, "🐢"),
+            (IconTarget::Antigravity, "⚛️"),
+            (IconTarget::Terminal, "🖥️"),
+            (IconTarget::Group, "📂"),
+            (IconTarget::TopLevel, "🏠"),
+            (IconTarget::Editor, "📝"),
+            (IconTarget::Board, "📉"),
+            (IconTarget::ToolbarSearch, "🔎"),
+            (IconTarget::WaitingApproval, "✋"),
+            (IconTarget::WaitingBackground, "🕗"),
+        ] {
+            assert_eq!(ui.icons.glyph(target), glyph, "{}", target.key());
+        }
+        assert_eq!(ui.agent_identifiers.claude_icon, ClaudeAgentIcon::Crab);
+        assert_eq!(ui.agent_identifiers.codex_icon, CodexAgentIcon::Turtle);
+        assert_eq!(ui.motion_level, MotionLevel::Reduced);
+        assert_eq!(
+            ui.left_panel_sizing,
+            LeftPanelSizingSettings {
+                mode: LeftPanelSizingMode::TerminalWidthDependent,
+                fixed_width: 32,
+                unfocused_width: 24,
+                focused_width: 44,
+                minimum_terminal_width: 120,
+            }
+        );
+
+        assert_eq!(config.keyboard.shortcut_base, ShortcutBase::B);
+        assert_eq!(config.keyboard.navigation_shortcut_base, ShortcutBase::B);
+        for (action, key) in [
+            (Action::NewSplitView, '"'),
+            (Action::NewFolder, 'F'),
+            (Action::Rename, ','),
+            (Action::FocusPane, 'P'),
+            (Action::Search, 'f'),
+            (Action::Settings, ':'),
+            (Action::Quit, '&'),
+        ] {
+            assert_eq!(
+                action_for_table(&config.keybindings, BindingKey::Character(key)),
+                Some(action)
+            );
+        }
+
+        let triggers = &config.triggers;
+        assert_eq!(
+            triggers.actions_for(TriggerEvent::StartupComplete),
+            &[TriggerAction::RestructureAllProjects]
+        );
+        assert!(triggers.is_enabled(
+            TriggerEvent::AgentFinishedWork,
+            TriggerAction::RetitleElement
+        ));
+        assert!(triggers.is_enabled(
+            TriggerEvent::AgentFinishedWork,
+            TriggerAction::RestructureProject
+        ));
+        assert!(config.text_triggers.triggers.is_empty());
+        assert_eq!(
+            config.inference.title_style,
+            ilium_inference::TitleStyle::Labeling
+        );
+        assert_eq!(config.terminal.scrollback_budget_mib, 8);
+        assert_eq!(config.kanban_board.card_preview_lines, 4);
+        assert_eq!(config.kanban_board.minimum_column_width, 45);
+        assert!(!config.voice.enabled);
+        assert!(config.voice.api_key.is_empty());
+    }
+
+    /// A config file that mentions a table but not every key must inherit the
+    /// same values as a missing file: one source of truth per setting.
+    #[test]
+    fn partial_tables_inherit_the_compiled_in_defaults() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ncolor_scheme = \"dark\"\n[keyboard]\n[terminal]\n[kanban_board]\n[triggers]\n",
+        )
+        .unwrap();
+        let partial = load(&dir).expect("partial config loads");
+        let defaults = ClientConfig::default();
+        assert_eq!(partial.ui, defaults.ui);
+        assert_eq!(partial.keyboard, defaults.keyboard);
+        assert_eq!(partial.terminal, defaults.terminal);
+        assert_eq!(partial.kanban_board, defaults.kanban_board);
+        assert_eq!(partial.triggers, defaults.triggers);
+        assert_eq!(partial.keybindings, defaults.keybindings);
     }
 
     #[test]
@@ -2514,7 +2626,10 @@ mod tests {
 
         let loaded = load(&dir).expect("load legacy inference settings");
 
-        assert_eq!(loaded.inference.kilo_gateway.model, "kilo-auto/free");
+        assert_eq!(
+            loaded.inference.kilo_gateway.model,
+            ilium_inference::DEFAULT_KILO_GATEWAY_SELECTED_MODEL
+        );
     }
 
     #[test]
@@ -3032,7 +3147,7 @@ mod tests {
             AgentIdentifierMode::FullName
         );
         assert_eq!(ClaudeAgentIcon::Brain.stepped(-1), ClaudeAgentIcon::Lobster);
-        assert_eq!(CodexAgentIcon::CrossMark.stepped(1), CodexAgentIcon::Gear);
+        assert_eq!(CodexAgentIcon::Turtle.stepped(1), CodexAgentIcon::Gear);
         assert_eq!(
             AntigravityAgentIcon::Spark.stepped(-1),
             AntigravityAgentIcon::Atom
@@ -3360,13 +3475,13 @@ mod tests {
     }
 
     #[test]
-    fn kanban_board_uses_three_preview_lines_and_twenty_column_width_by_default() {
+    fn kanban_board_uses_four_preview_lines_and_forty_five_column_width_by_default() {
         let dir = scratch_dir();
 
         let config = load(&dir).expect("missing config should use defaults");
 
-        assert_eq!(config.kanban_board.card_preview_lines, 3);
-        assert_eq!(config.kanban_board.minimum_column_width, 20);
+        assert_eq!(config.kanban_board.card_preview_lines, 4);
+        assert_eq!(config.kanban_board.minimum_column_width, 45);
     }
 
     #[test]

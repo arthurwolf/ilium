@@ -19,6 +19,7 @@ mod agent_delivery;
 pub mod config;
 mod detection;
 pub mod error;
+pub(crate) mod goal_control;
 mod http_api;
 mod initial_prompt;
 mod ipc;
@@ -38,6 +39,7 @@ mod sounds;
 mod state;
 mod task_guard;
 mod text_triggers;
+mod voice_relay;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -199,6 +201,8 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     let http_api_task =
         AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
+    let goal_reminder_task =
+        AbortOnDropHandle::new(goal_control::spawn_idle_reminder(Arc::clone(&state)));
     let snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
     let session_backup_task = AbortOnDropHandle::new(session_backups::spawn(
@@ -220,6 +224,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     detection_task.abort();
     http_api_task.abort();
     scheduled_input_task.abort();
+    goal_reminder_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }
@@ -469,15 +474,10 @@ pub(crate) async fn restore_snapshot(
 
     let persisted_monitor_count = persisted_progress_monitors.len();
     let mut restored_monitor_count = 0_usize;
-    for mut persisted_monitor in persisted_progress_monitors {
+    for persisted_monitor in persisted_progress_monitors {
         if failed_pane_ids.contains(&persisted_monitor.pane_id) {
             continue;
         }
-        // A snapshot proves only that a pause/resume workflow once existed;
-        // it cannot prove that the same process, transcript, goal epoch, and
-        // still-paused state survived the server boundary. Preserve the task
-        // and delivery evidence, but fail closed on automatic goal resumption.
-        persisted_monitor.disarm_ambiguous_goal_resume();
         let pane_id = persisted_monitor.pane_id;
         match ipc::handlers::restore_persisted_progress_monitor(state, persisted_monitor).await {
             Ok(()) => restored_monitor_count += 1,

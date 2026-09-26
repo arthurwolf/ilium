@@ -12,7 +12,7 @@ use ilium_core::{
     AgentClass, AgentProvider, BuiltinAgentProvider, GoalState, NodeId, PaneProgress,
     SessionIdentityTransitionRule,
 };
-use ilium_ipc::{ProgressGoalPolicy, ProgressMonitorStatus};
+use ilium_ipc::ProgressMonitorStatus;
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -73,36 +73,6 @@ impl From<crate::persistence::PersistedProgressDeliveryState> for ProgressDelive
     }
 }
 
-/// Stable ownership evidence captured before Ilium submits `/goal pause`.
-/// Every field must still match before pause confirmation or resumption.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProgressGoalBinding {
-    pub monitor_id: u64,
-    pub process_id: u32,
-    pub session_id: String,
-    pub goal_owner_epoch: u64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum ProgressGoalResumeState {
-    #[default]
-    Disarmed,
-    Armed(ProgressGoalBinding),
-    PauseSubmitted(ProgressGoalBinding),
-    OwnedPause(ProgressGoalBinding),
-    ResumeDeliveredToPty(ProgressGoalBinding),
-    Unsafe(String),
-}
-
-impl ProgressGoalResumeState {
-    pub const fn is_armed(&self) -> bool {
-        matches!(
-            self,
-            Self::Armed(_) | Self::PauseSubmitted(_) | Self::OwnedPause(_)
-        )
-    }
-}
-
 /// Server-owned operational state for one accepted progress registration.
 /// The pure tree carries only `latest_progress`; command and delivery state
 /// stay beside the PTY because they control server-side work.
@@ -112,10 +82,7 @@ pub struct ProgressMonitorRuntimeState {
     pub command: String,
     pub interval: Duration,
     pub latest_progress: PaneProgress,
-    pub goal_policy: ProgressGoalPolicy,
-    pub goal_resume: ProgressGoalResumeState,
     pub result_delivery: ProgressDeliveryState,
-    pub goal_resume_delivery: ProgressDeliveryState,
 }
 
 /// What a terminal pane was spawned to run -- kept separate from
@@ -271,6 +238,41 @@ pub struct TerminalPaneRuntime {
     /// check and full text-to-Enter submission of progress-owned effects.
     pub progress_effect_gate: std::sync::Arc<Mutex<()>>,
     pub progress_monitor: Option<ProgressMonitorRuntimeState>,
+    /// Goal-owner epoch in which the user typed `/goal pause` at the
+    /// keyboard. Agent-requested resume refuses that pause; typing
+    /// `/goal resume` or a new goal owner (new epoch) releases it.
+    pub user_paused_goal_epoch: Option<u64>,
+    /// Pending agent-requested `/goal resume` (see `crate::goal_control`).
+    pub agent_goal_resume: Option<AgentGoalResumeRequest>,
+    /// Waiter that submits `agent_goal_resume` at the next safe composer.
+    /// Owned here so closing the pane or cancelling the request stops it.
+    agent_goal_resume_task: Option<JoinHandle<()>>,
+    /// Idle paused-goal reminder bookkeeping (see
+    /// `crate::goal_control::spawn_idle_reminder`).
+    pub goal_reminder: Option<GoalReminderState>,
+    /// Goal-owner epoch in which detection last saw the goal `Active`. A
+    /// pause whose epoch was never seen active has an unknown origin (it
+    /// predates this server, for example) and fails closed.
+    pub goal_active_seen_epoch: Option<u64>,
+    /// When Ilium last wrote an agent-requested `/goal resume`. Detection
+    /// needs a moment to observe `Active`; during that window the pause is
+    /// reported as resume-queued so nothing queues a duplicate resume.
+    pub goal_resume_submitted_at: Option<Instant>,
+}
+
+/// One continuous episode in which this pane's goal stayed resumable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoalReminderState {
+    pub goal_owner_epoch: u64,
+    pub resumable_since: Instant,
+    pub is_delivered: bool,
+}
+
+/// One agent-requested resume, fenced to the paused goal it was issued for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentGoalResumeRequest {
+    pub goal_owner_epoch: u64,
+    pub process_id: u32,
 }
 
 impl TerminalPaneRuntime {
@@ -322,6 +324,12 @@ impl TerminalPaneRuntime {
             progress_monitor_generation: ProgressMonitorGeneration::default(),
             progress_effect_gate: std::sync::Arc::new(Mutex::new(())),
             progress_monitor: None,
+            user_paused_goal_epoch: None,
+            agent_goal_resume: None,
+            agent_goal_resume_task: None,
+            goal_reminder: None,
+            goal_active_seen_epoch: None,
+            goal_resume_submitted_at: None,
         }
     }
 
@@ -372,6 +380,30 @@ impl TerminalPaneRuntime {
         }
     }
 
+    pub fn set_agent_goal_resume_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.agent_goal_resume_task.replace(task) {
+            previous_task.abort();
+        }
+    }
+
+    /// Drops a pending agent-requested resume and stops its waiter.
+    pub fn cancel_agent_goal_resume(&mut self) {
+        self.agent_goal_resume = None;
+        if let Some(task) = self.agent_goal_resume_task.take() {
+            task.abort();
+        }
+    }
+
+    /// Records keyboard `/goal pause` and `/goal resume` so agent-requested
+    /// resume never overrides a pause the user chose.
+    pub fn observe_user_goal_command(&mut self, submitted_line: &str) {
+        if pauses_agent_goal(submitted_line) {
+            self.user_paused_goal_epoch = Some(self.goal_owner_epoch);
+        } else if resumes_agent_goal(submitted_line) || clears_agent_goal(submitted_line) {
+            self.user_paused_goal_epoch = None;
+        }
+    }
+
     /// Stops all automated progress work without discarding the accepted
     /// registration, sticky terminal evidence, or generation. Used by the
     /// global feature switch; explicit clear remains the destructive action.
@@ -388,26 +420,10 @@ impl TerminalPaneRuntime {
     pub fn install_progress_monitor(
         &mut self,
         registration: ProgressMonitorRegistration,
-        goal_policy: ProgressGoalPolicy,
     ) -> Result<ProgressMonitorFence, String> {
         registration.validate().map_err(|error| error.to_string())?;
-        if goal_policy == ProgressGoalPolicy::PauseAndResume
-            && (registration.initial_progress.is_terminal()
-                || registration.initial_progress.monitor_health.is_failed())
-        {
-            return Err(
-                "a terminal or failed progress monitor cannot arm goal resumption".to_string(),
-            );
-        }
-        // Validate every rejectable condition before advancing the generation
-        // or aborting the old tasks. A failed PauseAndResume replacement must
-        // leave the previous accepted monitor fully intact.
-        let initial_goal_resume = match goal_policy {
-            ProgressGoalPolicy::KeepRunning => ProgressGoalResumeState::Disarmed,
-            ProgressGoalPolicy::PauseAndResume => ProgressGoalResumeState::Armed(
-                self.verified_active_codex_goal_binding(registration.monitor_id)?,
-            ),
-        };
+        // Validate every rejectable condition before aborting the old tasks so
+        // a rejected replacement leaves the previous accepted monitor intact.
         let fence = self
             .progress_monitor_generation
             .activate(registration.monitor_id)
@@ -423,10 +439,7 @@ impl TerminalPaneRuntime {
             command: registration.command,
             interval: registration.interval,
             latest_progress: registration.initial_progress,
-            goal_policy,
-            goal_resume: initial_goal_resume,
             result_delivery: ProgressDeliveryState::NotQueued,
-            goal_resume_delivery: ProgressDeliveryState::NotQueued,
         });
         Ok(fence)
     }
@@ -461,25 +474,6 @@ impl TerminalPaneRuntime {
                 .progress_monitor
                 .as_ref()
                 .map(|monitor| monitor.latest_progress.clone()),
-            goal_policy: self
-                .progress_monitor
-                .as_ref()
-                .map(|monitor| monitor.goal_policy),
-            goal_resume_armed: self
-                .progress_monitor
-                .as_ref()
-                .is_some_and(|monitor| monitor.goal_resume.is_armed()),
-        }
-    }
-
-    pub fn armed_progress_goal_binding(&self, monitor_id: u64) -> Option<ProgressGoalBinding> {
-        if !self.is_current_progress_monitor(monitor_id) {
-            return None;
-        }
-        let monitor = self.progress_monitor.as_ref()?;
-        match &monitor.goal_resume {
-            ProgressGoalResumeState::Armed(binding) => Some(binding.clone()),
-            _ => None,
         }
     }
 
@@ -492,128 +486,24 @@ impl TerminalPaneRuntime {
             pane_id,
             command: monitor.command.clone(),
             interval_seconds: monitor.interval.as_secs(),
-            goal_policy: monitor.goal_policy,
             latest_progress: monitor.latest_progress.clone(),
-            goal_resume_armed: monitor.goal_resume.is_armed(),
             result_delivery: monitor.result_delivery.into(),
-            goal_resume_delivery: monitor.goal_resume_delivery.into(),
         })
     }
 
-    /// Applies crash-recovery delivery evidence without reconstructing goal
-    /// ownership. Only a caller that separately checks `Queued` may retry it;
-    /// attempted/uncertain states remain sticky evidence.
+    /// Applies crash-recovery delivery evidence. Only a caller that separately
+    /// checks `Queued` may retry it; attempted/uncertain states remain sticky
+    /// evidence.
     pub fn restore_progress_delivery_state(
         &mut self,
         result_delivery: crate::persistence::PersistedProgressDeliveryState,
-        goal_resume_delivery: crate::persistence::PersistedProgressDeliveryState,
     ) -> Result<(), String> {
         let monitor = self
             .progress_monitor
             .as_mut()
             .ok_or_else(|| "no progress monitor is installed".to_string())?;
         monitor.result_delivery = result_delivery.into();
-        monitor.goal_resume_delivery = goal_resume_delivery.into();
-        monitor.goal_resume = ProgressGoalResumeState::Disarmed;
         Ok(())
-    }
-
-    /// Captures a resumption binding only for a currently active, verified
-    /// Codex goal whose live process and transcript identity agree.
-    pub fn arm_progress_goal_resume(
-        &mut self,
-        monitor_id: u64,
-    ) -> Result<ProgressGoalBinding, String> {
-        if !self.is_current_progress_monitor(monitor_id) {
-            return Err(format!("progress monitor {monitor_id} is stale"));
-        }
-        let monitor = self
-            .progress_monitor
-            .as_ref()
-            .expect("current monitor was checked above");
-        if monitor.latest_progress.is_terminal()
-            || monitor.latest_progress.monitor_health.is_failed()
-        {
-            return Err(
-                "a terminal or failed progress monitor cannot arm goal resumption".to_string(),
-            );
-        }
-        let binding = self.verified_active_codex_goal_binding(monitor_id)?;
-        let monitor = self
-            .progress_monitor
-            .as_mut()
-            .expect("current monitor was checked above");
-        monitor.goal_policy = ProgressGoalPolicy::PauseAndResume;
-        monitor.goal_resume = ProgressGoalResumeState::Armed(binding.clone());
-        monitor.goal_resume_delivery = ProgressDeliveryState::NotQueued;
-        Ok(binding)
-    }
-
-    fn verified_active_codex_goal_binding(
-        &self,
-        monitor_id: u64,
-    ) -> Result<ProgressGoalBinding, String> {
-        let owner = self
-            .confirmed_goal_owner
-            .as_ref()
-            .filter(|owner| {
-                owner.agent_class == AgentClass::Codex && owner.goal_state == GoalState::Active
-            })
-            .ok_or_else(|| "an active verified Codex goal is required".to_string())?;
-        if self.detected_agent_process_id != Some(owner.process_id)
-            || self.session_process_id != Some(owner.process_id)
-            || self.detected_agent_class.as_ref() != Some(&AgentClass::Codex)
-            || self.session_agent_class.as_ref() != Some(&AgentClass::Codex)
-            || self.is_session_identity_invalidated
-        {
-            return Err("Codex process and session ownership are not stable".to_string());
-        }
-        let session_id = self
-            .session_id
-            .clone()
-            .ok_or_else(|| "Codex session identity is not verified yet".to_string())?;
-        let binding = ProgressGoalBinding {
-            monitor_id,
-            process_id: owner.process_id,
-            session_id,
-            goal_owner_epoch: self.goal_owner_epoch,
-        };
-        Ok(binding)
-    }
-
-    pub fn disarm_progress_goal_resume(&mut self, monitor_id: u64) -> Result<(), String> {
-        if !self.is_current_progress_monitor(monitor_id) {
-            return Err(format!("progress monitor {monitor_id} is stale"));
-        }
-        self.cancel_progress_delivery_task();
-        let monitor = self
-            .progress_monitor
-            .as_mut()
-            .expect("current monitor was checked above");
-        monitor.goal_policy = ProgressGoalPolicy::KeepRunning;
-        monitor.goal_resume = ProgressGoalResumeState::Disarmed;
-        monitor.goal_resume_delivery = ProgressDeliveryState::NotQueued;
-        Ok(())
-    }
-
-    pub fn progress_goal_binding_matches(
-        &self,
-        binding: &ProgressGoalBinding,
-        required_state: GoalState,
-    ) -> bool {
-        self.is_current_progress_monitor(binding.monitor_id)
-            && self.goal_owner_epoch == binding.goal_owner_epoch
-            && !self.is_session_identity_invalidated
-            && self.session_id.as_deref() == Some(binding.session_id.as_str())
-            && self.session_agent_class.as_ref() == Some(&AgentClass::Codex)
-            && self.session_process_id == Some(binding.process_id)
-            && self.detected_agent_process_id == Some(binding.process_id)
-            && self.detected_agent_class.as_ref() == Some(&AgentClass::Codex)
-            && self.confirmed_goal_owner.as_ref().is_some_and(|owner| {
-                owner.process_id == binding.process_id
-                    && owner.agent_class == AgentClass::Codex
-                    && owner.goal_state == required_state
-            })
     }
 
     /// Replaces detector-owned goal evidence while maintaining a stable
@@ -625,6 +515,13 @@ impl TerminalPaneRuntime {
             self.goal_owner_epoch = self.goal_owner_epoch.wrapping_add(1).max(1);
         }
         self.confirmed_goal_owner = owner;
+        if self
+            .confirmed_goal_owner
+            .as_ref()
+            .is_some_and(|owner| owner.goal_state == GoalState::Active)
+        {
+            self.goal_active_seen_epoch = Some(self.goal_owner_epoch);
+        }
     }
 
     /// Explicit goal clearing is an identity boundary even before the next
@@ -662,6 +559,7 @@ impl TerminalPaneRuntime {
         }
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_monitor();
+        self.cancel_agent_goal_resume();
     }
 }
 
@@ -715,6 +613,16 @@ pub fn clears_agent_conversation(submitted_line: &str) -> bool {
 /// must not clear the sidebar signal while their footer is temporarily hidden.
 pub fn clears_agent_goal(submitted_line: &str) -> bool {
     submitted_line.split_whitespace().eq(["/goal", "clear"])
+}
+
+/// A submitted `/goal pause` (Codex).
+pub fn pauses_agent_goal(submitted_line: &str) -> bool {
+    submitted_line.split_whitespace().eq(["/goal", "pause"])
+}
+
+/// A submitted `/goal resume` (Codex).
+pub fn resumes_agent_goal(submitted_line: &str) -> bool {
+    submitted_line.split_whitespace().eq(["/goal", "resume"])
 }
 
 impl Drop for TerminalPaneRuntime {
@@ -993,6 +901,21 @@ mod tests {
             "please /goal clear",
         ] {
             assert!(!clears_agent_goal(command));
+        }
+    }
+
+    #[test]
+    fn only_exact_goal_pause_and_resume_commands_are_recognised() {
+        assert!(pauses_agent_goal(" /goal   pause "));
+        assert!(resumes_agent_goal("/goal resume"));
+        for command in [
+            "/goal",
+            "/goal pause now",
+            "please /goal pause",
+            "/goal resume later",
+        ] {
+            assert!(!pauses_agent_goal(command), "{command}");
+            assert!(!resumes_agent_goal(command), "{command}");
         }
     }
 

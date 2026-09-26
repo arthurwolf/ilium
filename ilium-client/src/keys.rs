@@ -2580,6 +2580,13 @@ mod indent_outdent_tests {
         let ctrl_a = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
         let ctrl_b = Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
 
+        // Fresh install: both prefixes are Ctrl+B, so it opens the leader.
+        handle_event(&mut app, ctrl_b.clone());
+        assert!(matches!(app.mode, Mode::LeaderPending));
+        app.mode = Mode::Normal;
+
+        // Split the general leader from the navigation prefix (Ctrl+A / Ctrl+B).
+        app.settings_set_shortcut_base(crate::keymap::ShortcutBase::A);
         handle_event(&mut app, ctrl_a.clone());
         assert!(matches!(app.mode, Mode::LeaderPending));
         app.mode = Mode::Normal;
