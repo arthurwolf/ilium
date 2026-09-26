@@ -21,6 +21,9 @@ use crate::{
 };
 
 const REALTIME_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
+/// Test and demo seam: points the adapter at a local scripted Realtime server so
+/// the full voice path can be exercised without the network or an API key.
+const ENDPOINT_OVERRIDE_ENV: &str = "ILIUM_VOICE_REALTIME_URL";
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
 const SESSION_RENEWAL_INTERVAL: Duration = Duration::from_secs(55 * 60);
 const SESSION_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -42,6 +45,17 @@ struct SessionState {
     completed_call_ids: BoundedCallIdSet,
     playing_item: Option<PlayingItem>,
     is_response_active: bool,
+    /// Function calls from the last completed response were handed to the
+    /// application and their outputs have not come back yet. The provider
+    /// allows only one response at a time and the application's follow-up
+    /// `response.create` must not collide with a typed turn, so typed turns
+    /// wait for the outputs.
+    is_awaiting_tool_outputs: bool,
+    /// Typed sentences (`VoiceCommand::SendText`) not yet turned into a user
+    /// item because a response was in flight. Each becomes its own turn, in
+    /// order, exactly like successive spoken sentences. Survives a proactive
+    /// reconnect, unlike the flags above.
+    pending_text: VecDeque<String>,
 }
 
 impl SessionState {
@@ -54,12 +68,20 @@ impl SessionState {
             completed_call_ids: BoundedCallIdSet::default(),
             playing_item: None,
             is_response_active: false,
+            is_awaiting_tool_outputs: false,
+            pending_text: VecDeque::new(),
         }
     }
 
     fn reset_connection_state(&mut self) {
         self.playing_item = None;
         self.is_response_active = false;
+        self.is_awaiting_tool_outputs = false;
+    }
+
+    /// Whether the provider can take a new typed turn right now.
+    fn can_start_typed_turn(&self) -> bool {
+        !self.is_response_active && !self.is_awaiting_tool_outputs
     }
 }
 
@@ -283,35 +305,19 @@ async fn handle_command(
             .await?;
         }
         VoiceCommand::SubmitToolOutputs(outputs) => {
-            submit_tool_outputs(socket, event_sender, &outputs, true).await?;
+            submit_tool_outputs(socket, event_sender, state, &outputs, true).await?;
         }
         VoiceCommand::SubmitToolOutputsAndShutdown(outputs) => {
-            submit_tool_outputs(socket, event_sender, &outputs, false).await?;
+            submit_tool_outputs(socket, event_sender, state, &outputs, false).await?;
             return Ok(CommandOutcome::Shutdown);
         }
         VoiceCommand::SendText(text) => {
-            if text.trim().is_empty() {
+            let text = text.trim();
+            if text.is_empty() {
                 return Ok(CommandOutcome::Continue);
             }
-            send_json(
-                socket,
-                &json!({
-                    "type": "conversation.item.create",
-                    "item": {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{ "type": "input_text", "text": text }],
-                    },
-                }),
-            )
-            .await?;
-            send_json(socket, &json!({ "type": "response.create" })).await?;
-            state.is_response_active = true;
-            send_event(
-                event_sender,
-                VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
-            )
-            .await;
+            state.pending_text.push_back(text.to_owned());
+            start_pending_typed_turn(socket, event_sender, state).await?;
         }
         VoiceCommand::StartPushToTalk => {
             if matches!(config.input_mode, VoiceInputMode::PushToTalk) {
@@ -378,6 +384,7 @@ async fn handle_command(
 async fn submit_tool_outputs(
     socket: &mut RealtimeSocket,
     event_sender: &mpsc::Sender<VoiceEvent>,
+    state: &mut SessionState,
     outputs: &[VoiceToolOutput],
     can_request_follow_up: bool,
 ) -> Result<(), VoiceError> {
@@ -385,15 +392,59 @@ async fn submit_tool_outputs(
     for output_event in output_events {
         send_json(socket, &output_event).await?;
     }
+    state.is_awaiting_tool_outputs = false;
     if can_request_follow_up && request_follow_up {
         send_json(socket, &json!({ "type": "response.create" })).await?;
+        // The provider has not yet said `response.created`; marking the
+        // response active now keeps a typed turn from racing this follow-up.
+        state.is_response_active = true;
         send_event(
             event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
         )
         .await;
+    } else if can_request_follow_up {
+        // No follow-up will end the turn, so no `response.done` is coming to
+        // release a typed sentence that queued behind these tool calls.
+        start_pending_typed_turn(socket, event_sender, state).await?;
     }
 
+    Ok(())
+}
+
+/// Turns the oldest queued typed sentence into a user message and asks for a
+/// response, if the provider is free. This is the same input the model gets
+/// from a recognised utterance, so it picks tools and answers identically.
+async fn start_pending_typed_turn(
+    socket: &mut RealtimeSocket,
+    event_sender: &mpsc::Sender<VoiceEvent>,
+    state: &mut SessionState,
+) -> Result<(), VoiceError> {
+    if !state.can_start_typed_turn() {
+        return Ok(());
+    }
+    let Some(text) = state.pending_text.pop_front() else {
+        return Ok(());
+    };
+    send_json(
+        socket,
+        &json!({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": text }],
+            },
+        }),
+    )
+    .await?;
+    send_json(socket, &json!({ "type": "response.create" })).await?;
+    state.is_response_active = true;
+    send_event(
+        event_sender,
+        VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
+    )
+    .await;
     Ok(())
 }
 
@@ -523,6 +574,7 @@ async fn handle_provider_event(
                 .into_iter()
                 .filter(|invocation| state.completed_call_ids.insert(invocation.call_id.clone()))
                 .collect::<Vec<_>>();
+            state.is_awaiting_tool_outputs = !invocations.is_empty();
             if !invocations.is_empty() {
                 send_event(event_sender, VoiceEvent::ToolInvocations(invocations)).await;
             }
@@ -532,6 +584,10 @@ async fn handle_provider_event(
                 VoiceEvent::StateChanged(VoiceConnectionState::Listening),
             )
             .await;
+            // A typed sentence that arrived mid-response runs now (and puts
+            // the state back to Thinking); with tool calls pending it waits
+            // for their outputs instead.
+            start_pending_typed_turn(socket, event_sender, state).await?;
         }
         "error" => {
             let message = event
@@ -552,12 +608,52 @@ async fn handle_provider_event(
     Ok(())
 }
 
+/// Returns the Realtime endpoint. The override is honoured only for loopback
+/// `ws://` URLs, so captured microphone audio can never be redirected to a
+/// remote host through the environment.
+fn realtime_endpoint() -> Result<String, VoiceError> {
+    resolve_realtime_endpoint(std::env::var(ENDPOINT_OVERRIDE_ENV).ok().as_deref())
+}
+
+/// Pure core of [`realtime_endpoint`], separated so the loopback guard is
+/// testable without touching the process environment.
+fn resolve_realtime_endpoint(override_value: Option<&str>) -> Result<String, VoiceError> {
+    let Some(value) = override_value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(REALTIME_ENDPOINT.to_owned());
+    };
+    if !is_loopback_websocket_url(value) {
+        return Err(VoiceError::Connect(format!(
+            "{ENDPOINT_OVERRIDE_ENV} must be a loopback ws:// URL"
+        )));
+    }
+    Ok(value.to_owned())
+}
+
+/// True only for `ws://<loopback host>:<port>[/path]`. The authority is
+/// parsed rather than prefix-matched: `ws://127.0.0.1:80@example.com/` starts
+/// with a loopback prefix yet connects to `example.com`.
+fn is_loopback_websocket_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("ws://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let Some((host, port)) = authority.rsplit_once(':') else {
+        return false;
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+        && !port.is_empty()
+        && port.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 async fn connect(config: &VoiceRuntimeConfig) -> Result<RealtimeSocket, VoiceError> {
     // This workspace contains TLS clients with different rustls feature
     // graphs. Selecting one provider here prevents rustls from panicking when
     // feature unification leaves process-wide provider choice ambiguous.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let url = format!("{REALTIME_ENDPOINT}?model={}", config.model.api_name());
+    let url = format!("{}?model={}", realtime_endpoint()?, config.model.api_name());
     let diagnostic_url = ilium_logging::redacted_url(&url);
     tracing::info!(
         method = "GET",
@@ -889,6 +985,38 @@ mod tests {
 
     use super::*;
     use crate::{ReasoningEffort, VadEagerness, VoiceModel, VoiceName};
+
+    #[test]
+    fn realtime_endpoint_defaults_to_the_provider_and_accepts_only_loopback_overrides() {
+        assert_eq!(resolve_realtime_endpoint(None).unwrap(), REALTIME_ENDPOINT);
+        assert_eq!(
+            resolve_realtime_endpoint(Some("  ")).unwrap(),
+            REALTIME_ENDPOINT
+        );
+        for accepted in [
+            "ws://127.0.0.1:8080/v1/realtime",
+            "ws://localhost:1/v1/realtime",
+            "ws://[::1]:9000/v1/realtime",
+        ] {
+            assert_eq!(resolve_realtime_endpoint(Some(accepted)).unwrap(), accepted);
+        }
+        for rejected in [
+            "wss://api.openai.com/v1/realtime",
+            "ws://example.com:80/v1/realtime",
+            "wss://127.0.0.1:8080/v1/realtime",
+            "ws://127.0.0.1/v1/realtime",
+            // Userinfo makes the real host `example.com` despite the prefix.
+            "ws://127.0.0.1:80@example.com/v1/realtime",
+            "ws://localhost:80@example.com",
+            "ws://127.0.0.1.example.com:80/v1/realtime",
+            "ws://127.0.0.1:80x/v1/realtime",
+        ] {
+            assert!(
+                resolve_realtime_endpoint(Some(rejected)).is_err(),
+                "{rejected} must be rejected"
+            );
+        }
+    }
 
     fn config(input_mode: VoiceInputMode) -> VoiceRuntimeConfig {
         VoiceRuntimeConfig {

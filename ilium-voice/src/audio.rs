@@ -11,6 +11,10 @@ use tokio::sync::mpsc;
 use crate::{VoiceError, VoiceInputMode};
 
 pub(crate) const REALTIME_SAMPLE_RATE: u32 = 24_000;
+/// Test and demo seam: `none` runs the session without opening any audio
+/// device, so typed sentences and a scripted provider exercise the whole
+/// pipeline on a machine with no microphone or speaker (CI, containers).
+const AUDIO_OVERRIDE_ENV: &str = "ILIUM_VOICE_AUDIO";
 const CAPTURE_CHANNEL_CAPACITY: usize = 32;
 const MAX_BUFFERED_PLAYBACK_SECONDS: usize = 30;
 
@@ -22,8 +26,11 @@ pub(crate) struct CapturedAudio {
 
 /// Owns both device streams. Dropping this object stops capture and playback.
 pub(crate) struct AudioEngine {
-    _input_stream: cpal::Stream,
-    _output_stream: cpal::Stream,
+    /// `None` only for the headless test seam (see `AUDIO_OVERRIDE_ENV`).
+    _streams: Option<(cpal::Stream, cpal::Stream)>,
+    /// Keeps a headless engine's capture channel open: a dropped sender would
+    /// make `next_capture` report the session as ended instead of idle.
+    _headless_capture_sender: Option<mpsc::Sender<CapturedAudio>>,
     capture_receiver: mpsc::Receiver<CapturedAudio>,
     capture_enabled: Arc<AtomicBool>,
     playback_samples: Arc<Mutex<VecDeque<f32>>>,
@@ -41,6 +48,9 @@ impl AudioEngine {
         input_mode: VoiceInputMode,
         output_volume_percent: u8,
     ) -> Result<Self, VoiceError> {
+        if is_headless_requested() {
+            return Ok(Self::headless(output_volume_percent));
+        }
         let host = cpal::default_host();
         let input_device = find_device(&host, input_device_name, true)?;
         let output_device = find_device(&host, output_device_name, false)?;
@@ -98,8 +108,8 @@ impl AudioEngine {
 
         let output_sample_rate = output_supported_config.sample_rate();
         Ok(Self {
-            _input_stream: input_stream,
-            _output_stream: output_stream,
+            _streams: Some((input_stream, output_stream)),
+            _headless_capture_sender: None,
             capture_receiver,
             capture_enabled,
             playback_samples,
@@ -112,6 +122,27 @@ impl AudioEngine {
             ),
             output_volume: f32::from(output_volume_percent) / 100.0,
         })
+    }
+
+    /// An engine with no devices: capture never yields and playback is
+    /// discarded. Used only through `AUDIO_OVERRIDE_ENV`.
+    fn headless(output_volume_percent: u8) -> Self {
+        let (capture_sender, capture_receiver) = mpsc::channel(1);
+        Self {
+            _streams: None,
+            _headless_capture_sender: Some(capture_sender),
+            capture_receiver,
+            capture_enabled: Arc::new(AtomicBool::new(false)),
+            playback_samples: Arc::new(Mutex::new(VecDeque::new())),
+            played_output_frames: Arc::new(AtomicU64::new(0)),
+            output_sample_rate: REALTIME_SAMPLE_RATE,
+            output_sample_aligner: Pcm16SampleAligner::default(),
+            output_resampler: StreamingLinearResampler::new(
+                REALTIME_SAMPLE_RATE,
+                REALTIME_SAMPLE_RATE,
+            ),
+            output_volume: f32::from(output_volume_percent) / 100.0,
+        }
     }
 
     pub(crate) async fn next_capture(&mut self) -> Option<CapturedAudio> {
@@ -159,6 +190,9 @@ impl AudioEngine {
     }
 
     pub(crate) fn enqueue_realtime_pcm16(&mut self, bytes: &[u8]) {
+        if self._streams.is_none() {
+            return;
+        }
         let input_samples = self.output_sample_aligner.process(bytes);
         let mut output_samples = self.output_resampler.process(&input_samples);
         for sample in &mut output_samples {
@@ -184,6 +218,10 @@ impl AudioEngine {
         self.reset_output_pipeline();
         played_frames.saturating_mul(1_000) / u64::from(self.output_sample_rate)
     }
+}
+
+fn is_headless_requested() -> bool {
+    std::env::var(AUDIO_OVERRIDE_ENV).is_ok_and(|value| value.trim().eq_ignore_ascii_case("none"))
 }
 
 /// Returns stable display names without keeping devices alive.
