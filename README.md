@@ -1,98 +1,306 @@
-# ilium
+# Ilium
+
+**A terminal multiplexer for people running several AI coding agents at once.**
+
+Ilium keeps your terminals alive when you detach, arranges panes in a tree you can reorganize, and shows which agents are working, waiting for approval, or done. One glance at the sidebar tells you which session needs you.
+
+[▶ See it in action](#see-it-in-action) · [◆ Features](#what-it-gives-you-over-tmux) · [↓ Install](#install) · [⌨ Quickstart](#quickstart) · [⚙ Configuration](#configuration)
+
+## See it in action
+
+<table>
+<tbody>
+<tr>
+<td valign="top">
+<p>
+<strong>01 · AI reorganizes the pane tree</strong>
+</p>
+<p>
+<a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/01-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>02 · Voice control (simulated speech understanding)</strong>
+</p>
+<p>Typed commands travel through Ilium&#x27;s real voice relay and trigger real UI actions. The demo opens a terminal, sends <code>ls -lh</code>, and shows its real shell output. That command was captured in a separate isolated take and composed into the agent scene. A loopback model selects the tools; no microphone audio or live OpenAI Realtime inference is used. The first prompt reaches a real Claude session.</p>
+<p>
+<a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/02-voice-control.gif" alt="Voice command demonstration with a loopback model, real Ilium UI actions, and a real Claude prompt" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>03 · Automatic titles from agent context</strong>
+</p>
+<p>
+<a href="assets/demos/03-contextual-titles.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/03-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>04 · Delayed input to agents and terminals</strong>
+</p>
+<p>
+<a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>05 · Screen transfer</strong>
+</p>
+<p>
+<a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/05-screen-transfer.gif" alt="The visible screen is transferred between panes" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>06 · Agent costs and stats</strong>
+</p>
+<p>
+<a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/06-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>07a · Settings: interface and board</strong>
+</p>
+<p>
+<a href="assets/demos/07a-settings-tour-a.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/07a-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>07b · Settings: voice and inference</strong>
+</p>
+<p>
+<a href="assets/demos/07b-settings-tour-b.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/07b-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>07c · Settings: titles and setup</strong>
+</p>
+<p>
+<a href="assets/demos/07c-settings-tour-c.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/07c-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>08 · Agent activity (simulated objective icon)</strong>
+</p>
+<p>Three real agents show working, approval, and unread completion. The Codex objective icon is recreated on the captured sidebar; its recorded turn was an ordinary prompt, while the other state changes are real.</p>
+<p>
+<a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/08-agent-activity.gif" alt="Real agent activity with a disclosed simulated Codex objective icon" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>09 · Rearrangeable pane tree</strong>
+</p>
+<p>
+<a href="assets/demos/09-pane-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>10 · Persistent mixed splits</strong>
+</p>
+<p>
+<a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/10-mixed-splits.gif" alt="A split view displays several terminal panes together" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>11 · Smart Copy</strong>
+</p>
+<p>
+<a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/11-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>12 · Ask for update</strong>
+</p>
+<p>
+<a href="assets/demos/12-ask-for-update.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/12-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>13 · Prompt queue</strong>
+</p>
+<p>
+<a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>14 · Progress monitor</strong>
+</p>
+<p>
+<a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/14-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>15 · Kanban board</strong>
+</p>
+<p>
+<a href="assets/demos/15-kanban.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/15-kanban.gif" alt="A card moves through the built-in Kanban board" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>16 · Create an agent from a line</strong>
+</p>
+<p>
+<a href="assets/demos/16-agent-from-line.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/16-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>17 · Workspace search (corrected terminal replay)</strong>
+</p>
+<p>A real capture searches agent output, shell history, and files, then jumps to matching lines. The recording repaints stale terminal cells in two search screens and the Ledger title; the original capture is preserved.</p>
+<p>
+<a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/17-workspace-search.gif" alt="Workspace search returns real agent, shell, and file matches and jumps to their lines; disclosed terminal-cell repaint" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>18 · Detach and reattach</strong>
+</p>
+<p>
+<a href="assets/demos/18-detach-reattach.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/18-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>19 · Markdown editor</strong>
+</p>
+<p>
+<a href="assets/demos/19-markdown-editor.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/19-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>20 · Chatroom handoff (simulated sidebar titles)</strong>
+</p>
+<p>Codex posts a real handoff and Claude posts a real reply. The two sidebar titles are recreated in this recording because the captured rows had no useful names.</p>
+<p>
+<a href="assets/demos/20-chatroom.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/20-chatroom.gif" alt="Real Codex and Claude Chatroom exchange with disclosed simulated sidebar titles" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>21 · Text triggers</strong>
+</p>
+<p>
+<a href="assets/demos/21-text-triggers.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent&#x27;s confirmation question" width="420">
+</a>
+</p>
+</td>
+<td valign="top">
+<p>
+<strong>22 · Goal indicators</strong>
+</p>
+<p>
+<a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="420">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<strong>23 · Snapshot resume</strong>
+</p>
+<p>After a server restart restores the tree, real Claude and Codex sessions each recall a code given before the restart. Setup and wait periods are cut in the recording.</p>
+<p>
+<a href="assets/demos/23-snapshot-resume.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and real Claude and Codex sessions answer from their resumed context" width="420">
+</a>
+</p>
+</td>
+<td>
+</td>
+</tr>
+</tbody>
+</table>
+
+These recordings show ilium running in a terminal. Scene captions identify simulated portions. Select a GIF to view it at full size.
 
 A terminal multiplexer for people running several AI coding agents at once.
 
 Like tmux, ilium keeps your terminals alive in a background server you can detach from and reattach to. Unlike tmux, it organizes them as a **tree** you can rearrange, and it **watches each pane to tell you what its agent is doing** — thinking, waiting for your approval, or done — so a glance at the sidebar tells you which session needs you.
-
-## See it in action
-
-These recordings show ilium running in a terminal with real agent sessions. Select a GIF to view it at full size.
-
-**AI reorganizes the pane tree**
-
-<a href="assets/demos/12-ai-tree.gif"><img src="assets/demos/12-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="840"></a>
-
-**Automatic titles from agent context**
-
-<a href="assets/demos/20-contextual-titles.gif"><img src="assets/demos/20-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="840"></a>
-
-**Delayed input to agents and terminals**
-
-<a href="assets/demos/15-scheduled-input.gif"><img src="assets/demos/15-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="840"></a>
-
-**Screen transfer**
-
-<a href="assets/demos/18-screen-transfer.gif"><img src="assets/demos/18-screen-transfer.gif" alt="The visible screen is transferred between panes" width="840"></a>
-
-**Agent costs and stats**
-
-<a href="assets/demos/23-cost-and-stats.gif"><img src="assets/demos/23-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="840"></a>
-
-**Settings: interface and board**
-
-<a href="assets/demos/21-settings-tour-a.gif"><img src="assets/demos/21-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="840"></a>
-
-**Settings: voice and inference**
-
-<a href="assets/demos/21-settings-tour-b.gif"><img src="assets/demos/21-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="840"></a>
-
-**Settings: titles and setup**
-
-<a href="assets/demos/21-settings-tour-c.gif"><img src="assets/demos/21-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="840"></a>
-
-**Rearrangeable pane tree**
-
-<a href="assets/demos/02-pane-tree.gif"><img src="assets/demos/02-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="840"></a>
-
-**Persistent mixed splits**
-
-<a href="assets/demos/03-mixed-splits.gif"><img src="assets/demos/03-mixed-splits.gif" alt="A split view displays several terminal panes together" width="840"></a>
-
-**Smart Copy**
-
-<a href="assets/demos/04-smart-copy.gif"><img src="assets/demos/04-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="840"></a>
-
-**Ask for update**
-
-<a href="assets/demos/05-ask-for-update.gif"><img src="assets/demos/05-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="840"></a>
-
-**Prompt queue**
-
-<a href="assets/demos/06-prompt-queue.gif"><img src="assets/demos/06-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="840"></a>
-
-**Progress monitor**
-
-<a href="assets/demos/07-progress-monitor.gif"><img src="assets/demos/07-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="840"></a>
-
-**Kanban board**
-
-<a href="assets/demos/08-kanban.gif"><img src="assets/demos/08-kanban.gif" alt="A card moves through the built-in Kanban board" width="840"></a>
-
-**Create an agent from a line**
-
-<a href="assets/demos/09-agent-from-line.gif"><img src="assets/demos/09-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="840"></a>
-
-**Detach and reattach**
-
-<a href="assets/demos/11-detach-reattach.gif"><img src="assets/demos/11-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="840"></a>
-
-**Markdown editor**
-
-<a href="assets/demos/13-markdown-editor.gif"><img src="assets/demos/13-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="840"></a>
-
-**Chatroom handoff (temporary preview)**
-
-Codex posts a real handoff. Claude receives it, but its weekly usage limit prevents a reply. This preview will be replaced with the complete exchange after the limit resets.
-
-<a href="assets/demos/14-chatroom-limit-preview.gif"><img src="assets/demos/14-chatroom-limit-preview.gif" alt="Real Codex Chatroom handoff followed by Claude Code's weekly usage limit refusal" width="840"></a>
-
-**Text triggers**
-
-<a href="assets/demos/16-text-triggers.gif"><img src="assets/demos/16-text-triggers.gif" alt="A text trigger responds to an agent's confirmation question" width="840"></a>
-
-**Goal indicators**
-
-<a href="assets/demos/17-goal-indicators.gif"><img src="assets/demos/17-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="840"></a>
 
 ```
 ╭  ≡ ● · Ilium──────────────────┬  ≡ ● · cargo run─────────────────────────────────────────────────────╮
@@ -372,7 +580,7 @@ Debug file logging is off by default because it records full HTTP and LLM reques
 
 Voice control (`F8`, or Settings → Voice control) lets you talk to Ilium: a realtime model hears you, decides what you mean, and either operates Ilium or types what you said into the focused agent. It needs an OpenAI Realtime key and is off until you turn it on.
 
-You can also **type to the same voice session**, as if you had said it. `ilium voice say` hands each sentence to the running voice session as one turn of the conversation, and the model interprets it exactly as it would speech: it can operate the tree, open settings, or dictate the sentence into the active agent. Text and microphone audio are interchangeable and can be mixed freely; nothing else about the session changes.
+You can also **type to the same voice session**, as if you had said it. `ilium voice say` hands each sentence to the running voice session as one turn of the conversation, and the model interprets it exactly as it would speech: it can operate the tree, open settings, or dictate the sentence into the active agent. In a focused shell, the terminal tool can submit a command such as `ls -lh` with Enter, and its output appears in that pane. Text and microphone audio are interchangeable and can be mixed freely; nothing else about the session changes.
 
 ```sh
 ilium voice say "open the settings"
