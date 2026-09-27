@@ -5667,9 +5667,14 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "Settings did not open: {:?}",
         tui.screen_text()
     );
-    for _ in 0..6 {
-        tui.write(b"\t").expect("advance to Git settings tab");
-    }
+    let git_settings_row = tui.with_screen(|screen| rows_containing(screen, "Git"))[0];
+    let git_settings_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, git_settings_row, "Git"))
+        .expect("Git settings tab column");
+    tui.write(&sgr_mouse_down(0, git_settings_column, git_settings_row))
+        .expect("select Git settings tab");
+    tui.write(&sgr_mouse_up(git_settings_column, git_settings_row))
+        .expect("release Git settings tab click");
     assert!(
         wait_until(
             || {

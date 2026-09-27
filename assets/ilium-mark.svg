@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="Ilium pane tree">
+  <rect x="2" y="2" width="44" height="44" rx="9" stroke="#81909B" stroke-width="2"/>
+  <path d="M12 13v22m0-17h7m-7 12h7" stroke="#81909B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="12" cy="13" r="2" fill="#81909B"/>
+  <rect x="21" y="11" width="15" height="8" rx="2" stroke="#81909B" stroke-width="2"/>
+  <rect x="21" y="22" width="15" height="8" rx="2" stroke="#83B764" stroke-width="2"/>
+  <rect x="21" y="33" width="15" height="5" rx="2" stroke="#81909B" stroke-width="2"/>
+</svg>

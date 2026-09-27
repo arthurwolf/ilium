@@ -6501,6 +6501,7 @@ impl App {
         const SCHEDULED_INPUT_FRAME_MILLIS: u64 = 220;
 
         let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
+        let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         let mut requirements = AnimationRequirements::default();
 
         if let Some(session) = &self.smart_copy_session {
@@ -6509,7 +6510,7 @@ impl App {
                 session.phase,
                 SmartCopyPhase::Connecting | SmartCopyPhase::Streaming
             );
-            if is_request_active {
+            if is_request_active && !motion_off {
                 requirements.is_active = true;
                 retain_minimum_delay(
                     &mut requirements.next_semantic_delay,
@@ -6518,7 +6519,7 @@ impl App {
             }
             for candidate in &session.candidates {
                 let age = now.saturating_duration_since(candidate.arrived_at);
-                if age < crate::smart_copy::ARRIVAL_FLASH_DURATION {
+                if age < crate::smart_copy::ARRIVAL_FLASH_DURATION && !motion_off {
                     requirements.is_active = true;
                     retain_minimum_delay(
                         &mut requirements.next_semantic_delay,
@@ -6528,11 +6529,12 @@ impl App {
             }
         }
 
-        if self.is_project_name_loading
-            || !self.titles_loading.is_empty()
-            || self.structure_loading
-            || self.model_discovery.is_loading()
-            || self.inference_test_state.is_loading()
+        if !motion_off
+            && (self.is_project_name_loading
+                || !self.titles_loading.is_empty()
+                || self.structure_loading
+                || self.model_discovery.is_loading()
+                || self.inference_test_state.is_loading())
         {
             requirements.is_active = true;
             retain_minimum_delay(
@@ -6541,7 +6543,6 @@ impl App {
             );
         }
 
-        let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         if self.terminal_activity.has_fast_activity(elapsed_ms) {
             if !motion_off {
                 requirements.is_active = true;
@@ -6601,7 +6602,7 @@ impl App {
                 },
                 None => None,
             };
-            if let Some(frame_millis) = frame_millis {
+            if let Some(frame_millis) = frame_millis.filter(|_| !motion_off) {
                 requirements.is_active = true;
                 retain_minimum_delay(
                     &mut requirements.next_semantic_delay,
@@ -6610,7 +6611,7 @@ impl App {
             }
         }
 
-        for created_offset_ms in self.recently_created.values() {
+        for created_offset_ms in self.recently_created.values().filter(|_| !motion_off) {
             let age_ms = elapsed_ms.saturating_sub(*created_offset_ms);
             if age_ms >= tree_ui::RECENTLY_CREATED_PULSE_MS {
                 continue;
@@ -14167,12 +14168,40 @@ mod tests {
     }
 
     #[test]
-    fn motion_off_suppresses_terminal_activity_frame_wakes_but_keeps_semantic_expiry() {
+    fn motion_off_suppresses_frame_wakes_but_keeps_terminal_activity_expiry() {
         let mut app = app();
         app.ui_settings.motion_level = crate::config::MotionLevel::Off;
-        let pane_id = NodeId(74);
+        let group_id = app.tree.add_group(ROOT_ID, "agents").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
+            )
+            .unwrap();
         let now = Instant::now();
         app.started_at = now;
+
+        for activity in [
+            AgentActivity::Working,
+            AgentActivity::WaitingBackground,
+            AgentActivity::Done,
+        ] {
+            app.tree
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::from_activity(AgentClass::Codex, activity, None),
+                )
+                .unwrap();
+
+            let schedule = app.maintenance_schedule(now);
+            assert_eq!(schedule.delay, Duration::from_secs(1), "{activity:?}");
+            assert!(!schedule.was_animating, "{activity:?}");
+        }
+
         app.terminal_activity.record(pane_id, 0);
 
         let fast_schedule = app.maintenance_schedule(now);

@@ -536,7 +536,7 @@ pub fn objective_explanation(signal: ObjectiveSignal) -> Option<StatusExplanatio
         },
         ObjectiveSignal::Goal(GoalState::Paused) => StatusExplanation {
             title: "Goal paused",
-            body: "A persistent /goal is set but paused, so the agent will not continue it on its own. Ilium never pauses or resumes a goal by itself; type /goal resume to continue it.",
+            body: "The provider surfaced a persistent /goal in its paused state. Ilium reports that state but does not control whether or when the provider resumes it.",
         },
         ObjectiveSignal::Goal(GoalState::Blocked) => StatusExplanation {
             title: "Goal stalled, needs a decision",
@@ -544,7 +544,7 @@ pub fn objective_explanation(signal: ObjectiveSignal) -> Option<StatusExplanatio
         },
         ObjectiveSignal::Goal(GoalState::UsageLimited) => StatusExplanation {
             title: "Goal stopped by usage limits",
-            body: "The /goal hit an account usage limit or its token budget. It continues after the limit resets or when you resume it.",
+            body: "The provider reports that the goal stopped after hitting an account usage limit or token budget. Ilium does not control when that limit resets or how the provider continues.",
         },
         ObjectiveSignal::Goal(GoalState::Reached) => StatusExplanation {
             title: "Goal reached",
@@ -580,7 +580,7 @@ pub fn now_explanation(signal: NowSignal) -> Option<StatusExplanation> {
         },
         NowSignal::Parked => StatusExplanation {
             title: "Parked: waiting on its task",
-            body: "The agent ended its turn to wait for the task shown in the long-term slot. Ilium polls the task and delivers the result as the agent's next message, so this does not ring as finished.",
+            body: "The agent is idle while Ilium has a live progress monitor linked to this pane, so the turn is shown as parked instead of finished. When the monitor ends, Ilium reports its result in the footer; delivery to the agent depends on provider and pane state.",
         },
         NowSignal::FinishedUnread => StatusExplanation {
             title: "Finished, not yet seen",
@@ -1063,6 +1063,25 @@ mod tests {
             assert!(now_explanation(signal).is_some());
         }
         assert!(now_explanation(NowSignal::None).is_none());
+    }
+
+    #[test]
+    fn goal_and_parked_explanations_describe_observed_state_without_claiming_control() {
+        let paused = objective_explanation(ObjectiveSignal::Goal(GoalState::Paused)).unwrap();
+        assert!(paused.body.contains("provider surfaced"));
+        assert!(paused.body.contains("does not control"));
+        assert!(!paused.body.contains("/goal resume"));
+
+        let usage_limited =
+            objective_explanation(ObjectiveSignal::Goal(GoalState::UsageLimited)).unwrap();
+        assert!(usage_limited.body.contains("provider reports"));
+        assert!(usage_limited.body.contains("does not control"));
+
+        let parked = now_explanation(NowSignal::Parked).unwrap();
+        assert!(parked
+            .body
+            .contains("live progress monitor linked to this pane"));
+        assert!(parked.body.contains("depends on provider and pane state"));
     }
 
     #[test]
