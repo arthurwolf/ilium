@@ -18,6 +18,7 @@ pub enum IconTarget {
     SplitVertical,
     SplitHorizontal,
     Folder,
+    WorktreeBranch,
     Terminal,
     Editor,
     Board,
@@ -82,13 +83,14 @@ pub enum IconTarget {
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 64] = [
+    pub const ALL: [Self; 65] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
         Self::SplitVertical,
         Self::SplitHorizontal,
         Self::Folder,
+        Self::WorktreeBranch,
         Self::Terminal,
         Self::Editor,
         Self::Board,
@@ -157,6 +159,7 @@ impl IconTarget {
             Self::SplitVertical => "Vertical split",
             Self::SplitHorizontal => "Horizontal split",
             Self::Folder => "Folder",
+            Self::WorktreeBranch => "Worktree branch",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
             Self::Board => "Board",
@@ -226,6 +229,7 @@ impl IconTarget {
             Self::SplitVertical => "split_vertical",
             Self::SplitHorizontal => "split_horizontal",
             Self::Folder => "folder",
+            Self::WorktreeBranch => "worktree_branch",
             Self::Terminal => "terminal",
             Self::Editor => "editor",
             Self::Board => "board",
@@ -299,6 +303,7 @@ impl IconTarget {
             Self::SplitVertical => "▥",
             Self::SplitHorizontal => "▤",
             Self::Folder => "📂",
+            Self::WorktreeBranch => "🌿",
             Self::Terminal => "🖥️",
             Self::Editor => "📝",
             Self::Board => "📉",
@@ -363,6 +368,7 @@ impl IconTarget {
     pub const fn suggestions(self) -> &'static [&'static str] {
         match self {
             Self::Group | Self::Project | Self::Folder => &["📁", "📂", "🗂️", "🧺"],
+            Self::WorktreeBranch => &["🌿", "🌱", "⑂", "⎇"],
             Self::TopLevel => &["⌂", "⌘", "🏠", "◆"],
             Self::SplitVertical | Self::SplitHorizontal => &["▥", "▤", "⊞", "▦"],
             Self::Terminal => &["📟", "▸", "⌘", "🖥️"],
@@ -431,12 +437,16 @@ impl IconTarget {
 /// the renderer has a simple, allocation-free lookup path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IconSettings {
+    /// Equal-width frames from empty/starting through complete. The core's
+    /// twelve progress buckets are mapped onto this list for presentation.
+    pub task_progress_frames: Vec<String>,
     pub group: String,
     pub top_level: String,
     pub project: String,
     pub split_vertical: String,
     pub split_horizontal: String,
     pub folder: String,
+    pub worktree_branch: String,
     pub terminal: String,
     pub editor: String,
     pub board: String,
@@ -506,12 +516,14 @@ impl Default for IconSettings {
 impl IconSettings {
     pub fn from_target(mut value: impl FnMut(IconTarget) -> String) -> Self {
         Self {
+            task_progress_frames: task_progress_preset_frames(0),
             group: value(IconTarget::Group),
             top_level: value(IconTarget::TopLevel),
             project: value(IconTarget::Project),
             split_vertical: value(IconTarget::SplitVertical),
             split_horizontal: value(IconTarget::SplitHorizontal),
             folder: value(IconTarget::Folder),
+            worktree_branch: value(IconTarget::WorktreeBranch),
             terminal: value(IconTarget::Terminal),
             editor: value(IconTarget::Editor),
             board: value(IconTarget::Board),
@@ -581,6 +593,7 @@ impl IconSettings {
             IconTarget::SplitVertical => &self.split_vertical,
             IconTarget::SplitHorizontal => &self.split_horizontal,
             IconTarget::Folder => &self.folder,
+            IconTarget::WorktreeBranch => &self.worktree_branch,
             IconTarget::Terminal => &self.terminal,
             IconTarget::Editor => &self.editor,
             IconTarget::Board => &self.board,
@@ -650,6 +663,7 @@ impl IconSettings {
             IconTarget::SplitVertical => &mut self.split_vertical,
             IconTarget::SplitHorizontal => &mut self.split_horizontal,
             IconTarget::Folder => &mut self.folder,
+            IconTarget::WorktreeBranch => &mut self.worktree_branch,
             IconTarget::Terminal => &mut self.terminal,
             IconTarget::Editor => &mut self.editor,
             IconTarget::Board => &mut self.board,
@@ -711,6 +725,24 @@ impl IconSettings {
         };
         *slot = glyph;
     }
+}
+
+pub const TASK_PROGRESS_STYLE_NAMES: [&str; 4] = ["Braille", "Blocks", "Moons", "Quarters"];
+
+/// Curated equal-width frame families. Custom TOML lists remain valid and
+/// appear as Custom in Settings until the user selects a preset.
+pub fn task_progress_preset_frames(index: usize) -> Vec<String> {
+    let frames: &[&str] = match index % TASK_PROGRESS_STYLE_NAMES.len() {
+        0 => &crate::status_icons::TASK_PROGRESS_FRAMES,
+        1 => &["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
+        2 => &["🌑", "🌒", "🌓", "🌔", "🌕"],
+        _ => &["○", "◔", "◑", "◕", "●"],
+    };
+    frames.iter().map(|frame| (*frame).to_string()).collect()
+}
+
+pub fn task_progress_preset_index(frames: &[String]) -> Option<usize> {
+    (0..TASK_PROGRESS_STYLE_NAMES.len()).find(|&index| frames == task_progress_preset_frames(index))
 }
 
 /// One selectable glyph and the words used to find it in the picker.

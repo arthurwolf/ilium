@@ -100,7 +100,7 @@ pub fn terminal_title_input(app: &App, pane_id: NodeId) -> Option<TerminalTitleI
         .unwrap_or_default();
     let project_path = app
         .tree
-        .project_path_for(pane_id)
+        .pane_cwd(pane_id)
         .unwrap_or(&app.session_cwd)
         .to_path_buf();
     let (parent_group, nearby_titles) = crate::title_inference::nearby_title_context(app, pane_id);

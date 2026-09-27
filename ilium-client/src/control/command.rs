@@ -114,6 +114,14 @@ pub struct TreeCommand {
     pub index: Option<usize>,
     pub storage: Option<BoardStorageChoice>,
     pub provider: Option<AgentProviderChoice>,
+    pub workspace: Option<ControlWorkspaceSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlWorkspaceSpec {
+    pub branch: String,
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

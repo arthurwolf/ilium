@@ -7,9 +7,10 @@ use serde_json::Value;
 
 use crate::app::{AppearanceRow, EditorRow, SessionRow, SoundRow, TerminalRow};
 use crate::config::{
-    AgentIdentifierMode, LeftPanelSizingMode, MotionLevel, NewPaneDirectory, SessionRecoveryPolicy,
-    SidebarDensity, TreeOrder, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES,
-    MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
+    AgentIdentifierMode, GitBranchLine, GitClosePolicy, GitDefaultBase, GitDefaultWhere,
+    LeftPanelSizingMode, MotionLevel, NewPaneDirectory, SessionRecoveryPolicy, SidebarDensity,
+    TreeOrder, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES, MIN_BOARD_COLUMN_WIDTH,
+    MIN_CARD_PREVIEW_LINES,
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
@@ -141,6 +142,27 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 app.settings_adjust_row(AppearanceRow::SidebarDensity, 1);
             }
             ensure_reached(app.ui_settings.sidebar_density == target)?;
+        }
+        "ui.task_progress_style" => {
+            let name = normalized(string(&value)?);
+            let target = crate::icon_settings::TASK_PROGRESS_STYLE_NAMES
+                .iter()
+                .position(|candidate| normalized(candidate) == name)
+                .ok_or("task progress style must be braille, blocks, moons, or quarters")?;
+            for _ in 0..=crate::icon_settings::TASK_PROGRESS_STYLE_NAMES.len() {
+                if crate::icon_settings::task_progress_preset_index(
+                    &app.ui_settings.icons.task_progress_frames,
+                ) == Some(target)
+                {
+                    break;
+                }
+                app.settings_adjust_row(AppearanceRow::ProgressFillStyle, 1);
+            }
+            ensure_reached(
+                crate::icon_settings::task_progress_preset_index(
+                    &app.ui_settings.icons.task_progress_frames,
+                ) == Some(target),
+            )?;
         }
         "ui.stable_glyphs" => {
             if app.ui_settings.use_stable_glyphs != boolean(&value)? {
@@ -359,6 +381,12 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "sound.events.waiting_background" => {
             set_sound_event(app, SoundEvent::WaitingBackground, boolean(&value)?)
         }
+        "sound.events.task_succeeded" => {
+            set_sound_event(app, SoundEvent::TaskSucceeded, boolean(&value)?)
+        }
+        "sound.events.task_failed" => {
+            set_sound_event(app, SoundEvent::TaskFailed, boolean(&value)?)
+        }
         path if path.starts_with("triggers.") => {
             // The guard above already proved the prefix is present, so this can never miss.
             let event_key = path
@@ -512,6 +540,56 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 app.settings_toggle_file_logging();
             }
         }
+        path if path.starts_with("git.") => {
+            let mut settings = app.git_settings.clone();
+            match path {
+                "git.default_where" => {
+                    settings.default_where = match normalized(string(&value)?).as_str() {
+                        "here" => GitDefaultWhere::Here,
+                        "new_worktree" => GitDefaultWhere::NewWorktree,
+                        "existing_worktree" => GitDefaultWhere::ExistingWorktree,
+                        _ => return Err(
+                            "git.default_where must be here, new_worktree, or existing_worktree"
+                                .into(),
+                        ),
+                    };
+                }
+                "git.branch_prefix" => settings.branch_prefix = string(&value)?.to_owned(),
+                "git.worktree_location_template" => {
+                    settings.worktree_location_template = string(&value)?.to_owned();
+                }
+                "git.default_base" => {
+                    settings.default_base = match normalized(string(&value)?).as_str() {
+                        "current" => GitDefaultBase::Current,
+                        "default_branch" => GitDefaultBase::DefaultBranch,
+                        _ => {
+                            return Err("git.default_base must be current or default_branch".into())
+                        }
+                    };
+                }
+                "git.branch_line" => {
+                    settings.branch_line = match normalized(string(&value)?).as_str() {
+                        "worktree_only" => GitBranchLine::WorktreeOnly,
+                        "off" => GitBranchLine::Off,
+                        _ => return Err("git.branch_line must be worktree_only or off".into()),
+                    };
+                }
+                "git.setup_command" => settings.setup_command = string(&value)?.to_owned(),
+                "git.default_close_policy" => {
+                    settings.default_close_policy =
+                        match normalized(string(&value)?).as_str() {
+                            "keep" => GitClosePolicy::Keep,
+                            "offer_removal_when_safe" => GitClosePolicy::OfferRemovalWhenSafe,
+                            _ => return Err(
+                                "git.default_close_policy must be keep or offer_removal_when_safe"
+                                    .into(),
+                            ),
+                        };
+                }
+                _ => return Err(format!("Unknown or read-only setting path {path:?}")),
+            }
+            app.apply_and_persist_git_settings(settings)?;
+        }
         _ => return Err(format!("Unknown or read-only setting path {path:?}")),
     }
     Ok(())
@@ -531,6 +609,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "ui.agent_identifier_mode" => app.settings_adjust_agent_identifier_mode(direction),
         "ui.motion_level" => app.settings_adjust_row(AppearanceRow::MotionLevel, direction),
         "ui.sidebar_density" => app.settings_adjust_row(AppearanceRow::SidebarDensity, direction),
+        "ui.task_progress_style" => {
+            app.settings_adjust_row(AppearanceRow::ProgressFillStyle, direction)
+        }
         "terminal.scrollback_budget_mib" => {
             app.settings_adjust_terminal_row(TerminalRow::ScrollbackBudget, direction)
         }
@@ -813,6 +894,30 @@ mod tests {
 
         set_setting(&mut app, "ui.motion_level", json!("reduced")).unwrap();
         assert_eq!(app.ui_settings.motion_level, MotionLevel::Reduced);
+        set_setting(&mut app, "ui.task_progress_style", json!("moons")).unwrap();
+        assert_eq!(
+            crate::icon_settings::task_progress_preset_index(
+                &app.ui_settings.icons.task_progress_frames
+            ),
+            Some(2)
+        );
+        adjust_setting(&mut app, "ui.task_progress_style", 1).unwrap();
+        assert_eq!(
+            crate::icon_settings::task_progress_preset_index(
+                &app.ui_settings.icons.task_progress_frames
+            ),
+            Some(3)
+        );
+        let snapshot =
+            super::super::snapshot::capture(&app, StateDetail::Compact, &Default::default())
+                .unwrap();
+        assert_eq!(snapshot.settings["ui"]["task_progress_style"], "Quarters");
+        assert_eq!(snapshot.settings["ui"]["task_progress_frames"][0], "○");
+        assert!(snapshot.settings["writable_path_patterns"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("sound.events.task_succeeded")));
+        assert!(set_setting(&mut app, "ui.task_progress_style", json!("unknown")).is_err());
         set_setting(&mut app, "voice.confirm_terminal_submissions", json!(true)).unwrap();
         assert!(app.voice_settings.confirm_terminal_submissions);
         set_setting(

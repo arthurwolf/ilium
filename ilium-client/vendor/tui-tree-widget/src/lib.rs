@@ -180,13 +180,19 @@ where
         });
 
         state.last_area = area;
-        state.last_rendered_identifiers.clear();
+        state.last_rendered_rows.clear();
+        state.last_item_heights.clear();
         if area.width < 1 || area.height < 1 {
             return;
         }
 
         let visible = state.flatten(self.items);
         state.last_biggest_index = visible.len().saturating_sub(1);
+        state.last_item_heights.extend(
+            visible
+                .iter()
+                .map(|flattened| flattened.item.height().max(1)),
+        );
         if visible.is_empty() {
             return;
         }
@@ -210,12 +216,14 @@ where
 
         let mut end = start;
         let mut height = 0;
-        for item_height in visible
-            .iter()
-            .skip(start)
-            .map(|flattened| flattened.item.height())
-        {
+        for item_height in state.last_item_heights.iter().skip(start).copied() {
             if height + item_height > available_height {
+                // A two-line row in a one-line viewport must still paint its
+                // first line and remain an accessible scroll target.
+                if height == 0 {
+                    height = available_height;
+                    end += 1;
+                }
                 break;
             }
             height += item_height;
@@ -224,10 +232,11 @@ where
 
         if let Some(ensure_index_in_view) = ensure_index_in_view {
             while ensure_index_in_view >= end {
-                height += visible[end].item.height();
+                height += state.last_item_heights[end].min(available_height);
                 end += 1;
                 while height > available_height {
-                    height = height.saturating_sub(visible[start].item.height());
+                    height =
+                        height.saturating_sub(state.last_item_heights[start].min(available_height));
                     start += 1;
                 }
             }
@@ -237,9 +246,11 @@ where
         state.ensure_selected_in_view_on_next_render = false;
 
         if let Some(scrollbar) = self.scrollbar {
-            let mut scrollbar_state = ScrollbarState::new(visible.len().saturating_sub(height))
-                .position(start)
-                .viewport_content_length(height);
+            let total_lines: usize = state.last_item_heights.iter().sum();
+            let first_line: usize = state.last_item_heights.iter().take(start).sum();
+            let mut scrollbar_state = ScrollbarState::new(total_lines)
+                .position(first_line)
+                .viewport_content_length(available_height);
             let scrollbar_area = Rect {
                 // Inner height to be exactly as the content
                 y: area.y,
@@ -269,7 +280,10 @@ where
 
             let x = area.x;
             let y = area.y + current_height;
-            let height = item.height() as u16;
+            let height = item
+                .height()
+                .min(available_height.saturating_sub(usize::from(current_height)))
+                as u16;
             current_height += height;
 
             let area = Rect {
@@ -338,8 +352,8 @@ where
             }
 
             state
-                .last_rendered_identifiers
-                .push((area.y, visible_index));
+                .last_rendered_rows
+                .push((area.y, area.height, visible_index));
         }
         // Reuse the existing Vec's allocation across renders (this runs every
         // frame in a TUI redraw loop) instead of dropping it and collecting
@@ -364,6 +378,7 @@ where
 #[cfg(test)]
 mod render_tests {
     use super::*;
+    use ratatui_core::layout::Position;
 
     #[must_use]
     #[track_caller]
@@ -382,6 +397,61 @@ mod render_tests {
         _ = render(10, 0, &mut TreeState::default());
         _ = render(0, 10, &mut TreeState::default());
         _ = render(10, 10, &mut TreeState::default());
+    }
+
+    #[test]
+    fn two_line_item_owns_both_rendered_rows() {
+        let items = [
+            TreeItem::new_leaf("agent", "Agent\nbranch"),
+            TreeItem::new_leaf("next", "Next"),
+        ];
+        let tree = Tree::new(&items).unwrap();
+        let area = Rect::new(0, 0, 12, 3);
+        let mut buffer = Buffer::empty(area);
+        let mut state = TreeState::default();
+        StatefulWidget::render(tree, area, &mut buffer, &mut state);
+
+        assert_eq!(items[0].height(), 2);
+        assert_eq!(state.rendered_at(Position::new(2, 0)), Some(&["agent"][..]));
+        assert_eq!(state.rendered_at(Position::new(2, 1)), Some(&["agent"][..]));
+        assert_eq!(state.rendered_at(Position::new(2, 2)), Some(&["next"][..]));
+    }
+
+    #[test]
+    fn mixed_height_scroll_uses_terminal_lines_and_clips_a_tall_first_item() {
+        let items = [
+            TreeItem::new_leaf("plain", "Plain"),
+            TreeItem::new_leaf("agent", "Agent\nbranch"),
+            TreeItem::new_leaf("tail", "Tail"),
+        ];
+        let area = Rect::new(0, 0, 12, 3);
+        let mut state = TreeState::default();
+        let mut buffer = Buffer::empty(area);
+        StatefulWidget::render(Tree::new(&items).unwrap(), area, &mut buffer, &mut state);
+        assert_eq!(state.total_line_count(), 4);
+        assert_eq!(state.rendered_at(Position::new(2, 0)), Some(&["plain"][..]));
+        assert_eq!(state.rendered_at(Position::new(2, 1)), Some(&["agent"][..]));
+        assert_eq!(state.rendered_at(Position::new(2, 2)), Some(&["agent"][..]));
+
+        assert!(state.scroll_down(2));
+        assert_eq!(state.get_offset(), 2);
+        assert_eq!(state.first_visible_line(), 3);
+        assert!(state.scroll_up(2));
+        assert_eq!(state.get_offset(), 1);
+
+        let short_area = Rect::new(0, 0, 12, 1);
+        let mut short_buffer = Buffer::empty(short_area);
+        StatefulWidget::render(
+            Tree::new(&items).unwrap(),
+            short_area,
+            &mut short_buffer,
+            &mut state,
+        );
+        assert_eq!(state.rendered_at(Position::new(2, 0)), Some(&["agent"][..]));
+        assert_eq!(
+            state.rendered_rows().next().map(|(_, _, height)| height),
+            Some(1)
+        );
     }
 
     #[test]

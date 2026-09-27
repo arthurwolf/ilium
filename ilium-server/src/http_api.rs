@@ -14,13 +14,14 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
-use ilium_core::BuiltinAgentProvider;
+use ilium_core::{BuiltinAgentProvider, ROOT_ID};
 use ilium_platform::paths;
 use serde::{Deserialize, Serialize};
 
 use crate::config::HttpApiConfig;
 use crate::ipc::handlers::create_agent_with_prompt;
 use crate::state::ServerState;
+use crate::workspace::{create_agent_in_workspace, CreateAgentOptions};
 
 /// Starts the HTTP API on `127.0.0.1`, never on a public interface. A server
 /// that cannot bind its configured port keeps its terminal/IPC duties alive.
@@ -49,6 +50,16 @@ struct CreateAgentRequest {
     agent_type: HttpAgentType,
     project: String,
     prompt: String,
+    #[serde(default)]
+    workspace: Option<HttpWorkspaceSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HttpWorkspaceSpec {
+    branch: String,
+    #[serde(default)]
+    base: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,13 +116,61 @@ async fn create_agent(
             })?
             .map_err(|message| api_error(StatusCode::BAD_REQUEST, message))?
     };
-    let pane_id = create_agent_with_prompt(
-        &state,
-        request.agent_type.provider(),
-        project_path.clone(),
-        request.prompt,
-    )
-    .await
+    let pane_id = if let Some(workspace) = request.workspace {
+        let spec = crate::workspace::default_new_worktree_spec(
+            &project_path,
+            workspace.branch,
+            workspace.base,
+        )
+        .await
+        .map_err(|message| api_error(StatusCode::BAD_REQUEST, message))?;
+        // The HTTP handler may be dropped when its requester disconnects.
+        // Keep Git mutation in a server-owned task, and let the coordinator
+        // observe that disconnect at its safe rollback boundaries. Three
+        // progress events fit in this channel while the receiver is held.
+        let (request_tx, _request_rx) = tokio::sync::mpsc::channel(4);
+        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let creation_state = Arc::clone(&state);
+        let options = CreateAgentOptions {
+            request_id: 0,
+            parent_group: ROOT_ID,
+            project_override: Some(project_path.clone()),
+            provider: request.agent_type.provider(),
+            spec,
+            initial_input: Some(request.prompt),
+            wait_for_prompt: true,
+        };
+        let handle = tokio::spawn(async move {
+            if start_rx.await.is_err() {
+                return;
+            }
+            let result =
+                create_agent_in_workspace(&creation_state, options, Some(&request_tx)).await;
+            let _ = result_tx.send(result);
+        });
+        if !state.track_workspace_creation_task(handle) {
+            return Err(api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "session is shutting down",
+            ));
+        }
+        let _ = start_tx.send(());
+        result_rx.await.map_err(|error| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("worktree creation task ended without a result: {error}"),
+            )
+        })?
+    } else {
+        create_agent_with_prompt(
+            &state,
+            request.agent_type.provider(),
+            project_path.clone(),
+            request.prompt,
+        )
+        .await
+    }
     .map_err(|message| api_error(StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     Ok(Json(CreateAgentResponse {
@@ -223,7 +282,40 @@ fn project_name_candidates(root: &Path, name: &str) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::project_name_candidates;
+    use super::{project_name_candidates, CreateAgentRequest, HttpWorkspaceSpec};
+
+    #[test]
+    fn create_agent_request_accepts_server_chosen_worktree_path_and_legacy_shape() {
+        let legacy: CreateAgentRequest = serde_json::from_value(serde_json::json!({
+            "agent_type": "codex",
+            "project": "/tmp/example",
+            "prompt": "inspect"
+        }))
+        .expect("existing API request");
+        assert!(legacy.workspace.is_none());
+
+        let worktree: CreateAgentRequest = serde_json::from_value(serde_json::json!({
+            "agent_type": "claude",
+            "project": "/tmp/example",
+            "prompt": "inspect",
+            "workspace": {
+                "branch": "agent/inspect",
+                "base": "main"
+            }
+        }))
+        .expect("worktree API request");
+        assert!(matches!(worktree.workspace, Some(HttpWorkspaceSpec { .. })));
+        let path_override = serde_json::json!({
+            "agent_type": "claude",
+            "project": "/tmp/example",
+            "prompt": "inspect",
+            "workspace": {
+                "branch": "agent/inspect",
+                "path": "/tmp/forbidden-override"
+            }
+        });
+        assert!(serde_json::from_value::<CreateAgentRequest>(path_override).is_err());
+    }
 
     #[test]
     fn project_name_lookup_finds_nested_directories() {

@@ -51,14 +51,18 @@ pub enum SoundEvent {
     ApprovalRequired,
     AgentStarted,
     WaitingBackground,
+    TaskSucceeded,
+    TaskFailed,
 }
 
 impl SoundEvent {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::AgentFinished,
         Self::ApprovalRequired,
         Self::AgentStarted,
         Self::WaitingBackground,
+        Self::TaskSucceeded,
+        Self::TaskFailed,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -67,6 +71,8 @@ impl SoundEvent {
             Self::ApprovalRequired => "Agent needs approval",
             Self::AgentStarted => "Agent started working",
             Self::WaitingBackground => "Agent is waiting for background work",
+            Self::TaskSucceeded => "Task succeeded",
+            Self::TaskFailed => "Task failed or monitor lost",
         }
     }
 }
@@ -79,6 +85,8 @@ pub struct SoundEventSettings {
     pub approval_required: bool,
     pub agent_started: bool,
     pub waiting_background: bool,
+    pub task_succeeded: bool,
+    pub task_failed: bool,
 }
 
 impl Default for SoundEventSettings {
@@ -88,6 +96,8 @@ impl Default for SoundEventSettings {
             approval_required: false,
             agent_started: false,
             waiting_background: false,
+            task_succeeded: true,
+            task_failed: true,
         }
     }
 }
@@ -99,6 +109,8 @@ impl SoundEventSettings {
             SoundEvent::ApprovalRequired => self.approval_required,
             SoundEvent::AgentStarted => self.agent_started,
             SoundEvent::WaitingBackground => self.waiting_background,
+            SoundEvent::TaskSucceeded => self.task_succeeded,
+            SoundEvent::TaskFailed => self.task_failed,
         }
     }
 
@@ -112,6 +124,8 @@ impl SoundEventSettings {
             SoundEvent::WaitingBackground => {
                 self.waiting_background = !self.waiting_background;
             }
+            SoundEvent::TaskSucceeded => self.task_succeeded = !self.task_succeeded,
+            SoundEvent::TaskFailed => self.task_failed = !self.task_failed,
         }
     }
 }

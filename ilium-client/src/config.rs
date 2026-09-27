@@ -75,6 +75,8 @@ pub struct ClientConfig {
     pub editor: EditorSettings,
     /// Policy the detached server reads the next time it starts this session.
     pub session: SessionSettings,
+    /// Worktree creation and branch presentation defaults.
+    pub git: GitSettings,
     /// OpenAI Realtime voice-controller settings. The API key remains on the
     /// client side and is never included in semantic state snapshots.
     pub voice: VoiceSettings,
@@ -100,10 +102,164 @@ impl Default for ClientConfig {
             terminal: TerminalSettings::default(),
             editor: EditorSettings::default(),
             session: SessionSettings::default(),
+            git: GitSettings::default(),
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
             api: ApiSettings::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitDefaultWhere {
+    #[default]
+    Here,
+    NewWorktree,
+    ExistingWorktree,
+}
+
+impl GitDefaultWhere {
+    pub const ALL: [Self; 3] = [Self::Here, Self::NewWorktree, Self::ExistingWorktree];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Here => "Here",
+            Self::NewWorktree => "New worktree",
+            Self::ExistingWorktree => "Existing worktree",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitDefaultBase {
+    #[default]
+    Current,
+    DefaultBranch,
+}
+
+impl GitDefaultBase {
+    pub const ALL: [Self; 2] = [Self::Current, Self::DefaultBranch];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Current => "Current branch",
+            Self::DefaultBranch => "Default branch",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitBranchLine {
+    #[default]
+    WorktreeOnly,
+    Off,
+}
+
+impl GitBranchLine {
+    pub const ALL: [Self; 2] = [Self::WorktreeOnly, Self::Off];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WorktreeOnly => "Worktree agents",
+            Self::Off => "Off",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GitClosePolicy {
+    #[default]
+    Keep,
+    OfferRemovalWhenSafe,
+}
+
+impl GitClosePolicy {
+    pub const ALL: [Self; 2] = [Self::Keep, Self::OfferRemovalWhenSafe];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep",
+            Self::OfferRemovalWhenSafe => "Offer removal when safe",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// Global defaults for opt-in Git worktree creation. A blank setup command
+/// means no post-create command is run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitSettings {
+    pub default_where: GitDefaultWhere,
+    pub branch_prefix: String,
+    pub worktree_location_template: String,
+    pub default_base: GitDefaultBase,
+    pub branch_line: GitBranchLine,
+    pub setup_command: String,
+    pub default_close_policy: GitClosePolicy,
+}
+
+impl Default for GitSettings {
+    fn default() -> Self {
+        Self {
+            default_where: GitDefaultWhere::Here,
+            branch_prefix: "agent/".to_string(),
+            worktree_location_template: "{repo_parent}/{repo_name}.worktrees/{branch_slug}"
+                .to_string(),
+            default_base: GitDefaultBase::Current,
+            branch_line: GitBranchLine::WorktreeOnly,
+            setup_command: String::new(),
+            default_close_policy: GitClosePolicy::Keep,
+        }
+    }
+}
+
+impl GitSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.setup_command.len() > 8 * 1024 || self.setup_command.contains('\0') {
+            return Err("Setup command must be at most 8192 bytes and contain no NUL".into());
+        }
+        ilium_core::validate_branch_name(&format!("{}task", self.branch_prefix))
+            .map_err(|error| format!("Invalid branch prefix: {error}"))?;
+        let template = self.worktree_location_template.trim();
+        if template.is_empty() || !template.contains("{branch_slug}") {
+            return Err("Worktree location must include {branch_slug}".to_string());
+        }
+        let mut remaining = template;
+        while let Some(open) = remaining.find('{') {
+            if remaining[..open].contains('}') {
+                return Err("Worktree location has an unmatched closing brace".to_string());
+            }
+            let after_open = &remaining[open..];
+            let Some(close) = after_open.find('}') else {
+                return Err("Worktree location has an unclosed placeholder".to_string());
+            };
+            let token = &after_open[..=close];
+            if !matches!(
+                token,
+                "{repo_parent}" | "{repo_name}" | "{branch_slug}" | "{project}"
+            ) {
+                return Err(format!(
+                    "Unsupported worktree location placeholder: {token}"
+                ));
+            }
+            remaining = &after_open[close + 1..];
+        }
+        if remaining.contains('}') {
+            return Err("Worktree location has an unmatched closing brace".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -894,6 +1050,8 @@ struct RawClientConfig {
     #[serde(default)]
     session: RawSessionConfig,
     #[serde(default)]
+    git: GitSettings,
+    #[serde(default)]
     voice: VoiceSettings,
     #[serde(default)]
     debug: DebugSettings,
@@ -949,6 +1107,7 @@ struct RawUiConfig {
     lock_closed_enabled: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
+    task_progress_frames: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -989,6 +1148,8 @@ struct RawThemeConfig {
 /// testable, mirroring `ilium_server::error::ConfigLoadError`.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
+    #[error("invalid [git] settings: {0}")]
+    InvalidGitSettings(String),
     #[error("failed to read config file: {0}")]
     Read(#[from] std::io::Error),
     #[error("failed to parse config file as TOML: {0}")]
@@ -1057,6 +1218,8 @@ pub enum ConfigLoadError {
     InvalidMotionLevel(String),
     #[error("ui.sidebar_density = {0:?} must be compact, standard, or comfortable")]
     InvalidSidebarDensity(String),
+    #[error("ui.task_progress_frames must contain 2–13 printable frames, all one or all two display cells wide")]
+    InvalidTaskProgressFrames,
     #[error("terminal.scrollback_budget_mib = {0} must be between 4 and 512")]
     InvalidScrollbackBudget(u16),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
@@ -1157,6 +1320,12 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
+    raw.git
+        .validate()
+        .map_err(|message| ClientError::ConfigLoad {
+            path: path.clone(),
+            source: ConfigLoadError::InvalidGitSettings(message),
+        })?;
     if raw.voice.output_volume_percent > 100 {
         return Err(ClientError::ConfigLoad {
             path: path.clone(),
@@ -1183,6 +1352,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         terminal,
         editor,
         session,
+        git: raw.git,
         voice: raw.voice,
         debug: raw.debug,
         api: raw.api,
@@ -1321,13 +1491,29 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         .map(parse_sidebar_density)
         .transpose()?
         .unwrap_or(defaults.sidebar_density);
-    let icons = IconSettings::from_target(|target| {
+    let mut icons = IconSettings::from_target(|target| {
         raw.icons
             .get(target.key())
             .filter(|glyph| !glyph.trim().is_empty())
             .cloned()
             .unwrap_or_else(|| target.default_glyph().to_string())
     });
+    if let Some(frames) = raw.task_progress_frames {
+        use unicode_width::UnicodeWidthStr;
+        let width = frames
+            .first()
+            .map(|frame| frame.width())
+            .unwrap_or_default();
+        if !(2..=usize::from(ilium_core::TASK_PROGRESS_BUCKETS) + 1).contains(&frames.len())
+            || !(1..=2).contains(&width)
+            || frames
+                .iter()
+                .any(|frame| frame.width() != width || frame.chars().any(char::is_control))
+        {
+            return Err(ConfigLoadError::InvalidTaskProgressFrames);
+        }
+        icons.task_progress_frames = frames;
+    }
     Ok(UiSettings {
         left_panel_sizing: LeftPanelSizingSettings {
             mode: sizing_mode,
@@ -1804,6 +1990,14 @@ pub fn save_terminal_settings(
     settings: &TerminalSettings,
 ) -> Result<(), ClientError> {
     save_table(config_dir, "terminal", terminal_settings_to_toml(settings))
+}
+
+pub fn save_git_settings(config_dir: &Path, settings: &GitSettings) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "git", value)
 }
 pub fn save_editor_settings(
     config_dir: &Path,
@@ -2317,6 +2511,17 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         })
         .collect();
     table.insert("icons".to_string(), toml::Value::Table(icons));
+    table.insert(
+        "task_progress_frames".to_string(),
+        toml::Value::Array(
+            ui.icons
+                .task_progress_frames
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
     toml::Value::Table(table)
 }
 
@@ -3333,6 +3538,41 @@ mod tests {
     }
 
     #[test]
+    fn task_progress_frames_round_trip_and_reject_mixed_width() {
+        let dir = scratch_dir();
+        let mut ui = UiSettings::default();
+        ui.icons.task_progress_frames = crate::icon_settings::task_progress_preset_frames(2);
+        save_ui_settings(&dir, &ui).expect("save frames");
+        assert_eq!(
+            load(&dir)
+                .expect("load frames")
+                .ui
+                .icons
+                .task_progress_frames,
+            crate::icon_settings::task_progress_preset_frames(2)
+        );
+
+        let invalid = "[ui]\ntask_progress_frames = [\"x\"]\n";
+        std::fs::write(dir.join("config.toml"), invalid).expect("write invalid frames");
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidTaskProgressFrames,
+                ..
+            })
+        ));
+        let mixed_width = "[ui]\ntask_progress_frames = [\"x\", \"🌕\"]\n";
+        std::fs::write(dir.join("config.toml"), mixed_width).expect("write mixed frames");
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidTaskProgressFrames,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn context_menu_icons_default_on_and_round_trip_through_ui_config() {
         let dir = scratch_dir();
         assert!(load(&dir).unwrap().ui.show_context_menu_icons);
@@ -3522,6 +3762,41 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn git_settings_round_trip_and_preserve_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[notifications]\nenabled = false\n",
+        )
+        .expect("seed unrelated table");
+        let settings = GitSettings {
+            default_where: GitDefaultWhere::ExistingWorktree,
+            branch_prefix: "feature/".to_string(),
+            worktree_location_template: "{project}/.ilium/worktrees/{branch_slug}".to_string(),
+            default_base: GitDefaultBase::DefaultBranch,
+            branch_line: GitBranchLine::Off,
+            setup_command: "printf ready".to_string(),
+            default_close_policy: GitClosePolicy::OfferRemovalWhenSafe,
+        };
+
+        save_git_settings(&dir, &settings).expect("save git settings");
+        assert_eq!(load(&dir).expect("reload git settings").git, settings);
+        let raw = std::fs::read_to_string(dir.join("config.toml")).expect("read config");
+        assert!(raw.contains("[notifications]"));
+        assert!(raw.contains("enabled = false"));
+        assert!(raw.contains("[git]"));
+    }
+
+    #[test]
+    fn git_location_rejects_unmatched_closing_brace_before_placeholder() {
+        let settings = GitSettings {
+            worktree_location_template: "bad}/{branch_slug}".to_string(),
+            ..GitSettings::default()
+        };
+        assert!(settings.validate().is_err());
     }
 
     #[test]

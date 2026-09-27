@@ -14,13 +14,15 @@ use ilium_core::{
     ContainerKind, Node, NodeId, NodeKind, PaneProgress, PaneStatus, ShellOutputPhase, Tree,
     ROOT_ID,
 };
+use ilium_ipc::WorkspaceGitStatus;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 use tui_tree_widget::{Tree as TreeWidget, TreeItem, TreeState};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::{AgentIdentifierMode, AgentIdentifierSettings, SidebarDensity, TreeOrder};
@@ -381,6 +383,8 @@ impl TreeRowActionStrip {
 pub struct TreeNodeHit {
     pub id: NodeId,
     pub row: u16,
+    /// Zero-based line within the item: 0 is the title, 1 the worktree branch.
+    pub line: u16,
 }
 
 /// Hover-only rendering state supplied by `App`; grouping it keeps the tree
@@ -428,6 +432,9 @@ pub struct TreeRenderOptions<'a> {
     /// Resolved user-global presentation settings for detected agent types.
     pub agent_identifiers: &'a AgentIdentifierSettings,
     pub icons: &'a IconSettings,
+    /// Live status is ephemeral; static workspace provenance stays in core.
+    pub workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
+    pub show_worktree_branch_line: bool,
     pub tree_order: TreeOrder,
     pub sidebar_density: SidebarDensity,
     /// An explicit opt-in for text-only row-action symbols. The default is
@@ -463,6 +470,8 @@ struct TreeItemBuildContext<'a> {
     focused_pane_id: Option<NodeId>,
     agent_identifiers: &'a AgentIdentifierSettings,
     icons: &'a IconSettings,
+    workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
+    show_worktree_branch_line: bool,
     tree_order: TreeOrder,
     sidebar_density: SidebarDensity,
     show_inferred_title_icons: bool,
@@ -636,6 +645,7 @@ fn build_item(
             scheduled_input,
             prompt_queue,
             progress,
+            workspace,
             ..
         } => {
             let editor_filename = context
@@ -703,10 +713,33 @@ fn build_item(
                     context.focused_pane_id == Some(node.id),
                 ),
             );
-            TreeItem::new_leaf(
-                node.id,
-                apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density),
-            )
+            let title =
+                apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density);
+            let text = if let Some(workspace) = workspace
+                .as_ref()
+                .filter(|_| context.show_worktree_branch_line)
+            {
+                let live_status = context.workspace_git_statuses.get(&node.id);
+                let has_attention =
+                    live_status.is_some_and(|status| status.missing || status.conflicted > 0);
+                Text::from(vec![
+                    title,
+                    apply_recent_pulse(
+                        worktree_branch_line(
+                            displayed_worktree_branch(&workspace.branch, live_status),
+                            context.icons.glyph(IconTarget::WorktreeBranch),
+                            context.panel_width,
+                            identifier_path.len().saturating_sub(1),
+                            context.sidebar_density,
+                            has_attention,
+                        ),
+                        flash_on,
+                    ),
+                ])
+            } else {
+                Text::from(title)
+            };
+            TreeItem::new_leaf(node.id, text)
         }
         NodeKind::Folder {
             path,
@@ -748,6 +781,18 @@ fn build_item(
             )
             .expect("folder node ids are unique")
         }
+    }
+}
+
+pub(crate) fn displayed_worktree_branch<'a>(
+    creation_branch: &'a str,
+    live_status: Option<&'a WorkspaceGitStatus>,
+) -> &'a str {
+    match live_status {
+        Some(status) if status.missing => creation_branch,
+        Some(status) if status.detached => "detached HEAD",
+        Some(status) => status.branch.as_deref().unwrap_or(creation_branch),
+        None => creation_branch,
     }
 }
 
@@ -1140,13 +1185,11 @@ fn pane_label_with_icons(
         has_scheduled_input,
     } = context;
 
-    // While `session_naming::infer_pane_title` is still awaiting a result
-    // for this pane, its name renders as the same braille spinner
-    // `sidebar_title` uses for the project name -- the state slots ahead of
-    // it are a separate concept and keep animating independently.
+    // Keep the last known name visible while inference is pending. Replacing
+    // it with only a spinner leaves long-running agent rows nameless.
     let title = if is_title_loading {
         let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-        SPINNER_FRAMES[frame_index].to_string()
+        format!("{name} {}", SPINNER_FRAMES[frame_index])
     } else {
         name.to_string()
     };
@@ -1315,6 +1358,86 @@ fn status_row_label(
         fixed_width_icon_span(now, crate::status_icons::NOW_COLUMN_WIDTH),
         text,
     ])
+}
+
+/// A workspace pane's second line starts under its title, not under the
+/// identity/status columns. Its content is measured in terminal cells so a
+/// long branch retains both recognizable ends in a narrow sidebar.
+fn worktree_branch_line(
+    branch: &str,
+    icon: &str,
+    panel_width: u16,
+    depth: usize,
+    density: SidebarDensity,
+    has_attention: bool,
+) -> Line<'static> {
+    let density_width = match density {
+        SidebarDensity::Compact => 0,
+        SidebarDensity::Standard => 1,
+        SidebarDensity::Comfortable => 2,
+    };
+    let title_offset = NODE_ICON_COLUMN_WIDTH
+        + crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+        + crate::status_icons::NOW_COLUMN_WIDTH;
+    let prefix_width = density_width + title_offset;
+    let content_width = usize::from(panel_width)
+        .saturating_sub(2) // enclosing panel border
+        .saturating_sub(depth + usize::from(TREE_EXPAND_SYMBOL_WIDTH))
+        .saturating_sub(prefix_width);
+    let attention_width = usize::from(has_attention) * 2;
+    let branch_width = content_width
+        .saturating_sub(UnicodeWidthStr::width(icon))
+        .saturating_sub(1)
+        .saturating_sub(attention_width);
+    let mut spans = vec![
+        Span::raw(" ".repeat(prefix_width)),
+        Span::styled(format!("{icon} "), Style::new().fg(Color::DarkGray)),
+        Span::styled(
+            elide_middle(branch, branch_width),
+            Style::new().fg(Color::DarkGray),
+        ),
+    ];
+    if has_attention {
+        spans.push(Span::styled(" !", Style::new().fg(Color::Red)));
+    }
+    Line::from(spans)
+}
+
+fn elide_middle(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(text, true).collect();
+    let mut left = 0;
+    let mut right = graphemes.len();
+    let mut remaining = max_width - 1;
+    let mut prefer_left = true;
+    while left < right {
+        let next = if prefer_left {
+            graphemes[left]
+        } else {
+            graphemes[right - 1]
+        };
+        let width = UnicodeWidthStr::width(next);
+        if width > remaining {
+            break;
+        }
+        remaining -= width;
+        if prefer_left {
+            left += 1;
+        } else {
+            right -= 1;
+        }
+        prefer_left = !prefer_left;
+    }
+    format!(
+        "{}…{}",
+        graphemes[..left].concat(),
+        graphemes[right..].concat()
+    )
 }
 
 /// Terminal-cell offset of the long-term slot within a row label, measured
@@ -1558,8 +1681,42 @@ pub fn row_action_at(
         .then_some(action)
 }
 
+/// Maps a screen line to a flattened item using exactly the same item-height
+/// accounting as the widget. The cache can be queried before the next render,
+/// so `rendered_at` alone would incorrectly refer to the previous frame.
+fn item_at_position(
+    items: &[TreeItem<'static, NodeId>],
+    state: &TreeState<NodeId>,
+    list: Rect,
+    position: Position,
+) -> Option<(NodeId, u16, usize)> {
+    if !list.contains(position) {
+        return None;
+    }
+    let mut row = list.y;
+    for flattened in state.flatten(items).iter().skip(state.get_offset()) {
+        let height = u16::try_from(flattened.item.height()).unwrap_or(u16::MAX);
+        if row > list.y && height > list.bottom().saturating_sub(row) {
+            break;
+        }
+        let next_row = row.saturating_add(height);
+        if position.y < next_row {
+            return Some((
+                flattened.identifier.last().copied()?,
+                position.y - row,
+                flattened.depth(),
+            ));
+        }
+        row = next_row;
+        if row >= list.bottom() {
+            break;
+        }
+    }
+    None
+}
+
 /// Returns a node only when `position` is on one of the actually visible
-/// one-line rows, never on blank space below the final item. `items` is a
+/// item lines, never on blank space below the final item. `items` is a
 /// previously built `build_tree_items` result -- hit-testing only needs
 /// node identifiers and row structure, neither of which depends on label
 /// text (elapsed-time animation, loading spinners), so the caller is free
@@ -1572,19 +1729,11 @@ pub fn node_at_position(
     position: Position,
 ) -> Option<TreeNodeHit> {
     let list = list_area(area);
-    if !list.contains(position) {
-        return None;
-    }
-    let visible_index = state.get_offset() + usize::from(position.y.saturating_sub(list.y));
-    let id = state
-        .flatten(items)
-        .get(visible_index)?
-        .identifier
-        .last()
-        .copied()?;
+    let (id, line, _) = item_at_position(items, state, list, position)?;
     Some(TreeNodeHit {
         id,
         row: position.y,
+        line,
     })
 }
 
@@ -1603,14 +1752,11 @@ pub fn status_slot_at_position(
     use crate::status_icons::{StatusSlot, NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
 
     let list = list_area(area);
-    if !list.contains(position) {
+    let (id, line, depth) = item_at_position(items, state, list, position)?;
+    if line != 0 {
         return None;
     }
-    let visible_index = state.get_offset() + usize::from(position.y.saturating_sub(list.y));
-    let flattened = state.flatten(items);
-    let row = flattened.get(visible_index)?;
-    let id = row.identifier.last().copied()?;
-    let depth = u16::try_from(row.depth()).ok()?;
+    let depth = u16::try_from(depth).ok()?;
     let density_padding = match density {
         SidebarDensity::Compact => 0,
         SidebarDensity::Standard => 1,
@@ -1619,7 +1765,9 @@ pub fn status_slot_at_position(
     let label_x = list.x + depth + TREE_EXPAND_SYMBOL_WIDTH + density_padding;
     let objective_x = label_x + OBJECTIVE_SLOT_OFFSET;
     let now_x = label_x + NOW_SLOT_OFFSET;
-    let slot = if (objective_x..objective_x + OBJECTIVE_COLUMN_WIDTH as u16).contains(&position.x) {
+    let slot = if (label_x..objective_x).contains(&position.x) {
+        (StatusSlot::Identity, label_x)
+    } else if (objective_x..objective_x + OBJECTIVE_COLUMN_WIDTH as u16).contains(&position.x) {
         (StatusSlot::Objective, objective_x)
     } else if (now_x..now_x + NOW_COLUMN_WIDTH as u16).contains(&position.x) {
         (StatusSlot::Now, now_x)
@@ -1673,6 +1821,8 @@ impl TreeItemCache {
                     focused_pane_id: None,
                     agent_identifiers: &AgentIdentifierSettings::default(),
                     icons: &IconSettings::default(),
+                    workspace_git_statuses: &HashMap::new(),
+                    show_worktree_branch_line: true,
                     tree_order,
                     sidebar_density: SidebarDensity::default(),
                     show_inferred_title_icons: false,
@@ -1723,6 +1873,8 @@ pub fn render(
             focused_pane_id: options.focused_pane_id,
             agent_identifiers: options.agent_identifiers,
             icons: options.icons,
+            workspace_git_statuses: options.workspace_git_statuses,
+            show_worktree_branch_line: options.show_worktree_branch_line,
             tree_order: options.tree_order,
             sidebar_density: options.sidebar_density,
             show_inferred_title_icons: options.show_inferred_title_icons,
@@ -1748,7 +1900,7 @@ pub fn render(
         .expect("top-level items have unique identifiers")
         .highlight_style(theme::selected_style());
     frame.render_stateful_widget(widget, list, state);
-    let visible_item_count = state.visible_identifiers().len();
+    let visible_line_count = state.total_line_count();
 
     if let Some(presentation_tree) = options.transitions.presentation_tree(options.elapsed_ms) {
         let presentation_items = build_tree_items(
@@ -1763,6 +1915,8 @@ pub fn render(
                 focused_pane_id: options.focused_pane_id,
                 agent_identifiers: options.agent_identifiers,
                 icons: options.icons,
+                workspace_git_statuses: options.workspace_git_statuses,
+                show_worktree_branch_line: options.show_worktree_branch_line,
                 tree_order: options.tree_order,
                 sidebar_density: options.sidebar_density,
                 show_inferred_title_icons: options.show_inferred_title_icons,
@@ -1780,7 +1934,6 @@ pub fn render(
         apply_row_motions(
             frame,
             list,
-            presentation_state.visible_identifiers(),
             &presentation_state,
             options.transitions,
             options.elapsed_ms,
@@ -1793,32 +1946,20 @@ pub fn render(
         // on screen, painting the highlight over a different (wrong) row
         // whenever the two trees' row counts differ above the selection,
         // exactly the add/remove-in-flight case this frame exists for.
-        paint_selected_row(
-            frame,
-            list,
-            presentation_state.visible_identifiers(),
-            &presentation_state,
-        );
+        paint_selected_row(frame, list, &presentation_state);
     } else {
-        apply_row_motions(
-            frame,
-            list,
-            state.visible_identifiers(),
-            state,
-            options.transitions,
-            options.elapsed_ms,
-        );
+        apply_row_motions(frame, list, state, options.transitions, options.elapsed_ms);
         // Keep the selected-node visual independent from `TreeState`'s
         // full-path comparison. Snapshot reconciliation normally maintains
         // that path, but this final cell-level pass also protects the row
         // during width changes the tree widget's own highlight pass doesn't
         // fully repaint (see the function's own doc comment).
-        paint_selected_row(frame, list, state.visible_identifiers(), state);
+        paint_selected_row(frame, list, state);
     }
 
-    draw_scrollbar(frame, area, visible_item_count, state);
+    draw_scrollbar(frame, area, visible_line_count, state);
 
-    if let Some(hit) = options.hover.node {
+    if let Some(hit) = options.hover.node.filter(|hit| hit.line == 0) {
         if options
             .transitions
             .row_motion(hit.id, options.elapsed_ms)
@@ -1844,55 +1985,42 @@ pub fn render(
 /// final `NodeId`-based pass keeps the highlight whole during width changes
 /// and snapshot-presentation frames where an item's old and new ancestry
 /// differ.
-fn paint_selected_row(
-    frame: &mut Frame,
-    list: Rect,
-    visible_identifiers: &[Vec<NodeId>],
-    state: &TreeState<NodeId>,
-) {
+fn paint_selected_row(frame: &mut Frame, list: Rect, state: &TreeState<NodeId>) {
     let Some(selected_node_id) = state.selected().last().copied() else {
         return;
     };
-    let Some(selected_index) = visible_identifiers.iter().position(|identifier| {
+    let Some((_, first_row, height)) = state.rendered_rows().find(|(identifier, _, _)| {
         identifier
             .last()
             .is_some_and(|node_id| *node_id == selected_node_id)
     }) else {
         return;
     };
-    let Some(visible_row) = selected_index.checked_sub(state.get_offset()) else {
-        return;
-    };
-    let Ok(visible_row) = u16::try_from(visible_row) else {
-        return;
-    };
-    if visible_row >= list.height {
-        return;
-    }
 
-    let row = list.y.saturating_add(visible_row);
     let buffer = frame.buffer_mut();
-    buffer.set_style(
-        Rect::new(list.x, row, list.width, 1),
-        theme::selected_style(),
-    );
-
-    // `Buffer::set_style` intentionally leaves unmaterialized cells empty.
-    // Crossterm consequently has no character on which to emit that new
-    // background, leaving the selection visibly clipped at the label's old
-    // extent. Materialize only the blank tail, after every actual glyph, so
-    // UTF-8 icon continuation cells retain ratatui's normal width handling.
-    let trailing_start = (list.x..list.right())
-        .rev()
-        .find(|column| !buffer[(*column, row)].symbol().trim().is_empty())
-        .map_or(list.x, |column| column.saturating_add(1));
-    if trailing_start < list.right() {
-        buffer.set_string(
-            trailing_start,
-            row,
-            " ".repeat(usize::from(list.right() - trailing_start)),
+    for row in first_row..first_row.saturating_add(height).min(list.bottom()) {
+        buffer.set_style(
+            Rect::new(list.x, row, list.width, 1),
             theme::selected_style(),
         );
+
+        // `Buffer::set_style` intentionally leaves unmaterialized cells empty.
+        // Crossterm consequently has no character on which to emit that new
+        // background, leaving the selection visibly clipped at the label's old
+        // extent. Materialize only the blank tail, after every actual glyph, so
+        // UTF-8 icon continuation cells retain ratatui's normal width handling.
+        let trailing_start = (list.x..list.right())
+            .rev()
+            .find(|column| !buffer[(*column, row)].symbol().trim().is_empty())
+            .map_or(list.x, |column| column.saturating_add(1));
+        if trailing_start < list.right() {
+            buffer.set_string(
+                trailing_start,
+                row,
+                " ".repeat(usize::from(list.right() - trailing_start)),
+                theme::selected_style(),
+            );
+        }
     }
 }
 
@@ -1905,7 +2033,7 @@ fn copy_tree_state_for_presentation(state: &TreeState<NodeId>) -> TreeState<Node
         presentation_state.open(identifier.clone());
     }
     presentation_state.select(state.selected().to_vec());
-    presentation_state.scroll_down(state.get_offset());
+    presentation_state.set_item_offset(state.get_offset());
     presentation_state
 }
 
@@ -1915,34 +2043,21 @@ fn copy_tree_state_for_presentation(state: &TreeState<NodeId>) -> TreeState<Node
 fn apply_row_motions(
     frame: &mut Frame,
     list: Rect,
-    visible_identifiers: &[Vec<NodeId>],
     state: &TreeState<NodeId>,
     transitions: &TreeTransitions,
     elapsed_ms: u128,
 ) {
     let mut row_cells = Vec::with_capacity(usize::from(list.width));
-    for (visible_row, identifier) in visible_identifiers
-        .iter()
-        .skip(state.get_offset())
-        .take(usize::from(list.height))
-        .enumerate()
-    {
+    for (identifier, first_row, height) in state.rendered_rows() {
         let Some(node_id) = identifier.last().copied() else {
             continue;
         };
         let Some(motion) = transitions.row_motion(node_id, elapsed_ms) else {
             continue;
         };
-        let Ok(row_offset) = u16::try_from(visible_row) else {
-            continue;
-        };
-        translate_row_left(
-            frame,
-            list,
-            list.y.saturating_add(row_offset),
-            motion,
-            &mut row_cells,
-        );
+        for row in first_row..first_row.saturating_add(height).min(list.bottom()) {
+            translate_row_left(frame, list, row, motion, &mut row_cells);
+        }
     }
 }
 
@@ -2051,7 +2166,9 @@ fn draw_scrollbar(frame: &mut Frame, area: Rect, total_rows: usize, state: &Tree
     if total_rows <= usize::from(list.height) {
         return;
     }
-    let mut scrollbar_state = ScrollbarState::new(total_rows).position(state.get_offset());
+    let mut scrollbar_state = ScrollbarState::new(total_rows)
+        .position(state.first_visible_line())
+        .viewport_content_length(usize::from(list.height));
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
@@ -2202,6 +2319,27 @@ mod tests {
         elapsed_ms: u128,
         area: Rect,
     ) -> Buffer {
+        render_tree_buffer_with_branch_visibility(
+            tree,
+            state,
+            transitions,
+            recently_created,
+            elapsed_ms,
+            area,
+            (true, &HashMap::new()),
+        )
+    }
+
+    fn render_tree_buffer_with_branch_visibility(
+        tree: &Tree,
+        state: &mut TreeState<NodeId>,
+        transitions: &TreeTransitions,
+        recently_created: &HashMap<NodeId, u128>,
+        elapsed_ms: u128,
+        area: Rect,
+        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>),
+    ) -> Buffer {
+        let (show_branch_line, workspace_git_statuses) = branch_rendering;
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -2227,6 +2365,8 @@ mod tests {
                         transitions,
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
+                        workspace_git_statuses,
+                        show_worktree_branch_line: show_branch_line,
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
@@ -2319,6 +2459,56 @@ mod tests {
             &recently_created,
             crate::tree_transitions::TREE_ENTRY_TRANSITION_MS
         ));
+    }
+
+    #[test]
+    fn entering_worktree_moves_and_dims_both_lines_together() {
+        let mut previous_tree = Tree::new();
+        let group = previous_tree.add_group(ROOT_ID, "project").unwrap();
+        let mut new_tree = previous_tree.clone();
+        let pane = new_tree
+            .add_pane(group, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        new_tree
+            .set_pane_workspace(
+                pane,
+                Some(ilium_core::PaneWorkspace {
+                    workspace_id: Some("test".into()),
+                    repo_common_dir: PathBuf::from("/tmp/repo/.git"),
+                    worktree_root: PathBuf::from("/tmp/worktree"),
+                    branch: "agent/fix".into(),
+                    base_ref: "main".into(),
+                    base_commit: "abcdef0".into(),
+                    created_by_ilium: true,
+                    created_at_unix: 0,
+                }),
+            )
+            .unwrap();
+        let mut transitions = TreeTransitions::default();
+        transitions.observe_snapshot_change(&previous_tree, &new_tree, 0);
+        let mut state = TreeState::default();
+        state.open(vec![group]);
+        let first_row = list_area(Rect::new(0, 0, 40, 8)).y + 1;
+
+        let entering = render_tree_buffer(&new_tree, &mut state, &transitions, &HashMap::new(), 0);
+        for row in first_row..=first_row + 1 {
+            assert!((entering.area.x..entering.area.right())
+                .any(|column| entering[(column, row)].modifier.contains(Modifier::DIM)));
+        }
+        let settled = render_tree_buffer(
+            &new_tree,
+            &mut state,
+            &transitions,
+            &HashMap::new(),
+            crate::tree_transitions::TREE_ENTRY_TRANSITION_MS,
+        );
+        assert!(buffer_row_text(&settled, first_row).contains("agent"));
+        let branch_row = buffer_row_text(&settled, first_row + 1);
+        assert!(
+            branch_row.contains("agent/fix"),
+            "branch row: {branch_row:?}"
+        );
+        assert!(branch_row.contains("🌿"), "branch row: {branch_row:?}");
     }
 
     #[test]
@@ -2919,6 +3109,8 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
+                        workspace_git_statuses: &HashMap::new(),
+                        show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
@@ -2961,6 +3153,8 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
+                        workspace_git_statuses: &HashMap::new(),
+                        show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
@@ -2969,6 +3163,7 @@ mod tests {
                             node: Some(TreeNodeHit {
                                 id: first_group,
                                 row: list.y,
+                                line: 0,
                             }),
                             show_management_actions: true,
                             ..TreeHoverState::default()
@@ -3022,6 +3217,8 @@ mod tests {
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
                         icons: &IconSettings::default(),
+                        workspace_git_statuses: &HashMap::new(),
+                        show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
@@ -3191,6 +3388,248 @@ mod tests {
     }
 
     #[test]
+    fn worktree_branch_line_is_dim_aligned_and_elides_the_middle() {
+        let line = worktree_branch_line(
+            "agent/fix-very-long-recognizable-suffix",
+            "🌿",
+            40,
+            1,
+            SidebarDensity::Standard,
+            false,
+        );
+        let text = line.to_string();
+        assert!(text.starts_with(&" ".repeat(
+            1 + NODE_ICON_COLUMN_WIDTH
+                + crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+                + crate::status_icons::NOW_COLUMN_WIDTH
+        )));
+        assert!(text.contains("🌿 agent/"));
+        assert!(text.contains('…'));
+        assert!(text.ends_with("suffix"));
+        assert!(UnicodeWidthStr::width(text.as_str()) <= 40 - 2 - 1 - 2);
+        assert_eq!(line.spans[2].style.fg, Some(Color::DarkGray));
+
+        let warning = worktree_branch_line("agent/fix", "🌿", 40, 0, SidebarDensity::Compact, true);
+        assert_eq!(
+            warning.spans.last().map(|span| span.content.as_ref()),
+            Some(" !")
+        );
+        assert_eq!(
+            warning.spans.last().and_then(|span| span.style.fg),
+            Some(Color::Red)
+        );
+    }
+
+    #[test]
+    fn worktree_branch_line_uses_the_live_checkout_branch() {
+        let mut status = WorkspaceGitStatus {
+            branch: Some("agent/switched".into()),
+            detached: false,
+            ahead: 0,
+            behind: 0,
+            staged: 0,
+            modified: 0,
+            untracked: 0,
+            conflicted: 0,
+            upstream: None,
+            last_commit_subject: None,
+            checked_at_unix_millis: 1,
+            full_checked_at_unix_millis: None,
+            missing: false,
+        };
+        assert_eq!(
+            displayed_worktree_branch("agent/original", Some(&status)),
+            "agent/switched"
+        );
+        status.detached = true;
+        status.branch = None;
+        assert_eq!(
+            displayed_worktree_branch("agent/original", Some(&status)),
+            "detached HEAD"
+        );
+        status.missing = true;
+        assert_eq!(
+            displayed_worktree_branch("agent/original", Some(&status)),
+            "agent/original"
+        );
+        assert_eq!(
+            displayed_worktree_branch("agent/original", None),
+            "agent/original"
+        );
+    }
+
+    #[test]
+    fn mixed_tree_rows_hit_both_worktree_lines_and_select_both() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "project").unwrap();
+        let pane = tree
+            .add_pane(group, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let tail = tree
+            .add_pane(group, "tail", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_workspace(
+            pane,
+            Some(ilium_core::PaneWorkspace {
+                workspace_id: Some("test".into()),
+                repo_common_dir: PathBuf::from("/tmp/repo/.git"),
+                worktree_root: PathBuf::from("/tmp/worktree"),
+                branch: "agent/fix".into(),
+                base_ref: "main".into(),
+                base_commit: "abcdef0".into(),
+                created_by_ilium: true,
+                created_at_unix: 0,
+            }),
+        )
+        .unwrap();
+        let area = Rect::new(0, 0, 40, 9);
+        let list = list_area(area);
+        let mut state = TreeState::default();
+        state.open(vec![group]);
+        state.select(vec![group, pane]);
+        let buffer = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+        );
+        let branch_row = buffer_row_text(&buffer, list.y + 2);
+        assert!(
+            branch_row.contains("agent/fix"),
+            "branch row: {branch_row:?}"
+        );
+        assert!(branch_row.contains("🌿"), "branch row: {branch_row:?}");
+        let live_statuses = HashMap::from([(
+            pane,
+            WorkspaceGitStatus {
+                branch: Some("agent/switched".into()),
+                detached: false,
+                ahead: 0,
+                behind: 0,
+                staged: 0,
+                modified: 0,
+                untracked: 0,
+                conflicted: 0,
+                upstream: None,
+                last_commit_subject: None,
+                checked_at_unix_millis: 1,
+                full_checked_at_unix_millis: None,
+                missing: false,
+            },
+        )]);
+        let live = render_tree_buffer_with_branch_visibility(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            (true, &live_statuses),
+        );
+        let live_branch_row = buffer_row_text(&live, list.y + 2);
+        assert!(
+            live_branch_row.contains("agent/switched"),
+            "branch row: {live_branch_row:?}"
+        );
+        assert!(!live_branch_row.contains("agent/fix"));
+        assert_eq!(
+            buffer[(list.right() - 1, list.y + 1)].bg,
+            theme::accent_bg()
+        );
+        assert_eq!(
+            buffer[(list.right() - 1, list.y + 2)].bg,
+            theme::accent_bg()
+        );
+        let mut hidden_state = TreeState::default();
+        hidden_state.open(vec![group]);
+        let hidden = render_tree_buffer_with_branch_visibility(
+            &tree,
+            &mut hidden_state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            (false, &HashMap::new()),
+        );
+        let row_after_agent = buffer_row_text(&hidden, list.y + 2);
+        assert!(row_after_agent.contains("tail"), "{row_after_agent:?}");
+        assert!(!row_after_agent.contains("agent/fix"));
+
+        let items = build_tree_items(
+            &tree,
+            TreeItemBuildContext {
+                elapsed_ms: 0,
+                terminal_activity_elapsed_ms: 0,
+                current_unix_millis: 0,
+                titles_loading: &HashSet::new(),
+                recently_created: &HashMap::new(),
+                terminal_activity: &TerminalActivityTracker::default(),
+                focused_pane_id: None,
+                agent_identifiers: &AgentIdentifierSettings::default(),
+                icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
+                tree_order: TreeOrder::Manual,
+                sidebar_density: SidebarDensity::Standard,
+                show_inferred_title_icons: false,
+                panel_width: area.width,
+                opened_paths: state.opened(),
+                panes: &HashMap::new(),
+            },
+        );
+        assert_eq!(
+            node_at_position(&items, &state, area, Position::new(list.x, list.y + 1)),
+            Some(TreeNodeHit {
+                id: pane,
+                row: list.y + 1,
+                line: 0
+            })
+        );
+        assert_eq!(
+            node_at_position(&items, &state, area, Position::new(list.x, list.y + 2)),
+            Some(TreeNodeHit {
+                id: pane,
+                row: list.y + 2,
+                line: 1
+            })
+        );
+        assert_eq!(
+            node_at_position(&items, &state, area, Position::new(list.x, list.y + 3)),
+            Some(TreeNodeHit {
+                id: tail,
+                row: list.y + 3,
+                line: 0
+            })
+        );
+        let identity_hit = (list.x..list.x + area.width).find_map(|x| {
+            status_slot_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(x, list.y + 1),
+                SidebarDensity::Standard,
+            )
+            .filter(|(id, slot, _)| {
+                *id == pane && *slot == crate::status_icons::StatusSlot::Identity
+            })
+        });
+        assert!(
+            identity_hit.is_some(),
+            "pane identity icon must expose a hover slot"
+        );
+        assert!(status_slot_at_position(
+            &items,
+            &state,
+            area,
+            Position::new(list.x + 6, list.y + 2),
+            SidebarDensity::Standard
+        )
+        .is_none());
+    }
+
+    #[test]
     fn folder_virtual_rows_resolve_to_the_live_file_path() {
         let root_path = std::env::temp_dir().join(format!(
             "ilium-folder-tree-ui-{:?}",
@@ -3250,6 +3689,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3273,6 +3714,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3299,6 +3742,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3344,6 +3789,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3475,10 +3922,9 @@ mod tests {
     }
 
     #[test]
-    fn pane_label_shows_the_braille_spinner_instead_of_the_name_while_title_inference_is_in_flight()
-    {
+    fn pane_label_keeps_the_agent_name_visible_while_title_inference_is_in_flight() {
         let line = pane_label(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done),
             "claude",
             0,
             true,
@@ -3490,7 +3936,7 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect();
-        assert!(!text.contains("claude"));
+        assert!(text.contains("[done] claude"));
         assert!(text.ends_with(SPINNER_FRAMES[0]));
     }
 
@@ -3572,6 +4018,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3839,6 +4287,8 @@ mod tests {
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
                 icons: &IconSettings::default(),
+                workspace_git_statuses: &HashMap::new(),
+                show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 show_inferred_title_icons: false,
@@ -3852,14 +4302,16 @@ mod tests {
             node_at_position(&items, &state, area, Position::new(list.x, list.y)),
             Some(TreeNodeHit {
                 id: group,
-                row: list.y
+                row: list.y,
+                line: 0,
             })
         );
         assert_eq!(
             node_at_position(&items, &state, area, Position::new(list.x, list.y + 1)),
             Some(TreeNodeHit {
                 id: pane,
-                row: list.y + 1
+                row: list.y + 1,
+                line: 0,
             })
         );
         assert_eq!(

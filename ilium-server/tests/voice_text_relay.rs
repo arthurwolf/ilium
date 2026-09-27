@@ -41,7 +41,7 @@ async fn register_voice_host(stream: &mut ilium_transport::SessionStream) {
         .expect("register voice host");
     write_frame(
         stream,
-        &ClientRequest::GetPaneGoalStatus {
+        &ClientRequest::GetPaneProgressMonitorStatus {
             request_id: 1,
             pane_id: ilium_core::ROOT_ID,
         },
@@ -49,7 +49,7 @@ async fn register_voice_host(stream: &mut ilium_transport::SessionStream) {
     .await
     .expect("barrier request");
     let _ = expect_event(stream, STEP, |event| {
-        matches!(event, ServerEvent::PaneGoalStatusReported { .. })
+        matches!(event, ServerEvent::ProgressMonitorStatusReported { .. })
     })
     .await;
 }

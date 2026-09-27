@@ -6,7 +6,7 @@
 //! `#[test]` functions.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -689,6 +689,77 @@ pub enum GoalState {
     Reached,
 }
 
+/// Current provider turn phase. Unread completion is independent memory, not
+/// a phase reported by the provider's screen classifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AgentTurn {
+    Working,
+    WaitingApproval,
+    WaitingSubagents,
+    Settling,
+    Idle,
+}
+
+/// One semantic agent state assembled from process identity, turn detection,
+/// retained provider goal evidence, and server-owned completion attention.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentState {
+    pub class: AgentClass,
+    pub turn: AgentTurn,
+    pub goal: Option<GoalState>,
+    pub completion_unread: bool,
+}
+
+impl AgentState {
+    pub fn from_activity(
+        class: AgentClass,
+        activity: AgentActivity,
+        goal: Option<GoalState>,
+    ) -> Self {
+        let (turn, completion_unread) = match activity {
+            AgentActivity::Working => (AgentTurn::Working, false),
+            AgentActivity::WaitingApproval => (AgentTurn::WaitingApproval, false),
+            AgentActivity::WaitingBackground => (AgentTurn::WaitingSubagents, false),
+            AgentActivity::BackgroundTaskStillRunning => (AgentTurn::Settling, false),
+            AgentActivity::Done => (AgentTurn::Idle, true),
+            AgentActivity::Idle => (AgentTurn::Idle, false),
+        };
+        Self {
+            class,
+            turn,
+            goal,
+            completion_unread,
+        }
+    }
+
+    pub fn from_status(status: &PaneStatus) -> Option<Self> {
+        let (class, activity, goal) = match status {
+            PaneStatus::Agent(class, activity) => (class, activity, None),
+            PaneStatus::AgentWithGoal(class, activity, goal) => (class, activity, Some(*goal)),
+            PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
+        };
+        Some(Self::from_activity(class.clone(), *activity, goal))
+    }
+
+    /// The current persisted/wire status is a compatibility projection of
+    /// this semantic state. No caller should independently rebuild the same
+    /// class/turn/goal combination.
+    pub fn into_status(self) -> PaneStatus {
+        let activity = match (self.turn, self.completion_unread) {
+            (AgentTurn::Working, _) => AgentActivity::Working,
+            (AgentTurn::WaitingApproval, _) => AgentActivity::WaitingApproval,
+            (AgentTurn::WaitingSubagents, _) => AgentActivity::WaitingBackground,
+            (AgentTurn::Settling, _) => AgentActivity::BackgroundTaskStillRunning,
+            (AgentTurn::Idle, true) => AgentActivity::Done,
+            (AgentTurn::Idle, false) => AgentActivity::Idle,
+        };
+        match self.goal {
+            Some(goal) => PaneStatus::AgentWithGoal(self.class, activity, goal),
+            None => PaneStatus::Agent(self.class, activity),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaneStatus {
     /// Terminal pane, no agent CLI detected in it.
@@ -779,9 +850,6 @@ pub enum NowSignal {
     /// Idle while a live progress monitor watches its task: asleep until
     /// Ilium delivers the result, not finished.
     Parked,
-    /// Idle, and the goal already owns the long-term slot, so the monitored
-    /// task (what the agent is waiting on, or its unread outcome) shows here.
-    Task(TaskSignal),
     FinishedUnread,
     Idle,
     ShellOutput(ShellOutputPhase),
@@ -792,61 +860,108 @@ pub enum NowSignal {
 pub struct PaneSignals {
     pub objective: ObjectiveSignal,
     pub now: NowSignal,
+    /// The ordered projection rule that selected the long-term slot.
+    pub objective_rule: &'static str,
+    /// The ordered projection rule that selected the current-activity slot.
+    pub now_rule: &'static str,
 }
 
 /// The single projection from server-owned pane facts to the two sidebar
 /// state slots. It is pure so the server (sounds, notifications) and every
 /// client (rendering, tooltips) derive identical answers from the same facts.
-///
-/// Long-term slot: goal, else the monitored task, else a scheduled input.
-/// Now slot: the agent's turn; while the turn is idle a live monitor makes
-/// the agent parked (shown as the task itself when the goal occupies the
-/// long-term slot), and an unread task outcome hidden by the goal surfaces
-/// before the ordinary finished/idle markers.
+/// Unread outcomes outrank goals; blocked/limited goals outrank a live task;
+/// otherwise a live task outranks a goal and a scheduled input comes last.
 pub fn project_pane_signals(
     status: &PaneStatus,
     progress: Option<&PaneProgress>,
     has_scheduled_input: bool,
     shell_output: Option<ShellOutputPhase>,
 ) -> PaneSignals {
-    let task = progress.map(TaskSignal::from_progress);
-    let unattached_objective = match (task, has_scheduled_input) {
-        (Some(task), _) => ObjectiveSignal::Task(task),
-        (None, true) => ObjectiveSignal::ScheduledInput,
-        (None, false) => ObjectiveSignal::None,
-    };
-    let (activity, goal) = match status {
-        PaneStatus::Agent(_, activity) => (*activity, None),
-        PaneStatus::AgentWithGoal(_, activity, goal) => (*activity, Some(*goal)),
+    let agent = match status {
+        // Both matched variants are exactly the two accepted by from_status.
+        PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..) => {
+            AgentState::from_status(status).expect("agent status has agent state")
+        }
         PaneStatus::PlainShell => {
+            let (objective, objective_rule) =
+                project_objective_signal(progress, None, has_scheduled_input);
             return PaneSignals {
-                objective: unattached_objective,
+                objective,
                 now: shell_output.map_or(NowSignal::None, NowSignal::ShellOutput),
+                objective_rule,
+                now_rule: if shell_output.is_some() { "A8" } else { "A9" },
             };
         }
         PaneStatus::Editor { .. } | PaneStatus::Board => {
             return PaneSignals {
                 objective: ObjectiveSignal::None,
                 now: NowSignal::None,
+                objective_rule: "B9",
+                now_rule: "A9",
             };
         }
     };
-    let objective = goal.map_or(unattached_objective, ObjectiveSignal::Goal);
+    let (objective, objective_rule) =
+        project_objective_signal(progress, agent.goal, has_scheduled_input);
     let is_monitor_live = progress.is_some_and(PaneProgress::is_live);
-    let has_unread_outcome = progress.is_some_and(PaneProgress::has_unread_outcome);
-    let now = match activity {
-        AgentActivity::WaitingApproval => NowSignal::NeedsApproval,
-        AgentActivity::Working => NowSignal::Working,
-        AgentActivity::WaitingBackground => NowSignal::WaitingSubagents,
-        AgentActivity::BackgroundTaskStillRunning => NowSignal::Settling,
-        AgentActivity::Done | AgentActivity::Idle => match (task, goal) {
-            (Some(task), Some(_)) if is_monitor_live || has_unread_outcome => NowSignal::Task(task),
-            (Some(_), None) if is_monitor_live => NowSignal::Parked,
-            _ if activity == AgentActivity::Done => NowSignal::FinishedUnread,
-            _ => NowSignal::Idle,
-        },
+    let (now, now_rule) = match agent.turn {
+        AgentTurn::WaitingApproval => (NowSignal::NeedsApproval, "A1"),
+        AgentTurn::Working => (NowSignal::Working, "A2"),
+        AgentTurn::WaitingSubagents => (NowSignal::WaitingSubagents, "A3"),
+        AgentTurn::Settling => (NowSignal::Settling, "A4"),
+        AgentTurn::Idle if is_monitor_live => (NowSignal::Parked, "A5"),
+        AgentTurn::Idle if agent.completion_unread => (NowSignal::FinishedUnread, "A6"),
+        AgentTurn::Idle => (NowSignal::Idle, "A7"),
     };
-    PaneSignals { objective, now }
+    PaneSignals {
+        objective,
+        now,
+        objective_rule,
+        now_rule,
+    }
+}
+
+fn project_objective_signal(
+    progress: Option<&PaneProgress>,
+    goal: Option<GoalState>,
+    has_scheduled_input: bool,
+) -> (ObjectiveSignal, &'static str) {
+    let task = progress.map(TaskSignal::from_progress);
+    if let Some(
+        task @ (TaskSignal::Done { unread: true }
+        | TaskSignal::Error { unread: true }
+        | TaskSignal::MonitorFailed { unread: true }),
+    ) = task
+    {
+        let rule = if matches!(task, TaskSignal::MonitorFailed { .. }) {
+            "B2"
+        } else {
+            "B1"
+        };
+        return (ObjectiveSignal::Task(task), rule);
+    }
+    if let Some(goal @ (GoalState::Blocked | GoalState::UsageLimited)) = goal {
+        return (ObjectiveSignal::Goal(goal), "B3");
+    }
+    if let Some(task @ (TaskSignal::Pending | TaskSignal::Running { .. })) = task {
+        let rule = if matches!(task, TaskSignal::Running { .. }) {
+            "B4"
+        } else {
+            "B5"
+        };
+        return (ObjectiveSignal::Task(task), rule);
+    }
+    if let Some(goal) = goal {
+        return (ObjectiveSignal::Goal(goal), "B6");
+    }
+    if let Some(task) = task {
+        return (ObjectiveSignal::Task(task), "B7");
+    }
+    if has_scheduled_input {
+        (ObjectiveSignal::ScheduledInput, "B8")
+    } else {
+        (ObjectiveSignal::None, "B9")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1055,6 +1170,113 @@ impl ContainerNode {
     }
 }
 
+/// Git provenance recorded when Ilium attaches a terminal pane to a
+/// worktree. Live branch and dirty state are queried from Git separately;
+/// these creation facts survive a missing worktree and session restore.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneWorkspace {
+    /// Server-generated identity. Old snapshots and foreign worktrees have no
+    /// marker and therefore cannot pass an Ilium-owned removal check.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    pub repo_common_dir: PathBuf,
+    pub worktree_root: PathBuf,
+    pub branch: String,
+    pub base_ref: String,
+    pub base_commit: String,
+    pub created_by_ilium: bool,
+    pub created_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BranchNameError {
+    #[error("branch name is empty")]
+    Empty,
+    #[error("branch name contains a forbidden Git ref character")]
+    ForbiddenCharacter,
+    #[error("branch name contains an invalid Git ref sequence")]
+    InvalidSequence,
+    #[error("branch name contains an invalid path component")]
+    InvalidComponent,
+}
+
+/// Fast, pure branch validation for an editable form. The Git adapter must
+/// also run `git check-ref-format --branch` before creating anything.
+pub fn validate_branch_name(branch: &str) -> Result<(), BranchNameError> {
+    if branch.is_empty() {
+        return Err(BranchNameError::Empty);
+    }
+    if branch == "@" || branch.contains("..") || branch.contains("@{") || branch.contains("//") {
+        return Err(BranchNameError::InvalidSequence);
+    }
+    if branch.chars().any(|character| {
+        character.is_control()
+            || matches!(character, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+    }) {
+        return Err(BranchNameError::ForbiddenCharacter);
+    }
+    if branch.starts_with('-')
+        || branch.ends_with('/')
+        || branch.ends_with('.')
+        || branch.split('/').any(|component| {
+            component.is_empty() || component.starts_with('.') || component.ends_with(".lock")
+        })
+    {
+        return Err(BranchNameError::InvalidComponent);
+    }
+    Ok(())
+}
+
+/// Makes a conservative, readable component for an automatically suggested
+/// branch. Callers add their configured prefix and check for collisions.
+pub fn slugify_branch(text: &str) -> String {
+    let mut slug = String::new();
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+        if slug.len() >= 48 {
+            break;
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "task".to_string()
+    } else {
+        slug.to_string()
+    }
+}
+
+/// Expands the user-configured worktree location. The server still validates
+/// the resulting path against existing directories and repository ownership.
+pub fn expand_worktree_path_template(
+    template: &str,
+    repo_parent: &Path,
+    repo_name: &str,
+    branch_slug: &str,
+) -> PathBuf {
+    let mut expanded = String::with_capacity(template.len());
+    let mut remaining = template;
+    while !remaining.is_empty() {
+        if let Some(tail) = remaining.strip_prefix("{repo_parent}") {
+            expanded.push_str(&repo_parent.to_string_lossy());
+            remaining = tail;
+        } else if let Some(tail) = remaining.strip_prefix("{repo_name}") {
+            expanded.push_str(repo_name);
+            remaining = tail;
+        } else if let Some(tail) = remaining.strip_prefix("{branch_slug}") {
+            expanded.push_str(branch_slug);
+            remaining = tail;
+        } else if let Some(character) = remaining.chars().next() {
+            expanded.push(character);
+            remaining = &remaining[character.len_utf8()..];
+        }
+    }
+    PathBuf::from(expanded)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
     Container(ContainerNode),
@@ -1088,6 +1310,13 @@ pub enum NodeKind {
         /// keeps existing recovery snapshots compatible.
         #[serde(default)]
         progress: Option<Box<PaneProgress>>,
+        /// Actual spawn directory, including for a plain pane launched from
+        /// a subdirectory. Old snapshots fall back to their project root.
+        #[serde(default)]
+        launch_cwd: Option<PathBuf>,
+        /// Worktree creation provenance; the live Git state is not persisted.
+        #[serde(default)]
+        workspace: Option<Box<PaneWorkspace>>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -1714,6 +1943,30 @@ impl Tree {
             .and_then(Node::project_path)
     }
 
+    /// The directory in which this terminal was actually launched. Legacy
+    /// snapshots and other pane kinds use their enclosing project root.
+    pub fn pane_cwd(&self, id: NodeId) -> Option<&Path> {
+        if let Some(Node {
+            kind:
+                NodeKind::Pane {
+                    launch_cwd: Some(cwd),
+                    ..
+                },
+            ..
+        }) = self.get(id)
+        {
+            return Some(cwd);
+        }
+        self.project_path_for(id)
+    }
+
+    pub fn pane_workspace(&self, id: NodeId) -> Option<&PaneWorkspace> {
+        let NodeKind::Pane { workspace, .. } = &self.get(id)?.kind else {
+            return None;
+        };
+        workspace.as_deref()
+    }
+
     pub fn project_ids(&self) -> Vec<NodeId> {
         self.children_of(ROOT_ID)
             .unwrap_or_default()
@@ -2064,6 +2317,8 @@ impl Tree {
                     prompt_queue: Vec::new(),
                     last_prompt: None,
                     progress: None,
+                    launch_cwd: None,
+                    workspace: None,
                 },
             },
         );
@@ -2128,6 +2383,8 @@ impl Tree {
                     prompt_queue: Vec::new(),
                     last_prompt: None,
                     progress: None,
+                    launch_cwd: None,
+                    workspace: None,
                 },
             },
         );
@@ -3130,6 +3387,48 @@ impl Tree {
         Ok(())
     }
 
+    /// Persists the directory actually used to spawn a terminal, even when
+    /// it is a plain terminal rather than a worktree agent.
+    pub fn set_pane_launch_cwd(&mut self, id: NodeId, cwd: PathBuf) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            launch_cwd,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        *launch_cwd = Some(cwd);
+        Ok(())
+    }
+
+    /// Records creation provenance without changing the pane's cwd. Callers
+    /// must set the actual launch directory separately before spawning.
+    pub fn set_pane_workspace(
+        &mut self,
+        id: NodeId,
+        workspace: Option<PaneWorkspace>,
+    ) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            content,
+            workspace: field,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *content != PaneContentKind::Terminal {
+            return Err(TreeError::NotATerminal(id));
+        }
+        *field = workspace.map(Box::new);
+        Ok(())
+    }
+
     /// Records (or, with `None`, clears) a terminal pane's active
     /// long-running-task progress. Invalid externally sourced state is
     /// rejected rather than silently normalized at this persistence boundary.
@@ -3714,6 +4013,95 @@ fn project_display_name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_branch_helpers_reject_git_ref_hazards() {
+        assert_eq!(slugify_branch("  Fix Login / OAuth!  "), "fix-login-oauth");
+        assert_eq!(slugify_branch("---"), "task");
+        assert!(validate_branch_name("agent/fix-login").is_ok());
+        for invalid in [
+            "",
+            "@",
+            "-bad",
+            "agent//bad",
+            "agent/../bad",
+            "agent/.hidden",
+            "agent/bad.lock",
+            "agent/bad.",
+            "agent/bad name",
+            "agent/@{bad",
+            "agent/bad\\name",
+            "agent/bad\nname",
+        ] {
+            assert!(
+                validate_branch_name(invalid).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
+        assert_eq!(
+            expand_worktree_path_template(
+                "{repo_parent}/{repo_name}.worktrees/{branch_slug}",
+                Path::new("/tmp/projects"),
+                "acme-api",
+                "agent-fix-login",
+            ),
+            PathBuf::from("/tmp/projects/acme-api.worktrees/agent-fix-login")
+        );
+        assert_eq!(
+            expand_worktree_path_template(
+                "{repo_parent}/{repo_name}/{branch_slug}",
+                Path::new("/tmp/{repo_name}"),
+                "{branch_slug}-repo",
+                "agent-task",
+            ),
+            PathBuf::from("/tmp/{repo_name}/{branch_slug}-repo/agent-task"),
+            "replacement values are literal path components, not new templates"
+        );
+    }
+
+    #[test]
+    fn terminal_launch_directory_and_workspace_are_independent() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
+        let group = tree.add_group(project, "agents").unwrap();
+        let pane = tree
+            .add_pane(group, "codex", PaneContentKind::Terminal)
+            .unwrap();
+        assert_eq!(tree.pane_cwd(pane), Some(Path::new("/tmp/project")));
+        assert!(tree.pane_workspace(pane).is_none());
+
+        let launch_cwd = PathBuf::from("/tmp/project.worktrees/agent-fix/src");
+        tree.set_pane_launch_cwd(pane, launch_cwd.clone()).unwrap();
+        assert_eq!(tree.pane_cwd(pane), Some(launch_cwd.as_path()));
+        assert!(tree.pane_workspace(pane).is_none());
+
+        let workspace = PaneWorkspace {
+            workspace_id: Some("test-workspace".to_string()),
+            repo_common_dir: PathBuf::from("/tmp/project/.git"),
+            worktree_root: PathBuf::from("/tmp/project.worktrees/agent-fix"),
+            branch: "agent/fix".to_string(),
+            base_ref: "main".to_string(),
+            base_commit: "a".repeat(40),
+            created_by_ilium: true,
+            created_at_unix: 1_790_380_800,
+        };
+        tree.set_pane_workspace(pane, Some(workspace.clone()))
+            .unwrap();
+        assert_eq!(tree.pane_workspace(pane), Some(&workspace));
+        assert_eq!(tree.pane_cwd(pane), Some(launch_cwd.as_path()));
+
+        let editor = tree
+            .add_pane(group, "editor", PaneContentKind::Editor)
+            .unwrap();
+        assert!(matches!(
+            tree.set_pane_launch_cwd(editor, launch_cwd),
+            Err(TreeError::NotATerminal(id)) if id == editor
+        ));
+        assert!(matches!(
+            tree.set_pane_workspace(editor, Some(workspace)),
+            Err(TreeError::NotATerminal(id)) if id == editor
+        ));
+    }
 
     #[test]
     fn new_tree_has_root_group() {
@@ -6310,12 +6698,44 @@ mod pane_signal_tests {
     }
 
     #[test]
-    fn goal_always_owns_the_long_term_slot_even_while_a_task_runs() {
+    fn agent_state_separates_turn_phase_from_unread_completion() {
+        let completed =
+            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done, GoalState::Paused);
+        let state = AgentState::from_status(&completed).unwrap();
+        assert_eq!(state.class, AgentClass::Codex);
+        assert_eq!(state.turn, AgentTurn::Idle);
+        assert_eq!(state.goal, Some(GoalState::Paused));
+        assert!(state.completion_unread);
+        assert_eq!(state.into_status(), completed);
+
+        let idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
+        assert!(!AgentState::from_status(&idle).unwrap().completion_unread);
+        assert_eq!(AgentState::from_status(&idle).unwrap().into_status(), idle);
+        assert!(AgentState::from_status(&PaneStatus::PlainShell).is_none());
+    }
+
+    #[test]
+    fn running_task_outweighs_an_active_goal_but_not_a_blocked_goal() {
         let status =
             PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working, GoalState::Active);
         let signals = project_pane_signals(&status, Some(&running(42.0)), false, None);
-        assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Active));
+        assert_eq!(
+            signals.objective,
+            ObjectiveSignal::Task(TaskSignal::Running {
+                bucket: 6,
+                degraded: false,
+            })
+        );
         assert_eq!(signals.now, NowSignal::Working);
+        assert_eq!((signals.objective_rule, signals.now_rule), ("B4", "A2"));
+        let blocked = PaneStatus::AgentWithGoal(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            GoalState::Blocked,
+        );
+        let signals = project_pane_signals(&blocked, Some(&running(42.0)), false, None);
+        assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Blocked));
+        assert_eq!((signals.objective_rule, signals.now_rule), ("B3", "A2"));
     }
 
     #[test]
@@ -6330,27 +6750,29 @@ mod pane_signal_tests {
             })
         );
         assert_eq!(signals.now, NowSignal::Parked);
+        assert_eq!((signals.objective_rule, signals.now_rule), ("B4", "A5"));
 
         let with_goal =
             PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Paused);
         let signals = project_pane_signals(&with_goal, Some(&running(84.0)), false, None);
-        assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Paused));
         assert!(matches!(
-            signals.now,
-            NowSignal::Task(TaskSignal::Running { bucket: 11, .. })
+            signals.objective,
+            ObjectiveSignal::Task(TaskSignal::Running { bucket: 11, .. })
         ));
+        assert_eq!(signals.now, NowSignal::Parked);
     }
 
     #[test]
-    fn unread_outcome_hidden_by_a_goal_surfaces_in_the_now_slot_until_seen() {
+    fn unread_outcome_outweighs_a_goal_until_seen() {
         let status =
             PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Active);
         let unread =
             project_pane_signals(&status, Some(&done(ProgressAttention::Unread)), false, None);
         assert_eq!(
-            unread.now,
-            NowSignal::Task(TaskSignal::Done { unread: true })
+            unread.objective,
+            ObjectiveSignal::Task(TaskSignal::Done { unread: true })
         );
+        assert_eq!(unread.now, NowSignal::Idle);
         let seen = project_pane_signals(
             &status,
             Some(&done(ProgressAttention::Acknowledged)),
@@ -6358,6 +6780,7 @@ mod pane_signal_tests {
             None,
         );
         assert_eq!(seen.now, NowSignal::Idle);
+        assert_eq!(seen.objective, ObjectiveSignal::Goal(GoalState::Active));
     }
 
     #[test]
@@ -6380,6 +6803,167 @@ mod pane_signal_tests {
         );
         assert!(matches!(signals.objective, ObjectiveSignal::Task(_)));
         assert_eq!(signals.now, NowSignal::ShellOutput(ShellOutputPhase::Fast));
+    }
+
+    #[test]
+    fn projection_reaches_exactly_the_126_documented_icon_pairs() {
+        use std::collections::HashSet;
+
+        fn pair(signals: PaneSignals) -> (u8, u8) {
+            let now = match signals.now {
+                NowSignal::NeedsApproval => 1,
+                NowSignal::Working => 2,
+                NowSignal::WaitingSubagents => 3,
+                NowSignal::Settling => 4,
+                NowSignal::Parked => 5,
+                NowSignal::FinishedUnread => 6,
+                NowSignal::Idle => 7,
+                NowSignal::ShellOutput(_) => 8,
+                NowSignal::None => 9,
+            };
+            let objective = match signals.objective {
+                ObjectiveSignal::None => 0,
+                ObjectiveSignal::Goal(GoalState::Active) => 1,
+                ObjectiveSignal::Goal(GoalState::Paused) => 2,
+                ObjectiveSignal::Goal(GoalState::Blocked) => 3,
+                ObjectiveSignal::Goal(GoalState::UsageLimited) => 4,
+                ObjectiveSignal::Goal(GoalState::Reached) => 5,
+                ObjectiveSignal::Task(TaskSignal::Pending) => 6,
+                ObjectiveSignal::Task(TaskSignal::Running { .. }) => 7,
+                ObjectiveSignal::Task(TaskSignal::Done { .. }) => 8,
+                ObjectiveSignal::Task(TaskSignal::Error { .. }) => 9,
+                ObjectiveSignal::Task(TaskSignal::MonitorFailed { .. }) => 10,
+                ObjectiveSignal::ScheduledInput => 11,
+            };
+            (now, objective)
+        }
+
+        let mut reports = vec![None];
+        for attention in [ProgressAttention::Unread, ProgressAttention::Acknowledged] {
+            for (status, health) in [
+                (
+                    ProgressTaskStatus::NotStartedYet,
+                    ProgressMonitorHealth::Healthy,
+                ),
+                (ProgressTaskStatus::Running, ProgressMonitorHealth::Healthy),
+                (
+                    ProgressTaskStatus::Running,
+                    ProgressMonitorHealth::Degraded {
+                        consecutive_failures: 1,
+                        last_error: "probe retry".to_string(),
+                    },
+                ),
+                (ProgressTaskStatus::Done, ProgressMonitorHealth::Healthy),
+                (ProgressTaskStatus::Error, ProgressMonitorHealth::Healthy),
+                (
+                    ProgressTaskStatus::Running,
+                    ProgressMonitorHealth::Failed {
+                        consecutive_failures: 3,
+                        last_error: "probe lost".to_string(),
+                    },
+                ),
+            ] {
+                reports.push(Some(progress(status, 42.0, health, attention)));
+            }
+        }
+
+        let turns = [
+            AgentActivity::WaitingApproval,
+            AgentActivity::Working,
+            AgentActivity::WaitingBackground,
+            AgentActivity::BackgroundTaskStillRunning,
+            AgentActivity::Done,
+            AgentActivity::Idle,
+        ];
+        let goals = [
+            GoalState::Active,
+            GoalState::Paused,
+            GoalState::Blocked,
+            GoalState::UsageLimited,
+            GoalState::Reached,
+        ];
+        let mut goal_capable = HashSet::new();
+        let mut no_goal_reader = HashSet::new();
+        let mut plain_shell = HashSet::new();
+        for scheduled in [false, true] {
+            for report in &reports {
+                for turn in turns {
+                    no_goal_reader.insert(pair(project_pane_signals(
+                        &PaneStatus::Agent(AgentClass::Antigravity, turn),
+                        report.as_ref(),
+                        scheduled,
+                        None,
+                    )));
+                    goal_capable.insert(pair(project_pane_signals(
+                        &PaneStatus::Agent(AgentClass::Codex, turn),
+                        report.as_ref(),
+                        scheduled,
+                        None,
+                    )));
+                    for goal in goals {
+                        goal_capable.insert(pair(project_pane_signals(
+                            &PaneStatus::AgentWithGoal(AgentClass::Codex, turn, goal),
+                            report.as_ref(),
+                            scheduled,
+                            None,
+                        )));
+                    }
+                }
+                for output in [
+                    None,
+                    Some(ShellOutputPhase::Fast),
+                    Some(ShellOutputPhase::Slow),
+                ] {
+                    plain_shell.insert(pair(project_pane_signals(
+                        &PaneStatus::PlainShell,
+                        report.as_ref(),
+                        scheduled,
+                        output,
+                    )));
+                }
+            }
+        }
+
+        let mut expected_goal_capable = HashSet::new();
+        for now in 1..=4 {
+            for objective in 0..=11 {
+                expected_goal_capable.insert((now, objective));
+            }
+        }
+        for objective in [3, 4, 6, 7] {
+            expected_goal_capable.insert((5, objective));
+        }
+        for now in [6, 7] {
+            for objective in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11] {
+                expected_goal_capable.insert((now, objective));
+            }
+        }
+        let mut expected_no_goal_reader = HashSet::new();
+        for now in 1..=4 {
+            for objective in [0, 6, 7, 8, 9, 10, 11] {
+                expected_no_goal_reader.insert((now, objective));
+            }
+        }
+        for objective in [6, 7] {
+            expected_no_goal_reader.insert((5, objective));
+        }
+        for now in [6, 7] {
+            for objective in [0, 8, 9, 10, 11] {
+                expected_no_goal_reader.insert((now, objective));
+            }
+        }
+        let expected_plain_shell: HashSet<_> = [8, 9]
+            .into_iter()
+            .flat_map(|now| [0, 6, 7, 8, 9, 10, 11].map(move |objective| (now, objective)))
+            .collect();
+
+        assert_eq!(goal_capable, expected_goal_capable);
+        assert_eq!(no_goal_reader, expected_no_goal_reader);
+        assert_eq!(plain_shell, expected_plain_shell);
+        assert_eq!(
+            goal_capable.len() + no_goal_reader.len() + plain_shell.len(),
+            126
+        );
     }
 
     #[test]

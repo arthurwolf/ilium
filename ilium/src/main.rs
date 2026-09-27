@@ -22,7 +22,6 @@
 
 use ilium::session;
 
-mod goal;
 mod voice;
 
 use std::ffi::OsString;
@@ -35,11 +34,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{Parser, Subcommand};
 
 use ilium::error::CliError;
+use ilium_core::BuiltinAgentProvider;
+use ilium_ipc::{ClientRequest, RepoFacts, ServerEvent, WorkspaceCreateSpec, WorkspaceCreateStage};
 use ilium_platform::paths;
 
 /// How long the `new-pane`/`kill-session` one-shot subcommands wait for
 /// the server to confirm a request before giving up and reporting failure.
 const REQUEST_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(5);
+const WORKSPACE_FACTS_TIMEOUT: Duration = Duration::from_secs(30);
+const WORKSPACE_CREATION_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// ilium: a tmux-like terminal multiplexer TUI.
 #[derive(Parser, Debug)]
@@ -86,6 +89,15 @@ enum Command {
         /// Project-local session to receive the pane.
         #[arg(long, default_value = session::DEFAULT_SESSION_NAME)]
         session_name: String,
+        /// Start a built-in agent in a new Git worktree on its own branch.
+        #[arg(long, requires = "branch")]
+        worktree: bool,
+        /// New branch for --worktree. Must not already exist.
+        #[arg(long, requires = "worktree")]
+        branch: Option<String>,
+        /// Starting ref for --worktree; defaults to the repository's default base.
+        #[arg(long, requires = "worktree")]
+        base: Option<String>,
         #[arg(last = true, required = true, value_name = "CMD")]
         cmd: Vec<String>,
     },
@@ -104,14 +116,6 @@ enum Command {
     Progress {
         #[command(subcommand)]
         command: ProgressCommand,
-    },
-    /// Paused-goal status and agent-requested `/goal resume` for the pane
-    /// this runs in, plus the Stop-hook adapter that keeps an agent from
-    /// ending a turn with an unblocked goal left paused. Run from inside an
-    /// Ilium pane, like `progress`.
-    Goal {
-        #[command(subcommand)]
-        command: goal::GoalCommand,
     },
     /// Voice control from the command line: `voice say` types sentences into
     /// the running voice session as if they had been spoken. Output is JSONL.
@@ -249,12 +253,20 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         }
         Some(Command::Ls) => list_sessions(&cli.cwd),
         Some(Command::KillSession { name }) => kill_session(&name, &cli.cwd).await,
-        Some(Command::NewPane { session_name, cmd }) => {
-            new_pane(&session_name, &cmd, &cli.cwd).await
-        }
+        Some(Command::NewPane {
+            session_name,
+            worktree,
+            branch,
+            base,
+            cmd,
+        }) => match (worktree, branch) {
+            (true, Some(branch)) => {
+                new_workspace_pane(&session_name, &cmd, &cli.cwd, &branch, base.as_deref()).await
+            }
+            _ => new_pane(&session_name, &cmd, &cli.cwd).await,
+        },
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
-        Some(Command::Goal { command }) => goal::goal(command).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
     }
 }
@@ -919,6 +931,231 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Worktree creation is an agent-facing one-shot operation. The final event
+/// must carry this request ID: a tree broadcast can describe another client's
+/// pane, and a send acknowledgement cannot prove that Git or startup worked.
+async fn new_workspace_pane(
+    session_name: &str,
+    cmd: &[String],
+    cwd: &Path,
+    branch: &str,
+    base: Option<&str>,
+) -> Result<(), CliError> {
+    let request_id = next_progress_request_id();
+    let result = run_new_workspace_pane(session_name, cmd, cwd, branch, base, request_id).await;
+    if let Err(error) = &result {
+        println!(
+            "{{\"type\":\"error\",\"request_id\":{request_id},\"message\":{}}}",
+            json_string(&error.to_string())
+        );
+    }
+    result
+}
+
+async fn run_new_workspace_pane(
+    session_name: &str,
+    cmd: &[String],
+    cwd: &Path,
+    branch: &str,
+    base: Option<&str>,
+    request_id: u64,
+) -> Result<(), CliError> {
+    let provider = workspace_provider(cmd)?;
+    ilium_core::validate_branch_name(branch).map_err(|error| {
+        CliError::ServerReportedError(format!("invalid worktree branch {branch:?}: {error}"))
+    })?;
+    // Snapshot the same persisted Git setting as the TUI before starting the
+    // detached server. A malformed config must not silently skip setup.
+    let setup_command = ilium_platform::paths::config_dir()
+        .map(|directory| {
+            ilium_client::config::load(&directory).map(|config| config.git.setup_command)
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let project_session = session::resolve_project_session(cwd, session_name)?;
+    let log_path = session::ensure_server_running(&project_session).await?;
+    initialize_cli_logging(&log_path)?;
+
+    let mut connection = ilium_client::connection::Connection::connect(
+        &project_session.socket_path,
+        session_name.to_string(),
+    )
+    .await?;
+    let attach = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ServerEvent::TreeSnapshot(_) => return Ok(()),
+                ServerEvent::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+        Err("connection closed before the session attach completed".to_string())
+    })
+    .await
+    .map_err(|_| CliError::ServerReportedError("session attach timed out".into()))?
+    .map_err(CliError::ServerReportedError);
+    attach?;
+
+    println!(
+        "{{\"type\":\"progress\",\"request_id\":{request_id},\"stage\":\"querying-repository\"}}"
+    );
+    connection
+        .requests
+        .send(ClientRequest::QueryRepoFacts {
+            request_id,
+            project: ilium_core::ROOT_ID,
+        })
+        .await
+        .map_err(|_| {
+            CliError::ServerReportedError(
+                "connection closed before repository query was sent".into(),
+            )
+        })?;
+    let facts = tokio::time::timeout(WORKSPACE_FACTS_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ServerEvent::RepoFactsReported {
+                    request_id: response_id,
+                    result,
+                    ..
+                } if response_id == request_id => return result,
+                ServerEvent::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+        Err("connection closed before repository facts arrived".to_string())
+    })
+    .await
+    .map_err(|_| CliError::ServerReportedError("repository query timed out".into()))?
+    .map_err(CliError::ServerReportedError)?;
+
+    let path = default_workspace_path(&facts, branch)?;
+    let base_ref = base.unwrap_or(&facts.default_base_ref);
+    let spec = if setup_command.trim().is_empty() {
+        WorkspaceCreateSpec::New {
+            branch: branch.to_string(),
+            base_ref: base_ref.to_string(),
+            path: path.clone(),
+        }
+    } else {
+        WorkspaceCreateSpec::NewWithSetup {
+            branch: branch.to_string(),
+            base_ref: base_ref.to_string(),
+            path: path.clone(),
+            setup_command,
+        }
+    };
+    connection
+        .requests
+        .send(ClientRequest::CreateAgentInWorkspace {
+            request_id,
+            parent_group: ilium_core::ROOT_ID,
+            provider,
+            spec,
+            initial_input: None,
+        })
+        .await
+        .map_err(|_| {
+            CliError::ServerReportedError(
+                "connection closed before workspace request was sent".into(),
+            )
+        })?;
+    let result = tokio::time::timeout(WORKSPACE_CREATION_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ServerEvent::WorkspaceCreateProgress {
+                    request_id: response_id,
+                    stage,
+                } if response_id == request_id => {
+                    println!(
+                        "{{\"type\":\"progress\",\"request_id\":{request_id},\"stage\":{}}}",
+                        json_string(workspace_stage_name(stage))
+                    );
+                }
+                ServerEvent::WorkspaceCreated {
+                    request_id: response_id,
+                    pane_id,
+                } if response_id == request_id => return Ok(pane_id),
+                ServerEvent::WorkspaceCreateFailed {
+                    request_id: response_id,
+                    error,
+                } if response_id == request_id => return Err(error),
+                ServerEvent::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+        Err("connection closed before workspace creation was confirmed".to_string())
+    })
+    .await
+    .map_err(|_| {
+        CliError::ServerReportedError(
+            "workspace confirmation timed out; creation may still have completed, so inspect the session and Git worktrees before retrying".into(),
+        )
+    })?
+    .map_err(CliError::ServerReportedError);
+    let _ = connection.requests.send(ClientRequest::Detach).await;
+    let pane_id = result?;
+    println!(
+        "{{\"type\":\"result\",\"request_id\":{request_id},\"pane_id\":{},\"branch\":{},\"base\":{},\"worktree_path\":{}}}",
+        pane_id.0,
+        json_string(branch),
+        json_string(base_ref),
+        json_string(&path.to_string_lossy())
+    );
+    Ok(())
+}
+
+fn workspace_provider(cmd: &[String]) -> Result<BuiltinAgentProvider, CliError> {
+    match cmd {
+        [command] => BuiltinAgentProvider::from_command_line(command).ok_or_else(|| {
+            CliError::ServerReportedError(
+                "--worktree requires exactly one built-in agent command: claude, codex, or agy"
+                    .into(),
+            )
+        }),
+        _ => Err(CliError::ServerReportedError(
+            "--worktree requires exactly one built-in agent command: claude, codex, or agy".into(),
+        )),
+    }
+}
+
+fn default_workspace_path(facts: &RepoFacts, branch: &str) -> Result<PathBuf, CliError> {
+    // Git lists the main worktree first. The session may have started from a
+    // linked checkout, so its `checkout_root` is not necessarily the repo's
+    // stable location for sibling worktrees.
+    let main_worktree = facts.worktrees.first().ok_or_else(|| {
+        CliError::ServerReportedError("repository has no registered main worktree".into())
+    })?;
+    let main_root = &main_worktree.path;
+    if !main_root.is_absolute() {
+        return Err(CliError::ServerReportedError(
+            "repository main worktree path is not absolute".into(),
+        ));
+    }
+    let parent = main_root.parent().ok_or_else(|| {
+        CliError::ServerReportedError("repository main worktree has no parent directory".into())
+    })?;
+    let mut directory_name = main_root
+        .file_name()
+        .ok_or_else(|| {
+            CliError::ServerReportedError("repository main worktree has no name".into())
+        })?
+        .to_os_string();
+    directory_name.push(".worktrees");
+    Ok(parent
+        .join(directory_name)
+        .join(ilium_core::slugify_branch(branch)))
+}
+
+const fn workspace_stage_name(stage: WorkspaceCreateStage) -> &'static str {
+    match stage {
+        WorkspaceCreateStage::CreatingWorktree => "creating-worktree",
+        WorkspaceCreateStage::Preparing => "preparing",
+        WorkspaceCreateStage::Starting => "starting",
+        WorkspaceCreateStage::RunningSetup => "running-setup",
+    }
+}
+
 async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
     let log_path = session::ensure_server_running(&project_session).await?;
@@ -1089,9 +1326,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, json_string, pane_identity_from_values,
-        pane_progress_json, progress_report_json, session, shell_join, Cli, Command,
-        ProgressCommand,
+        chatroom_project_root, client_restart_args, default_workspace_path, json_string,
+        pane_identity_from_values, pane_progress_json, progress_report_json, session, shell_join,
+        workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
 
@@ -1143,6 +1380,99 @@ mod tests {
     fn bare_single_token_commands_round_trip_unquoted() {
         assert_eq!(shell_join(&["cat".to_string()]), "cat");
         assert_eq!(shell_join(&["ls".to_string(), "-la".to_string()]), "ls -la");
+    }
+
+    #[test]
+    fn worktree_flags_require_a_branch_and_keep_plain_new_pane_available() {
+        let plain = Cli::try_parse_from(["ilium", "new-pane", "--", "cat"]).unwrap();
+        assert!(matches!(
+            plain.command,
+            Some(Command::NewPane {
+                worktree: false,
+                branch: None,
+                base: None,
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from(["ilium", "new-pane", "--worktree", "--", "codex"]).is_err());
+        assert!(
+            Cli::try_parse_from(["ilium", "new-pane", "--branch", "agent/fix", "--", "codex"])
+                .is_err()
+        );
+        let workspace = Cli::try_parse_from([
+            "ilium",
+            "new-pane",
+            "--worktree",
+            "--branch",
+            "agent/fix",
+            "--base",
+            "main",
+            "--",
+            "codex",
+        ])
+        .unwrap();
+        assert!(matches!(
+            workspace.command,
+            Some(Command::NewPane {
+                worktree: true,
+                branch: Some(branch),
+                base: Some(base),
+                cmd,
+                ..
+            }) if branch == "agent/fix" && base == "main" && cmd == ["codex"]
+        ));
+    }
+
+    #[test]
+    fn worktree_mode_accepts_only_exact_builtin_agent_commands() {
+        for command in ["claude", "codex", "agy"] {
+            assert!(workspace_provider(&[command.to_string()]).is_ok());
+        }
+        for command in ["cat", "/usr/bin/codex", "codex --ask-for-approval never"] {
+            assert!(workspace_provider(&[command.to_string()]).is_err());
+        }
+        assert!(workspace_provider(&["codex".into(), "resume".into()]).is_err());
+    }
+
+    #[test]
+    fn default_worktree_path_uses_main_checkout_for_a_linked_project_subdirectory() {
+        let facts = ilium_ipc::RepoFacts {
+            repo_common_dir: PathBuf::from("/work/api/.git"),
+            checkout_root: PathBuf::from("/work/api.worktrees/existing-agent"),
+            project_subpath: PathBuf::from("crates/service"),
+            current_branch: Some("main".into()),
+            default_base_ref: "main".into(),
+            default_base_commit: "abc123".into(),
+            local_branches: vec!["main".into()],
+            worktrees: vec![
+                ilium_ipc::WorkspaceWorktreeFact {
+                    path: PathBuf::from("/work/api"),
+                    branch: Some("main".into()),
+                    created_by_ilium: false,
+                    is_dirty: false,
+                    occupied_pane_id: None,
+                },
+                ilium_ipc::WorkspaceWorktreeFact {
+                    path: PathBuf::from("/work/api.worktrees/existing-agent"),
+                    branch: Some("agent/existing".into()),
+                    created_by_ilium: true,
+                    is_dirty: false,
+                    occupied_pane_id: None,
+                },
+            ],
+            source_dirty_count: 0,
+            main_dirty_count: 0,
+            has_gitmodules: false,
+            git_version: ilium_ipc::WorkspaceGitVersion {
+                major: 2,
+                minor: 17,
+                patch: 0,
+            },
+        };
+        assert_eq!(
+            default_workspace_path(&facts, "agent/fix-login").unwrap(),
+            PathBuf::from("/work/api.worktrees/agent-fix-login")
+        );
     }
 
     #[test]

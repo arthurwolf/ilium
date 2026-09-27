@@ -215,6 +215,9 @@ pub struct PtySession {
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     // OS pid of the directly-spawned child, if the platform reported one.
     process_id: Option<u32>,
+    // Captured while the PTY child is still owned. Worktree teardown must
+    // refuse a stale/reused PID rather than signal an unrelated process.
+    pty_process_identity: Option<ilium_platform::process_control::PtyProcessIdentity>,
     // Held so `subscribe_screen_changed` can hand out clones; a `watch`
     // receiver never lets its sender's send fail as "no receivers left"
     // while at least one clone (this one) is alive.
@@ -842,6 +845,9 @@ impl PtySession {
             }
         };
         let process_id = child.process_id();
+        let pty_process_identity = process_id.and_then(|process_id| {
+            ilium_platform::process_control::capture_pty_process(process_id).ok()
+        });
         let child = Arc::new(Mutex::new(child));
 
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
@@ -999,6 +1005,7 @@ impl PtySession {
             master: Mutex::new(pair.master),
             child,
             process_id,
+            pty_process_identity,
             screen_changed: screen_changed_rx,
             output_bytes: output_bytes_tx,
             reader_should_stop,
@@ -1162,6 +1169,25 @@ impl PtySession {
     /// report one.
     pub fn process_id(&self) -> Option<u32> {
         self.process_id
+    }
+
+    /// Terminates the owned PTY lineage for worktree removal and waits up to
+    /// `timeout` for observed descendants to be gone. This is separate from
+    /// ordinary `kill()`/`Drop`, which retain their direct-child semantics.
+    /// A missing birth identity or unavailable platform proof is an error;
+    /// callers must also check `processes_using_directory` before removal to
+    /// catch a descendant that detached before this method's process scan.
+    pub fn terminate_process_tree(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> std::io::Result<ilium_platform::process_control::PtyTerminationProof> {
+        let identity = self.pty_process_identity.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "PTY child birth identity was not captured",
+            )
+        })?;
+        ilium_platform::process_control::terminate_pty_process_tree(identity, timeout)
     }
 
     /// Best-effort cwd of the directly spawned shell or command. Delegates to
@@ -1344,6 +1370,31 @@ impl Drop for PtySession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn worktree_termination_reaches_pty_descendant() {
+        let mut session = PtySession::spawn(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("sleep 60 & echo child-started; wait"),
+        )
+        .expect("spawn PTY shell");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !session.screen_text().contains("child-started")
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(session.screen_text().contains("child-started"));
+        let proof = session
+            .terminate_process_tree(std::time::Duration::from_secs(3))
+            .expect("terminate PTY lineage");
+        assert!(
+            proof.signalled_processes >= 2,
+            "shell and background child must both be signalled"
+        );
+    }
 
     fn journal() -> OutputJournal {
         OutputJournal {

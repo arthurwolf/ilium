@@ -89,6 +89,8 @@ Choose one compact visual icon that helps recognize this pane. Prefer the shorte
 pub struct SessionTitleInput {
     pub pane_id: NodeId,
     pub project_name: String,
+    /// The pane's launch cwd, including a worktree or project subdirectory.
+    /// This also selects the transcript store and verifies its embedded cwd.
     pub project_path: PathBuf,
     pub agent_class: AgentClass,
     pub session_id: String,
@@ -194,13 +196,20 @@ fn infer_session_title<G: PromptCompletionClient>(
 ) -> anyhow::Result<DualTitle> {
     let style = generator.title_style();
     let context = SessionTitleContext::new(input, transcript_path, transcript_entries, style);
-    naming::render_complete_and_parse(
+    let title = naming::render_complete_and_parse(
         generator,
         "session-title",
         SESSION_TITLE_TEMPLATE,
         &context,
         |response| parse_session_title_response_for_style(response, style),
-    )
+    )?;
+    let provider_label = input.agent_class.label();
+    if title.short.trim().eq_ignore_ascii_case(provider_label)
+        || title.long.trim().eq_ignore_ascii_case(provider_label)
+    {
+        anyhow::bail!("session title only names the agent provider");
+    }
+    Ok(title)
 }
 
 #[derive(Debug, Serialize)]
@@ -482,6 +491,26 @@ mod tests {
         assert!(!prompt.contains("<transcript-path>"));
         assert!(!prompt.contains("Treat the current title as a strong prior"));
         assert!(prompt.contains("<nearby-title>\"PASSWORD RESET\"</nearby-title>"));
+    }
+
+    #[test]
+    fn labeling_rejects_provider_name_as_session_title() {
+        let generator = LabelGenerator(FakeGenerator {
+            calls: Cell::new(0),
+            last_prompt: RefCell::new(None),
+            response: r#"{"icon":"🐢","session_title_short":"CODEX","session_title_long":"CODEX"}"#
+                .to_string(),
+        });
+        let result = infer_session_title(
+            &generator,
+            &input(PathBuf::from("/tmp/ilium-provider-title")),
+            Path::new("/tmp/ilium-provider-title/session.jsonl"),
+            entries(),
+        );
+        assert!(
+            result.is_err(),
+            "a provider name cannot identify the pane's task"
+        );
     }
 
     #[test]

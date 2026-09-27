@@ -19,7 +19,7 @@ mod agent_delivery;
 pub mod config;
 mod detection;
 pub mod error;
-pub(crate) mod goal_control;
+mod git_status;
 mod http_api;
 mod initial_prompt;
 mod ipc;
@@ -40,6 +40,11 @@ mod state;
 mod task_guard;
 mod text_triggers;
 mod voice_relay;
+mod workspace;
+mod workspace_custody;
+mod workspace_owner;
+mod workspace_setup;
+mod worktree_include;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -198,11 +203,14 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
+    let workspace_git_requests = state.take_workspace_git_full_receiver().await;
+    let git_status_task = AbortOnDropHandle::new(git_status::spawn(
+        Arc::clone(&state),
+        workspace_git_requests,
+    ));
     let http_api_task =
         AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
-    let goal_reminder_task =
-        AbortOnDropHandle::new(goal_control::spawn_idle_reminder(Arc::clone(&state)));
     let snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
     let session_backup_task = AbortOnDropHandle::new(session_backups::spawn(
@@ -222,9 +230,9 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     }
 
     detection_task.abort();
+    git_status_task.abort();
     http_api_task.abort();
     scheduled_input_task.abort();
-    goal_reminder_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }
@@ -235,6 +243,10 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     // comment.
     tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
     state.abort_all_connection_tasks();
+    // Worktree requests are server-owned after dispatch. Joining here keeps
+    // an in-flight Git add or its exact rollback from being cut off by
+    // session shutdown, even if the requesting socket already disappeared.
+    state.finish_workspace_creation_tasks().await;
 
     // Flush any crash-recovery mutation too recent for the background
     // debounced writer's window to have picked up yet (a `KillSession`
@@ -363,10 +375,37 @@ pub(crate) async fn restore_snapshot(
 ) {
     let pane_count = snapshot.panes.len();
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
+    let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
+    // Prune checks the entire tree under this fence. Publish a restored tree
+    // under the same fence so a new worktree user cannot appear after that
+    // check and before Git removal. Respawn takes the fence again later.
+    let publish_guard = state.workspace_spawn_lock.lock().await;
     {
         let mut tree = state.tree.write().await;
         *tree = snapshot.tree;
+        let mut preferences = state.workspace_close_preferences.write().await;
+        preferences.clear();
+        for preference in persisted_close_preferences {
+            if tree
+                .pane_workspace(preference.pane_id)
+                .is_some_and(|workspace| {
+                    workspace.workspace_id == preference.workspace_id
+                        && workspace.worktree_root == preference.worktree_root
+                })
+            {
+                preferences.insert(
+                    preference.pane_id,
+                    crate::state::WorkspaceClosePreference {
+                        pane_id: preference.pane_id,
+                        workspace_id: preference.workspace_id,
+                        worktree_root: preference.worktree_root,
+                        policy: preference.policy,
+                    },
+                );
+            }
+        }
+        drop(preferences);
         // Presentation state contains the previous process's monitor IDs.
         // Clear it before respawning panes; each valid persisted registration
         // below receives a fresh process-local generation and republishes its
@@ -396,11 +435,91 @@ pub(crate) async fn restore_snapshot(
         }
         drop(panes);
     }
+    drop(publish_guard);
+    state.workspace_git_status_cache.write().await.clear();
 
     let mut failed_pane_ids = Vec::new();
+    let mut missing_workspace_pane_ids = Vec::new();
     for pane_snapshot in snapshot.panes {
         let node_id = pane_snapshot.node_id;
-        match ipc::handlers::spawn_and_register_pane(state, node_id, pane_snapshot.kind).await {
+        let (saved_location, project_root) = {
+            let tree = state.tree.read().await;
+            (
+                tree.pane_workspace(node_id).map(|workspace| {
+                    (
+                        tree.pane_cwd(node_id).map(std::path::Path::to_path_buf),
+                        workspace.clone(),
+                    )
+                }),
+                tree.project_path_for(node_id)
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| state.session_cwd.clone()),
+            )
+        };
+        let had_workspace = saved_location.is_some();
+        let (kind, cwd, deferred_workspace) = match (saved_location, pane_snapshot.kind) {
+            (Some((Some(saved_cwd), workspace)), pane::PaneSnapshotKind::Terminal(origin)) => {
+                match workspace::restore_target(&saved_cwd, &workspace).await {
+                    workspace::RestoreTarget::Ready(cwd) => {
+                        (pane::PaneSnapshotKind::Terminal(origin), cwd, None)
+                    }
+                    workspace::RestoreTarget::Missing(reason) => {
+                        tracing::warn!(pane_id = node_id.0, %reason, "saved worktree is unavailable; restoring a safe project-root shell");
+                        state.broadcast(ilium_ipc::ServerEvent::Error {
+                            message: format!(
+                                "Pane {node_id:?} worktree is unavailable; its original command and queued input were held: {reason}"
+                            ),
+                        });
+                        missing_workspace_pane_ids.push(node_id);
+                        let mut tree = state.tree.write().await;
+                        let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
+                        (
+                            pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
+                            project_root.clone(),
+                            Some((origin, reason)),
+                        )
+                    }
+                }
+            }
+            (Some((None, _)), pane::PaneSnapshotKind::Terminal(origin)) => {
+                let reason = "saved worktree pane has no launch directory".to_string();
+                missing_workspace_pane_ids.push(node_id);
+                let mut tree = state.tree.write().await;
+                let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
+                (
+                    pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
+                    project_root.clone(),
+                    Some((origin, reason)),
+                )
+            }
+            (_, kind) => {
+                let cwd = {
+                    let tree = state.tree.read().await;
+                    tree.pane_cwd(node_id)
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or(project_root)
+                };
+                (kind, cwd, None)
+            }
+        };
+        let spawn_result = match deferred_workspace {
+            Some(deferred) => {
+                ipc::handlers::spawn_and_register_pane_with_deferred_workspace(
+                    state,
+                    node_id,
+                    kind,
+                    &cwd,
+                    Some(deferred),
+                )
+                .await
+            }
+            None if had_workspace => {
+                ipc::handlers::spawn_and_register_pane_in_directory(state, node_id, kind, &cwd)
+                    .await
+            }
+            None => ipc::handlers::spawn_and_register_pane(state, node_id, kind).await,
+        };
+        match spawn_result {
             Ok(()) => {
                 let _ = crate::agent_debug::record(
                     state,
@@ -454,6 +573,11 @@ pub(crate) async fn restore_snapshot(
         // to a numeric tree id. A pane that cannot be respawned must not
         // leave sensitive history orphaned in every future snapshot.
         state.agent_debug.remove(&failed_pane_ids).await;
+        let mut preferences = state.workspace_close_preferences.write().await;
+        for pane_id in &failed_pane_ids {
+            preferences.remove(pane_id);
+        }
+        drop(preferences);
 
         tracing::warn!(
             "restored {} of {pane_count} pane(s) from crash-recovery snapshot for session {:?}; \
@@ -476,6 +600,15 @@ pub(crate) async fn restore_snapshot(
     let mut restored_monitor_count = 0_usize;
     for persisted_monitor in persisted_progress_monitors {
         if failed_pane_ids.contains(&persisted_monitor.pane_id) {
+            continue;
+        }
+        if missing_workspace_pane_ids.contains(&persisted_monitor.pane_id) {
+            let mut panes = state.panes.write().await;
+            if let Some(pane::PaneResource::Terminal(runtime)) =
+                panes.get_mut(&persisted_monitor.pane_id)
+            {
+                runtime.deferred_progress_monitor = Some(persisted_monitor);
+            }
             continue;
         }
         let pane_id = persisted_monitor.pane_id;
@@ -574,6 +707,143 @@ mod restore_tests {
     use super::*;
     use crate::pane::{PaneSnapshotKind, TerminalOrigin};
     use crate::persistence::{PaneSnapshot, SessionSnapshot};
+
+    #[tokio::test]
+    async fn missing_worktree_restores_shell_without_running_saved_command() {
+        let directory = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "missing-worktree-test".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("session.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let project_root = directory.path().join("nested-project");
+        std::fs::create_dir(&project_root).unwrap();
+        let mut tree = Tree::new();
+        let project = tree.add_project(project_root.clone()).unwrap();
+        let group = tree.add_group(project, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "Saved agent", PaneContentKind::Terminal)
+            .unwrap();
+        let missing_root = directory.path().join("removed-worktree");
+        tree.set_pane_launch_cwd(pane_id, missing_root.clone())
+            .unwrap();
+        tree.set_pane_workspace(
+            pane_id,
+            Some(ilium_core::PaneWorkspace {
+                workspace_id: Some("removed-worktree".into()),
+                repo_common_dir: directory.path().join("repo/.git"),
+                worktree_root: missing_root,
+                branch: "agent/saved".into(),
+                base_ref: "main".into(),
+                base_commit: "0123456789012345678901234567890123456789".into(),
+                created_by_ilium: true,
+                created_at_unix: 1,
+            }),
+        )
+        .unwrap();
+        let scheduled = ilium_core::ScheduledPaneInput {
+            execute_at_unix_millis: 1,
+            text: "must stay queued".into(),
+            send_enter: true,
+        };
+        tree.schedule_pane_input(pane_id, scheduled.clone())
+            .unwrap();
+        let original = TerminalOrigin::Command("printf 'unsafe-original-command'".into());
+        let persisted_monitor = crate::persistence::PersistedProgressMonitor {
+            pane_id,
+            command: "printf 'should-not-probe'".into(),
+            interval_seconds: 15,
+            latest_progress: ilium_core::PaneProgress::new(
+                41,
+                ilium_core::ProgressTaskReport::new(
+                    "saved-job".into(),
+                    ilium_core::ProgressTaskStatus::Running,
+                    35.0,
+                    "saved work".into(),
+                    None,
+                )
+                .unwrap(),
+                1_700_000_000_000,
+            )
+            .unwrap(),
+            result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
+        };
+        restore_snapshot(
+            &state,
+            SessionSnapshot {
+                version: 3,
+                tree,
+                panes: vec![PaneSnapshot {
+                    node_id: pane_id,
+                    kind: PaneSnapshotKind::Terminal(original.clone()),
+                }],
+                agent_debug_logs: Vec::new(),
+                progress_monitors: vec![persisted_monitor.clone()],
+                workspace_close_preferences: Vec::new(),
+            },
+        )
+        .await;
+
+        let panes = state.panes.read().await;
+        let Some(crate::pane::PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            panic!("missing worktree must retain a live fallback shell");
+        };
+        assert_eq!(runtime.origin, TerminalOrigin::PlainShell);
+        assert_eq!(runtime.deferred_workspace_origin, Some(original));
+        assert!(runtime.missing_workspace.is_some());
+        assert_eq!(
+            runtime.deferred_progress_monitor,
+            Some(persisted_monitor.clone())
+        );
+        drop(panes);
+        assert_eq!(
+            state
+                .last_terminal_working_directory
+                .lock()
+                .await
+                .as_deref(),
+            Some(project_root.as_path())
+        );
+        let tree = state.tree.read().await;
+        assert_eq!(
+            tree.scheduled_pane_inputs().next(),
+            Some((pane_id, &scheduled))
+        );
+        drop(tree);
+        let result = crate::ipc::handlers::submit_terminal_text(
+            &state,
+            pane_id,
+            "must not deliver",
+            ilium_ipc::PromptSubmissionSource::ScheduledInput,
+        )
+        .await;
+        assert!(result.unwrap_err().contains("automated input was held"));
+
+        crate::persistence::save_snapshot(&state).await.unwrap();
+        let saved = crate::persistence::load_snapshot(&directory.path().join("snapshot.json"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.progress_monitors, vec![persisted_monitor]);
+        assert!(matches!(
+            &saved.panes[0].kind,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(command))
+                if command == "printf 'unsafe-original-command'"
+        ));
+
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+    }
 
     /// Mirrors `ilium-server/tests/smoke.rs`'s helper of the same name --
     /// binding a UDS socket is not instant, and a fixed sleep would be
@@ -697,6 +967,7 @@ mod restore_tests {
                 log: persisted_debug_log,
             }],
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
         tokio::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
@@ -779,8 +1050,12 @@ mod restore_tests {
         .expect("write Attach request");
 
         let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
-        let ServerEvent::TreeSnapshot(restored_tree) = event else {
-            panic!("expected TreeSnapshot on attach, got {event:?}");
+        let ServerEvent::PaneStateSnapshot {
+            tree: restored_tree,
+            ..
+        } = event
+        else {
+            panic!("expected PaneStateSnapshot on attach, got {event:?}");
         };
         // Structure, not runtime counters. Restoring a pane starts a real
         // process, and any byte it emits advances that node's activity
@@ -930,6 +1205,7 @@ mod restore_tests {
             panes: Vec::new(),
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 
@@ -1030,6 +1306,7 @@ mod restore_tests {
             panes: Vec::new(),
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         };
         restore_snapshot(&state, snapshot).await;
 

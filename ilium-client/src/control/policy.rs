@@ -278,6 +278,7 @@ mod tests {
             index: None,
             storage: None,
             provider: None,
+            workspace: None,
         });
 
         assert!(confirmation_plan(&app, &command)
@@ -309,6 +310,7 @@ mod tests {
             index: None,
             storage: None,
             provider: None,
+            workspace: None,
         });
 
         let plan = confirmation_plan(&app, &command)

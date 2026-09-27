@@ -71,6 +71,7 @@ pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;
+pub mod popover;
 pub mod progress_bar;
 pub mod project_config;
 pub mod project_naming;
@@ -117,6 +118,8 @@ pub mod trigger_settings_ui;
 pub mod ui;
 pub mod voice_settings;
 pub mod workspace_file;
+pub mod worktree_dialog;
+pub mod worktree_manager;
 
 #[cfg(test)]
 mod performance_tests;
@@ -528,6 +531,7 @@ async fn run_inner(
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
+    app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_debug_settings(config.debug);
     app.apply_api_settings(config.api);

@@ -23,6 +23,10 @@ use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::search_ui::SearchState;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
+use crate::worktree_dialog::{
+    WorktreeClosePolicy, WorktreeDialogFocus, WorktreeDialogMode, WorktreeDialogState,
+    WorktreeDialogStatus,
+};
 
 fn is_press(key: &KeyEvent) -> bool {
     matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
@@ -35,6 +39,16 @@ fn is_escape(event: &Event) -> bool {
 /// Top-level per-mode dispatch, called for every non-mouse `Event` (key
 /// presses, resizes are handled by the caller before reaching here).
 pub fn handle_event(app: &mut App, event: Event) {
+    if matches!(&event, Event::Key(key) if is_press(key) && key.code == KeyCode::Esc)
+        && app
+            .agent_popover
+            .as_ref()
+            .is_some_and(|popover| popover.pinned)
+        && matches!(app.mode, Mode::Normal)
+    {
+        app.agent_popover = None;
+        return;
+    }
     // A tree double-click is two consecutive mouse presses. Any intervening
     // keyboard, paste, or other non-mouse event makes it a separate
     // interaction and must cancel the pending rename pair.
@@ -59,6 +73,8 @@ pub fn handle_event(app: &mut App, event: Event) {
                 | Mode::NavigationLeaderPending
                 | Mode::SchedulePaneInput(_)
                 | Mode::QueuePrompt(_)
+                | Mode::CreateAgentWorkspace(_)
+                | Mode::WorktreeManager(_)
                 | Mode::AgentSetupPathPrompt(_, _)
                 | Mode::AgentSetupPrompt(_)
         );
@@ -87,6 +103,9 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_voice_setting_prompt(app, field, state, &event)
         }
         Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
+        Mode::GitSettingPrompt(field, state) => {
+            handle_git_setting_prompt(app, field, state, &event)
+        }
         Mode::AgentSetupPathPrompt(feature, state) => {
             handle_agent_setup_path_prompt(app, feature, state, &event)
         }
@@ -112,6 +131,40 @@ pub fn handle_event(app: &mut App, event: Event) {
         }
         Mode::SmartCopy => handle_smart_copy_event(app, &event),
         Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
+        Mode::CreateAgentWorkspace(state) => {
+            handle_create_agent_workspace_event(app, state, &event)
+        }
+        Mode::WorktreeManager(state) => handle_worktree_manager_event(app, state, &event),
+        Mode::WaitingWorkspaceCloseOffer {
+            request_id,
+            pane_id,
+        } => {
+            if matches!(&event, Event::Key(key) if is_press(key) && key.code == KeyCode::Esc) {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::WaitingWorkspaceCloseOffer {
+                    request_id,
+                    pane_id,
+                };
+            }
+        }
+        Mode::ConfirmWorkspaceCloseOffer(pane_id) => {
+            if let Event::Key(key) = &event {
+                if is_press(key) {
+                    match key.code {
+                        KeyCode::Char('y' | 'Y') => app.confirm_workspace_close_removal(pane_id),
+                        KeyCode::Char('n' | 'N') | KeyCode::Enter | KeyCode::Esc => {
+                            app.request_close(pane_id);
+                        }
+                        _ => app.mode = Mode::ConfirmWorkspaceCloseOffer(pane_id),
+                    }
+                } else {
+                    app.mode = Mode::ConfirmWorkspaceCloseOffer(pane_id);
+                }
+            } else {
+                app.mode = Mode::ConfirmWorkspaceCloseOffer(pane_id);
+            }
+        }
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
         Mode::CreateSplitOrientation(state) => {
             handle_create_split_orientation_event(app, state, &event)
@@ -132,6 +185,21 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_board_delete_confirm(app, pane_id, target, &event)
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
+        Mode::ConfirmRemoveWorkspace(target) => {
+            let Event::Key(key) = &event else {
+                app.mode = Mode::ConfirmRemoveWorkspace(target);
+                return;
+            };
+            if !is_press(key) {
+                app.mode = Mode::ConfirmRemoveWorkspace(target);
+                return;
+            }
+            match key.code {
+                KeyCode::Char('y' | 'Y') | KeyCode::Enter => app.confirm_remove_workspace(target),
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
+                _ => app.mode = Mode::ConfirmRemoveWorkspace(target),
+            }
+        }
         Mode::ConfirmSessionRecovery { pane_count } => {
             handle_session_recovery_event(app, pane_count, &event)
         }
@@ -663,6 +731,11 @@ fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event
 fn execute_action(app: &mut App, action: Action) {
     match action {
         Action::NewTerminal => app.action_new_terminal(),
+        Action::NewAgentWorktree => app.open_create_agent_workspace_dialog(
+            ilium_core::BuiltinAgentProvider::Claude,
+            app.selected_node_id().unwrap_or(ilium_core::ROOT_ID),
+            app.git_settings.default_where == crate::config::GitDefaultWhere::ExistingWorktree,
+        ),
         Action::NewEditor => app.action_new_editor(),
         Action::NewBoard => app.open_create_board_dialog(),
         Action::ClosePane => app.action_close_selected(),
@@ -1045,6 +1118,30 @@ fn handle_api_setting_prompt(app: &mut App, mut state: TextPromptState, event: &
     }
 }
 
+fn handle_git_setting_prompt(
+    app: &mut App,
+    field: crate::app::GitTextField,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::GitSettingPrompt(field, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::GitSettingPrompt(field, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            app.settings_commit_git_text_field(field, state.buf);
+            app.pop_modal();
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
+        PromptOutcome::Continue => app.mode = Mode::GitSettingPrompt(field, state),
+    }
+}
+
 fn handle_agent_setup_path_prompt(
     app: &mut App,
     feature: crate::agent_feature_setup::AgentFeature,
@@ -1269,8 +1366,7 @@ fn handle_confirm_close_event(app: &mut App, target: ilium_core::NodeId, event: 
     }
     match key.code {
         KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
-            app.request_close(target);
-            app.mode = Mode::Normal;
+            app.request_interactive_close(target);
         }
         KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
         _ => app.mode = Mode::ConfirmClose(target),
@@ -1385,29 +1481,44 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
         return;
     }
 
-    if let Some(submenu) = menu.tree_order_submenu.as_mut() {
+    if let Some(submenu) = menu.submenu.as_mut() {
         match key.code {
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
-                menu.tree_order_submenu = None;
+                menu.submenu = None;
                 app.mode = Mode::ContextMenu(menu);
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 submenu.selected_index = submenu.selected_index.saturating_sub(1);
+                if let Some(reason) = submenu
+                    .items
+                    .get(submenu.selected_index)
+                    .and_then(|item| item.disabled_reason.as_ref())
+                {
+                    app.status_message = Some(reason.clone());
+                }
                 app.mode = Mode::ContextMenu(menu);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                submenu.selected_index = (submenu.selected_index + 1)
-                    .min(crate::config::TreeOrder::ALL.len().saturating_sub(1));
+                submenu.selected_index =
+                    (submenu.selected_index + 1).min(submenu.items.len().saturating_sub(1));
+                if let Some(reason) = submenu
+                    .items
+                    .get(submenu.selected_index)
+                    .and_then(|item| item.disabled_reason.as_ref())
+                {
+                    app.status_message = Some(reason.clone());
+                }
                 app.mode = Mode::ContextMenu(menu);
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(tree_order) = crate::config::TreeOrder::ALL
-                    .get(submenu.selected_index)
-                    .copied()
-                {
-                    app.settings_set_tree_order(tree_order);
+                if let Some(item) = submenu.items.get(submenu.selected_index) {
+                    if let Some(reason) = &item.disabled_reason {
+                        app.status_message = Some(reason.clone());
+                        app.mode = Mode::ContextMenu(menu);
+                        return;
+                    }
+                    app.execute_context_submenu_item(item, menu.target);
                 }
-                app.mode = Mode::Normal;
             }
             _ => app.mode = Mode::ContextMenu(menu),
         }
@@ -1425,15 +1536,15 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
                 (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
             app.mode = Mode::ContextMenu(menu);
         }
-        KeyCode::Right | KeyCode::Char('l')
-            if menu.actions[menu.selected_index] == crate::app::ContextMenuAction::OrderBy =>
-        {
-            app.open_context_tree_order_submenu(&mut menu);
+        KeyCode::Right | KeyCode::Char('l') if menu.actions[menu.selected_index].has_submenu() => {
+            let parent = menu.actions[menu.selected_index];
+            app.open_context_submenu(&mut menu, parent);
             app.mode = Mode::ContextMenu(menu);
         }
         KeyCode::Enter => {
-            if menu.actions[menu.selected_index] == crate::app::ContextMenuAction::OrderBy {
-                app.open_context_tree_order_submenu(&mut menu);
+            if menu.actions[menu.selected_index].has_submenu() {
+                let parent = menu.actions[menu.selected_index];
+                app.open_context_submenu(&mut menu, parent);
                 app.mode = Mode::ContextMenu(menu);
                 return;
             }
@@ -1576,6 +1687,217 @@ fn handle_create_agent_from_line_event(
         _ => {}
     }
     app.mode = Mode::CreateAgentFromLine(state);
+}
+
+fn handle_worktree_manager_event(
+    app: &mut App,
+    mut state: Box<crate::worktree_manager::WorktreeManagerState>,
+    event: &Event,
+) {
+    use crate::worktree_manager::ManagerView;
+
+    if let Event::Paste(pasted) = event {
+        if matches!(state.view, ManagerView::ConfirmDiscard { .. }) {
+            for character in pasted.chars().filter(|character| !character.is_control()) {
+                state.edit_discard_path(KeyCode::Char(character));
+            }
+        }
+        app.mode = Mode::WorktreeManager(state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::WorktreeManager(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::WorktreeManager(state);
+        return;
+    }
+    #[derive(Clone, Copy)]
+    enum Phase {
+        Browsing,
+        ConfirmSafe,
+        ConfirmDiscard,
+        ResultOrError,
+        Loading,
+        Pruning,
+    }
+    let phase = match &state.view {
+        ManagerView::Browsing => Phase::Browsing,
+        ManagerView::ConfirmSafe { .. } => Phase::ConfirmSafe,
+        ManagerView::ConfirmDiscard { .. } => Phase::ConfirmDiscard,
+        ManagerView::Result { .. } | ManagerView::Error(_) => Phase::ResultOrError,
+        ManagerView::Loading => Phase::Loading,
+        ManagerView::Pruning => Phase::Pruning,
+    };
+    match phase {
+        Phase::Browsing => match key.code {
+            KeyCode::Up | KeyCode::Char('k') => state.select_delta(-1),
+            KeyCode::Down | KeyCode::Char('j') => state.select_delta(1),
+            KeyCode::Char('s' | 'S') => {
+                if let Err(error) = state.begin_safe_confirmation() {
+                    app.status_message = Some(error);
+                }
+            }
+            KeyCode::Char('d' | 'D') => {
+                if let Err(error) = state.begin_discard_confirmation() {
+                    app.status_message = Some(error);
+                }
+            }
+            KeyCode::Char('r' | 'R') => {
+                app.refresh_worktree_manager(state);
+                return;
+            }
+            KeyCode::Esc => return,
+            _ => {}
+        },
+        Phase::ConfirmSafe => match key.code {
+            KeyCode::Char('b' | 'B') | KeyCode::Tab => state.toggle_branch_policy(),
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+                app.submit_worktree_manager_prune(state);
+                return;
+            }
+            KeyCode::Esc | KeyCode::Char('n' | 'N') => state.cancel_confirmation(),
+            _ => {}
+        },
+        Phase::ConfirmDiscard => match key.code {
+            KeyCode::Tab => state.toggle_branch_policy(),
+            KeyCode::Enter => {
+                app.submit_worktree_manager_prune(state);
+                return;
+            }
+            KeyCode::Esc => state.cancel_confirmation(),
+            other => state.edit_discard_path(other),
+        },
+        Phase::ResultOrError => match key.code {
+            KeyCode::Char('r' | 'R') => {
+                app.refresh_worktree_manager(state);
+                return;
+            }
+            KeyCode::Esc => return,
+            _ => {}
+        },
+        Phase::Loading => {
+            if key.code == KeyCode::Esc {
+                return;
+            }
+        }
+        Phase::Pruning => {
+            if key.code == KeyCode::Esc {
+                app.status_message = Some(
+                    "Worktree removal is still running; its result will appear in the status line"
+                        .into(),
+                );
+                return;
+            }
+        }
+    }
+    app.mode = Mode::WorktreeManager(state);
+}
+
+fn handle_create_agent_workspace_event(
+    app: &mut App,
+    mut state: Box<WorktreeDialogState>,
+    event: &Event,
+) {
+    if let Event::Paste(pasted) = event {
+        if !matches!(state.status, WorktreeDialogStatus::Creating(_)) {
+            if state.focus == WorktreeDialogFocus::Prompt {
+                let normalized = pasted.replace("\r\n", "\n").replace('\r', "\n");
+                state.prompt.insert_str(normalized);
+                state.refresh_auto_fields();
+            } else {
+                state.paste_focused_text(pasted);
+            }
+        }
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if matches!(state.status, WorktreeDialogStatus::Creating(_)) {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if key.code == KeyCode::Esc
+        || (key.code == KeyCode::Enter && state.focus == WorktreeDialogFocus::Cancel)
+    {
+        app.mode = Mode::Normal;
+        return;
+    }
+    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.submit_create_agent_workspace(state);
+        return;
+    }
+    match key.code {
+        KeyCode::Tab => state.focus_next(),
+        KeyCode::BackTab => state.focus_previous(),
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.step_provider(1);
+        }
+        KeyCode::Char('a')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && state.focus == WorktreeDialogFocus::Branch =>
+        {
+            state.use_auto_branch();
+        }
+        KeyCode::Char('a')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && state.focus == WorktreeDialogFocus::Path =>
+        {
+            state.use_auto_path();
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+            if state.focus == WorktreeDialogFocus::Provider =>
+        {
+            let direction = if matches!(key.code, KeyCode::Left | KeyCode::Up) {
+                -1
+            } else {
+                1
+            };
+            state.step_provider(direction);
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+            if state.focus == WorktreeDialogFocus::Where =>
+        {
+            state.set_mode(if matches!(key.code, KeyCode::Left | KeyCode::Up) {
+                WorktreeDialogMode::New
+            } else {
+                WorktreeDialogMode::Existing
+            });
+        }
+        KeyCode::Up | KeyCode::Down if state.focus == WorktreeDialogFocus::ExistingWorktree => {
+            state.move_existing_selection(if key.code == KeyCode::Up { -1 } else { 1 });
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+            if state.focus == WorktreeDialogFocus::ClosePolicy =>
+        {
+            state.close_policy = if state.close_policy == WorktreeClosePolicy::Keep {
+                WorktreeClosePolicy::OfferRemovalWhenSafe
+            } else {
+                WorktreeClosePolicy::Keep
+            };
+        }
+        KeyCode::Enter if state.focus == WorktreeDialogFocus::Advanced => {
+            state.advanced = !state.advanced;
+        }
+        KeyCode::Enter => {
+            app.submit_create_agent_workspace(state);
+            return;
+        }
+        _ if state.focus == WorktreeDialogFocus::Prompt => {
+            state.prompt.input(event.clone());
+            state.refresh_auto_fields();
+        }
+        _ => state.edit_focused_text(key.code),
+    }
+    app.mode = Mode::CreateAgentWorkspace(state);
 }
 
 /// Edits the six controls in the scheduled-input form. Tab order mirrors the
@@ -2198,6 +2520,45 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_adjust_session_row(row, -1);
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Git => {
+            state.selected_row = state.selected_row.saturating_sub(1)
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Git => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::app::GitRow::ALL.len().saturating_sub(1))
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Git => {
+            if let Some(row) = crate::app::GitRow::ALL.get(state.selected_row).copied() {
+                if matches!(
+                    row,
+                    crate::app::GitRow::BranchPrefix
+                        | crate::app::GitRow::WorktreeLocationTemplate
+                        | crate::app::GitRow::SetupCommand
+                ) {
+                    app.mode = Mode::Settings(state);
+                    app.settings_adjust_git_row(row, -1);
+                    return;
+                }
+                app.settings_adjust_git_row(row, -1);
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Git =>
+        {
+            if let Some(row) = crate::app::GitRow::ALL.get(state.selected_row).copied() {
+                if matches!(
+                    row,
+                    crate::app::GitRow::BranchPrefix
+                        | crate::app::GitRow::WorktreeLocationTemplate
+                        | crate::app::GitRow::SetupCommand
+                ) {
+                    app.mode = Mode::Settings(state);
+                    app.settings_adjust_git_row(row, 1);
+                    return;
+                }
+                app.settings_adjust_git_row(row, 1);
+            }
+        }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Session =>
         {
@@ -2740,6 +3101,42 @@ mod indent_outdent_tests {
     }
 
     #[test]
+    fn git_text_setting_opens_prompt_and_returns_to_git_tab() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Git,
+            selected_row: 1,
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(
+            app.mode,
+            Mode::GitSettingPrompt(crate::app::GitTextField::BranchPrefix, _)
+        ));
+        assert!(matches!(
+            app.modal_stack.as_slice(),
+            [Mode::Settings(state)] if state.tab == SettingsTab::Git && state.selected_row == 1
+        ));
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(
+            app.mode,
+            Mode::Settings(SettingsState {
+                tab: SettingsTab::Git,
+                ..
+            })
+        ));
+        assert_eq!(app.git_settings.branch_prefix, "agent/");
+    }
+
+    #[test]
     fn modal_stack_restores_arbitrary_depth_in_last_opened_first_closed_order() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::Settings(SettingsState {
@@ -2890,7 +3287,7 @@ mod indent_outdent_tests {
         assert!(matches!(
             app.mode,
             Mode::ContextMenu(crate::app::ContextMenu {
-                tree_order_submenu: Some(_),
+                submenu: Some(_),
                 ..
             })
         ));
@@ -2906,6 +3303,43 @@ mod indent_outdent_tests {
 
         assert_eq!(app.ui_settings.tree_order, crate::config::TreeOrder::Type);
         assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn agent_context_menu_enter_enter_creates_here_without_worktree() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(menu) = &mut app.mode else {
+            panic!("context menu should be open");
+        };
+        menu.selected_index = menu
+            .actions
+            .iter()
+            .position(|action| {
+                *action
+                    == crate::app::ContextMenuAction::NewAgent(
+                        ilium_core::BuiltinAgentProvider::Claude,
+                    )
+            })
+            .unwrap();
+
+        let enter = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_event(&mut app, enter.clone());
+        let Mode::ContextMenu(menu) = &app.mode else {
+            panic!("agent submenu should be open");
+        };
+        assert_eq!(menu.submenu.as_ref().unwrap().selected_index, 0);
+        handle_event(&mut app, enter);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::QueryRepoFacts { .. }, ilium_ipc::ClientRequest::NewPane {
+                kind: ilium_ipc::NewPaneKind::Command(command),
+                ..
+            }] if command == "claude"
+        ));
     }
 
     #[test]

@@ -102,6 +102,7 @@ pub struct RestructureWorkerResult {
 pub struct LastPromptTranscriptWorkerRequest {
     pub home: PathBuf,
     pub pane_id: NodeId,
+    /// The pane's launch cwd; the locator rejects transcripts bound elsewhere.
     pub project_path: PathBuf,
     pub agent_class: AgentClass,
     pub session_id: String,
@@ -570,7 +571,6 @@ impl NamingWorkers {
     ) {
         let crate::app::PendingRestructureRequest {
             project_id,
-            project_cwd,
             mut contexts,
             protected_split_views,
             current_structure,
@@ -588,7 +588,7 @@ impl NamingWorkers {
             // reads, not just the LLM call -- see `spawn_project_name_worker`.
             lower_current_thread(WorkerPriority::BelowNormal);
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                crate::restructure::resolve_content_extracts(&mut contexts, &home, &project_cwd);
+                crate::restructure::resolve_content_extracts(&mut contexts, &home);
                 let _permit = concurrency_limiter.acquire();
                 crate::restructure::infer_restructure_plan_with_protected_splits(
                     &inference_settings,

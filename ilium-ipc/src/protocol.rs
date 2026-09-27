@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
-    BoardStorage, NodeActivityRevision, NodeId, PaneProgress, PaneStatus, PaneTitleSource,
-    ProgressTaskReport, PromptQueueDelivery, RestructurePlan, SplitOrientation, Tree,
-    TreeMoveDirection,
+    BoardStorage, BuiltinAgentProvider, NodeActivityRevision, NodeId, PaneProgress, PaneStatus,
+    PaneTitleSource, ProgressTaskReport, PromptQueueDelivery, RestructurePlan, SplitOrientation,
+    Tree, TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,9 @@ pub enum NewPaneWorkingDirectory {
     ProjectRoot,
     FocusedTerminal,
     LastUsed,
+    /// Resolve the recorded launch directory of this workspace pane on the
+    /// server, so a context-menu action never trusts a client-supplied path.
+    WorkspacePane(NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,12 +110,6 @@ pub enum PromptSubmissionSource {
     /// A task-terminal or monitor-failure notification emitted by the progress
     /// lifecycle coordinator.
     ProgressResult,
-    /// `/goal resume` requested by the agent itself through `ilium goal
-    /// resume`.
-    AgentGoalResume,
-    /// Ilium's one-time reminder to an idle agent whose goal stayed paused
-    /// and resumable. It never resumes the goal itself.
-    GoalPauseReminder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,37 +155,222 @@ pub struct ProgressMonitorStatus {
     pub progress: Option<PaneProgress>,
 }
 
-/// Whether the agent in a pane may ask Ilium to resume its paused `/goal`,
-/// and if not, who owns the decision. Returned by `ilium goal status` and the
-/// agents' Stop hook so an idle agent never leaves an unblocked goal paused.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PaneGoalResumability {
-    /// No goal is confirmed for this pane's agent.
-    NoGoal,
-    /// A goal exists but is not paused (see `PaneGoalStatus::goal_state`).
-    NotPaused,
-    /// The user typed `/goal pause`; only the user resumes it.
-    PausedByUser,
-    /// An agent-requested `/goal resume` waits for the current turn to end.
-    ResumeQueued,
-    /// Paused, unowned, and not paused by the user: the agent may resume it.
-    Resumable,
-    /// The provider or pane state does not support agent-requested resume.
-    Unsupported { reason: String },
-    /// Ilium never saw this goal active (for example, it was already paused
-    /// when the server started), so it cannot tell whether the user paused
-    /// it. Treated like a user pause: only the user resumes it.
-    PauseOriginUnknown,
+/// Version used to decide whether this repository supports safe worktree
+/// removal. The server obtains it from Git; clients only display the fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceGitVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
 }
 
-/// Correlated goal status for one pane.
+/// One registered Git worktree in a repository-facts response. Ownership is
+/// asserted by the server from a validated Git metadata marker, never by the
+/// path or the presence of a pane.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PaneGoalStatus {
-    pub pane_id: NodeId,
-    /// Provider display name of the agent that owns the goal, if any.
-    pub agent: Option<String>,
-    pub goal_state: Option<ilium_core::GoalState>,
-    pub resumability: PaneGoalResumability,
+pub struct WorkspaceWorktreeFact {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    pub created_by_ilium: bool,
+    pub is_dirty: bool,
+    pub occupied_pane_id: Option<NodeId>,
+}
+
+/// Snapshot returned when the create-agent dialog opens. The server checks
+/// every choice again when creation begins because Git state may change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoFacts {
+    pub repo_common_dir: PathBuf,
+    pub checkout_root: PathBuf,
+    pub project_subpath: PathBuf,
+    pub current_branch: Option<String>,
+    pub default_base_ref: String,
+    pub default_base_commit: String,
+    pub local_branches: Vec<String>,
+    pub worktrees: Vec<WorkspaceWorktreeFact>,
+    /// Dirty entries in the checkout from which this project was queried.
+    pub source_dirty_count: u32,
+    pub main_dirty_count: u32,
+    /// The source checkout has a `.gitmodules` file; new worktrees may need
+    /// a setup command before their submodules are ready.
+    pub has_gitmodules: bool,
+    pub git_version: WorkspaceGitVersion,
+}
+
+/// A new branch/worktree, or an already registered worktree to launch in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceClosePolicy {
+    #[default]
+    Keep,
+    OfferRemovalWhenSafe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceCreateSpec {
+    New {
+        branch: String,
+        base_ref: String,
+        path: PathBuf,
+    },
+    Existing {
+        path: PathBuf,
+    },
+    /// An API caller supplies a branch and optional base; the server derives
+    /// the sibling checkout path from the repository's main worktree.
+    NewAtDefaultPath {
+        branch: String,
+        base_ref: Option<String>,
+    },
+    /// A new worktree with a user-configured command to run before the agent
+    /// starts. Separate from `New` to retain the existing bincode layout.
+    NewWithSetup {
+        branch: String,
+        base_ref: String,
+        path: PathBuf,
+        setup_command: String,
+    },
+    /// A control caller lets the server choose the sibling path while still
+    /// sending the initiating client's exact setup setting.
+    NewAtDefaultPathWithSetup {
+        branch: String,
+        base_ref: Option<String>,
+        setup_command: String,
+    },
+    NewWithOptions {
+        branch: String,
+        base_ref: String,
+        path: PathBuf,
+        setup_command: String,
+        close_policy: WorkspaceClosePolicy,
+    },
+    ExistingWithOptions {
+        path: PathBuf,
+        close_policy: WorkspaceClosePolicy,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceCreateStage {
+    CreatingWorktree,
+    Preparing,
+    Starting,
+    RunningSetup,
+}
+
+/// Live, non-persisted Git facts for a workspace pane. `missing` is true if
+/// its directory or Git worktree registration has disappeared.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceGitStatus {
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub ahead: u32,
+    pub behind: u32,
+    pub staged: u32,
+    pub modified: u32,
+    pub untracked: u32,
+    pub conflicted: u32,
+    pub upstream: Option<String>,
+    pub last_commit_subject: Option<String>,
+    pub checked_at_unix_millis: u64,
+    /// Absent after a HEAD-only probe; file counts remain unverified until a
+    /// full porcelain status has completed for this worktree.
+    pub full_checked_at_unix_millis: Option<u64>,
+    pub missing: bool,
+}
+
+/// Explicit worktree disposition selected when closing a workspace pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceDisposition {
+    Keep,
+    RemoveWorktree,
+    RemoveWorktreeAndBranch,
+}
+
+/// Complete provenance plus the directory generation selected by the inventory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspacePruneTarget {
+    pub repo_common_dir: PathBuf,
+    pub worktree_root: PathBuf,
+    pub workspace_id: String,
+    pub creation_branch: String,
+    pub base_ref: String,
+    pub base_commit: String,
+    pub created_at_unix: i64,
+    pub metadata_directory: PathBuf,
+    pub root_device: u64,
+    pub root_inode: u64,
+    pub metadata_device: u64,
+    pub metadata_inode: u64,
+    pub expected_head: String,
+}
+/// File discard is separate from branch deletion and cannot waive identity or custody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspacePruneMode {
+    Safe,
+    DiscardFiles { confirmed_path: PathBuf },
+}
+/// There is intentionally no forced branch deletion variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspacePruneBranchPolicy {
+    Keep,
+    DeleteIfSafe,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceInventoryOwner {
+    Owned,
+    Foreign,
+    Unavailable { reason: String },
+}
+/// All blocker lists are observations, not a promise that a later mutation will succeed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceInventoryEntry {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    pub is_main: bool,
+    pub is_locked: bool,
+    pub is_prunable: bool,
+    pub owner: WorkspaceInventoryOwner,
+    pub target: Option<WorkspacePruneTarget>,
+    pub occupied_pane_ids: Vec<NodeId>,
+    pub protected_paths: Vec<PathBuf>,
+    pub safe_blockers: Vec<String>,
+    pub discard_blockers: Vec<String>,
+    pub merge_target: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceInventory {
+    pub repo_common_dir: PathBuf,
+    pub control_directory: PathBuf,
+    pub total_worktrees: usize,
+    pub truncated: bool,
+    pub entries: Vec<WorkspaceInventoryEntry>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspacePruneOutcome {
+    Removed,
+    Blocked,
+    Uncertain,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspacePruneBranchOutcome {
+    /// This operation did not establish deletion; branch existence is not implied.
+    Kept,
+    Deleted,
+    Absent,
+    Unknown,
+}
+/// `None` postconditions mean unavailable/not probed, never false.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspacePruneResult {
+    pub outcome: WorkspacePruneOutcome,
+    /// Whether the removal adapter was invoked; acquiring its repository lease may create a lock file.
+    pub mutation_attempted: bool, // Record attempted destructive work independently of final observations.
+    pub path_present: Option<bool>,
+    pub registration_present: Option<bool>,
+    pub metadata_present: Option<bool>,
+    pub branch_outcome: WorkspacePruneBranchOutcome,
+    pub reasons: Vec<String>,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here
@@ -203,7 +385,9 @@ pub struct PaneGoalStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientRequest {
     /// Attach this client connection to the named session.
-    Attach { session: String },
+    Attach {
+        session: String,
+    },
     /// Create a new pane as a child of `parent_group`.
     NewPane {
         parent_group: NodeId,
@@ -211,7 +395,9 @@ pub enum ClientRequest {
         working_directory: NewPaneWorkingDirectory,
     },
     /// Close a pane (and terminate its PTY/process).
-    ClosePane { pane_id: NodeId },
+    ClosePane {
+        pane_id: NodeId,
+    },
     /// Move a tree node one step in `direction` (mirrors
     /// `Tree::move_node_one_step`).
     MoveNode {
@@ -266,7 +452,10 @@ pub enum ClientRequest {
     /// bincode variant index of every request declared after it -- see
     /// `ilium-ipc`'s `a_bad_shape_frame_errors_instead_of_misparsing_as_the_wrong_variant`
     /// test, which pins specific cross-enum shape collisions.
-    NewGroup { parent_group: NodeId, name: String },
+    NewGroup {
+        parent_group: NodeId,
+        name: String,
+    },
     /// Move `node_id` to become a child of `new_parent`, inserted at
     /// `index` within the new parent's children (`None` appends at the
     /// end). Mirrors `Tree::move_node` directly -- unlike `MoveNode`
@@ -307,7 +496,10 @@ pub enum ClientRequest {
     /// Appended last for the same reason `NewGroup`/`ReparentNode`/
     /// `SetAutomaticPaneTitle` are: keeps every earlier variant's bincode
     /// variant index stable.
-    SetPaneFocus { pane_id: NodeId, focused: bool },
+    SetPaneFocus {
+        pane_id: NodeId,
+        focused: bool,
+    },
     /// End the server process without clearing its crash-recovery snapshot.
     /// The next CLI attach can therefore launch a newly-built server and
     /// restore the same project session. Appended last to preserve every
@@ -315,12 +507,20 @@ pub enum ClientRequest {
     RestartServer,
     /// Persist a filesystem root in the tree. Directory reads remain a
     /// client-local concern; the server owns only this structural reference.
-    NewFolder { parent_group: NodeId, path: PathBuf },
+    NewFolder {
+        parent_group: NodeId,
+        path: PathBuf,
+    },
     /// Adds one canonical directory-backed top-level project.
-    NewProject { path: PathBuf },
+    NewProject {
+        path: PathBuf,
+    },
     /// Changes the working directory inherited by entries subsequently
     /// created under this project. Existing processes keep their cwd.
-    ChangeProjectFolder { project_id: NodeId, path: PathBuf },
+    ChangeProjectFolder {
+        project_id: NodeId,
+        path: PathBuf,
+    },
     /// Create a persisted, file-backed kanban board under `parent_group`.
     NewBoard {
         parent_group: NodeId,
@@ -339,7 +539,9 @@ pub enum ClientRequest {
     /// Replaces the detached server's live sound configuration immediately.
     /// The client has already persisted the same value to `config.toml` so a
     /// future server process starts with it as well.
-    UpdateSoundSettings { settings: SoundSettings },
+    UpdateSoundSettings {
+        settings: SoundSettings,
+    },
     /// Plays the current source once without changing any event checkbox.
     /// Used by the Sound settings tab's Preview row.
     PreviewSound {
@@ -363,7 +565,9 @@ pub enum ClientRequest {
         delivery: PromptQueueDelivery,
     },
     /// Removes all pending prompts for a terminal pane.
-    ClearPromptQueue { pane_id: NodeId },
+    ClearPromptQueue {
+        pane_id: NodeId,
+    },
     /// Applies an LLM title only if `pane_id` still owns the exact session
     /// the client summarized. The server-side compare-and-set closes the
     /// race where `/resume` invalidates a session while a worker result is
@@ -404,17 +608,25 @@ pub enum ClientRequest {
         inference_activity_revisions: Vec<NodeActivityRevision>,
     },
     /// Restores only `project_id` from its own latest restructure undo point.
-    RevertProjectRestructure { project_id: NodeId },
+    RevertProjectRestructure {
+        project_id: NodeId,
+    },
     /// Resolves an attach-time crash-recovery prompt for this session.
-    ResolveSessionRecovery { restore: bool },
+    ResolveSessionRecovery {
+        restore: bool,
+    },
     /// Applies the Debug tab's file-logging toggle to the already-running
     /// detached server. The client persists the same value before sending it,
     /// so future server/client processes start with the identical policy.
-    UpdateDebugLogging { enabled: bool },
+    UpdateDebugLogging {
+        enabled: bool,
+    },
     /// Applies the User Interface tab's agent-debug toggle to the detached
     /// server. Disabling capture retains existing history but stops new
     /// entries until recording is enabled again.
-    UpdateAgentDebugMenu { enabled: bool },
+    UpdateAgentDebugMenu {
+        enabled: bool,
+    },
     /// Fetches one pane's retained history on demand. The optional sequence
     /// supports a cheap delta when reopening an already-cached log.
     GetPaneDebugLog {
@@ -438,22 +650,31 @@ pub enum ClientRequest {
     },
     /// Reports a successful client-owned editor or board content mutation.
     /// Terminal input/output is recorded directly by the server instead.
-    RecordNodeActivity { node_id: NodeId },
+    RecordNodeActivity {
+        node_id: NodeId,
+    },
     /// Attaches an interactive client without replaying every terminal's
     /// retained byte journal. The client follows this with
     /// [`Self::SetVisiblePanes`]; newly visible panes recover exactly the
     /// missing journal tail before their live stream resumes. Keeping the
     /// original [`Self::Attach`] variant preserves the complete-replay
     /// contract for diagnostics and older one-shot consumers.
-    AttachInteractive { session: String },
+    AttachInteractive {
+        session: String,
+    },
     /// Replaces this connection's terminal-output subscription. Only panes
     /// occupying the right panel need live raw bytes; hidden panes remain
     /// authoritative in the server journal and recover on the next request
     /// that makes them visible. A split view supplies up to four pane ids.
-    SetVisiblePanes { pane_ids: Vec<NodeId> },
+    SetVisiblePanes {
+        pane_ids: Vec<NodeId>,
+    },
     /// Sets a container's or folder's expand/collapse state. Appended to
     /// preserve every earlier bincode variant discriminant.
-    SetNodeExpanded { node_id: NodeId, expanded: bool },
+    SetNodeExpanded {
+        node_id: NodeId,
+        expanded: bool,
+    },
     /// Locks or unlocks a container's or folder's closed state -- see
     /// `ilium_core::Tree::set_node_locked_closed`. Appended to preserve
     /// every earlier bincode variant discriminant.
@@ -493,7 +714,10 @@ pub enum ClientRequest {
         interval_seconds: u32,
     },
     /// Returns the live registration/report state for one pane.
-    GetPaneProgressMonitorStatus { request_id: u64, pane_id: NodeId },
+    GetPaneProgressMonitorStatus {
+        request_id: u64,
+        pane_id: NodeId,
+    },
     /// Stops `pane_id`'s monitor and clears presentation state. Supplying an
     /// ID fences the clear so a stale agent cannot remove its replacement.
     ClearPaneProgressMonitor {
@@ -507,7 +731,9 @@ pub enum ClientRequest {
     /// sending it, so future server/client processes start with the
     /// identical policy. Appended to preserve every earlier bincode variant
     /// discriminant.
-    UpdateProgressMonitorEnabled { enabled: bool },
+    UpdateProgressMonitorEnabled {
+        enabled: bool,
+    },
     /// Replaces the detached server's text-trigger rules immediately. The
     /// client persists the same value in `[text_triggers]` for future servers.
     /// Appended to preserve every earlier bincode variant discriminant.
@@ -522,12 +748,6 @@ pub enum ClientRequest {
         text: String,
         source: PromptSubmissionSource,
     },
-    /// Reports whether `pane_id`'s goal is paused and who may resume it.
-    /// Appended to preserve every earlier bincode variant discriminant.
-    GetPaneGoalStatus { request_id: u64, pane_id: NodeId },
-    /// Queues `/goal resume` for `pane_id` after its current turn, only when
-    /// the status is `Resumable`. Idempotent while a resume is queued.
-    RequestPaneGoalResume { request_id: u64, pane_id: NodeId },
     /// Announces that this connection hosts a voice session (an interactive
     /// TUI client) and can be offered typed sentences. One-shot CLI
     /// connections use the same attach handshake, so the server cannot infer
@@ -549,6 +769,58 @@ pub enum ClientRequest {
     AnswerVoiceText {
         request_id: u64,
         result: crate::VoiceTextResult,
+    },
+    /// Read-only repository snapshot for the create-agent dialog.
+    QueryRepoFacts {
+        request_id: u64,
+        project: NodeId,
+    },
+    /// Create a built-in agent in a new or existing Git worktree. The server
+    /// validates the branch, path, and ownership against live Git state.
+    CreateAgentInWorkspace {
+        request_id: u64,
+        parent_group: NodeId,
+        provider: BuiltinAgentProvider,
+        spec: WorkspaceCreateSpec,
+        initial_input: Option<String>,
+    },
+    /// Request a full status probe outside the periodic lightweight poll.
+    RefreshPaneGitStatus {
+        pane_id: NodeId,
+    },
+    /// Remove an owned worktree after server-side safety checks. `force_path`
+    /// is the exact path the user explicitly confirmed for forced removal.
+    RemoveWorkspace {
+        request_id: u64,
+        pane_id: NodeId,
+        force_path: Option<PathBuf>,
+        /// Also delete the creation branch after removing this worktree.
+        /// A forced branch delete requires the same path-named confirmation.
+        remove_branch: bool,
+    },
+    /// Close with an explicit worktree disposition. The original `ClosePane`
+    /// remains unchanged to preserve its positional bincode payload.
+    ClosePaneWithWorkspaceDisposition {
+        request_id: u64,
+        pane_id: NodeId,
+        disposition: WorkspaceDisposition,
+    },
+    /// On-demand retained/foreign inventory; append-only request discriminant.
+    QueryWorkspaceInventory {
+        request_id: u64,
+        project: NodeId,
+    },
+    /// Removes exactly the confirmed retained generation, without manufacturing a pane.
+    PruneWorkspace {
+        request_id: u64,
+        project: NodeId,
+        target: WorkspacePruneTarget,
+        mode: WorkspacePruneMode,
+        branch_policy: WorkspacePruneBranchPolicy,
+    },
+    QueryWorkspaceCloseOffer {
+        request_id: u64,
+        pane_id: NodeId,
     },
 }
 
@@ -607,11 +879,19 @@ impl ClientRequest {
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
             Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SubmitTerminalText { .. } => "submit_terminal_text",
-            Self::GetPaneGoalStatus { .. } => "get_pane_goal_status",
-            Self::RequestPaneGoalResume { .. } => "request_pane_goal_resume",
             Self::RegisterVoiceTextReceiver => "register_voice_text_receiver",
             Self::SubmitVoiceText { .. } => "submit_voice_text",
             Self::AnswerVoiceText { .. } => "answer_voice_text",
+            Self::QueryWorkspaceInventory { .. } => "query_workspace_inventory",
+            Self::PruneWorkspace { .. } => "prune_workspace",
+            Self::QueryWorkspaceCloseOffer { .. } => "query_workspace_close_offer",
+            Self::QueryRepoFacts { .. } => "query_repo_facts",
+            Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
+            Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
+            Self::RemoveWorkspace { .. } => "remove_workspace",
+            Self::ClosePaneWithWorkspaceDisposition { .. } => {
+                "close_pane_with_workspace_disposition"
+            }
         }
     }
 
@@ -637,6 +917,27 @@ impl ClientRequest {
 /// Events pushed from `ilium-server` to `ilium-client`, asynchronously
 /// -- not a request/response pair, since the server pushes tree changes
 /// and terminal output as they happen rather than waiting to be polled.
+/// One detector decision and the observation that justified it. The rule is
+/// the detector's predicate description; it must never claim a regex was used
+/// when the detector used structural or substring matching.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetectionReason {
+    pub rule: String,
+    pub observed: Option<String>,
+    pub context: String,
+}
+
+/// Last server-applied identity, activity, and goal evidence for one pane.
+/// `applied_status` lets a client reject evidence from a different displayed
+/// state while an incremental status event and its evidence cross IPC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneDetectionEvidence {
+    pub applied_status: PaneStatus,
+    pub identity: Option<DetectionReason>,
+    pub activity: Option<DetectionReason>,
+    pub goal: Option<DetectionReason>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServerEvent {
     /// The full current tree. Sent on attach and after any structural
@@ -844,21 +1145,6 @@ pub enum ServerEvent {
         pane_id: NodeId,
         result: Result<Option<u64>, ProgressMonitorRejection>,
     },
-    /// Correlated reply to `GetPaneGoalStatus`. `Err` names why the pane has
-    /// no status (for example, it is not a live terminal pane).
-    PaneGoalStatusReported {
-        request_id: u64,
-        pane_id: NodeId,
-        result: Result<PaneGoalStatus, String>,
-    },
-    /// Correlated reply to `RequestPaneGoalResume`. `Ok` carries the status
-    /// after queueing (`ResumeQueued`); `Err` carries the refusal reason and
-    /// the status that caused it.
-    PaneGoalResumeRequested {
-        request_id: u64,
-        pane_id: NodeId,
-        result: Result<PaneGoalStatus, (String, Option<PaneGoalStatus>)>,
-    },
     /// A `SubmitVoiceText` offered to this one voice-hosting client. Sent
     /// only to the registered client currently being asked (never broadcast),
     /// so exactly one voice session can act on the text. The client answers
@@ -874,5 +1160,74 @@ pub enum ServerEvent {
     VoiceTextResult {
         request_id: u64,
         result: crate::VoiceTextResult,
+    },
+    /// Correlated result of `QueryRepoFacts`; errors are scoped to this
+    /// request so concurrent dialogs cannot consume one another's response.
+    RepoFactsReported {
+        request_id: u64,
+        project: NodeId,
+        result: Result<RepoFacts, String>,
+    },
+    /// Creation stages are sent to the requesting connection only.
+    WorkspaceCreateProgress {
+        request_id: u64,
+        stage: WorkspaceCreateStage,
+    },
+    /// Correlated success once the pane exists in the authoritative tree.
+    WorkspaceCreated { request_id: u64, pane_id: NodeId },
+    /// Correlated creation failure; no half-created pane is left behind.
+    WorkspaceCreateFailed { request_id: u64, error: String },
+    /// The latest server-owned runtime status for one workspace pane.
+    PaneGitStatusChanged {
+        pane_id: NodeId,
+        status: WorkspaceGitStatus,
+    },
+    /// Correlated result of a successful worktree removal.
+    WorkspaceRemoved { request_id: u64, pane_id: NodeId },
+    /// Legacy refusal or uncertain completion. Read reasons: this event alone
+    /// does not prove that a removal command left the checkout/files intact.
+    WorkspaceRemovalBlocked {
+        request_id: u64,
+        pane_id: NodeId,
+        reasons: Vec<String>,
+    },
+    /// Only clients that issue the new query receive this append-only response.
+    WorkspaceInventoryReported {
+        request_id: u64,
+        project: NodeId,
+        result: Result<WorkspaceInventory, String>,
+    },
+    /// Sent only to the requesting connection; includes the confirmed identity.
+    WorkspacePruneCompleted {
+        request_id: u64,
+        project: NodeId,
+        target: WorkspacePruneTarget,
+        result: WorkspacePruneResult,
+    },
+    WorkspaceCloseOfferReported {
+        request_id: u64,
+        pane_id: NodeId,
+        can_offer: bool,
+    },
+    /// Server-owned detector evidence, independent of optional debug logs.
+    /// Sent after the applied status on live updates and replayed on attach.
+    /// Appended to preserve older bincode discriminants.
+    PaneDetectionEvidenceChanged {
+        pane_id: NodeId,
+        evidence: PaneDetectionEvidence,
+    },
+    /// One attach/reconnect boundary for the tree and the exact detector
+    /// evidence captured under the same server locks. Replaces prior client
+    /// evidence wholesale, so a reused pane ID cannot keep an old WHY line.
+    PaneStateSnapshot {
+        tree: Tree,
+        detection_evidence: Vec<(NodeId, PaneDetectionEvidence)>,
+    },
+    /// One live detector decision: the status and its selected provenance
+    /// share a single event boundary, including when the status changes.
+    PaneDetectedStateChanged {
+        pane_id: NodeId,
+        status: PaneStatus,
+        evidence: PaneDetectionEvidence,
     },
 }

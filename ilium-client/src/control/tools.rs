@@ -74,6 +74,15 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
                     "index": { "type": "integer", "minimum": 0 },
                     "storage": { "type": "string", "enum": ["markdown", "folder"] },
                     "provider": { "type": "string", "enum": ["claude", "codex", "antigravity"] },
+                    "workspace": {
+                        "type": "object",
+                        "properties": {
+                            "branch": { "type": "string" },
+                            "base": { "type": "string" }
+                        },
+                        "required": ["branch"],
+                        "additionalProperties": false
+                    },
                 },
                 "required": ["action"],
                 "additionalProperties": false,

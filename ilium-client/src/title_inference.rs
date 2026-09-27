@@ -135,7 +135,7 @@ pub fn session_title_input(
         project_name,
         project_path: app
             .tree
-            .project_path_for(pane_id)
+            .pane_cwd(pane_id)
             .unwrap_or(&app.session_cwd)
             .to_path_buf(),
         agent_class: class.clone(),

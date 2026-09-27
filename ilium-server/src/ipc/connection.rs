@@ -1081,7 +1081,7 @@ mod tests {
         .await
         .expect("lag repair did not write a state snapshot")
         .expect("read repaired state event");
-        assert!(matches!(repaired, ServerEvent::TreeSnapshot(_)));
+        assert!(matches!(repaired, ServerEvent::PaneStateSnapshot { .. }));
         assert!(
             !handlers::initial_state_events(&state, false, true)
                 .await

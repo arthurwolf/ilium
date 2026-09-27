@@ -209,9 +209,394 @@ pub fn private_open_options() -> OpenOptions {
     OpenOptions::new()
 }
 
+/// A directory handle used to walk one child at a time without following
+/// symbolic links. Worktree include copying uses this instead of resolving a
+/// candidate path and opening it later, which would leave a parent-symlink race.
+#[cfg(unix)]
+pub struct NoFollowDirectory {
+    file: std::fs::File,
+}
+
+#[cfg(not(unix))]
+pub struct NoFollowDirectory;
+
+/// Whether this platform can safely create and verify worktree ownership
+/// markers and copy included files without following substituted paths.
+pub const fn supports_nofollow_directories() -> bool {
+    cfg!(unix)
+}
+
+/// Returns the device and inode of an exact canonical directory after opening
+/// it without following a substituted final symlink.
+#[cfg(unix)]
+pub fn directory_generation(path: &Path) -> io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+
+    if crate::paths::canonicalize(path)? != path {
+        return Err(io::Error::other("directory path is not canonical"));
+    }
+    let directory = NoFollowDirectory::open_root(path)?;
+    let metadata = directory.file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+pub fn directory_generation(_path: &Path) -> io::Result<(u64, u64)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory generation verification is unavailable",
+    ))
+}
+
+/// An optional generation fence for ordinary pane spawning. Worktree
+/// deletion itself still requires the strict `directory_generation` proof.
+#[cfg(unix)]
+pub fn spawn_directory_generation(path: &Path) -> io::Result<Option<(u64, u64)>> {
+    directory_generation(path).map(Some)
+}
+
+#[cfg(not(unix))]
+pub fn spawn_directory_generation(_path: &Path) -> io::Result<Option<(u64, u64)>> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+impl NoFollowDirectory {
+    pub fn sync_all(&self) -> io::Result<()> {
+        self.file.sync_all()
+    }
+    pub fn open_root(path: &Path) -> io::Result<Self> {
+        use std::os::fd::FromRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        let before = std::fs::symlink_metadata(path)?;
+        if !before.file_type().is_dir() || before.file_type().is_symlink() {
+            return Err(io::Error::other("root must be a real directory"));
+        }
+        let path = unix_c_string(path.as_os_str())?;
+        // SAFETY: `path` is a valid NUL-terminated byte string. On success,
+        // this call transfers ownership of the returned descriptor to File.
+        let descriptor = unsafe {
+            libc::open(
+                path.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `open` returned a new descriptor owned by this process.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        let after = file.metadata()?;
+        if !after.file_type().is_dir() || before.dev() != after.dev() || before.ino() != after.ino()
+        {
+            return Err(io::Error::other("root changed while opening"));
+        }
+        Ok(Self { file })
+    }
+
+    pub fn open_directory(&self, name: &std::ffi::OsStr) -> io::Result<Self> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // SAFETY: `self.file` is an open directory descriptor, and `name` is a
+        // single NUL-terminated path component. File owns a successful result.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `openat` returned a new descriptor owned by this process.
+        Ok(Self {
+            file: unsafe { std::fs::File::from_raw_fd(descriptor) },
+        })
+    }
+
+    /// Create a child directory, returning whether this call created it.
+    /// Callers should record a newly created path before opening the child,
+    /// since opening can itself fail after mkdir succeeds.
+    pub fn create_directory_if_missing(&self, name: &std::ffi::OsStr) -> io::Result<bool> {
+        use std::os::fd::AsRawFd;
+
+        let name_c = unix_child_name(name)?;
+        // SAFETY: the parent handle is an open directory and `name_c` is one
+        // valid path component. The mode is owner-only from creation.
+        let result = unsafe { libc::mkdirat(self.file.as_raw_fd(), name_c.as_ptr(), 0o700) };
+        let created = if result == 0 {
+            true
+        } else {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::AlreadyExists {
+                return Err(error);
+            }
+            false
+        };
+        Ok(created)
+    }
+
+    pub fn open_regular(&self, name: &std::ffi::OsStr) -> io::Result<std::fs::File> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // O_NONBLOCK makes a raced-in FIFO fail the subsequent regular-file
+        // check instead of hanging the server worker inside openat.
+        // SAFETY: `self.file` is an open directory and `name` is one valid
+        // path component. File owns a successful descriptor.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `openat` returned a new descriptor owned by this process.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        if !file.metadata()?.file_type().is_file() {
+            return Err(io::Error::other("child is not a regular file"));
+        }
+        Ok(file)
+    }
+
+    pub fn create_regular(&self, name: &std::ffi::OsStr) -> io::Result<std::fs::File> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // SAFETY: `self.file` is an open directory and `name` is one valid
+        // path component. O_EXCL refuses any existing leaf, including links.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `openat` returned a new descriptor owned by this process.
+        Ok(unsafe { std::fs::File::from_raw_fd(descriptor) })
+    }
+
+    /// Remove a regular child only when it still names the supplied open file.
+    /// This keeps the parent traversal pinned and refuses a substituted leaf
+    /// observed at the identity check. POSIX has no atomic compare-and-unlink;
+    /// callers must still serialize mutations of this directory.
+    pub fn remove_regular(
+        &self,
+        name: &std::ffi::OsStr,
+        expected: &std::fs::File,
+    ) -> io::Result<()> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        let name = unix_child_name(name)?;
+        let expected = expected.metadata()?;
+        if !expected.file_type().is_file() {
+            return Err(io::Error::other("expected handle is not a regular file"));
+        }
+        let mut current = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: `current` points to writable storage for one stat result;
+        // the directory descriptor and child name are valid for this call.
+        let status = unsafe {
+            libc::fstatat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                current.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if status < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful fstatat initialized the stat value.
+        let current = unsafe { current.assume_init() };
+        if current.st_mode & libc::S_IFMT != libc::S_IFREG
+            || !metadata_id_matches(current.st_dev, expected.dev())
+            || !metadata_id_matches(current.st_ino, expected.ino())
+        {
+            return Err(io::Error::other("regular child changed before removal"));
+        }
+        // SAFETY: the directory descriptor and child name are valid. A
+        // concurrent mutation after fstatat is outside this method's guard.
+        if unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn metadata_id_matches<T>(current: T, expected: u64) -> bool
+where
+    T: TryFrom<u64> + PartialEq,
+{
+    T::try_from(expected).is_ok_and(|identity| current == identity)
+}
+
+#[cfg(unix)]
+fn unix_c_string(value: &std::ffi::OsStr) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+
+    std::ffi::CString::new(value.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))
+}
+
+#[cfg(unix)]
+fn unix_child_name(name: &std::ffi::OsStr) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes == b"." || bytes == b".." || bytes.contains(&b'/') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid child path component",
+        ));
+    }
+    unix_c_string(name)
+}
+
+#[cfg(not(unix))]
+impl NoFollowDirectory {
+    pub fn sync_all(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "directory durability is unavailable",
+        ))
+    }
+    pub fn open_root(_path: &Path) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+
+    pub fn open_directory(&self, _name: &std::ffi::OsStr) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+
+    pub fn create_directory_if_missing(&self, _name: &std::ffi::OsStr) -> io::Result<bool> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+
+    pub fn open_regular(&self, _name: &std::ffi::OsStr) -> io::Result<std::fs::File> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+
+    pub fn create_regular(&self, _name: &std::ffi::OsStr) -> io::Result<std::fs::File> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+
+    pub fn remove_regular(
+        &self,
+        _name: &std::ffi::OsStr,
+        _expected: &std::fs::File,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe worktree include copying is unavailable on this platform",
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn nofollow_directory_stays_on_open_parent_after_path_is_replaced() {
+        use std::io::Write;
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        let outside = temp.path().join("outside");
+        let moved = temp.path().join("moved");
+        std::fs::create_dir(&root).expect("root");
+        std::fs::create_dir(root.join("child")).expect("child");
+        std::fs::create_dir(&outside).expect("outside");
+
+        let root_handle = NoFollowDirectory::open_root(&root).expect("root handle");
+        let child_handle = root_handle
+            .open_directory("child".as_ref())
+            .expect("child handle");
+        std::fs::rename(root.join("child"), &moved).expect("rename child");
+        symlink(&outside, root.join("child")).expect("replace with symlink");
+
+        assert!(root_handle.open_directory("child".as_ref()).is_err());
+        child_handle
+            .create_regular("safe".as_ref())
+            .expect("create in held directory")
+            .write_all(b"safe")
+            .expect("write");
+        assert_eq!(std::fs::read(moved.join("safe")).expect("safe"), b"safe");
+        assert!(!outside.join("safe").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nofollow_directory_rejects_symlink_leaf_and_special_file() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = NoFollowDirectory::open_root(temp.path()).expect("root handle");
+        std::fs::write(temp.path().join("real"), "real").expect("real");
+        symlink("real", temp.path().join("linked")).expect("link");
+        assert!(root.open_regular("linked".as_ref()).is_err());
+        assert!(root.create_regular("linked".as_ref()).is_err());
+        let fifo_path = unix_c_string(temp.path().join("pipe").as_os_str()).expect("fifo path");
+        // SAFETY: `fifo_path` is a valid NUL-terminated path owned by this test.
+        assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o600) }, 0);
+        assert!(root.open_regular("pipe".as_ref()).is_err());
+        assert!(root.open_regular(".".as_ref()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nofollow_remove_rejects_replaced_leaf() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = NoFollowDirectory::open_root(temp.path()).expect("root handle");
+        let marker = temp.path().join("marker");
+        let moved = temp.path().join("moved");
+        std::fs::write(&marker, "owned").expect("marker");
+        let owned = root.open_regular("marker".as_ref()).expect("owned handle");
+        std::fs::rename(&marker, &moved).expect("rename");
+        std::fs::write(&marker, "other").expect("replacement");
+        assert!(root.remove_regular("marker".as_ref(), &owned).is_err());
+        assert_eq!(
+            std::fs::read(&marker).expect("replacement survives"),
+            b"other"
+        );
+        root.remove_regular(
+            "marker".as_ref(),
+            &root
+                .open_regular("marker".as_ref())
+                .expect("replacement handle"),
+        )
+        .expect("remove exact replacement");
+        assert!(!marker.exists());
+    }
 
     #[test]
     fn create_private_directory_is_idempotent_and_restricts_an_existing_directory() {

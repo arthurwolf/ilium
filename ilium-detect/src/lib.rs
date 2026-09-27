@@ -101,6 +101,8 @@ const GENERIC_AGENT_SIGNATURES: &[AgentSignature] = &[
 pub struct AgentIdentity {
     pub class: AgentClass,
     pub pid: u32,
+    /// Process generation. A reused PID must not inherit a prior goal.
+    pub started_at_unix_seconds: u64,
     /// Exact executable/process name that matched the registry, retained so
     /// diagnostics can explain the identity decision without re-reading the
     /// live process table later.
@@ -122,7 +124,39 @@ pub enum ActivityEvidence {
     BackgroundTaskWait,
     ConfirmationPrompt,
     SelectionPrompt,
+    FolderTrustPrompt,
     NoActiveMarker,
+}
+
+impl ActivityEvidence {
+    /// Names the predicate that actually selected this activity. These are
+    /// structural and substring rules, not regular expressions.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::InterruptMarker => "screen line contains the exact marker esc to interrupt",
+            Self::GenericLiveStatus => {
+                "generic live status line contains an ellipsis and elapsed-time token"
+            }
+            Self::ClaudeLiveStatus => {
+                "Claude live status line contains an ellipsis and elapsed-time token"
+            }
+            Self::CodexLiveStatus => {
+                "Codex present-tense working status line contains an elapsed-time token"
+            }
+            Self::BackgroundWait => "one line contains waiting for, background, and agent or task",
+            Self::BackgroundTaskWait => {
+                "completed-turn summary line contains a numbered still running suffix"
+            }
+            Self::ConfirmationPrompt => "visible confirmation prompt has a yes/no choice",
+            Self::SelectionPrompt => {
+                "visible interactive menu has selection or select/cancel chrome"
+            }
+            Self::FolderTrustPrompt => "Claude folder trust prompt is visible",
+            Self::NoActiveMarker => {
+                "none of the working, background, confirmation, or selection predicates matched"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +257,11 @@ fn classify_screen_activity(
             AgentActivity::WaitingApproval,
             ActivityEvidence::ConfirmationPrompt,
         )
+    } else if looks_like_claude_folder_trust_prompt(screen_text) {
+        (
+            AgentActivity::WaitingApproval,
+            ActivityEvidence::FolderTrustPrompt,
+        )
     } else if looks_like_selection_prompt(screen_text) {
         (
             AgentActivity::WaitingApproval,
@@ -281,6 +320,7 @@ fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Opti
         ActivityEvidence::BackgroundTaskWait => is_background_task_wait_line,
         ActivityEvidence::ConfirmationPrompt => is_confirmation_prompt_line,
         ActivityEvidence::SelectionPrompt => is_selection_prompt_line,
+        ActivityEvidence::FolderTrustPrompt => is_claude_folder_trust_choice_line,
         ActivityEvidence::NoActiveMarker => return None,
     };
     screen_text
@@ -635,6 +675,39 @@ pub enum GoalEvidence {
 pub struct GoalClassification {
     pub evidence: GoalEvidence,
     pub matched_line: Option<String>,
+    /// Exact predicate family that selected the reported provider-owned line.
+    /// `None` means the screen supplied no decisive goal evidence.
+    pub matched_rule: Option<GoalEvidenceRule>,
+    /// Literal marker tested inside the structurally selected provider row.
+    /// This is `None` for negative or inconclusive evidence.
+    pub matched_pattern: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GoalEvidenceRule {
+    CodexFooterGoalSegment,
+    CodexMetadataFooterWithoutGoal,
+    ClaudeGoalIndicator,
+    ClaudePausedNotice,
+    ClaudeAchievedNotice,
+    ClaudeFailedNotice,
+    ClaudeClearedNotice,
+    ClaudeIndicatorWithoutGoal,
+}
+
+impl GoalEvidenceRule {
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::CodexFooterGoalSegment => "rightmost Codex goal segment in the status footer below its composer",
+            Self::CodexMetadataFooterWithoutGoal => "Codex metadata footer below its composer contains no goal segment",
+            Self::ClaudeGoalIndicator => "Claude /goal active indicator directly above its composer",
+            Self::ClaudePausedNotice => "newest current-turn Claude goal notice starts with Goal paused",
+            Self::ClaudeAchievedNotice => "newest current-turn Claude goal notice starts with Goal achieved",
+            Self::ClaudeFailedNotice => "newest current-turn Claude goal notice starts with Goal could not be achieved",
+            Self::ClaudeClearedNotice => "newest current-turn Claude goal notice starts with Goal cleared",
+            Self::ClaudeIndicatorWithoutGoal => "Claude indicator row directly above its composer has no goal and no current-turn goal notice",
+        }
+    }
 }
 
 /// Extracts provider-owned goal evidence from the current visible screen.
@@ -662,6 +735,8 @@ pub fn goal_evidence_for_agent_detailed(
         return GoalClassification {
             evidence: GoalEvidence::Unknown,
             matched_line: None,
+            matched_rule: None,
+            matched_pattern: None,
         };
     };
     let lines: Vec<&str> = screen_text.lines().collect();
@@ -678,10 +753,17 @@ fn provider_goal_reader(class: &AgentClass) -> Option<fn(&[&str]) -> GoalClassif
     }
 }
 
-fn goal_classification(evidence: GoalEvidence, line: Option<&str>) -> GoalClassification {
+fn goal_classification(
+    evidence: GoalEvidence,
+    line: Option<&str>,
+    matched_rule: Option<GoalEvidenceRule>,
+    matched_pattern: Option<&'static str>,
+) -> GoalClassification {
     GoalClassification {
         evidence,
         matched_line: line.map(bounded_terminal_evidence),
+        matched_rule,
+        matched_pattern,
     }
 }
 
@@ -689,32 +771,51 @@ fn goal_classification(evidence: GoalEvidence, line: Option<&str>) -> GoalClassi
 /// with a multi-line draft; anything further away is not the live composer.
 const CODEX_COMPOSER_SEARCH_ROWS: usize = 10;
 
-/// Codex renders its status footer as the last non-blank screen row, directly
-/// below the `›` composer. The goal segment is right-pinned in that row: wide
-/// layouts truncate the metadata on its left with `…` and may append a
-/// `⚠ 1 warning · f2 to view` notice to its right, so the segment is found by
-/// marker, not by line position.
+/// Codex renders its status footer below the `›` composer. A separate
+/// `? for shortcuts` hint row may follow it, so the status row is not always
+/// the last non-blank screen row. The goal segment is right-pinned in the
+/// status row: wide layouts truncate metadata on its left with `…`.
 fn codex_goal_classification(lines: &[&str]) -> GoalClassification {
     let Some(footer) = codex_footer_row(lines) else {
-        return goal_classification(GoalEvidence::Unknown, None);
+        return goal_classification(GoalEvidence::Unknown, None, None, None);
     };
     let normalized_footer = footer.to_lowercase();
-    if let Some(goal_state) = codex_footer_goal_state(&normalized_footer) {
-        return goal_classification(GoalEvidence::State(goal_state), Some(footer));
+    if let Some((goal_state, marker)) = codex_footer_goal_state(&normalized_footer) {
+        return goal_classification(
+            GoalEvidence::State(goal_state),
+            Some(footer),
+            Some(GoalEvidenceRule::CodexFooterGoalSegment),
+            Some(marker),
+        );
     }
     // A goal-free footer is decisive only when it is recognizably Codex's
     // metadata status line. Popups that replace the footer (slash-command
     // lists, key hints under a selection menu) stay inconclusive so a
     // transient overlay never clears a confirmed goal.
     if is_codex_metadata_footer(&normalized_footer) {
-        return goal_classification(GoalEvidence::Inactive, Some(footer));
+        return goal_classification(
+            GoalEvidence::Inactive,
+            Some(footer),
+            Some(GoalEvidenceRule::CodexMetadataFooterWithoutGoal),
+            None,
+        );
     }
-    goal_classification(GoalEvidence::Unknown, None)
+    goal_classification(GoalEvidence::Unknown, None, None, None)
 }
 
-/// The footer row, provided the live composer sits a few rows above it.
+/// The status footer row, provided the live composer sits a few rows above it.
 fn codex_footer_row<'screen>(lines: &[&'screen str]) -> Option<&'screen str> {
-    let footer_index = lines.iter().rposition(|line| !line.trim().is_empty())?;
+    let last_index = lines.iter().rposition(|line| !line.trim().is_empty())?;
+    let footer_index = if lines[last_index]
+        .trim_start()
+        .starts_with("? for shortcuts")
+    {
+        (0..last_index)
+            .rev()
+            .find(|&index| !lines[index].trim().is_empty())?
+    } else {
+        last_index
+    };
     let search_start = footer_index.saturating_sub(CODEX_COMPOSER_SEARCH_ROWS);
     lines[search_start..footer_index]
         .iter()
@@ -738,7 +839,7 @@ fn is_codex_composer_row(line: &str) -> bool {
 /// CLI 0.156 binary and confirmed live where noted in the research document.
 /// Only the rightmost marker counts: the goal segment is the footer's final
 /// status segment.
-fn codex_footer_goal_state(normalized_footer: &str) -> Option<GoalState> {
+fn codex_footer_goal_state(normalized_footer: &str) -> Option<(GoalState, &'static str)> {
     const ELAPSED_MARKERS: [(&str, GoalState); 3] = [
         ("pursuing goal (", GoalState::Active),
         ("goal achieved (", GoalState::Reached),
@@ -759,15 +860,16 @@ fn codex_footer_goal_state(normalized_footer: &str) -> Option<GoalState> {
     let elapsed_matches = ELAPSED_MARKERS.iter().filter_map(|(marker, goal_state)| {
         rightmost_segment_start(normalized_footer, marker)
             .filter(|&index| has_elapsed_token_after(normalized_footer, index + marker.len()))
-            .map(|index| (index, *goal_state))
+            .map(|index| (index, *goal_state, *marker))
     });
     let exact_matches = EXACT_MARKERS.iter().filter_map(|(marker, goal_state)| {
-        rightmost_segment_start(normalized_footer, marker).map(|index| (index, *goal_state))
+        rightmost_segment_start(normalized_footer, marker)
+            .map(|index| (index, *goal_state, *marker))
     });
     elapsed_matches
         .chain(exact_matches)
-        .max_by_key(|(index, _)| *index)
-        .map(|(_, goal_state)| goal_state)
+        .max_by_key(|(index, _, _)| *index)
+        .map(|(_, goal_state, marker)| (goal_state, marker))
 }
 
 /// The last occurrence of `marker` that begins a word, so `repursuing goal (`
@@ -825,34 +927,56 @@ const CLAUDE_TURN_END_SEARCH_ROWS: usize = 30;
 /// gone.
 fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
     let Some(indicator_index) = claude_indicator_row_index(lines) else {
-        return goal_classification(GoalEvidence::Unknown, None);
+        return goal_classification(GoalEvidence::Unknown, None, None, None);
     };
     let indicator = lines[indicator_index];
     let turn_end = claude_turn_end_goal_notice(lines, indicator_index);
     if claude_indicator_shows_goal(indicator) {
         return match turn_end {
-            Some((ClaudeGoalNotice::Paused(goal_state), line)) => {
-                goal_classification(GoalEvidence::State(goal_state), Some(line))
-            }
-            _ => goal_classification(GoalEvidence::State(GoalState::Active), Some(indicator)),
+            Some((ClaudeGoalNotice::Paused(goal_state), line)) => goal_classification(
+                GoalEvidence::State(goal_state),
+                Some(line),
+                Some(GoalEvidenceRule::ClaudePausedNotice),
+                Some("goal paused"),
+            ),
+            _ => goal_classification(
+                GoalEvidence::State(GoalState::Active),
+                Some(indicator),
+                Some(GoalEvidenceRule::ClaudeGoalIndicator),
+                Some("/goal active"),
+            ),
         };
     }
     match turn_end {
-        Some((ClaudeGoalNotice::Achieved, line)) => {
-            goal_classification(GoalEvidence::State(GoalState::Reached), Some(line))
-        }
-        Some((ClaudeGoalNotice::Failed, line)) => {
-            goal_classification(GoalEvidence::State(GoalState::Blocked), Some(line))
-        }
-        Some((ClaudeGoalNotice::Cleared, line)) => {
-            goal_classification(GoalEvidence::Inactive, Some(line))
-        }
+        Some((ClaudeGoalNotice::Achieved, line)) => goal_classification(
+            GoalEvidence::State(GoalState::Reached),
+            Some(line),
+            Some(GoalEvidenceRule::ClaudeAchievedNotice),
+            Some("goal achieved"),
+        ),
+        Some((ClaudeGoalNotice::Failed, line)) => goal_classification(
+            GoalEvidence::State(GoalState::Blocked),
+            Some(line),
+            Some(GoalEvidenceRule::ClaudeFailedNotice),
+            Some("goal could not be achieved"),
+        ),
+        Some((ClaudeGoalNotice::Cleared, line)) => goal_classification(
+            GoalEvidence::Inactive,
+            Some(line),
+            Some(GoalEvidenceRule::ClaudeClearedNotice),
+            Some("goal cleared"),
+        ),
         // A notice that the goal is still running (or paused) without its
         // indicator is a redraw in progress, not proof the goal ended.
         Some((ClaudeGoalNotice::Running | ClaudeGoalNotice::Paused(_), _)) => {
-            goal_classification(GoalEvidence::Unknown, None)
+            goal_classification(GoalEvidence::Unknown, None, None, None)
         }
-        None => goal_classification(GoalEvidence::Inactive, Some(indicator)),
+        None => goal_classification(
+            GoalEvidence::Inactive,
+            Some(indicator),
+            Some(GoalEvidenceRule::ClaudeIndicatorWithoutGoal),
+            None,
+        ),
     }
 }
 
@@ -1147,6 +1271,20 @@ fn is_confirmation_prompt_line(line: &str) -> bool {
     has_yes_word && has_no_word
 }
 
+/// Captured live from Claude Code 2.1.283 in a fresh folder with a harmless
+/// project permission rule. Both choices and the safety-check heading are
+/// required before declaring a blocked interstitial. No input is ever sent
+/// to answer it automatically.
+fn looks_like_claude_folder_trust_prompt(screen_text: &str) -> bool {
+    screen_text.contains("Quick safety check:")
+        && screen_text.contains("Yes, I trust this folder")
+        && screen_text.contains("No, continue without these permissions")
+}
+
+fn is_claude_folder_trust_choice_line(line: &str) -> bool {
+    line.contains("Yes, I trust this folder")
+}
+
 /// Every glyph an agent CLI marks its currently-selected option with.
 ///
 /// `❯` (U+276F) is what Claude Code and Codex's approval dialogs render;
@@ -1439,6 +1577,7 @@ pub fn identify_agent_with_extra(
     best.map(
         |((_, depth, _), pid, process_name, process_match)| AgentIdentity {
             pid: pid.as_u32(),
+            started_at_unix_seconds: system.process(pid).map_or(0, sysinfo::Process::start_time),
             class: process_match.class,
             process_name,
             matched_signature: process_match.matched_signature,
@@ -1957,6 +2096,32 @@ mod tests {
     }
 
     #[test]
+    fn codex_folder_trust_modal_never_receives_initial_input() {
+        // Captured from codex-cli 0.157.1 in a fresh temporary directory.
+        let screen = fixture("codex_trust_folder.txt");
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Codex, &screen),
+            AgentActivity::WaitingApproval
+        );
+        assert!(!is_agent_prompt_ready(&AgentClass::Codex, &screen));
+    }
+
+    #[test]
+    fn claude_folder_trust_modal_never_receives_initial_input() {
+        // Captured from a live Claude Code 2.1.283 PTY in a fresh temporary
+        // folder with one project-local permission rule; no trust was granted.
+        let screen = fixture("claude_folder_trust.txt");
+        let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+        assert_eq!(classification.activity, AgentActivity::WaitingApproval);
+        assert_eq!(classification.evidence, ActivityEvidence::FolderTrustPrompt);
+        assert!(!is_agent_prompt_ready(&AgentClass::Claude, &screen));
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, "Yes, I trust this folder"),
+            AgentActivity::Idle
+        );
+    }
+
+    #[test]
     fn prose_mentioning_yes_and_no_is_idle_not_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("claude_code_prose_with_yes_no.txt")),
@@ -2265,6 +2430,20 @@ mod tests {
                 "codex_goal_active_wide_footer.txt",
                 GoalEvidence::State(GoalState::Active),
             ),
+            // Codex 0.157.1 adds a separate hint row below the live status.
+            // These three excerpts are from the same real S17 goal lifecycle.
+            (
+                "codex_goal_two_line_active.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
+            (
+                "codex_goal_two_line_paused.txt",
+                GoalEvidence::State(GoalState::Paused),
+            ),
+            (
+                "codex_goal_two_line_resumed.txt",
+                GoalEvidence::State(GoalState::Active),
+            ),
             (
                 "codex_goal_achieved_wide_footer.txt",
                 GoalEvidence::State(GoalState::Reached),
@@ -2343,6 +2522,7 @@ Goal achieved (3m)
         for screen in [
             "› 1. Trust and continue\n  2. Quit\n\n  enter continue · esc quit",
             "› /goal\n\n  /goal   set or view the goal for a long-running task",
+            "› Ask Codex to do anything\n\n  ? for shortcuts   ⚠ 1 warning · f2 to view",
         ] {
             assert_eq!(
                 goal_evidence_for_agent(&AgentClass::Codex, screen),
@@ -2530,6 +2710,16 @@ Goal achieved (3m)
             classification.matched_line.as_deref(),
             Some("model · workspace · Pursuing goal (16m)")
         );
+        assert_eq!(
+            classification.matched_rule,
+            Some(GoalEvidenceRule::CodexFooterGoalSegment)
+        );
+        assert_eq!(classification.matched_pattern, Some("pursuing goal ("));
+        assert!(classification
+            .matched_rule
+            .unwrap()
+            .description()
+            .contains("below its composer"));
     }
 
     #[test]

@@ -35,13 +35,13 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, AppearanceRow, IconPickerColumnMode, IconPickerSearchStatus, InferenceRow,
+    App, AppearanceRow, GitRow, IconPickerColumnMode, IconPickerSearchStatus, InferenceRow,
     InferenceSettingField, InferenceTestState, KanbanBoardRow, ModelDiscoveryState, SettingsState,
     SettingsTab, SoundRow,
 };
 use crate::config::{
-    DebugSettings, EditorSettings, KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode,
-    SessionSettings, TerminalSettings, UiSettings,
+    DebugSettings, EditorSettings, GitSettings, KanbanBoardSettings, KeyboardSettings,
+    LeftPanelSizingMode, SessionSettings, TerminalSettings, UiSettings,
 };
 use crate::icon_settings::{
     catalogue_icon_count, catalogue_icon_count_for, IconCatalogEntry, IconCatalogFamily,
@@ -321,6 +321,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             frame,
             layout.content_area,
             session_lines(&app.session_settings, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::Git => render_scrollable(
+            frame,
+            layout.content_area,
+            git_lines(
+                &app.git_settings,
+                app.git_settings_error.as_deref(),
+                state.selected_row,
+            ),
             state.scroll,
         ),
         SettingsTab::Keyboard => {
@@ -618,6 +628,12 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
+        SettingsTab::Git => git_lines(
+            &app.git_settings,
+            app.git_settings_error.as_deref(),
+            selected_row,
+        )
+        .len() as u16,
         SettingsTab::Keyboard => {
             keyboard_lines(&app.keyboard_settings, &app.keybindings).len() as u16
         }
@@ -900,6 +916,9 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,
                 icons: &app.ui_settings.icons,
+                workspace_git_statuses: &app.workspace_git_statuses,
+                show_worktree_branch_line: app.git_settings.branch_line
+                    == crate::config::GitBranchLine::WorktreeOnly,
                 tree_order: app.ui_settings.tree_order,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
@@ -932,12 +951,12 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             row(
                 IconTarget::Codex,
                 icons.glyph(IconTarget::GoalPaused),
-                crate::status_icons::TASK_PROGRESS_FRAMES[10],
+                crate::status_icons::task_progress_frame(icons, 10),
                 "goal, parked on task",
             ),
             row(
                 IconTarget::Codex,
-                crate::status_icons::TASK_PROGRESS_FRAMES[5],
+                crate::status_icons::task_progress_frame(icons, 5),
                 icons.glyph(IconTarget::Parked),
                 "parked on task",
             ),
@@ -2283,6 +2302,8 @@ fn sound_row_label(row: SoundRow) -> &'static str {
         SoundRow::ApprovalRequired => "Agent needs approval",
         SoundRow::AgentStarted => "Agent started working",
         SoundRow::WaitingBackground => "Agent waits for background work",
+        SoundRow::TaskSucceeded => "Task succeeded",
+        SoundRow::TaskFailed => "Task failed or monitor lost",
     }
 }
 
@@ -2295,6 +2316,8 @@ fn sound_row_description(row: SoundRow) -> &'static str {
         SoundRow::ApprovalRequired => "An agent entered a confirmation or approval prompt.",
         SoundRow::AgentStarted => "An idle or finished agent began a new turn.",
         SoundRow::WaitingBackground => "An agent is waiting for background workers it started.",
+        SoundRow::TaskSucceeded => "A monitored task reported successful completion.",
+        SoundRow::TaskFailed => "A monitored task failed or Ilium lost sight of it.",
     }
 }
 
@@ -2868,6 +2891,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
         AppearanceRow::ProgressMonitorMaxLines => "Progress footer lines",
+        AppearanceRow::ProgressFillStyle => "Progress fill style",
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
         AppearanceRow::LockClosedEnabled => "Lock-closed items",
     }
@@ -2933,6 +2957,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ProgressMonitorMaxLines => {
             "Maximum detail rows the progress footer can grow to below its status and percent row, including task messages, errors, monitor-health warnings, and compact job identity."
+        }
+        AppearanceRow::ProgressFillStyle => {
+            "Choose the frames shown by a running task's tree icon. Braille, blocks, moons, and quarters are available; custom frame lists can be set in config.toml."
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
@@ -3031,6 +3058,19 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             }
         }
         AppearanceRow::ProgressMonitorMaxLines => format!("{} lines", ui.progress_max_lines),
+        AppearanceRow::ProgressFillStyle => {
+            let frames = &ui.icons.task_progress_frames;
+            let name = crate::icon_settings::task_progress_preset_index(frames).map_or_else(
+                || format!("Custom ({} frames)", frames.len()),
+                |index| crate::icon_settings::TASK_PROGRESS_STYLE_NAMES[index].to_string(),
+            );
+            format!(
+                "{} · {} … {}",
+                name,
+                frames.first().map_or("", String::as_str),
+                frames.last().map_or("", String::as_str),
+            )
+        }
         AppearanceRow::TerminalTextSelection => {
             if ui.terminal_text_selection_enabled {
                 "On".to_string()
@@ -3150,6 +3190,59 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
         ],
         selected,
     )
+}
+
+fn git_lines(settings: &GitSettings, error: Option<&str>, selected: usize) -> Vec<Line<'static>> {
+    let rows = [
+        (
+            "Default where",
+            settings.default_where.label().to_string(),
+            "Default location for a new agent; Here preserves ordinary one-click creation.",
+        ),
+        (
+            "Branch prefix",
+            settings.branch_prefix.clone(),
+            "Prefix for automatically suggested worktree branches. Enter edits.",
+        ),
+        (
+            "Worktree location",
+            settings.worktree_location_template.clone(),
+            "Use {repo_parent}, {repo_name}, {project}, and {branch_slug}. Enter edits.",
+        ),
+        (
+            "Default base",
+            settings.default_base.label().to_string(),
+            "Start new branches from the current or default branch.",
+        ),
+        (
+            "Branch line",
+            settings.branch_line.label().to_string(),
+            "Show the branch beneath worktree agent rows, or hide it.",
+        ),
+        (
+            "Setup command",
+            if settings.setup_command.is_empty() {
+                "None".to_string()
+            } else {
+                settings.setup_command.clone()
+            },
+            "Optional command run after a new worktree is created. Enter edits.",
+        ),
+        (
+            "Close policy",
+            settings.default_close_policy.label().to_string(),
+            "Keep worktrees by default or offer removal when safe.",
+        ),
+    ];
+    debug_assert_eq!(rows.len(), GitRow::ALL.len());
+    let mut lines = setting_lines(&rows, selected);
+    if let Some(error) = error {
+        lines.push(Line::from(Span::styled(
+            format!("  {error}"),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    lines
 }
 
 fn debug_lines(settings: &DebugSettings, selected: usize) -> Vec<Line<'static>> {
@@ -3720,35 +3813,36 @@ mod tests {
             tab_at(area, Position::new(2, 6)),
             Some(SettingsTab::Session)
         );
+        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Git));
         assert_eq!(
-            tab_at(area, Position::new(2, 7)),
+            tab_at(area, Position::new(2, 8)),
             Some(SettingsTab::KanbanBoard)
         );
-        assert_eq!(tab_at(area, Position::new(2, 8)), Some(SettingsTab::Sound));
+        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::Sound));
         assert_eq!(
-            tab_at(area, Position::new(2, 9)),
+            tab_at(area, Position::new(2, 10)),
             Some(SettingsTab::VoiceControl)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 10)),
+            tab_at(area, Position::new(2, 11)),
             Some(SettingsTab::Inference)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 11)),
+            tab_at(area, Position::new(2, 12)),
             Some(SettingsTab::Titles)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 12)),
+            tab_at(area, Position::new(2, 13)),
             Some(SettingsTab::Triggers)
         );
         assert_eq!(
-            tab_at(area, Position::new(2, 13)),
+            tab_at(area, Position::new(2, 14)),
             Some(SettingsTab::TextTriggers)
         );
-        assert_eq!(tab_at(area, Position::new(2, 14)), Some(SettingsTab::Debug));
-        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Api));
-        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::About));
-        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::Setup));
+        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Debug));
+        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::Api));
+        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 18)), Some(SettingsTab::Setup));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
@@ -3756,23 +3850,23 @@ mod tests {
         // Spacious layouts retain the blank row after each tab.
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
         assert_eq!(
-            tab_at(spacious, Position::new(2, 25)),
+            tab_at(spacious, Position::new(2, 27)),
             Some(SettingsTab::TextTriggers)
         );
         assert_eq!(
-            tab_at(spacious, Position::new(2, 27)),
+            tab_at(spacious, Position::new(2, 29)),
             Some(SettingsTab::Debug)
         );
         assert_eq!(
-            tab_at(spacious, Position::new(2, 29)),
+            tab_at(spacious, Position::new(2, 31)),
             Some(SettingsTab::Api)
         );
         assert_eq!(
-            tab_at(spacious, Position::new(2, 31)),
+            tab_at(spacious, Position::new(2, 33)),
             Some(SettingsTab::About)
         );
         assert_eq!(
-            tab_at(spacious, Position::new(2, 33)),
+            tab_at(spacious, Position::new(2, 35)),
             Some(SettingsTab::Setup)
         );
 

@@ -16,7 +16,10 @@ use ilium_core::{NodeId, ScheduledPaneInput, Tree};
 use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 use tokio::task::JoinHandle;
 
-use crate::ipc::handlers::{broadcast_and_persist, submit_terminal_text, write_key_input};
+use crate::ipc::handlers::{
+    broadcast_and_persist, submit_terminal_text, write_scheduled_key_input,
+};
+use crate::pane::PaneResource;
 use crate::state::ServerState;
 
 const MILLIS_PER_SECOND: u64 = 1000;
@@ -46,7 +49,13 @@ async fn run(state: Arc<ServerState>) {
     loop {
         let next_deadline = {
             let tree = state.tree.read().await;
-            nearest_deadline(&tree)
+            let panes = state.panes.read().await;
+            nearest_deadline(&tree, |pane_id| {
+                !matches!(
+                    panes.get(&pane_id),
+                    Some(PaneResource::Terminal(runtime)) if runtime.missing_workspace.is_some()
+                )
+            })
         };
         let Some(deadline) = next_deadline else {
             state.scheduled_input_changed.notified().await;
@@ -73,8 +82,9 @@ async fn run(state: Arc<ServerState>) {
 
 /// Returns only the earliest deadline; the executor rescans after every wake
 /// so schedule replacement and removal cannot leave an obsolete sleep active.
-fn nearest_deadline(tree: &Tree) -> Option<u64> {
+fn nearest_deadline(tree: &Tree, is_available: impl Fn(NodeId) -> bool) -> Option<u64> {
     tree.scheduled_pane_inputs()
+        .filter(|(pane_id, _)| is_available(*pane_id))
         .map(|(_, scheduled_input)| scheduled_input.execute_at_unix_millis)
         .min()
 }
@@ -89,8 +99,15 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
     };
     let due_inputs: Vec<(NodeId, ScheduledPaneInput)> = {
         let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
         tree.scheduled_pane_inputs()
             .filter(|(_, scheduled_input)| scheduled_input.execute_at_unix_millis <= now)
+            .filter(|(pane_id, _)| {
+                !matches!(
+                    panes.get(pane_id),
+                    Some(PaneResource::Terminal(runtime)) if runtime.missing_workspace.is_some()
+                )
+            })
             .map(|(pane_id, scheduled_input)| (pane_id, scheduled_input.clone()))
             .collect()
     };
@@ -106,6 +123,11 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
         let delivery_error = write_scheduled_input(state, pane_id, &scheduled_input)
             .await
             .err();
+        if pane_has_missing_workspace(state, pane_id).await {
+            // A restore can replace the pane after collection. Retain the
+            // authored countdown and stop retrying until workspace recovery.
+            continue;
+        }
         if let Some(message) = &delivery_error {
             tracing::error!("scheduled input failed for pane {pane_id:?}: {message}");
             state.broadcast(ServerEvent::Error {
@@ -169,7 +191,15 @@ async fn is_current_schedule(
     let is_current = tree
         .scheduled_pane_inputs()
         .any(|(candidate_id, candidate)| candidate_id == pane_id && candidate == expected);
-    is_current
+    is_current && !pane_has_missing_workspace(state, pane_id).await
+}
+
+async fn pane_has_missing_workspace(state: &ServerState, pane_id: NodeId) -> bool {
+    let panes = state.panes.read().await;
+    matches!(
+        panes.get(&pane_id),
+        Some(PaneResource::Terminal(runtime)) if runtime.missing_workspace.is_some()
+    )
 }
 
 /// Sends text plus Enter through the staged terminal submission path. Text-only
@@ -192,7 +222,7 @@ async fn write_scheduled_input(
     let submission = scheduled_input
         .send_enter
         .then_some(PromptSubmissionSource::ScheduledInput);
-    write_key_input(state, pane_id, &bytes, submission).await
+    write_scheduled_key_input(state, pane_id, &bytes, submission).await
 }
 
 /// Raw input supports text-only or Enter-only. Combined submissions must use
@@ -263,7 +293,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(nearest_deadline(&tree), Some(3000));
+        assert_eq!(nearest_deadline(&tree, |_| true), Some(3000));
+        assert_eq!(
+            nearest_deadline(&tree, |pane_id| pane_id != second),
+            Some(5000)
+        );
 
         tree.schedule_pane_input(
             second,
@@ -274,7 +308,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(nearest_deadline(&tree), Some(5000));
+        assert_eq!(nearest_deadline(&tree, |_| true), Some(5000));
     }
 
     #[test]

@@ -206,6 +206,7 @@ impl std::fmt::Display for BindingKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     NewTerminal,
+    NewAgentWorktree,
     NewEditor,
     NewBoard,
     ClosePane,
@@ -386,6 +387,11 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "New terminal pane in the selected group",
     },
     KeyBinding {
+        key: BindingKey::Character('W'),
+        action: Action::NewAgentWorktree,
+        description: "New agent in a worktree (choose provider, branch and location)",
+    },
+    KeyBinding {
         key: BindingKey::Character('e'),
         action: Action::NewEditor,
         description: "New editor pane (opens a file picker)",
@@ -540,6 +546,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
 pub fn action_name(action: Action) -> &'static str {
     match action {
         Action::NewTerminal => "new_terminal",
+        Action::NewAgentWorktree => "new_agent_worktree",
         Action::NewEditor => "new_editor",
         Action::NewBoard => "new_board",
         Action::ClosePane => "close_pane",
@@ -582,6 +589,7 @@ pub fn action_name(action: Action) -> &'static str {
 pub const fn action_label(action: Action) -> &'static str {
     match action {
         Action::NewTerminal => "New terminal",
+        Action::NewAgentWorktree => "New agent worktree",
         Action::NewEditor => "New editor",
         Action::NewBoard => "New board",
         Action::ClosePane => "Close selection",
@@ -644,6 +652,10 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "terminal",
             },
         ],
+        Action::NewAgentWorktree => &[Mnemonic {
+            key: 'w',
+            word: "worktree",
+        }],
         Action::NewEditor => &[
             Mnemonic {
                 key: 'c',

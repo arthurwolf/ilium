@@ -37,12 +37,13 @@ impl TriggerOccurrence {
 /// Maps agent lifecycle transitions through the same classifier used by
 /// sound playback, making the two settings surfaces share one definition of
 /// “finished”, “started”, “approval”, and “background waiting”.
-pub const fn event_for_sound(sound_event: ilium_sound::SoundEvent) -> TriggerEvent {
+pub const fn event_for_sound(sound_event: ilium_sound::SoundEvent) -> Option<TriggerEvent> {
     match sound_event {
-        ilium_sound::SoundEvent::AgentFinished => TriggerEvent::AgentFinishedWork,
-        ilium_sound::SoundEvent::ApprovalRequired => TriggerEvent::AgentApprovalRequired,
-        ilium_sound::SoundEvent::AgentStarted => TriggerEvent::AgentStartedWorking,
-        ilium_sound::SoundEvent::WaitingBackground => TriggerEvent::AgentWaitingBackground,
+        ilium_sound::SoundEvent::AgentFinished => Some(TriggerEvent::AgentFinishedWork),
+        ilium_sound::SoundEvent::ApprovalRequired => Some(TriggerEvent::AgentApprovalRequired),
+        ilium_sound::SoundEvent::AgentStarted => Some(TriggerEvent::AgentStartedWorking),
+        ilium_sound::SoundEvent::WaitingBackground => Some(TriggerEvent::AgentWaitingBackground),
+        ilium_sound::SoundEvent::TaskSucceeded | ilium_sound::SoundEvent::TaskFailed => None,
     }
 }
 

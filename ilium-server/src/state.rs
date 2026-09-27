@@ -12,10 +12,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
-use ilium_core::{NodeId, Tree};
+use ilium_core::{NodeId, PaneWorkspace, Tree};
 use ilium_detect::AgentSignature;
-use ilium_ipc::ServerEvent;
-use tokio::sync::{broadcast, watch, Mutex, Notify, RwLock};
+use ilium_ipc::{ServerEvent, WorkspaceGitStatus};
+use tokio::sync::{broadcast, mpsc, watch, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::agent_debug::AgentDebugRecorder;
@@ -39,6 +39,15 @@ pub type PaneRegistry = HashMap<NodeId, PaneResource>;
 pub(crate) const MAXIMUM_CACHED_PROGRESS_SET_REQUESTS: usize = 512;
 pub(crate) type ProgressSetResult =
     Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection>;
+
+/// Creation and removal requests outlive their IPC connections once Git may have changed
+/// the repository. Shutdown stops accepting requests, then joins every task
+/// before the server process can abandon an in-flight worktree mutation.
+#[derive(Default)]
+struct WorkspaceCreationTasks {
+    closed: bool,
+    handles: Vec<JoinHandle<()>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProgressSetRequestIdentity {
@@ -104,6 +113,20 @@ pub struct ServerStateOptions {
     pub progress_monitor_enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkspaceClosePreference {
+    pub pane_id: NodeId,
+    pub workspace_id: Option<String>,
+    pub worktree_root: PathBuf,
+    pub policy: ilium_ipc::WorkspaceClosePolicy,
+}
+
+impl WorkspaceClosePreference {
+    pub(crate) fn matches_workspace(&self, workspace: &ilium_core::PaneWorkspace) -> bool {
+        self.workspace_id == workspace.workspace_id && self.worktree_root == workspace.worktree_root
+    }
+}
+
 pub struct ServerState {
     pub session_name: String,
     /// Canonical project boundary shared by every pane in this server.
@@ -145,6 +168,24 @@ pub struct ServerState {
     /// Serializes enqueue/clear mutations with completion-driven delivery so
     /// a successful PTY write advances exactly the FIFO head it observed.
     pub prompt_queue_transaction: Mutex<()>,
+    /// Serializes workspace creation and removal within this server for a
+    /// canonical Git common directory. Cooperating servers also take the
+    /// platform repository lease before the spawn lock; external Git does not.
+    /// Acquire this before tree/pane locks and never hold those locks across
+    /// a Git command.
+    pub(crate) workspace_repository_locks: Mutex<HashMap<PathBuf, std::sync::Arc<Mutex<()>>>>,
+    /// Serializes the shared PTY spawn path with workspace removal in this
+    /// server. Cooperating processes additionally take the repository lease.
+    /// This mutex does not exclude arbitrary external file access or tree edits.
+    /// Acquire after a workspace repository lock, before tree/pane locks.
+    pub(crate) workspace_spawn_lock: Mutex<()>,
+    /// Runtime-only Git facts. The tree stores creation provenance, never
+    /// potentially stale dirty counts or upstream information.
+    pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
+    pub(crate) workspace_close_preferences: RwLock<HashMap<NodeId, WorkspaceClosePreference>>,
+    workspace_git_full_requests: mpsc::Sender<NodeId>,
+    workspace_git_full_receiver: Mutex<Option<mpsc::Receiver<NodeId>>>,
+    workspace_creation_tasks: std::sync::Mutex<WorkspaceCreationTasks>,
     /// Whether the on-disk crash-recovery snapshot still matches
     /// `tree`/`panes`, and whether this session wants one at all. Request
     /// Ordinary request handlers (`crate::ipc::handlers`) mark it through
@@ -225,8 +266,58 @@ pub struct ServerState {
 }
 
 impl ServerState {
+    pub(crate) async fn workspace_repository_lock(
+        &self,
+        common_dir: &std::path::Path,
+    ) -> std::sync::Arc<Mutex<()>> {
+        let mut locks = self.workspace_repository_locks.lock().await;
+        locks
+            .entry(common_dir.to_path_buf())
+            .or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Reuse the existing shutdown-drained registry for all workspace mutations.
+    pub(crate) fn track_workspace_mutation_task(&self, handle: JoinHandle<()>) -> bool {
+        self.track_workspace_creation_task(handle)
+    }
+
+    /// The task waits on its start gate until this registration succeeds.
+    /// A request racing server shutdown is rejected before it can run Git.
+    pub(crate) fn track_workspace_creation_task(&self, handle: JoinHandle<()>) -> bool {
+        let mut tasks = self.workspace_creation_tasks.lock().unwrap();
+        if tasks.closed {
+            handle.abort();
+            return false;
+        }
+        tasks.handles.retain(|task| !task.is_finished());
+        tasks.handles.push(handle);
+        true
+    }
+
+    pub(crate) fn accepts_workspace_creation(&self) -> bool {
+        !self.workspace_creation_tasks.lock().unwrap().closed
+    }
+
+    /// Git commands are bounded by the adapter, and no newly accepted task
+    /// can start after this drain begins. Never abort a live Git mutation.
+    pub(crate) async fn finish_workspace_creation_tasks(&self) {
+        let handles = {
+            let mut tasks = self.workspace_creation_tasks.lock().unwrap();
+            tasks.closed = true;
+            std::mem::take(&mut tasks.handles)
+        };
+        for handle in handles {
+            if let Err(error) = handle.await {
+                tracing::error!("workspace mutation task failed during shutdown: {error}");
+                // Report both create and prune task failures.
+            }
+        }
+    }
+
     pub fn new(options: ServerStateOptions) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        let (workspace_git_full_requests, workspace_git_full_receiver) = mpsc::channel(256);
         let mut tree = Tree::new();
         // A brand-new session always starts with the launch directory as its
         // first top-level project; the server's `session_cwd` remains the
@@ -254,6 +345,13 @@ impl ServerState {
             snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
+            workspace_repository_locks: Mutex::new(HashMap::new()),
+            workspace_spawn_lock: Mutex::new(()),
+            workspace_git_status_cache: RwLock::new(HashMap::new()),
+            workspace_close_preferences: RwLock::new(HashMap::new()),
+            workspace_git_full_requests,
+            workspace_git_full_receiver: Mutex::new(Some(workspace_git_full_receiver)),
+            workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),
             snapshot_state: SnapshotState::new(),
             snapshot_requested: Notify::new(),
             scheduled_input_changed: Notify::new(),
@@ -273,6 +371,52 @@ impl ServerState {
             progress_set_requests: Mutex::new(ProgressSetRequestCache::default()),
             voice_text: crate::voice_relay::VoiceTextRelay::default(),
         }
+    }
+
+    pub(crate) async fn take_workspace_git_full_receiver(&self) -> mpsc::Receiver<NodeId> {
+        self.workspace_git_full_receiver
+            .lock()
+            .await
+            .take()
+            .expect("the Git status coordinator starts once per server")
+    }
+
+    /// A bounded request queue keeps repeated pointer movement from starting
+    /// unbounded Git work. The periodic coordinator remains authoritative.
+    pub(crate) fn queue_full_git_status(&self, pane_id: NodeId) -> bool {
+        self.workspace_git_full_requests.try_send(pane_id).is_ok()
+    }
+
+    /// Publishes only a changed Git fact for the exact workspace that was
+    /// probed. Tree-before-cache locking prevents a late probe from reviving
+    /// status for a closed or replaced pane.
+    pub(crate) async fn publish_pane_git_status(
+        &self,
+        pane_id: NodeId,
+        workspace: &PaneWorkspace,
+        status: WorkspaceGitStatus,
+    ) -> bool {
+        let tree = self.tree.read().await;
+        if tree.pane_workspace(pane_id) != Some(workspace) {
+            return false;
+        }
+        let mut cache = self.workspace_git_status_cache.write().await;
+        let has_changed = cache.get(&pane_id).is_none_or(|old| {
+            let mut old = old.clone();
+            let mut new = status.clone();
+            old.checked_at_unix_millis = 0;
+            new.checked_at_unix_millis = 0;
+            old.full_checked_at_unix_millis = old.full_checked_at_unix_millis.map(|_| 0);
+            new.full_checked_at_unix_millis = new.full_checked_at_unix_millis.map(|_| 0);
+            old != new
+        });
+        cache.insert(pane_id, status.clone());
+        drop(cache);
+        drop(tree);
+        if has_changed {
+            self.broadcast(ServerEvent::PaneGitStatusChanged { pane_id, status });
+        }
+        has_changed
     }
 
     /// Whether `SetPaneProgressMonitor` is currently accepted.
@@ -446,6 +590,7 @@ impl ServerState {
     /// landing in that window would resurrect a snapshot file for a session
     /// `handle_kill_session` already decided has nothing worth recovering.
     pub fn mark_session_killed(&self) {
+        self.workspace_creation_tasks.lock().unwrap().closed = true;
         self.snapshot_state.mark_session_killed();
     }
 

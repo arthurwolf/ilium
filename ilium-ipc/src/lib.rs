@@ -25,10 +25,14 @@ pub use ilium_agent_debug::{
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
 pub use protocol::{
-    ClientRequest, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, PaneGoalResumability, PaneGoalStatus, ProgressMonitorAccepted,
+    ClientRequest, DetectionReason, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
+    NewPaneWorkingDirectory, PaneDetectionEvidence, ProgressMonitorAccepted,
     ProgressMonitorPreflight, ProgressMonitorRejection, ProgressMonitorRejectionCode,
-    ProgressMonitorStatus, PromptSubmissionSource, ServerEvent,
+    ProgressMonitorStatus, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
+    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
+    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
+    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
+    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };
 pub use text_trigger::{TextTrigger, TextTriggerSettings, TextTriggerTarget};
 pub use voice_text::{
@@ -52,6 +56,9 @@ pub mod pane_env {
     pub const SESSION_NAME: &str = "ILIUM_SESSION_NAME";
     /// This session's Unix domain socket path.
     pub const SESSION_SOCKET: &str = "ILIUM_SESSION_SOCKET";
+    /// Canonical root of this pane's Git worktree, present only for a
+    /// workspace-backed terminal pane.
+    pub const WORKTREE: &str = "ILIUM_WORKTREE";
 }
 
 #[cfg(test)]
@@ -60,8 +67,8 @@ mod tests {
     use std::path::PathBuf;
 
     use ilium_core::{
-        AgentActivity, AgentClass, BoardStorage, NodeId, PaneStatus, PromptQueueDelivery,
-        SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
+        AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
+        PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
     use ilium_sound::{SoundSettings, SoundSourceKind};
 
@@ -91,6 +98,11 @@ mod tests {
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Editor(PathBuf::from("/tmp/notes.md")),
                 working_directory: NewPaneWorkingDirectory::LastUsed,
+            },
+            ClientRequest::NewPane {
+                parent_group: NodeId(1),
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::WorkspacePane(NodeId(2)),
             },
             ClientRequest::NewPane {
                 parent_group: NodeId(1),
@@ -369,24 +381,6 @@ mod tests {
                 expected_monitor_id: Some(7),
             },
             ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
-            ClientRequest::SubmitTerminalText {
-                pane_id: NodeId(2),
-                text: "/goal resume".to_string(),
-                source: PromptSubmissionSource::AgentGoalResume,
-            },
-            ClientRequest::SubmitTerminalText {
-                pane_id: NodeId(2),
-                text: "Ilium: your /goal has stayed paused".to_string(),
-                source: PromptSubmissionSource::GoalPauseReminder,
-            },
-            ClientRequest::GetPaneGoalStatus {
-                request_id: 46,
-                pane_id: NodeId(2),
-            },
-            ClientRequest::RequestPaneGoalResume {
-                request_id: 47,
-                pane_id: NodeId(2),
-            },
             ClientRequest::RegisterVoiceTextReceiver,
             ClientRequest::SubmitVoiceText {
                 request_id: 50,
@@ -407,6 +401,150 @@ mod tests {
                     VoiceTextRejectionCode::VoiceOff,
                     "voice control is off",
                 )),
+            },
+            ClientRequest::QueryRepoFacts {
+                request_id: 60,
+                project: NodeId(1),
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 61,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::New {
+                    branch: "agent/feature".to_string(),
+                    base_ref: "main".to_string(),
+                    path: PathBuf::from("/tmp/project.worktrees/agent-feature"),
+                },
+                initial_input: Some("Implement feature".to_string()),
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 62,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Claude,
+                spec: WorkspaceCreateSpec::Existing {
+                    path: PathBuf::from("/tmp/project.worktrees/existing"),
+                },
+                initial_input: None,
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 64,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::NewAtDefaultPath {
+                    branch: "agent/default-path".to_string(),
+                    base_ref: None,
+                },
+                initial_input: None,
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 65,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::NewWithSetup {
+                    branch: "agent/setup".to_string(),
+                    base_ref: "main".to_string(),
+                    path: PathBuf::from("/tmp/project.worktrees/agent-setup"),
+                    setup_command: "printf ready".to_string(),
+                },
+                initial_input: None,
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 66,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::NewAtDefaultPathWithSetup {
+                    branch: "agent/configured-default".to_string(),
+                    base_ref: Some("main".to_string()),
+                    setup_command: "printf ready".to_string(),
+                },
+                initial_input: None,
+            },
+            ClientRequest::QueryWorkspaceInventory {
+                request_id: 80,
+                project: NodeId(1),
+            },
+            ClientRequest::PruneWorkspace {
+                request_id: 81,
+                project: NodeId(1),
+                target: crate::WorkspacePruneTarget {
+                    repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                    worktree_root: PathBuf::from("/tmp/project.worktrees/retained"),
+                    workspace_id: "00000000-0000-4000-8000-000000000001".into(),
+                    creation_branch: "agent/retained".into(),
+                    base_ref: "refs/heads/main".into(),
+                    base_commit: "a".repeat(40),
+                    created_at_unix: 1_700_000_000,
+                    metadata_directory: PathBuf::from("/tmp/project/.git/worktrees/retained"),
+                    root_device: 1,
+                    root_inode: 2,
+                    metadata_device: 1,
+                    metadata_inode: 3,
+                    expected_head: "a".repeat(40),
+                },
+                mode: crate::WorkspacePruneMode::Safe,
+                branch_policy: crate::WorkspacePruneBranchPolicy::Keep,
+            },
+            ClientRequest::PruneWorkspace {
+                request_id: 82,
+                project: NodeId(1),
+                target: crate::WorkspacePruneTarget {
+                    repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                    worktree_root: PathBuf::from("/tmp/project.worktrees/retained"),
+                    workspace_id: "00000000-0000-4000-8000-000000000001".into(),
+                    creation_branch: "agent/retained".into(),
+                    base_ref: "refs/heads/main".into(),
+                    base_commit: "a".repeat(40),
+                    created_at_unix: 1_700_000_000,
+                    metadata_directory: PathBuf::from("/tmp/project/.git/worktrees/retained"),
+                    root_device: 1,
+                    root_inode: 2,
+                    metadata_device: 1,
+                    metadata_inode: 3,
+                    expected_head: "a".repeat(40),
+                },
+                mode: crate::WorkspacePruneMode::DiscardFiles {
+                    confirmed_path: PathBuf::from("/tmp/project.worktrees/retained"),
+                },
+                branch_policy: crate::WorkspacePruneBranchPolicy::DeleteIfSafe,
+            },
+            ClientRequest::RefreshPaneGitStatus { pane_id: NodeId(2) },
+            ClientRequest::RemoveWorkspace {
+                request_id: 63,
+                pane_id: NodeId(2),
+                force_path: None,
+                remove_branch: false,
+            },
+            ClientRequest::ClosePaneWithWorkspaceDisposition {
+                request_id: 64,
+                pane_id: NodeId(2),
+                disposition: WorkspaceDisposition::RemoveWorktreeAndBranch,
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 84,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::NewWithOptions {
+                    branch: "agent/options".into(),
+                    base_ref: "main".into(),
+                    path: PathBuf::from("/tmp/project.worktrees/options"),
+                    setup_command: String::new(),
+                    close_policy: WorkspaceClosePolicy::OfferRemovalWhenSafe,
+                },
+                initial_input: None,
+            },
+            ClientRequest::CreateAgentInWorkspace {
+                request_id: 85,
+                parent_group: NodeId(1),
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::ExistingWithOptions {
+                    path: PathBuf::from("/tmp/project.worktrees/options"),
+                    close_policy: WorkspaceClosePolicy::Keep,
+                },
+                initial_input: None,
+            },
+            ClientRequest::QueryWorkspaceCloseOffer {
+                request_id: 86,
+                pane_id: NodeId(2),
             },
         ]
     }
@@ -442,6 +580,22 @@ mod tests {
     fn sample_server_events() -> Vec<ServerEvent> {
         vec![
             ServerEvent::TreeSnapshot(sample_tree()),
+            ServerEvent::PaneStateSnapshot {
+                tree: sample_tree(),
+                detection_evidence: vec![(
+                    NodeId(2),
+                    PaneDetectionEvidence {
+                        applied_status: PaneStatus::PlainShell,
+                        identity: Some(DetectionReason {
+                            rule: "no registered agent process".into(),
+                            observed: None,
+                            context: "pane shell only".into(),
+                        }),
+                        activity: None,
+                        goal: None,
+                    },
+                )],
+            },
             ServerEvent::ScreenUpdate {
                 pane_id: NodeId(2),
                 first_sequence: 7,
@@ -582,41 +736,6 @@ mod tests {
                 pane_id: NodeId(2),
                 result: Ok(Some(7)),
             },
-            ServerEvent::PaneGoalStatusReported {
-                request_id: 46,
-                pane_id: NodeId(2),
-                result: Ok(PaneGoalStatus {
-                    pane_id: NodeId(2),
-                    agent: Some("Codex".to_string()),
-                    goal_state: Some(ilium_core::GoalState::Paused),
-                    resumability: PaneGoalResumability::Resumable,
-                }),
-            },
-            ServerEvent::PaneGoalResumeRequested {
-                request_id: 47,
-                pane_id: NodeId(2),
-                result: Err((
-                    "the user paused this goal".to_string(),
-                    Some(PaneGoalStatus {
-                        pane_id: NodeId(2),
-                        agent: Some("Codex".to_string()),
-                        goal_state: Some(ilium_core::GoalState::Paused),
-                        resumability: PaneGoalResumability::PausedByUser,
-                    }),
-                )),
-            },
-            ServerEvent::PaneGoalStatusReported {
-                request_id: 48,
-                pane_id: NodeId(2),
-                result: Ok(PaneGoalStatus {
-                    pane_id: NodeId(2),
-                    agent: None,
-                    goal_state: None,
-                    resumability: PaneGoalResumability::Unsupported {
-                        reason: "no agent".to_string(),
-                    },
-                }),
-            },
             ServerEvent::VoiceTextOffered {
                 request_id: 50,
                 sentences: vec!["open the settings".to_string()],
@@ -636,6 +755,200 @@ mod tests {
                     VoiceTextRejectionCode::NoVoiceClient,
                     "no voice client is attached",
                 )),
+            },
+            ServerEvent::WorkspaceInventoryReported {
+                request_id: 80,
+                project: NodeId(1),
+                result: Ok(crate::WorkspaceInventory {
+                    repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                    control_directory: PathBuf::from("/tmp/project"),
+                    total_worktrees: 1,
+                    truncated: false,
+                    entries: vec![crate::WorkspaceInventoryEntry {
+                        path: PathBuf::from("/tmp/project.worktrees/retained"),
+                        branch: Some("agent/retained".into()),
+                        head: Some("a".repeat(40)),
+                        is_main: false,
+                        is_locked: false,
+                        is_prunable: false,
+                        owner: crate::WorkspaceInventoryOwner::Owned,
+                        target: Some(crate::WorkspacePruneTarget {
+                            repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                            worktree_root: PathBuf::from("/tmp/project.worktrees/retained"),
+                            workspace_id: "00000000-0000-4000-8000-000000000001".into(),
+                            creation_branch: "agent/retained".into(),
+                            base_ref: "refs/heads/main".into(),
+                            base_commit: "a".repeat(40),
+                            created_at_unix: 1_700_000_000,
+                            metadata_directory: PathBuf::from(
+                                "/tmp/project/.git/worktrees/retained",
+                            ),
+                            root_device: 1,
+                            root_inode: 2,
+                            metadata_device: 1,
+                            metadata_inode: 3,
+                            expected_head: "a".repeat(40),
+                        }),
+                        occupied_pane_ids: Vec::new(),
+                        protected_paths: Vec::new(),
+                        safe_blockers: Vec::new(),
+                        discard_blockers: Vec::new(),
+                        merge_target: Some("refs/heads/main".into()),
+                    }],
+                }),
+            },
+            ServerEvent::WorkspaceInventoryReported {
+                request_id: 83,
+                project: NodeId(1),
+                result: Err("ownership inspection unavailable".into()),
+            },
+            ServerEvent::WorkspacePruneCompleted {
+                request_id: 81,
+                project: NodeId(1),
+                target: crate::WorkspacePruneTarget {
+                    repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                    worktree_root: PathBuf::from("/tmp/project.worktrees/retained"),
+                    workspace_id: "00000000-0000-4000-8000-000000000001".into(),
+                    creation_branch: "agent/retained".into(),
+                    base_ref: "refs/heads/main".into(),
+                    base_commit: "a".repeat(40),
+                    created_at_unix: 1_700_000_000,
+                    metadata_directory: PathBuf::from("/tmp/project/.git/worktrees/retained"),
+                    root_device: 1,
+                    root_inode: 2,
+                    metadata_device: 1,
+                    metadata_inode: 3,
+                    expected_head: "a".repeat(40),
+                },
+                result: crate::WorkspacePruneResult {
+                    outcome: crate::WorkspacePruneOutcome::Uncertain,
+                    mutation_attempted: true,
+                    path_present: Some(false),
+                    registration_present: None,
+                    metadata_present: Some(true),
+                    branch_outcome: crate::WorkspacePruneBranchOutcome::Kept,
+                    reasons: vec!["inspect partial effects; do not retry automatically".into()],
+                },
+            },
+            ServerEvent::WorkspaceCloseOfferReported {
+                request_id: 86,
+                pane_id: NodeId(2),
+                can_offer: true,
+            },
+            ServerEvent::PaneDetectionEvidenceChanged {
+                pane_id: NodeId(2),
+                evidence: PaneDetectionEvidence {
+                    applied_status: PaneStatus::AgentWithGoal(
+                        AgentClass::Codex,
+                        AgentActivity::Idle,
+                        ilium_core::GoalState::Paused,
+                    ),
+                    identity: Some(DetectionReason {
+                        rule: "process name contains codex".into(),
+                        observed: Some("codex".into()),
+                        context: "PID 42 below pane shell".into(),
+                    }),
+                    activity: None,
+                    goal: Some(DetectionReason {
+                        rule: "rightmost Codex footer goal segment".into(),
+                        observed: Some("Goal paused (/goal resume)".into()),
+                        context: "same process".into(),
+                    }),
+                },
+            },
+            ServerEvent::PaneDetectedStateChanged {
+                pane_id: NodeId(2),
+                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                evidence: PaneDetectionEvidence {
+                    applied_status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                    identity: Some(DetectionReason {
+                        rule: "process signature codex".into(),
+                        observed: Some("codex".into()),
+                        context: "same live process".into(),
+                    }),
+                    activity: Some(DetectionReason {
+                        rule: "Codex live status".into(),
+                        observed: Some("Working for 2s".into()),
+                        context: "live turn".into(),
+                    }),
+                    goal: None,
+                },
+            },
+            ServerEvent::RepoFactsReported {
+                request_id: 60,
+                project: NodeId(1),
+                result: Ok(RepoFacts {
+                    repo_common_dir: PathBuf::from("/tmp/project/.git"),
+                    checkout_root: PathBuf::from("/tmp/project"),
+                    project_subpath: PathBuf::from("api"),
+                    current_branch: Some("main".to_string()),
+                    default_base_ref: "main".to_string(),
+                    default_base_commit: "a1b2c3".to_string(),
+                    local_branches: vec!["main".to_string()],
+                    worktrees: vec![WorkspaceWorktreeFact {
+                        path: PathBuf::from("/tmp/project.worktrees/agent-feature"),
+                        branch: Some("agent/feature".to_string()),
+                        created_by_ilium: true,
+                        is_dirty: false,
+                        occupied_pane_id: Some(NodeId(2)),
+                    }],
+                    source_dirty_count: 1,
+                    main_dirty_count: 1,
+                    has_gitmodules: true,
+                    git_version: WorkspaceGitVersion {
+                        major: 2,
+                        minor: 46,
+                        patch: 0,
+                    },
+                }),
+            },
+            ServerEvent::RepoFactsReported {
+                request_id: 61,
+                project: NodeId(1),
+                result: Err("not a Git repository".to_string()),
+            },
+            ServerEvent::WorkspaceCreateProgress {
+                request_id: 61,
+                stage: WorkspaceCreateStage::CreatingWorktree,
+            },
+            ServerEvent::WorkspaceCreateProgress {
+                request_id: 65,
+                stage: WorkspaceCreateStage::RunningSetup,
+            },
+            ServerEvent::WorkspaceCreated {
+                request_id: 61,
+                pane_id: NodeId(2),
+            },
+            ServerEvent::WorkspaceCreateFailed {
+                request_id: 62,
+                error: "branch already exists".to_string(),
+            },
+            ServerEvent::PaneGitStatusChanged {
+                pane_id: NodeId(2),
+                status: WorkspaceGitStatus {
+                    branch: Some("agent/feature".to_string()),
+                    detached: false,
+                    ahead: 1,
+                    behind: 0,
+                    staged: 2,
+                    modified: 1,
+                    untracked: 3,
+                    conflicted: 0,
+                    upstream: Some("origin/main".to_string()),
+                    last_commit_subject: Some("Add feature".to_string()),
+                    checked_at_unix_millis: 1_700_000_000_000,
+                    full_checked_at_unix_millis: Some(1_700_000_000_000),
+                    missing: false,
+                },
+            },
+            ServerEvent::WorkspaceRemoved {
+                request_id: 63,
+                pane_id: NodeId(2),
+            },
+            ServerEvent::WorkspaceRemovalBlocked {
+                request_id: 64,
+                pane_id: NodeId(2),
+                reasons: vec!["worktree has uncommitted changes".to_string()],
             },
         ]
     }
@@ -689,19 +1002,15 @@ mod tests {
         assert!(!submitted_key.is_high_frequency_diagnostic());
     }
 
-    /// The voice-text messages were appended after the goal messages, so a
-    /// peer built before them still decodes every earlier variant. bincode's
-    /// fixed-width encoding puts the variant index in the first four bytes.
+    /// The voice-text messages form one contiguous block of variants at the
+    /// end of each enum. bincode's fixed-width encoding puts the variant
+    /// index in the first four bytes.
     #[test]
-    fn voice_text_variants_are_appended_after_the_goal_variants() {
+    fn voice_text_variants_are_contiguous() {
         fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
             let bytes = bincode::serialize(value).expect("serializable");
             u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
         }
-        let goal_resume = variant_index(&ClientRequest::RequestPaneGoalResume {
-            request_id: 1,
-            pane_id: NodeId(2),
-        });
         let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);
         let submit = variant_index(&ClientRequest::SubmitVoiceText {
             request_id: 1,
@@ -715,16 +1024,8 @@ mod tests {
                 "",
             )),
         });
-        assert_eq!(
-            [register, submit, answer],
-            [goal_resume + 1, goal_resume + 2, goal_resume + 3]
-        );
+        assert_eq!([submit, answer], [register + 1, register + 2]);
 
-        let goal_event = variant_index(&ServerEvent::PaneGoalResumeRequested {
-            request_id: 1,
-            pane_id: NodeId(2),
-            result: Err((String::new(), None)),
-        });
         let offered = variant_index(&ServerEvent::VoiceTextOffered {
             request_id: 1,
             sentences: Vec::new(),
@@ -737,7 +1038,100 @@ mod tests {
                 "",
             )),
         });
-        assert_eq!([offered, result], [goal_event + 1, goal_event + 2]);
+        assert_eq!(result, offered + 1);
+    }
+
+    #[test]
+    fn workspace_variants_preserve_close_pane_wire_layout() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
+
+        assert_eq!(
+            bincode::serialize(&ClientRequest::ClosePane { pane_id: NodeId(2) })
+                .expect("serializable"),
+            [
+                2_u32.to_le_bytes().as_slice(),
+                2_u64.to_le_bytes().as_slice()
+            ]
+            .concat(),
+        );
+
+        let last_existing_request = variant_index(&ClientRequest::AnswerVoiceText {
+            request_id: 1,
+            result: Err(VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceOff,
+                "",
+            )),
+        });
+        let first_workspace_request = variant_index(&ClientRequest::QueryRepoFacts {
+            request_id: 2,
+            project: NodeId(1),
+        });
+        assert_eq!(first_workspace_request, last_existing_request + 1);
+
+        let last_existing_event = variant_index(&ServerEvent::VoiceTextResult {
+            request_id: 1,
+            result: Err(VoiceTextRejection::new(
+                VoiceTextRejectionCode::VoiceOff,
+                "",
+            )),
+        });
+        let first_workspace_event = variant_index(&ServerEvent::RepoFactsReported {
+            request_id: 2,
+            project: NodeId(1),
+            result: Err(String::new()),
+        });
+        assert_eq!(first_workspace_event, last_existing_event + 1);
+
+        let old_request_tail = variant_index(&ClientRequest::ClosePaneWithWorkspaceDisposition {
+            request_id: 70,
+            pane_id: NodeId(2),
+            disposition: crate::WorkspaceDisposition::Keep,
+        });
+        let inventory_request = variant_index(&ClientRequest::QueryWorkspaceInventory {
+            request_id: 71,
+            project: NodeId(1),
+        });
+        let prune_request = sample_client_requests()
+            .into_iter()
+            .find(|request| matches!(request, ClientRequest::PruneWorkspace { .. }))
+            .expect("prune request sample");
+        assert_eq!(inventory_request, old_request_tail + 1);
+        assert_eq!(variant_index(&prune_request), inventory_request + 1);
+        assert_eq!(
+            variant_index(&ClientRequest::QueryWorkspaceCloseOffer {
+                request_id: 72,
+                pane_id: NodeId(2)
+            }),
+            variant_index(&prune_request) + 1
+        );
+
+        let old_event_tail = variant_index(&ServerEvent::WorkspaceRemovalBlocked {
+            request_id: 70,
+            pane_id: NodeId(2),
+            reasons: Vec::new(),
+        });
+        let inventory_event = variant_index(&ServerEvent::WorkspaceInventoryReported {
+            request_id: 71,
+            project: NodeId(1),
+            result: Err(String::new()),
+        });
+        let prune_event = sample_server_events()
+            .into_iter()
+            .find(|event| matches!(event, ServerEvent::WorkspacePruneCompleted { .. }))
+            .expect("prune event sample");
+        assert_eq!(inventory_event, old_event_tail + 1);
+        assert_eq!(variant_index(&prune_event), inventory_event + 1);
+        assert_eq!(
+            variant_index(&ServerEvent::WorkspaceCloseOfferReported {
+                request_id: 72,
+                pane_id: NodeId(2),
+                can_offer: false
+            }),
+            variant_index(&prune_event) + 1
+        );
     }
 
     #[tokio::test]

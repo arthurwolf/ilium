@@ -27,6 +27,14 @@ enum SelectionReconciliation {
 /// there is one. State is always applied before the occurrence is returned.
 pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
     match event {
+        ServerEvent::PaneStateSnapshot {
+            tree,
+            detection_evidence,
+        } => {
+            apply_tree_snapshot(app, tree);
+            app.pane_detection_evidence = detection_evidence.into_iter().collect();
+            None
+        }
         ServerEvent::TreeSnapshot(tree) => {
             apply_tree_snapshot(app, tree);
             None
@@ -85,6 +93,25 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        ServerEvent::PaneDetectedStateChanged {
+            pane_id,
+            status,
+            evidence,
+        } => {
+            let matches_status = evidence.applied_status == status;
+            let occurrence = apply(app, ServerEvent::PaneStatusChanged { pane_id, status });
+            if matches_status
+                && app.tree.get(pane_id).is_some_and(|node| {
+                    matches!(&node.kind, NodeKind::Pane { status, .. } if status == &evidence.applied_status)
+                })
+            {
+                app.pane_detection_evidence.insert(pane_id, evidence);
+            } else {
+                app.pane_detection_evidence.remove(&pane_id);
+                tracing::warn!(?pane_id, "dropping mismatched detector provenance");
+            }
+            occurrence
+        }
         ServerEvent::PaneStatusChanged { pane_id, status } => {
             // Read before `status` moves into `set_pane_status` below. The
             // server already dedups identical consecutive statuses before
@@ -113,6 +140,13 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             // change that never actually happened.
             match app.tree.set_pane_status(pane_id, status) {
                 Ok(()) => {
+                    if app.pane_detection_evidence.get(&pane_id).is_some_and(|evidence| {
+                        app.tree.get(pane_id).is_some_and(|node| {
+                            matches!(&node.kind, NodeKind::Pane { status, .. } if status != &evidence.applied_status)
+                        })
+                    }) {
+                        app.pane_detection_evidence.remove(&pane_id);
+                    }
                     // The common path a pane first becomes a detected agent:
                     // one incremental `PaneStatusChanged`, not a full
                     // `TreeSnapshot`. Latching and resizing here (not only in
@@ -154,7 +188,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                             }
                             NodeKind::Container(_) | NodeKind::Folder { .. } => None,
                         })
-                        .map(event_for_sound);
+                        .and_then(event_for_sound);
                     lifecycle_event
                         .or_else(|| {
                             (became_agent && app.agent_session_ids.contains_key(&pane_id))
@@ -370,6 +404,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             cache.log.merge_synced_entry(entry);
             None
         }
+        ServerEvent::PaneDetectionEvidenceChanged { pane_id, evidence } => {
+            if app.tree.get(pane_id).is_some_and(|node| {
+                matches!(&node.kind, NodeKind::Pane { status, .. } if status == &evidence.applied_status)
+            }) {
+                app.pane_detection_evidence.insert(pane_id, evidence);
+            }
+            None
+        }
         ServerEvent::NodeActivityChanged {
             node_id,
             activity_revision,
@@ -441,12 +483,69 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         | ServerEvent::ProgressMonitorSetCompleted { .. }
         | ServerEvent::ProgressMonitorStatusReported { .. }
         | ServerEvent::ProgressMonitorCleared { .. }
-        | ServerEvent::PaneGoalStatusReported { .. }
-        | ServerEvent::PaneGoalResumeRequested { .. }
         | ServerEvent::VoiceTextResult { .. } => {
-            // These request-correlated replies are consumed by one-shot CLI
-            // connections. An attached TUI may observe a broadcast from an
-            // older server, but it has no local lifecycle state to update.
+            // These replies have no attached-client presentation state yet.
+            None
+        }
+        ServerEvent::PaneGitStatusChanged { pane_id, status } => {
+            app.workspace_git_statuses.insert(pane_id, status);
+            None
+        }
+        ServerEvent::WorkspaceRemoved { pane_id, .. } => {
+            app.workspace_git_statuses.remove(&pane_id);
+            app.status_message = Some("Worktree removed".to_string());
+            None
+        }
+        ServerEvent::RepoFactsReported {
+            request_id,
+            project,
+            result,
+        } => {
+            app.receive_repo_facts(request_id, project, result);
+            None
+        }
+        ServerEvent::WorkspaceCreateProgress { request_id, stage } => {
+            app.receive_workspace_create_progress(request_id, stage);
+            None
+        }
+        ServerEvent::WorkspaceCreated {
+            request_id,
+            pane_id,
+        } => {
+            app.receive_workspace_created(request_id, pane_id);
+            None
+        }
+        ServerEvent::WorkspaceCreateFailed { request_id, error } => {
+            app.receive_workspace_create_failed(request_id, error);
+            None
+        }
+        ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
+            app.status_message = Some(format!("Worktree retained: {}", reasons.join("; ")));
+            None
+        }
+        ServerEvent::WorkspaceInventoryReported {
+            request_id,
+            project,
+            result,
+        } => {
+            app.receive_worktree_inventory(request_id, project, result);
+            None
+        }
+        ServerEvent::WorkspacePruneCompleted {
+            request_id,
+            project,
+            target,
+            result,
+        } => {
+            app.receive_worktree_prune(request_id, project, target, result);
+            None
+        }
+        ServerEvent::WorkspaceCloseOfferReported {
+            request_id,
+            pane_id,
+            can_offer,
+        } => {
+            app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
         ServerEvent::VoiceTextOffered {
@@ -563,6 +662,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.pending_manual_retitles
         .retain(|pane_id| live_pane_ids.contains(pane_id));
     app.agent_debug_logs
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.pane_detection_evidence
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     // Same idea as the pane-keyed caches above, but keyed by project Group
     // id: a project removed from the tree must not leave its restructure
@@ -808,6 +909,112 @@ mod tests {
 
     fn app() -> App {
         App::new("test".to_string(), std::env::temp_dir())
+    }
+
+    #[test]
+    fn pane_state_snapshot_replaces_same_status_detector_evidence() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let status = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
+        tree.set_pane_status(pane_id, status.clone()).unwrap();
+        let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
+            applied_status: status.clone(),
+            identity: Some(ilium_ipc::DetectionReason {
+                rule: rule.to_string(),
+                observed: Some("codex".to_string()),
+                context: "same process".to_string(),
+            }),
+            activity: None,
+            goal: None,
+        };
+        apply(
+            &mut app,
+            ServerEvent::PaneStateSnapshot {
+                tree: tree.clone(),
+                detection_evidence: vec![(pane_id, evidence("old process"))],
+            },
+        );
+        apply(
+            &mut app,
+            ServerEvent::PaneStateSnapshot {
+                tree: tree.clone(),
+                detection_evidence: vec![(pane_id, evidence("new process"))],
+            },
+        );
+        assert_eq!(
+            app.pane_detection_evidence[&pane_id]
+                .identity
+                .as_ref()
+                .unwrap()
+                .rule,
+            "new process"
+        );
+        apply(
+            &mut app,
+            ServerEvent::PaneStateSnapshot {
+                tree,
+                detection_evidence: Vec::new(),
+            },
+        );
+        assert!(!app.pane_detection_evidence.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn live_detected_status_and_why_apply_as_one_event() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+        let status = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working);
+        let evidence = ilium_ipc::PaneDetectionEvidence {
+            applied_status: status.clone(),
+            identity: Some(ilium_ipc::DetectionReason {
+                rule: "exact codex process".to_string(),
+                observed: Some("codex".to_string()),
+                context: "current process".to_string(),
+            }),
+            activity: None,
+            goal: None,
+        };
+        apply(
+            &mut app,
+            ServerEvent::PaneDetectedStateChanged {
+                pane_id,
+                status: status.clone(),
+                evidence: evidence.clone(),
+            },
+        );
+        assert!(
+            matches!(&app.tree.get(pane_id).unwrap().kind, NodeKind::Pane { status: current, .. } if current == &status)
+        );
+        assert_eq!(
+            app.pane_detection_evidence[&pane_id]
+                .identity
+                .as_ref()
+                .unwrap()
+                .rule,
+            "exact codex process"
+        );
+        apply(
+            &mut app,
+            ServerEvent::PaneStatusChanged {
+                pane_id,
+                status: PaneStatus::PlainShell,
+            },
+        );
+        assert!(!app.pane_detection_evidence.contains_key(&pane_id));
+        apply(
+            &mut app,
+            ServerEvent::PaneDetectionEvidenceChanged { pane_id, evidence },
+        );
+        assert!(!app.pane_detection_evidence.contains_key(&pane_id));
     }
 
     fn debug_entry(sequence: u64, summary: &str) -> AgentDebugEntry {

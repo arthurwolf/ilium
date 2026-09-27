@@ -187,6 +187,51 @@ That attaches to (or creates) this project's `default` session. Then:
 
 Start an agent by opening a terminal and running `claude` or `codex` in it — ilium notices on its own, no configuration needed. The tree's right-click menu also has one-click entries for launching each supported agent.
 
+### Agents in Git worktrees
+
+Use the agent button in the tree footer or a project's right-click menu to
+start Claude Code, Codex, or Antigravity on a new branch in its own Git
+worktree. The form previews the branch, base, and checkout location before
+creation. You can also choose an existing linked worktree. Its pane retains
+that directory across detach and restore, and the branch appears on a second
+line in the tree. Hover the branch to refresh and inspect Git status.
+Git runs the repository's checkout hooks and filters when it creates the
+worktree. Repositories using submodules or Git LFS may need an additional
+post-create command, configurable in **Settings > Git**.
+On Linux, a configured setup command runs after copied worktree files are
+ready and before the agent starts. The CLI worktree command uses the same
+saved setting. A nonblank setup command is unavailable on other platforms;
+Ilium rejects creation there before changing Git.
+If creation reports a retained worktree, inspect the reported path before
+removing it with Git; setup or checkout hooks may have written files there.
+
+For scripts, start a new branch without opening the TUI:
+
+```sh
+ilium new-pane --worktree --branch agent/fix-login --base main -- codex
+```
+
+The command emits JSONL progress and a final result with the pane and
+worktree path. Omit `--base` to use the repository's default base. Worktrees
+that Ilium created can be removed from the pane's **Worktree** menu after
+the server checks the registered path, running processes, and local files.
+Opening an existing worktree does not transfer ownership to Ilium.
+Use **Manage worktrees…** from the project menu to inspect registered
+worktrees, see why a checkout cannot be removed, and remove a retained Ilium
+checkout. Safe removal keeps the branch by default. Discarding files requires
+typing the checkout's full path; branch deletion is a separate choice and
+only succeeds when Git accepts a safe delete. Foreign worktrees remain listed
+but cannot be removed by Ilium.
+
+**Settings > Git** can offer removal when an agent pane closes. Ilium shows
+the offer only after it verifies the worktree is clean, its branch is merged,
+and no other pane or unresolved custody ticket claims that directory. Choosing
+No keeps the checkout and branch. A blocked or uncertain removal leaves the
+checkout for manual inspection. Older Ilium ownership markers without process
+custody information also remain protected: Ilium refuses new terminals there
+and automatic removal. Inspect those exact Git worktree registrations and
+files manually before removing them outside Ilium.
+
 ### CLI
 
 | Command | What it does |
@@ -196,6 +241,7 @@ Start an agent by opening a terminal and running `claude` or `codex` in it — i
 | `ilium ls` | List this project's sessions and whether each is running |
 | `ilium kill-session <name>` | Gracefully end a session and all its panes |
 | `ilium new-pane --session <name> -- <cmd>` | Add a pane running `<cmd>` without attaching a TUI |
+| `ilium new-pane --worktree --branch <name> [--base <ref>] -- codex` | Start a supported agent in a new Git worktree |
 | `ilium chat …` | File-backed room so agents in a project can coordinate |
 
 Useful flags: `--cwd <dir>` targets another project directory, `--restart-server` replaces the running server while keeping the session snapshot (use after installing a new build), and `--reset-session` deletes this project's snapshot and starts empty.
@@ -266,6 +312,7 @@ Config lives at `~/.config/ilium/config.toml` and most of it is editable live fr
 | `[inference]` | Provider and model for optional LLM-assisted naming |
 | `[http_api]` | `port` for the loopback automation listener (default `8872`) |
 | `[debug]` | `file_logging_enabled` — off by default |
+| `[git]` | Agent worktree defaults: where to start, branch prefix, checkout location, base, branch-line visibility, setup command, and close policy |
 
 > **Note on the loopback HTTP API.** Each server binds `127.0.0.1:<port>` and serves `POST /create_agent`, which spawns an agent with a given prompt. It is bound to loopback and never a public interface, but it is **unauthenticated**, so any process running as your user can drive it. Change `[http_api].port` per project if you run several sessions at once — a server that cannot bind its port logs the failure and carries on without the API.
 
@@ -295,31 +342,8 @@ that point the agent must not poll: the detached Ilium server is the sole
 recurring poller. It keeps task failure separate from probe failure, displays a
 sticky terminal result, and submits that result to the agent as a message once
 its composer is ready, so the agent learns when the task succeeds or fails
-without polling. Progress monitoring never touches an agent's `/goal`: it does
-not pause, resume, or mention it.
-
-Ilium never pauses or resumes a Codex `/goal` by itself. A paused goal belongs
-to the agent or to you, for example one paused by an Esc interrupt.
-`ilium goal status` reports whether the pane's goal is paused and who may
-resume it. `ilium goal resume` asks Ilium to submit `/goal resume` after the
-agent's current turn ends. Ilium refuses the request when you typed
-`/goal pause` yourself.
-
-`ilium goal stop-hook --provider claude|codex` is a Stop hook for Claude Code
-and Codex:
-- It blocks the stop once when the goal is paused and resumable. The agent then
-  resumes it, or ends with `ACTION NEEDED: type /goal resume`.
-- It shows you a reminder when the goal waits on you.
-- Outside an Ilium pane it does nothing.
-
-A paused goal can stay resumable while the agent sits idle at an empty
-composer, even though you did not pause it. After five
-minutes, Ilium sends the agent one reminder for that pause. The agent then
-resumes the goal or ends with the ACTION NEEDED line. Ilium never resumes such
-a goal itself.
-
-Claude Code has no `/goal resume`. A paused Claude Code goal continues when a
-message is sent, so the hook reports it as unsupported and allows the stop.
+without polling. Ilium only displays an agent's `/goal` state and never pauses, resumes,
+or otherwise controls it; progress monitoring does not mention `/goal` either.
 
 ### Optional LLM features
 

@@ -2,8 +2,8 @@
 //!
 //! Provider layouts stay out of the terminal menu: Claude's project slug is
 //! lossy and Codex's date directory cannot be reconstructed from an ID.
-//! `TranscriptLocator` verifies the transcript's embedded identity and project
-//! before this module exposes a paste-ready path.
+//! `TranscriptLocator` verifies the transcript's embedded identity and launch
+//! directory before this module exposes a paste-ready path.
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ use ilium_core::AgentClass;
 /// offer a JSONL history-file path.
 pub fn verified_jsonl_history_path(
     home_dir: &Path,
-    project_path: &Path,
+    pane_cwd: &Path,
     agent_class: &AgentClass,
     session_id: &str,
 ) -> Option<PathBuf> {
@@ -25,7 +25,7 @@ pub fn verified_jsonl_history_path(
         return None;
     }
 
-    let path = TranscriptLocator::new(home_dir, project_path)
+    let path = TranscriptLocator::new(home_dir, pane_cwd)
         .transcript_for_session(agent_class, session_id)?
         .path;
 
@@ -112,6 +112,24 @@ mod tests {
                 codex_session_id,
             ),
             Some(codex_path)
+        );
+    }
+
+    #[test]
+    fn worktree_history_requires_the_panes_launch_cwd() {
+        let home = tempfile::tempdir().unwrap();
+        let project_cwd = Path::new("/work/history-path-test");
+        let worktree_cwd = Path::new("/work/history-path-test.worktrees/agent-task");
+        let session_id = "44444444-4444-4444-8444-444444444444";
+        let transcript_path = write_codex_transcript(home.path(), worktree_cwd, session_id);
+
+        assert_eq!(
+            verified_jsonl_history_path(home.path(), worktree_cwd, &AgentClass::Codex, session_id),
+            Some(transcript_path)
+        );
+        assert_eq!(
+            verified_jsonl_history_path(home.path(), project_cwd, &AgentClass::Codex, session_id),
+            None
         );
     }
 

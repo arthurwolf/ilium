@@ -1091,10 +1091,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
-    // Settings opens on User Interface. Eight real Tab key events reach the
+    // Settings opens on User Interface. Nine real Tab key events reach the
     // Voice control tab in the registry order, proving the feature is wired
     // into the same navigable settings surface as every established tab.
-    tui.write(b"\t\t\t\t\t\t\t\t")
+    tui.write(b"\t\t\t\t\t\t\t\t\t")
         .expect("navigating to Voice control settings");
     let voice_settings_shown = wait_until(
         || {
@@ -1599,7 +1599,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // The Kanban Board tab owns card compactness and column sizing
     // independently from general appearance. Prove both defaults, live
     // adjustment, and isolated persistence before continuing to Sound.
-    tui.write(b"\t\t\t\t")
+    tui.write(b"\t\t\t\t\t")
         .expect("switching to the Kanban Board settings tab");
     assert!(
         wait_until(
@@ -5346,4 +5346,363 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
         tui.kill().expect("force-kill stats-popover TUI");
     }
     assert!(exited, "stats-popover TUI did not exit after cleanup");
+}
+
+/// Drives all three worktree launch affordances through a real PTY, while
+/// stopping before provider launch so no installed agent CLI is involved.
+#[cfg(unix)]
+#[tokio::test]
+async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_input() {
+    let temp_root = tempfile::tempdir().expect("create isolated root");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+    seed_keyboard_config(&xdg);
+    update_isolated_ui_settings(&xdg, |ui| {
+        ui.icons.set(
+            ilium_client::icon_settings::IconTarget::Claude,
+            "🦀".to_string(),
+        );
+    });
+    let project_dir = temp_root.path().join("worktree-project");
+    std::fs::create_dir_all(&project_dir).expect("create project");
+    seed_project_config(&xdg, &project_dir);
+    let run_git = |arguments: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(arguments)
+            .current_dir(&project_dir)
+            .output()
+            .expect("run isolated git command");
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run_git(&["init", "-q", "-b", "main"]);
+    run_git(&["config", "user.name", "Ilium Test"]);
+    run_git(&["config", "user.email", "ilium-test@example.invalid"]);
+    std::fs::write(project_dir.join("README.md"), "isolated worktree UI test\n")
+        .expect("write Git fixture");
+    std::fs::write(project_dir.join(".gitmodules"), "").expect("write submodule fixture");
+    run_git(&["add", "README.md", ".gitmodules", ".ilium/config.yaml"]);
+    run_git(&["commit", "-qm", "baseline"]);
+    let fake_bin = temp_root.path().join("fake-bin");
+    std::fs::create_dir_all(&fake_bin).expect("create fake provider directory");
+    let fake_codex = fake_bin.join("codex");
+    std::fs::write(&fake_codex, "#!/bin/sh\nsleep 30\n").expect("write fake codex");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake codex executable");
+    let provider_path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    let new_pane_output = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
+    assert!(new_pane_output.status.success(), "create isolated pane");
+    let attach_command = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
+        .arg("--restart-server")
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string())
+        .env("PATH", provider_path);
+    let attach_command = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach_command, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach_command).expect("attach real Ilium TUI");
+    assert!(
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await,
+        "project did not render: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(b"\x02W").expect("open worktree dialog by leader");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("New agent in a worktree")
+                    && screen.contains("Creates")
+                    && screen.contains("This repo has submodules")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "leader dialog or repository facts did not render: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"fix login").expect("type a prompt into dialog");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("agent/fix-login"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "prompt did not update the automatic branch: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b").expect("cancel leader dialog");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("New agent in a worktree"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "leader dialog did not close: {:?}",
+        tui.screen_text()
+    );
+
+    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    tui.write(&sgr_mouse_down(2, 8, default_row))
+        .expect("open tree context menu");
+    tui.write(&sgr_mouse_release(2, 8, default_row))
+        .expect("release tree context menu click");
+    let agent_row = wait_until(
+        || tui.screen_text().contains("New Claude agent"),
+        WAIT_TIMEOUT,
+    )
+    .await;
+    assert!(agent_row, "agent menu row missing: {:?}", tui.screen_text());
+    let agent_row = tui.with_screen(|screen| rows_containing(screen, "New Claude agent"))[0];
+    let agent_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, agent_row, "New Claude agent"))
+        .expect("agent menu label column");
+    tui.write(&sgr_mouse_down(0, agent_column, agent_row))
+        .expect("open agent submenu");
+    tui.write(&sgr_mouse_up(agent_column, agent_row))
+        .expect("release agent submenu click");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("In new worktree"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "agent submenu missing: {:?}",
+        tui.screen_text()
+    );
+    let new_row = tui.with_screen(|screen| rows_containing(screen, "In new worktree"))[0];
+    let new_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, new_row, "In new worktree"))
+        .expect("new-worktree submenu column");
+    assert!(
+        wait_until(
+            || {
+                if tui.screen_text().contains("New agent in a worktree") {
+                    return true;
+                }
+                tui.write(&sgr_mouse_down(0, new_column, new_row))
+                    .expect("click new worktree menu item");
+                tui.write(&sgr_mouse_up(new_column, new_row))
+                    .expect("release new worktree menu item");
+                false
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "context menu did not open dialog: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b").expect("cancel context dialog");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("New agent in a worktree"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "context dialog did not close: {:?}",
+        tui.screen_text()
+    );
+
+    tui.write(b"\x02t")
+        .expect("expand sidebar for footer icons");
+    assert!(
+        wait_until(|| tui.screen_text().contains("🦀"), WAIT_TIMEOUT).await,
+        "Claude footer icon missing: {:?}",
+        tui.screen_text()
+    );
+    let icon_row = tui.with_screen(|screen| rows_containing(screen, "🦀"))[0];
+    let icon_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, icon_row, "🦀"))
+        .expect("Claude icon column");
+    tui.write(&sgr_mouse_move(icon_column, icon_row))
+        .expect("hover Claude footer icon");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Click icon: new Claude here"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "footer popover did not render: {:?}",
+        tui.screen_text()
+    );
+    let worktree_row = tui.with_screen(|screen| rows_containing(screen, "[Worktree"))[0];
+    let worktree_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, worktree_row, "[Worktree"))
+        .expect("popover worktree choice column");
+    assert!(
+        wait_until(
+            || {
+                if tui.screen_text().contains("New agent in a worktree") {
+                    return true;
+                }
+                tui.write(&sgr_mouse_down(0, worktree_column, worktree_row))
+                    .expect("click popover worktree choice");
+                tui.write(&sgr_mouse_up(worktree_column, worktree_row))
+                    .expect("release popover choice");
+                false
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "footer popover did not open dialog: {:?}",
+        tui.screen_text()
+    );
+    assert!(
+        wait_until(|| tui.screen_text().contains("Creates"), WAIT_TIMEOUT).await,
+        "repository facts missing from popover dialog: {:?}",
+        tui.screen_text()
+    );
+    let codex_row = tui.with_screen(|screen| rows_containing(screen, "Codex"))[0];
+    let codex_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, codex_row, "Codex"))
+        .expect("Codex selector column");
+    tui.write(&sgr_mouse_down(0, codex_column, codex_row))
+        .expect("select fake Codex provider");
+    tui.write(&sgr_mouse_up(codex_column, codex_row))
+        .expect("release provider selector");
+    assert!(
+        wait_until(|| tui.screen_text().contains("[Codex]"), WAIT_TIMEOUT).await,
+        "Codex provider was not selected: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\r").expect("submit worktree agent dialog");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("New agent in a worktree"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "worktree creation did not complete: {:?}",
+        tui.screen_text()
+    );
+    let worktree_path = temp_root
+        .path()
+        .join("worktree-project.worktrees/agent-task");
+    assert!(
+        worktree_path.is_dir(),
+        "dialog did not create expected isolated worktree at {}",
+        worktree_path.display()
+    );
+    assert!(
+        wait_until(|| tui.screen_text().contains("🌿 agent/task"), WAIT_TIMEOUT).await,
+        "worktree branch line did not render: {:?}",
+        tui.screen_text()
+    );
+    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
+    tui.write(&sgr_mouse_down(2, 8, branch_row))
+        .expect("open worktree pane context menu");
+    tui.write(&sgr_mouse_release(2, 8, branch_row))
+        .expect("release worktree pane context click");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Worktree  ▸"), WAIT_TIMEOUT).await,
+        "worktree context entry missing: {:?}",
+        tui.screen_text()
+    );
+
+    let manager_row = tui.with_screen(|screen| rows_containing(screen, "Manage worktrees…"))[0];
+    let manager_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, manager_row, "Manage worktrees…"))
+        .expect("worktree manager menu column");
+    tui.write(&sgr_mouse_down(0, manager_column, manager_row))
+        .expect("open worktree manager");
+    tui.write(&sgr_mouse_up(manager_column, manager_row))
+        .expect("release worktree manager click");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("registered worktrees"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "worktree inventory did not render: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b").expect("close worktree manager");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("registered worktrees"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "worktree manager did not close: {:?}",
+        tui.screen_text()
+    );
+    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
+    tui.write(&sgr_mouse_down(2, 8, branch_row))
+        .expect("reopen worktree pane context menu");
+    tui.write(&sgr_mouse_release(2, 8, branch_row))
+        .expect("release reopened worktree pane context click");
+    assert!(
+        wait_until(|| tui.screen_text().contains("Settings…"), WAIT_TIMEOUT).await,
+        "worktree context menu did not reopen: {:?}",
+        tui.screen_text()
+    );
+    let settings_row = tui.with_screen(|screen| rows_containing(screen, "Settings…"))[0];
+    let settings_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, settings_row, "Settings…"))
+        .expect("worktree context menu Settings column");
+    tui.write(&sgr_mouse_down(0, settings_column, settings_row))
+        .expect("open Settings from worktree context menu");
+    tui.write(&sgr_mouse_up(settings_column, settings_row))
+        .expect("release worktree context menu Settings click");
+    assert!(
+        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        "Settings did not open: {:?}",
+        tui.screen_text()
+    );
+    for _ in 0..6 {
+        tui.write(b"\t").expect("advance to Git settings tab");
+    }
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Default where") && screen.contains("Branch prefix")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Git settings tab did not render: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"l").expect("change default Git destination");
+    assert!(
+        wait_until(
+            || {
+                ilium_client::config::load(&xdg.ilium_config_dir).is_ok_and(|config| {
+                    config.git.default_where == ilium_client::config::GitDefaultWhere::NewWorktree
+                })
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "Git setting did not persist from the rendered tab: {:?}",
+        tui.screen_text()
+    );
+
+    let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(kill_output.status.success(), "kill isolated session");
+    cleanup_guard.already_cleaned_up = true;
+    let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    if !exited {
+        tui.kill().expect("force-kill isolated worktree TUI");
+    }
+    assert!(exited, "worktree TUI did not exit after cleanup");
 }

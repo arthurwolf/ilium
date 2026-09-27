@@ -63,7 +63,7 @@ const SNAPSHOT_DEBOUNCE_INTERVAL: Duration = Duration::from_millis(750);
 /// currently enforced on load -- see `workspace_file::CURRENT_VERSION`'s
 /// identical comment for why that's an acceptable, deliberate choice for a
 /// best-effort recovery file.
-const CURRENT_SNAPSHOT_VERSION: u32 = 2;
+const CURRENT_SNAPSHOT_VERSION: u32 = 3;
 
 /// Project-local save format written by the single-process precursor. It is
 /// intentionally defined at the server persistence boundary: importing it is
@@ -126,6 +126,16 @@ pub struct SessionSnapshot {
     /// boundary. Older snapshots default to no registrations.
     #[serde(default)]
     pub(crate) progress_monitors: Vec<PersistedProgressMonitor>,
+    #[serde(default)]
+    pub(crate) workspace_close_preferences: Vec<PersistedWorkspaceClosePreference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PersistedWorkspaceClosePreference {
+    pub pane_id: NodeId,
+    pub workspace_id: Option<String>,
+    pub worktree_root: PathBuf,
+    pub policy: ilium_ipc::WorkspaceClosePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,6 +158,7 @@ pub(crate) enum PersistedProgressDeliveryState {
     Attempted,
     DeliveredToPty,
     Uncertain,
+    NotDeliverable,
 }
 
 impl PersistedProgressDeliveryState {
@@ -283,11 +294,14 @@ fn normalize_agent_resumes(
         let Some(binding) = persisted_resume_binding(command) else {
             continue;
         };
-        let project_cwd = snapshot
-            .tree
-            .project_path_for(pane.node_id)
-            .unwrap_or(session_cwd);
-        let locator = TranscriptLocator::new(home, project_cwd);
+        let pane_cwd = snapshot.tree.pane_cwd(pane.node_id).unwrap_or(session_cwd);
+        if snapshot.tree.pane_workspace(pane.node_id).is_some() && !pane_cwd.is_dir() {
+            // Restore will quarantine this pane in a project-root shell. Do
+            // not erase its original resume command or authored title merely
+            // because the saved worktree cannot currently be inspected.
+            continue;
+        }
+        let locator = TranscriptLocator::new(home, pane_cwd);
         let is_project_verified = locator
             .transcript_for_session(&binding.provider.class(), &binding.session_id)
             .is_some();
@@ -370,6 +384,7 @@ impl LegacyWorkspace {
             panes,
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         })
     }
 }
@@ -457,7 +472,7 @@ async fn build_snapshot_with_progress_override(
     state: &ServerState,
     progress_override: Option<&PersistedProgressMonitor>,
 ) -> SessionSnapshot {
-    let (tree, pane_snapshots, progress_monitors) = {
+    let (tree, pane_snapshots, progress_monitors, workspace_close_preferences) = {
         let tree = state.tree.read().await;
         let panes = state.panes.read().await;
         let mut pane_snapshots = Vec::with_capacity(panes.len());
@@ -468,7 +483,8 @@ async fn build_snapshot_with_progress_override(
                     let progress_monitor = progress_override
                         .filter(|progress_monitor| progress_monitor.pane_id == *node_id)
                         .cloned()
-                        .or_else(|| runtime.progress_monitor_snapshot(*node_id));
+                        .or_else(|| runtime.progress_monitor_snapshot(*node_id))
+                        .or_else(|| runtime.deferred_progress_monitor.clone());
                     if let Some(progress_monitor) = progress_monitor {
                         progress_monitors.push(progress_monitor);
                     }
@@ -481,7 +497,29 @@ async fn build_snapshot_with_progress_override(
                 kind,
             });
         }
-        (tree.clone(), pane_snapshots, progress_monitors)
+        let mut workspace_close_preferences = state
+            .workspace_close_preferences
+            .read()
+            .await
+            .values()
+            .filter(|preference| {
+                tree.pane_workspace(preference.pane_id)
+                    .is_some_and(|workspace| preference.matches_workspace(workspace))
+            })
+            .map(|preference| PersistedWorkspaceClosePreference {
+                pane_id: preference.pane_id,
+                workspace_id: preference.workspace_id.clone(),
+                worktree_root: preference.worktree_root.clone(),
+                policy: preference.policy,
+            })
+            .collect::<Vec<_>>();
+        workspace_close_preferences.sort_by_key(|preference| preference.pane_id.0);
+        (
+            tree.clone(),
+            pane_snapshots,
+            progress_monitors,
+            workspace_close_preferences,
+        )
     };
     let agent_debug_logs = state.agent_debug.snapshot().await;
     SessionSnapshot {
@@ -490,12 +528,16 @@ async fn build_snapshot_with_progress_override(
         panes: pane_snapshots,
         agent_debug_logs,
         progress_monitors,
+        workspace_close_preferences,
     }
 }
 
 /// Turns a freshly-launched agent command into its resume form once the
 /// detection loop has authoritatively discovered that CLI's session id.
 fn snapshot_terminal_origin(runtime: &crate::pane::TerminalPaneRuntime) -> TerminalOrigin {
+    if let Some(original) = &runtime.deferred_workspace_origin {
+        return original.clone();
+    }
     snapshot_origin_from_identity(
         &runtime.origin,
         runtime.session_id.as_deref(),
@@ -755,7 +797,8 @@ mod tests {
         PaneDebugLog,
     };
     use ilium_core::{
-        PaneContentKind, PaneProgress, ProgressTaskReport, ProgressTaskStatus, ROOT_ID,
+        PaneContentKind, PaneProgress, PaneWorkspace, ProgressTaskReport, ProgressTaskStatus,
+        ROOT_ID,
     };
 
     fn scratch_snapshot_path() -> PathBuf {
@@ -801,6 +844,7 @@ mod tests {
             ],
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         }
     }
 
@@ -910,6 +954,14 @@ mod tests {
         let mut snapshot = sample_snapshot();
         let pane_id = snapshot.panes[1].node_id;
         snapshot.tree.set_node_bookmarked(pane_id, true).unwrap();
+        snapshot
+            .workspace_close_preferences
+            .push(PersistedWorkspaceClosePreference {
+                pane_id,
+                workspace_id: Some("created-worktree".into()),
+                worktree_root: PathBuf::from("/tmp/created-worktree"),
+                policy: ilium_ipc::WorkspaceClosePolicy::OfferRemovalWhenSafe,
+            });
         let mut log = PaneDebugLog::default();
         let _ = log.append(
             1_700_000_000_000,
@@ -928,6 +980,20 @@ mod tests {
         let loaded = load_snapshot(&path).await.unwrap().expect("just wrote it");
 
         assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn snapshots_before_workspace_close_preferences_default_to_keep() {
+        let snapshot = sample_snapshot();
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        old_shape
+            .as_object_mut()
+            .expect("snapshot serializes as an object")
+            .remove("workspace_close_preferences");
+
+        let loaded: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+
+        assert!(loaded.workspace_close_preferences.is_empty());
     }
 
     #[test]
@@ -1051,6 +1117,7 @@ mod tests {
             PersistedProgressDeliveryState::Attempted,
             PersistedProgressDeliveryState::DeliveredToPty,
             PersistedProgressDeliveryState::Uncertain,
+            PersistedProgressDeliveryState::NotDeliverable,
         ] {
             assert!(!state.may_retry_after_restart(), "{state:?}");
         }
@@ -1215,6 +1282,53 @@ mod tests {
 
         assert_eq!(loaded, snapshot);
         assert_eq!(loaded.tree.scheduled_pane_inputs().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn workspace_cwd_and_creation_facts_survive_snapshot_round_trip() {
+        let path = scratch_snapshot_path();
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        let launch_cwd = PathBuf::from("/tmp/project.worktrees/agent-fix/src");
+        let workspace = PaneWorkspace {
+            workspace_id: Some("test-workspace".to_string()),
+            repo_common_dir: PathBuf::from("/tmp/project/.git"),
+            worktree_root: PathBuf::from("/tmp/project.worktrees/agent-fix"),
+            branch: "agent/fix".to_string(),
+            base_ref: "main".to_string(),
+            base_commit: "a".repeat(40),
+            created_by_ilium: true,
+            created_at_unix: 1_790_380_800,
+        };
+        snapshot
+            .tree
+            .set_pane_launch_cwd(pane_id, launch_cwd.clone())
+            .unwrap();
+        snapshot
+            .tree
+            .set_pane_workspace(pane_id, Some(workspace.clone()))
+            .unwrap();
+
+        write_snapshot_to(&path, &snapshot).await.unwrap();
+        let loaded = load_snapshot(&path).await.unwrap().unwrap();
+        assert_eq!(loaded.version, CURRENT_SNAPSHOT_VERSION);
+        assert_eq!(loaded.tree.pane_cwd(pane_id), Some(launch_cwd.as_path()));
+        assert_eq!(loaded.tree.pane_workspace(pane_id), Some(&workspace));
+        assert_eq!(loaded, snapshot);
+
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        if let serde_json::Value::Object(fields) = &mut old_shape["tree"]["nodes"] {
+            for node in fields.values_mut() {
+                if let Some(serde_json::Value::Object(pane_fields)) =
+                    node.get_mut("kind").and_then(|kind| kind.get_mut("Pane"))
+                {
+                    pane_fields.remove("launch_cwd");
+                    pane_fields.remove("workspace");
+                }
+            }
+        }
+        let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+        assert_eq!(legacy.tree.pane_workspace(pane_id), None);
     }
 
     #[test]
@@ -1557,6 +1671,49 @@ root:
     }
 
     #[test]
+    fn missing_worktree_keeps_the_original_resume_for_later_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = sample_snapshot();
+        let pane_id = snapshot.panes[1].node_id;
+        let worktree = directory.path().join("removed-worktree");
+        snapshot
+            .tree
+            .set_pane_launch_cwd(pane_id, worktree.clone())
+            .unwrap();
+        snapshot
+            .tree
+            .set_pane_workspace(
+                pane_id,
+                Some(ilium_core::PaneWorkspace {
+                    workspace_id: Some("missing-worktree".into()),
+                    repo_common_dir: directory.path().join("repo/.git"),
+                    worktree_root: worktree,
+                    branch: "agent/missing".into(),
+                    base_ref: "main".into(),
+                    base_commit: "0123456789012345678901234567890123456789".into(),
+                    created_by_ilium: true,
+                    created_at_unix: 1,
+                }),
+            )
+            .unwrap();
+        snapshot.panes[1].kind = PaneSnapshotKind::Terminal(TerminalOrigin::Command(
+            "codex resume 22222222-2222-4222-8222-222222222222".into(),
+        ));
+
+        assert!(!normalize_agent_resumes(
+            &mut snapshot,
+            directory.path(),
+            directory.path(),
+        ));
+        assert!(matches!(
+            &snapshot.panes[1].kind,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(command))
+                if command.starts_with("codex resume ")
+        ));
+        assert_eq!(snapshot.tree.get(pane_id).unwrap().name, "claude");
+    }
+
+    #[test]
     fn an_earlier_unverified_duplicate_does_not_block_a_later_verified_resume() {
         // Regression test: `normalize_agent_resumes` must only let a
         // *project-verified* session id occupy the "already claimed" slot.
@@ -1619,6 +1776,7 @@ root:
             ],
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
+            workspace_close_preferences: Vec::new(),
         };
 
         assert!(normalize_agent_resumes(

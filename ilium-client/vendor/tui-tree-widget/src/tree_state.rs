@@ -30,8 +30,9 @@ pub struct TreeState<Identifier> {
     pub(super) last_biggest_index: usize,
     /// All identifiers open on last render
     pub(super) last_identifiers: Vec<Vec<Identifier>>,
-    /// Index in `last_identifiers` rendered at `y` on the last render.
-    pub(super) last_rendered_identifiers: Vec<(u16, usize)>,
+    /// Rendered item starts and clipped heights, in screen coordinates.
+    pub(super) last_rendered_rows: Vec<(u16, u16, usize)>,
+    pub(super) last_item_heights: Vec<usize>,
 }
 
 impl<Identifier> Default for TreeState<Identifier> {
@@ -45,7 +46,8 @@ impl<Identifier> Default for TreeState<Identifier> {
             last_area: Rect::ZERO,
             last_biggest_index: 0,
             last_identifiers: Vec::new(),
-            last_rendered_identifiers: Vec::new(),
+            last_rendered_rows: Vec::new(),
+            last_item_heights: Vec::new(),
         }
     }
 }
@@ -57,6 +59,18 @@ where
     #[must_use]
     pub const fn get_offset(&self) -> usize {
         self.offset
+    }
+
+    /// Total terminal lines in the most recently flattened visible tree.
+    #[must_use]
+    pub fn total_line_count(&self) -> usize {
+        self.last_item_heights.iter().sum()
+    }
+
+    /// Terminal-line position of the first visible item.
+    #[must_use]
+    pub fn first_visible_line(&self) -> usize {
+        self.last_item_heights.iter().take(self.offset).sum()
     }
 
     #[must_use]
@@ -285,12 +299,30 @@ where
             return None;
         }
 
-        self.last_rendered_identifiers
+        self.last_rendered_rows
             .iter()
             .rev()
-            .find(|(y, _)| position.y >= *y)
-            .and_then(|(_, index)| self.last_identifiers.get(*index))
+            .find(|(y, height, _)| position.y >= *y && position.y < y.saturating_add(*height))
+            .and_then(|(_, _, index)| self.last_identifiers.get(*index))
             .map(Vec::as_slice)
+    }
+
+    /// The rows actually painted on the most recent render, including the
+    /// clipped last item when the viewport ends inside a multi-line item.
+    pub fn rendered_rows(&self) -> impl Iterator<Item = (&[Identifier], u16, u16)> + '_ {
+        self.last_rendered_rows
+            .iter()
+            .filter_map(|(y, height, index)| {
+                self.last_identifiers
+                    .get(*index)
+                    .map(|identifier| (identifier.as_slice(), *y, *height))
+            })
+    }
+
+    /// Restore a previously rendered item offset without treating it as a
+    /// number of screen lines. Used by temporary presentation renderers.
+    pub const fn set_item_offset(&mut self, offset: usize) {
+        self.offset = offset;
     }
 
     /// Select what was rendered at the given position on last render.
@@ -319,9 +351,18 @@ where
     ///
     /// Returns `true` when the scroll position changed.
     /// Returns `false` when the scrolling has reached the top.
-    pub const fn scroll_up(&mut self, lines: usize) -> bool {
+    pub fn scroll_up(&mut self, lines: usize) -> bool {
         let before = self.offset;
-        self.offset = self.offset.saturating_sub(lines);
+        let mut remaining = lines;
+        while self.offset > 0 && remaining > 0 {
+            self.offset -= 1;
+            remaining = remaining.saturating_sub(
+                self.last_item_heights
+                    .get(self.offset)
+                    .copied()
+                    .unwrap_or(1),
+            );
+        }
         before != self.offset
     }
 
@@ -331,10 +372,16 @@ where
     /// Returns `false` when the scrolling has reached the last [`TreeItem`].
     pub fn scroll_down(&mut self, lines: usize) -> bool {
         let before = self.offset;
-        self.offset = self
-            .offset
-            .saturating_add(lines)
-            .min(self.last_biggest_index);
+        let mut remaining = lines;
+        while self.offset < self.last_biggest_index && remaining > 0 {
+            remaining = remaining.saturating_sub(
+                self.last_item_heights
+                    .get(self.offset)
+                    .copied()
+                    .unwrap_or(1),
+            );
+            self.offset += 1;
+        }
         before != self.offset
     }
 

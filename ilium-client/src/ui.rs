@@ -7,6 +7,7 @@
 use std::time::Instant;
 
 use ilium_core::{AgentClass, AgentProvider, NodeId, NodeKind, PaneStatus, ROOT_ID};
+use ratatui::buffer::CellDiffOption;
 use ratatui::layout::{Alignment, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -21,6 +22,7 @@ use crate::app::{
     AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind,
     ContextMenu, CreateBoardState, CreateGroupState, CreateSplitMembersState,
     CreateSplitOrientationState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
+    SubmenuItemAction,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -38,7 +40,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_voice_control(frame, layout.voice_control_area, app);
     if app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
         draw_status_tooltip(frame, app);
+        draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
+        if let Some(popover) = &app.agent_popover {
+            if popover.is_visible(Instant::now()) {
+                if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
+                    crate::popover::render(frame, &geometry, popover, app.ui_settings.color_scheme);
+                }
+            }
+        }
     }
 
     // Every suspended parent draws before its child. This makes stack depth
@@ -48,23 +58,94 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_mode_overlay(frame, area, app, mode);
     }
     draw_mode_overlay(frame, area, app, &app.mode);
+    skip_vs16_continuation_cells(frame);
+}
+
+/// A VS16 glyph occupies two terminal cells. Ratatui's diff can emit its
+/// blank continuation at x+1 immediately after printing the wide glyph, while
+/// CrosstermBackend assumes the previous print advanced only one cell. That
+/// writes the blank at x+2 on terminals that honor the glyph's full width.
+/// The glyph itself paints the continuation cell; omit the duplicate write.
+fn skip_vs16_continuation_cells(frame: &mut Frame) {
+    let area = frame.area();
+    let buffer = frame.buffer_mut();
+    for row in area.top()..area.bottom() {
+        for column in area.left()..area.right().saturating_sub(1) {
+            let glyph = buffer[(column, row)].symbol();
+            if glyph.contains('\u{fe0f}') && UnicodeWidthStr::width(glyph) > 1 {
+                let trailing = &mut buffer[(column + 1, row)];
+                if trailing.symbol().trim().is_empty() {
+                    trailing.set_diff_option(CellDiffOption::Skip);
+                }
+            }
+        }
+    }
+}
+
+fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
+    let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
+        return;
+    };
+    let Some(workspace) = app.tree.pane_workspace(hit.id) else {
+        return;
+    };
+    let explanation = crate::status_icons::workspace_explanation(
+        workspace,
+        app.workspace_git_statuses.get(&hit.id),
+    );
+    let anchor = Position::new(app.layout.tree_area.x.saturating_add(2), hit.row);
+    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
 }
 
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
 /// re-projected from the current tree at draw time, so the popover can never
 /// describe a state the row no longer shows.
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
-    use crate::status_icons::{now_explanation, objective_explanation, StatusSlot};
+    use crate::status_icons::{
+        identity_explanation, now_explanation, objective_explanation, StatusSlot,
+    };
 
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
     };
-    let Some(NodeKind::Pane {
+    let Some(node) = app.tree.get(node_id) else {
+        return;
+    };
+    if slot == StatusSlot::Identity {
+        let structural = match &node.kind {
+            NodeKind::Container(container) => {
+                let (title, kind) = match &container.kind {
+                    ilium_core::ContainerKind::Project { .. } => ("Project", "project"),
+                    ilium_core::ContainerKind::Group => ("Group", "group"),
+                    ilium_core::ContainerKind::SplitView { .. } => ("Split view", "split view"),
+                };
+                Some((title, kind))
+            }
+            NodeKind::Folder { .. } => Some(("Folder", "folder")),
+            NodeKind::Pane { .. } => None,
+        };
+        if let Some((title, kind)) = structural {
+            let tooltip = crate::status_icons::TooltipContent {
+                title: title.to_string(),
+                body: format!(
+                    "{} is a {} entry in the saved tree.",
+                    crate::status_icons::safe_tooltip_text(&node.name),
+                    kind
+                ),
+                reason: Some(format!(
+                    "Why: the authoritative tree records this entry as a {kind}."
+                )),
+            };
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+            return;
+        }
+    }
+    let NodeKind::Pane {
         status,
         progress,
         scheduled_input,
         ..
-    }) = app.tree.get(node_id).map(|node| &node.kind)
+    } = &node.kind
     else {
         return;
     };
@@ -79,11 +160,86 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         shell_output,
     );
     let explanation = match slot {
+        StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
         StatusSlot::Now => now_explanation(signals.now),
     };
     if let Some(explanation) = explanation {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
+        let detection = app
+            .pane_detection_evidence
+            .get(&node_id)
+            .filter(|evidence| &evidence.applied_status == status);
+        let recorded_reason = |reason: Option<&ilium_ipc::DetectionReason>| {
+            reason.map(crate::status_icons::detection_reason_text)
+        };
+        let reason = match slot {
+            StatusSlot::Identity => recorded_reason(detection.and_then(|evidence| evidence.identity.as_ref()))
+                .or_else(|| Some("Why: this pane kind comes from the server's current tree status; the process classification evidence has not arrived yet.".to_string())),
+            StatusSlot::Objective => match signals.objective {
+                ilium_core::ObjectiveSignal::Goal(_) => recorded_reason(
+                    detection.and_then(|evidence| evidence.goal.as_ref()),
+                ).or_else(|| Some("Why: this goal phase is in the current server status; the confirming provider row is not available yet.".to_string())),
+                ilium_core::ObjectiveSignal::Task(_) => progress.as_deref().map(|progress| {
+                    format!(
+                        "Why: monitor #{} reported job «{}» as {:?} at {:.1}%; observation is {}. Report message «{}».{} Received at Unix millisecond {}.",
+                        progress.monitor_id,
+                        crate::status_icons::safe_tooltip_text(&progress.report.job_id),
+                        progress.report.status,
+                        progress.report.percent,
+                        match &progress.monitor_health {
+                            ilium_core::ProgressMonitorHealth::Healthy => "healthy",
+                            ilium_core::ProgressMonitorHealth::Degraded { .. } => "degraded",
+                            ilium_core::ProgressMonitorHealth::Failed { .. } => "failed",
+                        },
+                        crate::status_icons::safe_tooltip_text(&progress.report.message),
+                        progress.report.error.as_deref().map(|error| format!(
+                            " Report error «{}».",
+                            crate::status_icons::safe_tooltip_text(error)
+                        )).unwrap_or_default(),
+                        progress.last_observed_unix_millis,
+                    )
+                }),
+                ilium_core::ObjectiveSignal::ScheduledInput => scheduled_input.as_ref().map(|input| format!(
+                    "Why: the server-owned tree has an input scheduled for Unix millisecond {}; it will {}.",
+                    input.execute_at_unix_millis,
+                    if input.send_enter { "submit with Enter" } else { "type without Enter" },
+                )),
+                ilium_core::ObjectiveSignal::None => None,
+            },
+            StatusSlot::Now => match signals.now {
+                ilium_core::NowSignal::Parked => progress.as_deref().map(|progress| format!(
+                    "Why: the agent is idle while live monitor #{} watches job «{}»; the monitor suppresses the finished alert.",
+                    progress.monitor_id,
+                    crate::status_icons::safe_tooltip_text(&progress.report.job_id),
+                )),
+                ilium_core::NowSignal::ShellOutput(phase) => Some(format!(
+                    "Why: this client's visible terminal-cell tracker recorded recent output or accepted input; its current activity window is {phase:?}."
+                )),
+                ilium_core::NowSignal::FinishedUnread => recorded_reason(
+                    detection.and_then(|evidence| evidence.activity.as_ref()),
+                ).map(|reason| format!("{reason} The server retained this completed turn as unread until pane focus or input."))
+                    .or_else(|| Some("Why: the server recorded a completed turn that has not yet been acknowledged by pane focus or input.".to_string())),
+                ilium_core::NowSignal::NeedsApproval
+                | ilium_core::NowSignal::Working
+                | ilium_core::NowSignal::WaitingSubagents
+                | ilium_core::NowSignal::Settling
+                | ilium_core::NowSignal::Idle => recorded_reason(
+                    detection.and_then(|evidence| evidence.activity.as_ref()),
+                ).or_else(|| Some("Why: this is the server's current activity classification; the matching screen evidence has not arrived yet.".to_string())),
+                ilium_core::NowSignal::None => None,
+            },
+        }
+        .map(|reason| match slot {
+            StatusSlot::Objective => format!("{reason} Projection rule {}.", signals.objective_rule),
+            StatusSlot::Now => format!("{reason} Projection rule {}.", signals.now_rule),
+            StatusSlot::Identity => reason,
+        });
+        let tooltip = crate::status_icons::TooltipContent {
+            title: explanation.title.to_string(),
+            body: explanation.body.to_string(),
+            reason,
+        };
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
     }
 }
 
@@ -184,6 +340,9 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
             icons: &app.ui_settings.icons,
+            workspace_git_statuses: &app.workspace_git_statuses,
+            show_worktree_branch_line: app.git_settings.branch_line
+                != crate::config::GitBranchLine::Off,
             tree_order: app.ui_settings.tree_order,
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
@@ -254,6 +413,10 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
         Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu, &app.ui_settings),
         Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
+        Mode::CreateAgentWorkspace(state) => {
+            crate::worktree_dialog::draw_dialog(frame, area, state);
+        }
+        Mode::WorktreeManager(state) => crate::worktree_manager::render(frame, area, state),
         Mode::CreateGroup(state) => draw_create_group(frame, app, state),
         Mode::CreateSplitOrientation(state) => {
             draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
@@ -308,6 +471,9 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::ApiSettingPrompt(state) => {
             modal::render_text_prompt(frame, area, "HTTP API port", state, "Apply");
         }
+        Mode::GitSettingPrompt(field, state) => {
+            modal::render_text_prompt(frame, area, field.label(), state, "Apply");
+        }
         Mode::AgentSetupPathPrompt(feature, state) => {
             modal::render_text_prompt(
                 frame,
@@ -329,6 +495,31 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             modal::render_text_prompt(frame, area, "Save As", state, "Save");
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
+        Mode::WaitingWorkspaceCloseOffer { .. } => {
+            let popup = modal::centered_fixed_rect(56, 5, area);
+            frame.render_widget(Clear, popup);
+            frame.render_widget(
+                Paragraph::new("Checking whether this worktree can be removed…  Esc cancels")
+                    .block(theme::block(true).title(theme::chrome_title("Worktree close"))),
+                popup,
+            );
+        }
+        Mode::ConfirmWorkspaceCloseOffer(pane_id) => {
+            let message = app.tree.pane_workspace(*pane_id).map_or_else(
+                || "Keep this worktree?".to_string(),
+                |workspace| format!("Remove the clean, merged worktree at {} too? Enter keeps it.", workspace.worktree_root.display()),
+            );
+            modal::render_confirm(frame, area, "Remove worktree too?", &message,
+                modal::DialogActions::confirmation("Keep", modal::DialogButtonTone::Neutral, "Remove worktree", modal::DialogButtonTone::Danger));
+        }
+        Mode::ConfirmRemoveWorkspace(target) => {
+            let message = app.tree.pane_workspace(*target).map_or_else(
+                || "This pane has no worktree".to_string(),
+                |workspace| format!("Remove the worktree at {}? The server checks for changes and running processes before removal. The branch is kept.", workspace.worktree_root.display()),
+            );
+            modal::render_confirm(frame, area, "Remove worktree?", &message,
+                modal::DialogActions::confirmation("Keep", modal::DialogButtonTone::Neutral, "Remove", modal::DialogButtonTone::Danger));
+        }
         Mode::ConfirmSessionRecovery { pane_count } => modal::render_confirm(
             frame,
             area,
@@ -697,35 +888,45 @@ fn draw_context_menu(
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
 
-    let Some(submenu) = &menu.tree_order_submenu else {
+    let Some(submenu) = &menu.submenu else {
         return;
     };
-    let lines: Vec<Line> = crate::config::TreeOrder::ALL
+    let lines: Vec<Line> = submenu
+        .items
         .iter()
         .enumerate()
-        .map(|(index, tree_order)| {
-            let style = if index == submenu.selected_index {
+        .map(|(index, item)| {
+            let mut style = if index == submenu.selected_index {
                 Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else {
                 Style::new()
             };
-            let check = if *tree_order == current_tree_order {
-                "✓"
-            } else {
-                " "
+            if item.disabled_reason.is_some() {
+                style = style.fg(Color::Gray).add_modifier(Modifier::DIM);
+            }
+            let check = match item.action {
+                SubmenuItemAction::SetTreeOrder(tree_order) if tree_order == current_tree_order => {
+                    "✓"
+                }
+                _ => " ",
             };
             Line::from(Span::styled(
                 format!(
                     " {check}{} {}",
-                    context_menu_icon(ui, IconTarget::TopLevel),
-                    tree_order.label()
+                    context_menu_icon(ui, submenu.parent.icon_target()),
+                    item.label
                 ),
                 style,
             ))
         })
         .collect();
-    let widget =
-        Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title("Order by")));
+    let title = match submenu.parent {
+        crate::app::ContextMenuAction::OrderBy => "Order by".to_string(),
+        crate::app::ContextMenuAction::NewAgent(provider) => format!("New {}", provider.label()),
+        crate::app::ContextMenuAction::Worktree => "Worktree".to_string(),
+        _ => "Actions".to_string(),
+    };
+    let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(&title)));
     frame.render_widget(Clear, submenu.area);
     frame.render_widget(widget, submenu.area);
 }
@@ -1845,6 +2046,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
         Mode::ApiSettingPrompt(_) => "HTTP API PORT",
+        Mode::GitSettingPrompt(_, _) => "GIT SETTING",
         Mode::AgentSetupPathPrompt(_, _) => "AGENT SETUP FILE",
         Mode::AgentSetupPrompt(_) => "AGENT SETUP",
         Mode::VoicePromptEditor(_) => "VOICE PROMPT",
@@ -1865,6 +2067,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
+        Mode::CreateAgentWorkspace(..) => "CREATE AGENT WORKTREE",
+        Mode::WorktreeManager(..) => "WORKTREES",
+        Mode::WaitingWorkspaceCloseOffer { .. } => "CHECKING WORKTREE",
+        Mode::ConfirmWorkspaceCloseOffer(..) => "WORKTREE CLOSE",
         Mode::CreateGroup(_) => "NEW GROUP",
         Mode::CreateSplitOrientation(_) => "NEW SPLIT",
         Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES",
@@ -1875,6 +2081,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
+        Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
         // Unreachable in practice -- `draw` returns before this ever runs
@@ -2367,7 +2574,7 @@ mod tests {
         let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("context menu should be open");
         };
-        app.open_context_tree_order_submenu(&mut menu);
+        app.open_context_submenu(&mut menu, crate::app::ContextMenuAction::OrderBy);
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
 
         terminal

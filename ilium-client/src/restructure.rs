@@ -17,7 +17,7 @@
 //! from inside its own spawned closure.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use handlebars::Handlebars;
 use ilium_core::{
@@ -123,8 +123,8 @@ The prior answer was rejected by the local validator. Correct this specific issu
 
 /// One pane or folder's current identity and content, as sent to the LLM.
 /// `agent_lookup` is intentionally excluded from the rendered prompt
-/// (`#[serde(skip)]`) -- it is this module's own bookkeeping for
-/// `resolve_content_extracts`, not something the model needs to see.
+/// (`#[serde(skip)]`). It carries each agent's launch directory across the
+/// worker boundary so transcript verification uses that pane's cwd.
 #[derive(Debug, Clone, Serialize)]
 pub struct LeafContext {
     pub id: NodeId,
@@ -139,7 +139,7 @@ pub struct LeafContext {
     /// new visible work without putting disk I/O on the UI event loop.
     automatic_content_fingerprint: u64,
     #[serde(skip)]
-    agent_lookup: Option<(AgentClass, String)>,
+    agent_lookup: Option<(AgentClass, String, PathBuf)>,
 }
 
 /// Exact user-owned split layout captured beside the restructure's leaf
@@ -218,7 +218,13 @@ pub fn gather_leaf_contexts(
             ) if agent_session_ids.contains_key(&pane_id) => {
                 context.automatic_content_fingerprint =
                     stable_restructure_fingerprint(&view.with_screen(|screen| screen.contents()));
-                context.agent_lookup = Some((class.clone(), agent_session_ids[&pane_id].clone()));
+                context.agent_lookup = tree.pane_cwd(pane_id).map(|cwd| {
+                    (
+                        class.clone(),
+                        agent_session_ids[&pane_id].clone(),
+                        cwd.to_path_buf(),
+                    )
+                });
             }
             (Some(PaneRuntime::Terminal(view)), _) => {
                 context.content_extract = clip_lines(&view.with_screen(|screen| screen.contents()));
@@ -296,6 +302,9 @@ pub fn project_restructure_input_fingerprint(
             &mut fingerprint,
             &context.automatic_content_fingerprint.to_string(),
         );
+        if let Some((_, _, cwd)) = &context.agent_lookup {
+            hash_restructure_value(&mut fingerprint, &cwd.to_string_lossy());
+        }
     }
     fingerprint
 }
@@ -465,12 +474,12 @@ fn render_structure_children(
 /// the same one `session_naming::infer_pane_title` uses, rather than only
 /// user prompts -- what an agent has actually been doing/answering matters
 /// just as much to a restructure decision as what it was asked to do.
-pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path, cwd: &Path) {
+pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
     for context in contexts.iter_mut() {
-        let Some((class, session_id)) = context.agent_lookup.take() else {
+        let Some((class, session_id, cwd)) = context.agent_lookup.take() else {
             continue;
         };
-        let entries = ilium_agent_session::TranscriptLocator::new(home, cwd)
+        let entries = ilium_agent_session::TranscriptLocator::new(home, &cwd)
             .transcript_for_session(&class, &session_id)
             .and_then(|transcript| {
                 crate::transcript_context::recent_transcript_entries(&class, &transcript.path).ok()
@@ -2295,12 +2304,70 @@ mod tests {
             agent_lookup: Some((
                 AgentClass::Claude,
                 "00000000-0000-4000-8000-000000000000".to_string(),
+                cwd.to_path_buf(),
             )),
         }];
 
-        resolve_content_extracts(&mut contexts, &home, cwd);
+        resolve_content_extracts(&mut contexts, &home);
 
         assert_eq!(contexts[0].content_extract, "(no transcript available)");
         assert!(contexts[0].agent_lookup.is_none());
+    }
+
+    #[test]
+    fn resolves_each_agent_transcript_against_its_own_cwd() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let project_cwd = directory.path().join("repo");
+        let worktree_cwd = directory.path().join("repo.worktrees").join("agent-task");
+        let transcript_dir = home.join(".codex/sessions/2026/09/26");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        std::fs::create_dir_all(&worktree_cwd).unwrap();
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+
+        let sessions = [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                &project_cwd,
+                "main checkout task",
+            ),
+            (
+                "22222222-2222-4222-8222-222222222222",
+                &worktree_cwd,
+                "worktree task",
+            ),
+        ];
+        let mut contexts = Vec::new();
+        for (index, (session_id, cwd, prompt)) in sessions.into_iter().enumerate() {
+            let transcript_path = transcript_dir.join(format!(
+                "rollout-2026-09-26T12-00-0{index}-{session_id}.jsonl"
+            ));
+            let transcript = [
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {"id": session_id, "cwd": cwd},
+                }),
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {"type": "user_message", "message": prompt},
+                }),
+            ]
+            .into_iter()
+            .map(|entry| entry.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+            std::fs::write(transcript_path, transcript).unwrap();
+            let mut context = leaf(index as u64 + 1, prompt);
+            context.agent_lookup =
+                Some((AgentClass::Codex, session_id.to_string(), cwd.to_path_buf()));
+            contexts.push(context);
+        }
+
+        resolve_content_extracts(&mut contexts, &home);
+
+        assert!(contexts[0].content_extract.contains("main checkout task"));
+        assert!(!contexts[0].content_extract.contains("worktree task"));
+        assert!(contexts[1].content_extract.contains("worktree task"));
+        assert!(!contexts[1].content_extract.contains("main checkout task"));
     }
 }

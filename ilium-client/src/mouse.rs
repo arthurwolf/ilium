@@ -109,6 +109,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
+    if !app.layout.tree_area.contains(position) {
+        app.update_agent_popover_pointer(position, Instant::now());
+    }
 
     if ends_tree_double_click_pair(app, &mouse, position) {
         app.last_tree_click = None;
@@ -164,6 +167,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    // Only actually take `app.mode` out when it's a variant this function
+    if matches!(app.mode, Mode::WaitingWorkspaceCloseOffer { .. }) {
+        return;
+    }
     // Only actually take `app.mode` out when it's a variant this function
     // handles -- mirrors the pre-client/server design's own care here (see
     // its comment): swapping out any mode unconditionally and never putting
@@ -231,6 +238,21 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::CreateAgentFromLine above");
         };
         handle_create_agent_from_line_mouse(app, state, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::CreateAgentWorkspace(_)) {
+        let Mode::CreateAgentWorkspace(state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("just matched Mode::CreateAgentWorkspace above");
+        };
+        handle_create_agent_workspace_mouse(app, state, mouse);
+        return;
+    }
+    if matches!(app.mode, Mode::WorktreeManager(_)) {
+        let Mode::WorktreeManager(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::WorktreeManager above");
+        };
+        handle_worktree_manager_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::ExplorerFileMenu(_)) {
@@ -400,11 +422,14 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::InferenceSettingPrompt(_, _)
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::ApiSettingPrompt(_)
+            | Mode::GitSettingPrompt(_, _)
             | Mode::AgentSetupPathPrompt(_, _)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
             | Mode::AgentDebugSavePath(..)
             | Mode::ConfirmClose(_)
+            | Mode::ConfirmWorkspaceCloseOffer(_)
+            | Mode::ConfirmRemoveWorkspace(_)
             | Mode::BoardCardPrompt(_, _)
             | Mode::BoardColumnPrompt(_, _)
             | Mode::BoardRenamePrompt(_, _, _)
@@ -425,6 +450,8 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
     if matches!(
         app.mode,
         Mode::ConfirmClose(_)
+            | Mode::ConfirmWorkspaceCloseOffer(_)
+            | Mode::ConfirmRemoveWorkspace(_)
             | Mode::BoardDeleteConfirm(_, _)
             | Mode::ConfirmSessionRecovery { .. }
     ) {
@@ -468,6 +495,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::InferenceSettingPrompt(_, state)
         | Mode::VoiceSettingPrompt(_, state)
         | Mode::ApiSettingPrompt(state)
+        | Mode::GitSettingPrompt(_, state)
         | Mode::AgentSetupPathPrompt(_, state)
         | Mode::SaveAs(_, state)
         | Mode::AgentDebugSavePath(_, state)
@@ -715,11 +743,51 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     app.leave_pane_focus();
     update_tree_hover(app, position);
 
+    if let Some(popover) = &app.agent_popover {
+        if popover.is_visible(Instant::now()) {
+            if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
+                if let Some(crate::popover::PopoverHit::Choice(choice)) = geometry.hit(position) {
+                    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                        if let Some(reason) = popover.unavailable_reason(choice) {
+                            app.status_message = Some(reason.to_string());
+                        } else {
+                            let provider = popover.provider;
+                            let target = app.selected_node_id().unwrap_or(ROOT_ID);
+                            app.open_create_agent_workspace_dialog(
+                                provider,
+                                target,
+                                choice == crate::popover::PopoverChoice::ExistingWorktree,
+                            );
+                        }
+                        return;
+                    }
+                } else if popover.pinned
+                    && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    && !geometry.area.contains(position)
+                    && !geometry.anchor.contains(position)
+                {
+                    app.agent_popover = None;
+                }
+            }
+        }
+    }
+
     if matches!(mouse.kind, MouseEventKind::Moved) {
         return;
     }
 
     if let Some(action) = tree_ui::toolbar_action_at(app.layout.tree_area, position) {
+        if let TreeToolbarAction::Agent(provider) = action {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+                if let Some((_, anchor)) = tree_ui::toolbar_button_rects(app.layout.tree_area)
+                    .into_iter()
+                    .find(|(button, _)| *button == action)
+                {
+                    app.hover_agent_popover(provider, anchor, Instant::now(), true);
+                }
+                return;
+            }
+        }
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             app.last_tree_click = None;
             execute_tree_toolbar_action(app, action);
@@ -727,7 +795,7 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         return;
     }
 
-    if let Some(hit) = app.hovered_tree_node {
+    if let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 0) {
         if let Some(action) = tree_ui::row_action_at(
             &app.tree,
             hit.id,
@@ -899,12 +967,35 @@ const TREE_DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 /// Updates the two independent hover affordances (row hit + toolbar) from
 /// the pointer's current tree-panel-relative position.
 fn update_tree_hover(app: &mut App, position: Position) {
+    let previous_branch = app
+        .hovered_tree_node
+        .filter(|hit| hit.line == 1)
+        .map(|hit| hit.id);
     let hit = app.tree_node_at(position);
+    if let Some(branch_hit) = hit.filter(|hit| hit.line == 1) {
+        if previous_branch != Some(branch_hit.id)
+            && app.tree.pane_workspace(branch_hit.id).is_some()
+        {
+            app.queue_request(ilium_ipc::ClientRequest::RefreshPaneGitStatus {
+                pane_id: branch_hit.id,
+            });
+        }
+    }
     app.set_hovered_tree_node(hit);
     app.hovered_status_slot = app.tree_status_slot_at(position);
     let toolbar_action = tree_ui::toolbar_action_at(app.layout.tree_area, position);
     let toolbar_hovered = tree_ui::toolbar_area(app.layout.tree_area).contains(position);
     app.set_tree_toolbar_hover(toolbar_hovered, toolbar_action);
+    let now = Instant::now();
+    if let Some(TreeToolbarAction::Agent(provider)) = toolbar_action {
+        if let Some((_, anchor)) = tree_ui::toolbar_button_rects(app.layout.tree_area)
+            .into_iter()
+            .find(|(button, _)| *button == TreeToolbarAction::Agent(provider))
+        {
+            app.hover_agent_popover(provider, anchor, now, false);
+        }
+    }
+    app.update_agent_popover_pointer(position, now);
 }
 
 fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRowAction) {
@@ -1053,20 +1144,64 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             return;
         }
         TreeToolbarAction::Shell => app.action_new_terminal(),
-        TreeToolbarAction::Agent(provider) => app.action_new_command_pane(provider.command_line()),
+        TreeToolbarAction::Agent(provider) => {
+            app.agent_popover = None;
+            app.action_new_command_pane(provider.command_line());
+        }
     }
     app.status_message = Some(format!("Created {}", action.description()));
 }
 
 /// Handles an activated context-menu entry or dismisses a click outside.
 fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseEvent) {
+    let position = Position::new(mouse.column, mouse.row);
+    if matches!(mouse.kind, MouseEventKind::Moved) {
+        if let Some(submenu) = menu.submenu.as_mut() {
+            if submenu.area.contains(position) {
+                let row = usize::from(position.y.saturating_sub(submenu.area.y.saturating_add(1)));
+                if position.y > submenu.area.y && row < submenu.items.len() {
+                    submenu.selected_index = row;
+                    if let Some(reason) = &submenu.items[row].disabled_reason {
+                        app.status_message = Some(reason.clone());
+                    }
+                }
+                menu.hover_candidate = None;
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            }
+        }
+        if menu.area.contains(position) {
+            let row = usize::from(position.y.saturating_sub(menu.area.y.saturating_add(1)));
+            if position.y > menu.area.y && row < menu.actions.len() {
+                menu.selected_index = row;
+                let action = menu.actions[row];
+                if action.has_submenu() {
+                    if menu
+                        .submenu
+                        .as_ref()
+                        .is_some_and(|submenu| submenu.parent == action)
+                    {
+                        menu.hover_candidate = None;
+                    } else if menu.hover_candidate.map(|candidate| candidate.0) != Some(action) {
+                        menu.hover_candidate = Some((action, Instant::now()));
+                    }
+                } else {
+                    menu.submenu = None;
+                    menu.hover_candidate = None;
+                }
+            }
+        } else {
+            menu.hover_candidate = None;
+        }
+        app.mode = Mode::ContextMenu(menu);
+        return;
+    }
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::ContextMenu(menu);
         return;
     }
-    let position = Position::new(mouse.column, mouse.row);
 
-    if let Some(submenu) = &menu.tree_order_submenu {
+    if let Some(submenu) = &menu.submenu {
         if submenu.area.contains(position) {
             let content_top = submenu.area.y.saturating_add(1);
             if position.y < content_top {
@@ -1074,12 +1209,16 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
                 return;
             }
             let item_row = usize::from(position.y - content_top);
-            let Some(tree_order) = crate::config::TreeOrder::ALL.get(item_row).copied() else {
+            let Some(item) = submenu.items.get(item_row) else {
                 app.mode = Mode::ContextMenu(menu);
                 return;
             };
-            app.settings_set_tree_order(tree_order);
-            app.mode = Mode::Normal;
+            if let Some(reason) = &item.disabled_reason {
+                app.status_message = Some(reason.clone());
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            }
+            app.execute_context_submenu_item(item, menu.target);
             return;
         }
         if !menu.area.contains(position) {
@@ -1108,8 +1247,8 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
     menu.selected_index = item_row;
     app.select_node(menu.target);
     let action = menu.actions[item_row];
-    if action == crate::app::ContextMenuAction::OrderBy {
-        app.open_context_tree_order_submenu(&mut menu);
+    if action.has_submenu() {
+        app.open_context_submenu(&mut menu, action);
         app.mode = Mode::ContextMenu(menu);
         return;
     }
@@ -1227,6 +1366,152 @@ fn handle_create_agent_from_line_mouse(
         return;
     }
     app.mode = Mode::CreateAgentFromLine(state);
+}
+
+fn handle_worktree_manager_mouse(
+    app: &mut App,
+    mut state: Box<crate::worktree_manager::WorktreeManagerState>,
+    mouse: MouseEvent,
+) {
+    use crate::worktree_manager::{ManagerHit, ManagerView};
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) {
+        if matches!(state.view, ManagerView::Browsing) {
+            state.select_delta(if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+                -1
+            } else {
+                1
+            });
+        }
+        app.mode = Mode::WorktreeManager(state);
+        return;
+    }
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::WorktreeManager(state);
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    match state.hit_test(app.layout.screen_area, position) {
+        Some(ManagerHit::Row(index)) => state.select(index),
+        Some(ManagerHit::Safe) => {
+            if let Err(error) = state.begin_safe_confirmation() {
+                app.status_message = Some(error);
+            }
+        }
+        Some(ManagerHit::Discard) => {
+            if let Err(error) = state.begin_discard_confirmation() {
+                app.status_message = Some(error);
+            }
+        }
+        Some(ManagerHit::ToggleBranch) => state.toggle_branch_policy(),
+        Some(ManagerHit::Refresh) => {
+            app.refresh_worktree_manager(state);
+            return;
+        }
+        Some(ManagerHit::Close) if !matches!(state.view, ManagerView::Pruning) => return,
+        Some(ManagerHit::Confirm) => {
+            app.submit_worktree_manager_prune(state);
+            return;
+        }
+        Some(ManagerHit::Cancel) => state.cancel_confirmation(),
+        _ => {}
+    }
+    app.mode = Mode::WorktreeManager(state);
+}
+
+fn handle_create_agent_workspace_mouse(
+    app: &mut App,
+    mut state: Box<crate::worktree_dialog::WorktreeDialogState>,
+    mouse: MouseEvent,
+) {
+    use crate::worktree_dialog::{
+        self, WorktreeClosePolicy, WorktreeDialogFocus, WorktreeDialogStatus,
+    };
+    use ratatui_textarea::CursorMove;
+
+    let position = Position::new(mouse.column, mouse.row);
+    let layout = worktree_dialog::dialog_layout(app.layout.screen_area, &state);
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) && layout.existing_list.contains(position)
+    {
+        state.move_existing_selection(if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+            -1
+        } else {
+            1
+        });
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if matches!(state.status, WorktreeDialogStatus::Creating(_)) {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if !layout.popup.contains(position) {
+        app.mode = Mode::Normal;
+        return;
+    }
+    let Some(focus) = worktree_dialog::hit_test(&state, &layout, position) else {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    };
+    state.focus = focus;
+    match focus {
+        WorktreeDialogFocus::Provider => {
+            if let Some(provider) = worktree_dialog::provider_at(&layout, position) {
+                state.provider = provider;
+            }
+        }
+        WorktreeDialogFocus::Prompt => {
+            let inner = Rect::new(
+                layout.prompt_area.x.saturating_add(1),
+                layout.prompt_area.y.saturating_add(1),
+                layout.prompt_area.width.saturating_sub(2),
+                layout.prompt_area.height.saturating_sub(2),
+            );
+            if inner.contains(position) {
+                state.prompt.move_cursor(CursorMove::Jump(
+                    position.y.saturating_sub(inner.y),
+                    position.x.saturating_sub(inner.x),
+                ));
+            }
+        }
+        WorktreeDialogFocus::Where => {
+            if let Some(mode) = worktree_dialog::mode_at(&layout, position) {
+                state.set_mode(mode);
+            }
+        }
+        WorktreeDialogFocus::ExistingWorktree => {
+            if let Some(index) = worktree_dialog::existing_row_at(&state, &layout, position) {
+                state.selected_existing = index;
+            }
+        }
+        WorktreeDialogFocus::Advanced => state.advanced = !state.advanced,
+        WorktreeDialogFocus::ClosePolicy => {
+            state.close_policy = if state.close_policy == WorktreeClosePolicy::Keep {
+                WorktreeClosePolicy::OfferRemovalWhenSafe
+            } else {
+                WorktreeClosePolicy::Keep
+            };
+        }
+        WorktreeDialogFocus::Create => {
+            app.submit_create_agent_workspace(state);
+            return;
+        }
+        WorktreeDialogFocus::Cancel => {
+            app.mode = Mode::Normal;
+            return;
+        }
+        WorktreeDialogFocus::Branch | WorktreeDialogFocus::Base | WorktreeDialogFocus::Path => {}
+    }
+    app.mode = Mode::CreateAgentWorkspace(state);
 }
 
 /// Gives every visible form control a direct mouse target. Clicking outside
@@ -1721,6 +2006,28 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.selected_row = index;
                     if let Some(row) = crate::app::SessionRow::ALL.get(index).copied() {
                         app.settings_adjust_session_row(row, direction);
+                    }
+                }
+            } else if state.tab == crate::app::SettingsTab::Git {
+                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    crate::app::GitRow::ALL.len(),
+                ) {
+                    state.selected_row = index;
+                    if let Some(row) = crate::app::GitRow::ALL.get(index).copied() {
+                        if matches!(
+                            row,
+                            crate::app::GitRow::BranchPrefix
+                                | crate::app::GitRow::WorktreeLocationTemplate
+                                | crate::app::GitRow::SetupCommand
+                        ) {
+                            app.mode = Mode::Settings(state);
+                            app.settings_adjust_git_row(row, direction);
+                            return;
+                        }
+                        app.settings_adjust_git_row(row, direction);
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Keyboard {
@@ -2447,7 +2754,7 @@ mod tree_order_context_mouse_tests {
         let (submenu_column, submenu_row) = match &app.mode {
             Mode::ContextMenu(menu) => {
                 let submenu = menu
-                    .tree_order_submenu
+                    .submenu
                     .as_ref()
                     .expect("Order by click should open its submenu");
                 let index = crate::config::TreeOrder::ALL
@@ -2466,6 +2773,56 @@ mod tree_order_context_mouse_tests {
             crate::config::TreeOrder::NameAscending
         );
         assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn hovering_agent_parent_opens_submenu_and_disabled_item_explains_itself() {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let (column, row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let index = menu
+                    .actions
+                    .iter()
+                    .position(|action| {
+                        *action
+                            == crate::app::ContextMenuAction::NewAgent(
+                                ilium_core::BuiltinAgentProvider::Claude,
+                            )
+                    })
+                    .unwrap();
+                (menu.area.x + 1, menu.area.y + 1 + index as u16)
+            }
+            _ => panic!("context menu should open"),
+        };
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let since = match &app.mode {
+            Mode::ContextMenu(menu) => menu.hover_candidate.expect("hover candidate").1,
+            _ => panic!("context menu should remain open"),
+        };
+        assert!(app.tick_context_menu_hover(since + Duration::from_millis(180)));
+        let (item_column, item_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                let submenu = menu.submenu.as_ref().expect("agent submenu");
+                (submenu.area.x + 1, submenu.area.y + 2)
+            }
+            _ => panic!("context menu should remain open"),
+        };
+        click(&mut app, item_column, item_row);
+        assert!(matches!(app.mode, Mode::ContextMenu(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Checking Git repository…")
+        );
     }
 }
 
@@ -2543,14 +2900,18 @@ mod markdown_board_context_mouse_tests {
             },
         );
 
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ilium_ipc::ClientRequest::NewBoard {
-                parent_group,
-                storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
-                ..
-            }] if *parent_group == group && board_path == &path
-        ));
+        let requests = app.take_outbound_requests();
+        assert!(
+            matches!(
+                requests.as_slice(),
+                [ilium_ipc::ClientRequest::QueryRepoFacts { .. }, ilium_ipc::ClientRequest::NewBoard {
+                    parent_group,
+                    storage: ilium_core::BoardStorage::MarkdownFile { path: board_path },
+                    ..
+                }] if *parent_group == group && board_path == &path
+            ),
+            "{requests:?}"
+        );
         let _ = std::fs::remove_file(path);
     }
 }

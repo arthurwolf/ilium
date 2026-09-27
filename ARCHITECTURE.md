@@ -31,7 +31,7 @@ Session
            └── Pane
 ```
 
-Each tree node is a `Container`, `Pane`, or persisted folder root. A container is either a normal `Group` or a `SplitView { orientation }`; a pane carries a `PaneContentKind` (`Terminal` | `Editor` | `Board`) and a matching `PaneStatus`. The detection engine drives `PlainShell`/`Agent(...)` for terminal panes, which in turn drives the icon/color shown next to them in the tree.
+Each tree node is a `Container`, `Pane`, or persisted folder root. A container is either a normal `Group` or a `SplitView { orientation }`; a pane carries a `PaneContentKind` (`Terminal` | `Editor` | `Board`) and a matching `PaneStatus`. The detection engine drives `PlainShell`/agent statuses for terminal panes; `AgentState` separates turn phase, provider goal, and unread completion when projecting the status into tree icons.
 
 ### Left panel — the tree
 
@@ -59,14 +59,14 @@ The right panel renders a normal pane alone, or every child of a selected split 
 
 ### Pane states shown in the tree
 
-Every pane row has three icon slots before its title. `ilium_core::project_pane_signals` is the one pure projection from server-owned facts (detected status, progress monitor, scheduled input, terminal output activity) to the last two slots, so the server (sounds, notifications) and every client (rendering, hover text) derive the same answer; `ilium-client/src/status_icons.rs` owns only how a signal looks and what its tooltip says. Glyphs below are the compiled-in defaults from `IconTarget::default_glyph`; every one is configurable under `[ui]` and in Settings → Icons, and agent identifiers render as icons unless `[ui]` selects full names, letters, or none.
+Every pane row has three icon slots before its title. `ilium_core::project_pane_signals` is the one pure projection from server-owned facts (detected status, progress monitor, scheduled input, terminal output activity) to the last two slots, so the server (sounds, notifications) and every client (rendering, hover text) derive the same answer. Its A/B rule IDs identify the selected precedence rule. `ilium-client/src/status_icons.rs` owns only how a signal looks and what its tooltip says. The grey WHY line at the bottom of each hover popover gives the applicable rule and the observed evidence; the server sends detector provenance with the tree in one attach snapshot and with status in one live update so an icon cannot pair with stale evidence. Glyphs below are the compiled-in defaults from `IconTarget::default_glyph`; every one is configurable under `[ui]` and in Settings → Icons, and agent identifiers render as icons unless `[ui]` selects full names, letters, or none.
 
 | Slot | Default glyph | Meaning |
 |---|---|---|
 | Identity | 🦀 / 🐢 / ⚛️ / 🤖 | Claude Code / Codex / Antigravity / any other detected agent |
 | Identity | 🖥️ (📝 editor, 📉 board) | plain terminal with no agent detected |
 | Objective | 🎯 / ⏸️ / 🚧 / ⌛ / 🏁 | the agent's `/goal` is active / paused / blocked / stopped by usage limits / reached (read from the provider's own status row) |
-| Objective | ⣀⣀ … ⣿⣿ (cyan, yellow when degraded) | a monitored task's progress, a braille bar in twelve steps |
+| Objective | ⣀⣀ … ⣿⣿ (cyan, yellow when degraded) | a monitored task's progress in twelve percentage buckets; Settings offers Braille, Blocks, Moons, and Quarters frame families, while `[ui].task_progress_frames` accepts a custom equal-width list of 2–13 frames |
 | Objective | ○ / ✅ / ❌ / ⚠ | a monitored task that is registered but not started / done / failed / lost by its monitor (bold while unread, dim once seen) |
 | Objective | ⏰ | a scheduled input is pending |
 | Now | ⠋ (animated) | agent is **working**; the ten-frame braille spinner runs at 90 ms, and motion level Off freezes it |
@@ -74,12 +74,11 @@ Every pane row has three icon slots before its title. `ilium_core::project_pane_
 | Now | ✋ (bold) | agent is **waiting on your approval** (y/n prompt or selection) |
 | Now | 🌀 | turn over but a background shell or task it started is still running |
 | Now | 💤 | agent idle and parked on a live progress monitor: not finished, no bell |
-| Now | the monitored task's own glyph | idle agent whose goal already owns the objective slot, while its monitor is live or its outcome unread |
 | Now | 🔔 (pulsing) | agent finished a turn you have not seen |
 | Now | ● | agent idle at its prompt with nothing running or unread |
 | Now | Angular Braille loop | ordinary terminal whose visible character grid changed, or received local key input, within the last 60 seconds |
 
-Plain-terminal activity is event-driven rather than polled: after each already-coalesced live `ScreenUpdate`, the client hashes visible character cells without allocating a screen string and refreshes its presentation window only when that hash changes. Replay, resize reflow, cursor motion, and style-only output reset or preserve the comparison baseline without creating false activity; accepted local key input refreshes the same window immediately. The selected Angular loop runs at its existing 90 ms frame speed for the first five seconds, slows to one frame every 500 ms until 60 seconds, then disappears. An idle terminal performs no screen checks or animation work.
+One raw Idle sample after an active agent turn is provisional: the server keeps the active state, schedules a prompt recheck, and marks completion unread only after a second consecutive Idle sample from the same process identity. A live monitor suppresses completion while the agent is parked. Plain-terminal activity is event-driven rather than polled: after each already-coalesced live `ScreenUpdate`, the client hashes visible character cells without allocating a screen string and refreshes its presentation window only when that hash changes. Replay, resize reflow, cursor motion, and style-only output reset or preserve the comparison baseline without creating false activity; accepted local key input refreshes the same window immediately. The selected Angular loop runs at its existing 90 ms frame speed for the first five seconds, slows to one frame every 500 ms until 60 seconds, then disappears. An idle terminal performs no screen checks or animation work.
 
 The blocked/waiting-for-approval state wasn't explicitly requested but falls out of the same detection pass at near-zero extra cost, and it's the state you most want a distinct color for in practice (herdr treats it as a 4th state for the same reason).
 
@@ -118,14 +117,58 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
   - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for markers. A literal `"esc to interrupt"` substring is one recognized "working" trigger, but real Claude Code builds also render a present-tense status line ending in an ellipsis alongside a live elapsed-time token (e.g. `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`) — `looks_like_live_status_line` catches that shape instead of matching exact wording, so it survives whichever whimsical verb is showing. A `y/n`-style confirmation line or a numbered selection menu with a `❯` cursor means blocked (`WaitingApproval`); anything else with no agent CLI detected, or an agent CLI with no such marker, is idle.
   - First-party providers implement one pure shared contract for command launch, process-name aliases, resume syntax, CLI argument parsing, labels, and deterministic ordering. Adding a supported provider extends that contract rather than duplicating special cases through the client and server.
 - **ilium-agent-session** — the shared transcript-provenance boundary used by both server-side session discovery and client-side LLM titling. It verifies Claude/Codex JSONL stores and Antigravity's UUID database plus `history.jsonl` project binding before accepting a session, preventing cross-project identities from leaking through lossy/global stores.
+- **ilium-git** — the Git adapter for repository discovery, registered worktrees, branch and dirty-state probes, and worktree mutation. It owns Git command arguments and porcelain parsing; the server owns pane lifecycle and removal policy.
 - **ilium-server** — owns all PTYs and the tree (`ServerState`), runs the detection loop, the single scheduled-input executor, and generation-fenced progress coordinators, writes a JSON crash-recovery snapshot to `<project>/.ilium/sessions/<name>.json` after structural or monitored-lifecycle changes, and restores panes, pending deadlines, and conservatively recoverable monitors on startup. The CLI gives it one exact project-session socket, so one process serves exactly one session with no multi-session registry.
-- **ilium-client** — the `ratatui` TUI: left tree panel + right presentation target, keybinding dispatch (`keys.rs`/`keymap.rs`), one-step tree reordering, and shared `split_layout` viewport geometry used by rendering, PTY sizing, focus, and mouse routing. It sends `ClientRequest`s to the server and renders the `ScreenUpdate`/`TreeSnapshot`/`PaneStatusChanged` events it streams back. Its `TerminalView` also compares allocation-free visible-character fingerprints while applying live output, feeding the client-local ordinary-terminal activity animation without adding a server poll or wire state. It owns built-in editor and board panes plus background LLM-assisted session/project naming and the client-local immutable Smart Copy snapshot/worker lifecycle through `ilium-inference`'s selected-provider boundary. When Kilo paid-proxy egress is enabled, its boot path reads the configured MongoDB collection before entering the terminal and keeps the loaded rows in memory only.
+- **ilium-client** — the `ratatui` TUI: left tree panel + right presentation target, keybinding dispatch (`keys.rs`/`keymap.rs`), one-step tree reordering, and shared `split_layout` viewport geometry used by rendering, PTY sizing, focus, and mouse routing. It sends `ClientRequest`s to the server and renders the `ScreenUpdate`/`PaneStateSnapshot`/`PaneStatusChanged` events it streams back. Its `TerminalView` also compares allocation-free visible-character fingerprints while applying live output, feeding the client-local ordinary-terminal activity animation without adding a server poll or wire state. It owns built-in editor and board panes plus background LLM-assisted session/project naming and the client-local immutable Smart Copy snapshot/worker lifecycle through `ilium-inference`'s selected-provider boundary. When Kilo paid-proxy egress is enabled, its boot path reads the configured MongoDB collection before entering the terminal and keeps the loaded rows in memory only.
 - **ilium-inference** — provider-neutral title/organization/Smart Copy inference. Its base provider contract has concrete Kilo Gateway, local Ollama, OpenAI-compatible, Anthropic, and OpenRouter implementations, with both whole-response and incremental streaming entry points; the client owns its persisted credentials, endpoints, selected models, and the MongoDB source/field mapping for Kilo paid proxies. Proxy records themselves are runtime-only and are never serialized into `config.toml`. Requests use the model's maximum output allowance when known and a 1,000,000-token fallback when the configured model has no retained capability metadata; prompts, not convenience caps, control normal response length. Kilo exposes a live, unauthenticated free-text-model catalog in Settings, with stable Kilo/OpenRouter free-router fallbacks when discovery is unavailable.
 - **ilium-logging** — the shared process-diagnostics boundary used by both the detached server and every attached client. One server start selects one private timestamped file under `/tmp/.ilium/<project-session-id>/`; all attached processes append to that path, and the live `[debug].file_logging_enabled` setting opens or closes their writers without changing call sites. Enabling it records complete HTTP and LLM text requests, responses, and errors while still redacting credential headers and URL parameters and replacing binary audio payloads with size summaries; unrelated sensitive per-agent evidence remains outside this process log unless a broader `RUST_LOG` filter is explicitly requested.
 - **ilium-ipc** — `ClientRequest`/`ServerEvent` wire enums plus `write_frame`/`read_frame`: a 4-byte little-endian length prefix followed by that many bytes of bincode payload, generic over any `AsyncRead`/`AsyncWrite` so both the request stream and the event stream reuse the same framing code.
 - **ilium-sound** — cross-platform adapter for XDG/Linux, macOS, and Windows system-sound discovery plus bounded native-command playback. It also owns the pure agent-status transition mapping used by the server, while `ilium-client` only presents the discovered catalog and edits the shared settings.
 - **ilium-voice** — provider-neutral owned actor for full-duplex audio, streaming sample conversion, interruption, and live-provider transport, and for text turns (`VoiceCommand::SendText`): typed sentences are queued and become one user message plus one response request each, in order, only when the provider is free (no response in flight and no tool outputs pending). Its OpenAI adapter speaks the Realtime WebSocket protocol, but the crate has no dependency on ratatui, IPC, or ilium domain types. The client-side `control` module is the separate semantic capability layer: typed commands, stable tool schemas, target resolution, redacted state snapshots, confirmations, deduplication, and structured results. This composition keeps a future provider adapter from duplicating UI behavior and keeps voice from simulating fragile keyboard/mouse coordinates.
 - **ilium** (bin) — `clap`-based CLI: `ilium` attaches or creates the `default` session for the current canonical directory; `ilium new-session <name>`, `ilium ls`, `ilium kill-session <name>`, and `ilium new-pane --session <name> -- <cmd>` remain project-scoped. It spawns `ilium-server` as a separate detached process and hands off to `ilium_client::run` for the TUI.
+
+## Agent worktrees
+
+An agent pane may own a linked Git worktree. `ilium-core` persists the pane's
+`launch_cwd` and `PaneWorkspace` provenance; `Tree::pane_cwd` is the sole
+directory source for launch, transcript lookup, and restore. For a project
+launched in a repository subdirectory, the same subdirectory is selected
+inside the new worktree. A missing worktree remains visible in the tree and
+does not resume its agent from the wrong checkout.
+
+`ilium-server` serializes creation within each repository, validates branch
+and path again after the client preview, and keeps Git mutation separate from
+tree mutation. The server removes only worktrees with verified Ilium ownership
+metadata, after exact Git registration and process-tree checks.
+Removal also checks ignored and untracked content; ordinary Git worktree
+removal alone would discard some ignored files. A retained Ilium worktree
+keeps its ownership marker after pane close and regains that identity when
+reopened. Foreign existing worktrees remain unowned.
+New ownership markers record a custody format revision. Before spawning a
+terminal in an owned worktree, the server durably publishes a per-spawn ticket
+in Git's metadata for that worktree. Safe removal requires zero tickets after
+supervised process termination and a directory-user scan. A failed proof,
+crash, unreadable process state, or legacy marker leaves the worktree in place
+for manual inspection. The server never silently adopts a foreign worktree.
+Prune inventory and mutation both recheck the exact Git registration, marker,
+pane references, directory users, and file/branch state. The interactive
+close offer is advisory; the same server gates run again for removal.
+The configured close policy is stored in the JSON session snapshot per pane,
+bound to its worktree identity, rather than in the tree's positional IPC
+payload. A missing policy defaults to keeping the worktree.
+If marker creation or a post-create command fails after Git has created the
+checkout, the server retains it and reports its path. Hooks, filters, or the
+setup command may have written files that cannot safely be rolled back.
+Branch switching in the current checkout is deferred: that checkout may also
+be used by other panes and the user's shell. A dedicated branch for an agent
+therefore uses a linked worktree instead of changing the shared checkout.
+
+One session-owned Git status coordinator checks each workspace's HEAD files
+every ten seconds, with at most two probes in flight. Full porcelain status
+is requested on branch-line hover and agent completion. Status events are
+runtime-only, change-only, and replayed to attaching clients. The second
+tree line presents the branch and missing/conflict marker; its hover text
+explains provenance and the latest verified status.
 
 ## Detection design
 

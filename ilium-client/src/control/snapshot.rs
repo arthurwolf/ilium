@@ -246,7 +246,7 @@ fn settings_snapshot(app: &App) -> Value {
             "ui.left_panel_unfocused_width", "ui.left_panel_focused_width",
             "ui.left_panel_minimum_terminal_width", "ui.tree_order",
             "ui.tree_row_management_controls", "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
-            "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.icons.<icon_key>",
+            "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.task_progress_style", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
@@ -255,6 +255,7 @@ fn settings_snapshot(app: &App) -> Value {
             "kanban_board.minimum_column_width", "sound.source", "sound.file",
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
+            "sound.events.task_succeeded", "sound.events.task_failed",
             "triggers.<event_key>",
             "inference.provider", "inference.title_style", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
@@ -266,7 +267,9 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
             "voice.confirm_terminal_submissions", "voice.pause_media_while_active",
             "voice.custom_prompt",
-            "debug.file_logging_enabled"
+            "debug.file_logging_enabled",
+            "git.default_where", "git.branch_prefix", "git.worktree_location_template",
+            "git.default_base", "git.branch_line", "git.setup_command", "git.default_close_policy"
         ],
         "ui": {
             "left_panel_sizing_mode": match app.ui_settings.left_panel_sizing.mode {
@@ -287,6 +290,10 @@ fn settings_snapshot(app: &App) -> Value {
             "agent_identifier_mode": app.ui_settings.agent_identifiers.mode.label(),
             "motion_level": app.ui_settings.motion_level.label(),
             "sidebar_density": app.ui_settings.sidebar_density.label(),
+            "task_progress_style": crate::icon_settings::task_progress_preset_index(
+                &app.ui_settings.icons.task_progress_frames
+            ).map(|index| crate::icon_settings::TASK_PROGRESS_STYLE_NAMES[index]).unwrap_or("Custom"),
+            "task_progress_frames": &app.ui_settings.icons.task_progress_frames,
             "agent_debug_menu_enabled": app.ui_settings.agent_debug_menu_enabled,
             "icons": icons,
         },
@@ -309,6 +316,28 @@ fn settings_snapshot(app: &App) -> Value {
             "recovery_policy": app.session_settings.recovery_policy.label(),
             "backups_enabled": app.session_settings.backups_enabled,
         },
+        "git": {
+            "default_where": match app.git_settings.default_where {
+                crate::config::GitDefaultWhere::Here => "here",
+                crate::config::GitDefaultWhere::NewWorktree => "new_worktree",
+                crate::config::GitDefaultWhere::ExistingWorktree => "existing_worktree",
+            },
+            "branch_prefix": app.git_settings.branch_prefix,
+            "worktree_location_template": app.git_settings.worktree_location_template,
+            "default_base": match app.git_settings.default_base {
+                crate::config::GitDefaultBase::Current => "current",
+                crate::config::GitDefaultBase::DefaultBranch => "default_branch",
+            },
+            "branch_line": match app.git_settings.branch_line {
+                crate::config::GitBranchLine::WorktreeOnly => "worktree_only",
+                crate::config::GitBranchLine::Off => "off",
+            },
+            "setup_command": app.git_settings.setup_command,
+            "default_close_policy": match app.git_settings.default_close_policy {
+                crate::config::GitClosePolicy::Keep => "keep",
+                crate::config::GitClosePolicy::OfferRemovalWhenSafe => "offer_removal_when_safe",
+            },
+        },
         "keyboard": {
             "shortcut_base": app.keyboard_settings.shortcut_base.label(),
             "bindings": keybindings,
@@ -321,6 +350,8 @@ fn settings_snapshot(app: &App) -> Value {
                 "approval_required": app.sound_settings.events.approval_required,
                 "agent_started": app.sound_settings.events.agent_started,
                 "waiting_background": app.sound_settings.events.waiting_background,
+                "task_succeeded": app.sound_settings.events.task_succeeded,
+                "task_failed": app.sound_settings.events.task_failed,
             },
         },
         "inference": {
@@ -430,6 +461,11 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::TextTriggerDialog(_) => "text_trigger_dialog",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",
         Mode::CreateAgentFromLine(_) => "create_agent",
+        Mode::CreateAgentWorkspace(_) => "create_agent_workspace",
+        Mode::WorktreeManager(_) => "worktree_manager",
+        Mode::WaitingWorkspaceCloseOffer { .. } => "waiting_workspace_close_offer",
+        Mode::ConfirmWorkspaceCloseOffer(_) => "confirm_workspace_close_offer",
+        Mode::GitSettingPrompt(_, _) => "git_setting_prompt",
         Mode::CreateGroup(_) => "create_group",
         Mode::CreateSplitOrientation(_) => "create_split_orientation",
         Mode::CreateSplitMembers(_) => "create_split_members",
@@ -440,6 +476,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::BoardRenamePrompt(..) => "board_rename_prompt",
         Mode::BoardDeleteConfirm(..) => "board_delete_confirm",
         Mode::ConfirmClose(_) => "confirm_close",
+        Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
         Mode::Search(_) => "search",

@@ -32,9 +32,9 @@ use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::board::BoardPane;
 use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
-    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, KanbanBoardSettings,
-    KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings, TreeOrder,
-    UiSettings, VoiceSettings,
+    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings,
+    KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings,
+    TreeOrder, UiSettings, VoiceSettings,
 };
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
@@ -42,6 +42,7 @@ use crate::icon_search_workers::{IconSearchRequest, IconSemanticSearchEvent};
 use crate::keymap::{self, Action, KeyBinding, KeymapPreset};
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
+use crate::popover::AgentPopover;
 use crate::prompt_queue::PromptQueueDialogState;
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
@@ -64,6 +65,8 @@ use crate::tree_transitions::TreeTransitions;
 use crate::tree_ui::{self, TreeNodeHit, TreeToolbarAction};
 use crate::trigger_settings::{TriggerAction, TriggerOccurrence, TriggerSettings};
 use crate::voice_settings::{VoicePromptEditorState, VoiceRow, VoiceSettingField};
+use crate::worktree_dialog::{WorktreeDialogMode, WorktreeDialogState};
+use crate::worktree_manager::WorktreeManagerState;
 use ilium_inference::InferenceSettings;
 use ilium_ipc::TextTriggerSettings;
 
@@ -243,6 +246,8 @@ pub enum Mode {
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
     /// Edits the loopback HTTP API port from Settings.
     ApiSettingPrompt(TextPromptState),
+    /// Edits one free-text Git worktree default from Settings.
+    GitSettingPrompt(GitTextField, TextPromptState),
     /// Edits one feature's global Claude-instruction file. Empty input resets
     /// that feature to `~/.claude/CLAUDE.md`.
     AgentSetupPathPrompt(AgentFeature, TextPromptState),
@@ -291,6 +296,14 @@ pub enum Mode {
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
     CreateAgentFromLine(Box<CreateAgentFromLineState>),
+    /// Prompt-first worktree creation form, retained until correlated result.
+    CreateAgentWorkspace(Box<WorktreeDialogState>),
+    WorktreeManager(Box<WorktreeManagerState>),
+    WaitingWorkspaceCloseOffer {
+        request_id: u64,
+        pane_id: NodeId,
+    },
+    ConfirmWorkspaceCloseOffer(NodeId),
     /// The "New group" destination picker is open.
     CreateGroup(CreateGroupState),
     CreateSplitOrientation(CreateSplitOrientationState),
@@ -306,6 +319,8 @@ pub enum Mode {
     BoardDeleteConfirm(NodeId, BoardDeleteTarget),
     /// A Yes/No confirmation is pending before closing `NodeId`.
     ConfirmClose(NodeId),
+    /// A separate confirmation before removing an Ilium-owned worktree.
+    ConfirmRemoveWorkspace(NodeId),
     /// The server found a persisted session and is awaiting a restore/discard choice.
     ConfirmSessionRecovery {
         pane_count: usize,
@@ -375,6 +390,7 @@ pub enum SettingsTab {
     Terminal,
     Editor,
     Session,
+    Git,
     Keyboard,
     KanbanBoard,
     Sound,
@@ -538,13 +554,14 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 17] = [
+    pub const ALL: [SettingsTab; 18] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
         Self::Session,
+        Self::Git,
         Self::KanbanBoard,
         Self::Sound,
         Self::VoiceControl,
@@ -570,6 +587,7 @@ impl SettingsTab {
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
             Self::Session => "Session",
+            Self::Git => "Git",
             Self::Keyboard => "Keyboard",
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
@@ -626,12 +644,13 @@ pub enum AppearanceRow {
     LastPromptMaxLines,
     ProgressMonitor,
     ProgressMonitorMaxLines,
+    ProgressFillStyle,
     TerminalTextSelection,
     LockClosedEnabled,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 18] = [
+    const GENERAL: [AppearanceRow; 19] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -648,6 +667,7 @@ impl AppearanceRow {
         Self::LastPromptMaxLines,
         Self::ProgressMonitor,
         Self::ProgressMonitorMaxLines,
+        Self::ProgressFillStyle,
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
     ];
@@ -709,6 +729,46 @@ impl SessionRow {
     pub const ALL: [Self; 2] = [Self::RecoveryPolicy, Self::BackupsEnabled];
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitRow {
+    DefaultWhere,
+    BranchPrefix,
+    WorktreeLocationTemplate,
+    DefaultBase,
+    BranchLine,
+    SetupCommand,
+    DefaultClosePolicy,
+}
+
+impl GitRow {
+    pub const ALL: [Self; 7] = [
+        Self::DefaultWhere,
+        Self::BranchPrefix,
+        Self::WorktreeLocationTemplate,
+        Self::DefaultBase,
+        Self::BranchLine,
+        Self::SetupCommand,
+        Self::DefaultClosePolicy,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitTextField {
+    BranchPrefix,
+    WorktreeLocationTemplate,
+    SetupCommand,
+}
+
+impl GitTextField {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::BranchPrefix => "Branch prefix",
+            Self::WorktreeLocationTemplate => "Worktree location template",
+            Self::SetupCommand => "Setup command",
+        }
+    }
+}
+
 /// Rows in the Debug tab. The registry keeps keyboard and mouse interaction
 /// exhaustive when more diagnostic controls are added later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -753,10 +813,12 @@ pub enum SoundRow {
     ApprovalRequired,
     AgentStarted,
     WaitingBackground,
+    TaskSucceeded,
+    TaskFailed,
 }
 
 impl SoundRow {
-    pub const ALL: [SoundRow; 7] = [
+    pub const ALL: [SoundRow; 9] = [
         Self::Source,
         Self::File,
         Self::Preview,
@@ -764,6 +826,8 @@ impl SoundRow {
         Self::ApprovalRequired,
         Self::AgentStarted,
         Self::WaitingBackground,
+        Self::TaskSucceeded,
+        Self::TaskFailed,
     ];
 
     pub const fn event(self) -> Option<ilium_sound::SoundEvent> {
@@ -772,6 +836,8 @@ impl SoundRow {
             Self::ApprovalRequired => Some(ilium_sound::SoundEvent::ApprovalRequired),
             Self::AgentStarted => Some(ilium_sound::SoundEvent::AgentStarted),
             Self::WaitingBackground => Some(ilium_sound::SoundEvent::WaitingBackground),
+            Self::TaskSucceeded => Some(ilium_sound::SoundEvent::TaskSucceeded),
+            Self::TaskFailed => Some(ilium_sound::SoundEvent::TaskFailed),
             Self::Source | Self::File | Self::Preview => None,
         }
     }
@@ -996,6 +1062,9 @@ pub enum ContextMenuAction {
     Close,
     /// Opens the adjacent checked ordering submenu.
     OrderBy,
+    /// Actions specific to a pane attached to a Git worktree.
+    Worktree,
+    ManageWorktrees,
     /// Replaces only the attached client process. The detached server keeps
     /// its PTYs and authoritative session tree alive throughout the handoff.
     Restart,
@@ -1008,6 +1077,10 @@ pub enum ContextMenuAction {
 }
 
 impl ContextMenuAction {
+    pub const fn has_submenu(self) -> bool {
+        matches!(self, Self::OrderBy | Self::NewAgent(_) | Self::Worktree)
+    }
+
     /// Returns the shared semantic icon role for this menu entry. Reusing
     /// vocabulary already visible elsewhere keeps the Icons tab concise.
     pub const fn icon_target(self) -> crate::icon_settings::IconTarget {
@@ -1034,6 +1107,7 @@ impl ContextMenuAction {
             Self::MoveUp => IconTarget::RowMoveUp,
             Self::MoveDown => IconTarget::RowMoveDown,
             Self::OrderBy => IconTarget::TopLevel,
+            Self::Worktree | Self::ManageWorktrees => IconTarget::WorktreeBranch,
             Self::Restart => IconTarget::ToolbarRestructure,
             Self::Settings => IconTarget::ToolbarSettings,
         }
@@ -1052,7 +1126,7 @@ impl ContextMenuAction {
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
-            Self::NewAgent(provider) => format!("New {} agent here", provider.label()),
+            Self::NewAgent(provider) => format!("New {} agent  ▸", provider.label()),
             Self::NewEditor => "New editor here".to_string(),
             Self::NewGroup => "New group\u{2026}".to_string(),
             Self::NewSplitView => "New split view\u{2026}".to_string(),
@@ -1076,6 +1150,8 @@ impl ContextMenuAction {
             Self::MoveDown => "Move down".to_string(),
             Self::Close => "Close".to_string(),
             Self::OrderBy => "Order by  ▸".to_string(),
+            Self::Worktree => "Worktree  ▸".to_string(),
+            Self::ManageWorktrees => "Manage worktrees…".to_string(),
             Self::Restart => "Restart".to_string(),
             Self::Settings => "Settings\u{2026}".to_string(),
         }
@@ -1091,14 +1167,35 @@ impl ContextMenuAction {
     }
 }
 
-/// Adjacent submenu state for the closed [`TreeOrder`] registry.
-pub struct TreeOrderSubmenu {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmenuItemAction {
+    SetTreeOrder(TreeOrder),
+    AgentHere(BuiltinAgentProvider),
+    AgentInNewWorktree(BuiltinAgentProvider),
+    AgentInExistingWorktree(BuiltinAgentProvider),
+    CopyWorktreeBranch,
+    CopyWorktreePath,
+    NewTerminalInWorktree,
+    OpenWorktreeFolder,
+    RemoveWorktree,
+}
+
+pub struct SubmenuItem {
+    pub action: SubmenuItemAction,
+    pub label: String,
+    pub disabled_reason: Option<String>,
+}
+
+/// Adjacent menu shared by tree ordering and agent launch choices.
+pub struct Submenu {
+    pub parent: ContextMenuAction,
     pub area: Rect,
+    pub items: Vec<SubmenuItem>,
     pub selected_index: usize,
 }
 
 /// State for the Sol/Terra/Luna reasoning-strength submenu opened from the
-/// agent toolbar's `CodexModelTier` button. Modeled on `TreeOrderSubmenu` and
+/// agent toolbar's `CodexModelTier` button. Modeled on `Submenu` and
 /// `EditorLineContextMenu` -- a mouse- and keyboard-driven popup that owns
 /// `App::mode` until a level is picked, Escape is pressed, or the pointer
 /// clicks outside it.
@@ -1142,7 +1239,28 @@ pub struct ContextMenu {
     pub area: Rect,
     pub actions: Vec<ContextMenuAction>,
     pub selected_index: usize,
-    pub tree_order_submenu: Option<TreeOrderSubmenu>,
+    pub submenu: Option<Submenu>,
+    /// Updated from the correlated repository-facts response while this menu
+    /// remains open. Until then, worktree actions fail closed.
+    pub worktree_unavailable_reason: Option<String>,
+    pub hover_candidate: Option<(ContextMenuAction, Instant)>,
+}
+
+impl ContextMenu {
+    pub fn set_worktree_unavailable_reason(&mut self, reason: Option<String>) {
+        self.worktree_unavailable_reason = reason.clone();
+        if let Some(submenu) = self.submenu.as_mut() {
+            for item in &mut submenu.items {
+                if matches!(
+                    item.action,
+                    SubmenuItemAction::AgentInNewWorktree(_)
+                        | SubmenuItemAction::AgentInExistingWorktree(_)
+                ) {
+                    item.disabled_reason = reason.clone();
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1485,6 +1603,10 @@ pub struct App {
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
+    /// Latest server-applied detector evidence, independent of the optional
+    /// agent debug journal. Hover text uses it only when its status matches
+    /// the tree state currently being rendered.
+    pub pane_detection_evidence: HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
     /// One client-wide toolbar policy keeps display and export consistent
     /// across panes while defaulting every newly attached client to low noise.
     pub agent_debug_log_filter: AgentDebugLogFilter,
@@ -1569,6 +1691,8 @@ pub struct App {
     pub terminal_settings: TerminalSettings,
     pub editor_settings: EditorSettings,
     pub session_settings: SessionSettings,
+    pub git_settings: GitSettings,
+    pub git_settings_error: Option<String>,
     /// Live voice settings and transport-neutral status. The actual service
     /// actor remains owned by `crate::run`, following the same outbox pattern
     /// used for IPC and background workers.
@@ -1627,6 +1751,8 @@ pub struct App {
     /// The tree-row state slot under the pointer (node, slot, glyph cell),
     /// which drives the status explanation popover.
     pub hovered_status_slot: Option<(NodeId, crate::status_icons::StatusSlot, Position)>,
+    /// Server-owned, non-persisted Git observations for worktree rows.
+    pub workspace_git_statuses: HashMap<NodeId, ilium_ipc::WorkspaceGitStatus>,
     /// The costs-and-stats popover hanging off an agent pane's second header
     /// icon: a hover preview or a pinned window (see `session_stats_popover`).
     pub stats_popover: Option<crate::session_stats_ui::StatsPopover>,
@@ -1634,6 +1760,14 @@ pub struct App {
     pub session_stats: crate::session_stats_store::SessionStatsStore,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
+    /// The footer agent icon's hover or pinned worktree actions.
+    pub agent_popover: Option<AgentPopover>,
+    agent_popover_last_visible: bool,
+    next_workspace_request_id: u64,
+    active_workspace_dialog_query: Option<(u64, NodeId)>,
+    active_workspace_menu_query: Option<(u64, NodeId)>,
+    active_workspace_popover_query: Option<(u64, NodeId)>,
+    active_workspace_create_request_id: Option<u64>,
     /// Panes ever observed with a detected agent status. Once a pane's
     /// toolbar row is reserved it stays reserved for that pane's lifetime,
     /// even if detection later reverts to `PlainShell` -- otherwise a live
@@ -1901,6 +2035,7 @@ impl App {
             // Until then an empty client has no project to inspect.
             next_chatroom_reconcile_at: None,
             agent_debug_logs: HashMap::new(),
+            pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
             tree_state: TreeState::default(),
@@ -1939,6 +2074,8 @@ impl App {
             terminal_settings: TerminalSettings::default(),
             editor_settings: EditorSettings::default(),
             session_settings: SessionSettings::default(),
+            git_settings: GitSettings::default(),
+            git_settings_error: None,
             voice_settings: VoiceSettings::default(),
             debug_settings: DebugSettings::default(),
             api_settings: ApiSettings::default(),
@@ -1972,10 +2109,18 @@ impl App {
             last_tree_click: None,
             hovered_tree_node: None,
             hovered_status_slot: None,
+            workspace_git_statuses: HashMap::new(),
             stats_popover: None,
             session_stats: crate::session_stats_store::SessionStatsStore::default(),
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
+            agent_popover: None,
+            agent_popover_last_visible: false,
+            next_workspace_request_id: 1,
+            active_workspace_dialog_query: None,
+            active_workspace_menu_query: None,
+            active_workspace_popover_query: None,
+            active_workspace_create_request_id: None,
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
@@ -2195,12 +2340,12 @@ impl App {
             PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => class.clone(),
             PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
         };
-        let project_path = self
+        let pane_cwd = self
             .tree
-            .project_path_for(pane_id)
+            .pane_cwd(pane_id)
             .unwrap_or(&self.session_cwd)
             .to_path_buf();
-        Some((class, session_id, project_path))
+        Some((class, session_id, pane_cwd))
     }
 
     /// Resolves the paste-ready JSONL history path for one detected pane.
@@ -3347,6 +3492,81 @@ impl App {
     }
     pub fn apply_session_settings(&mut self, settings: SessionSettings) {
         self.session_settings = settings;
+    }
+
+    pub fn apply_git_settings(&mut self, settings: GitSettings) {
+        self.git_settings = settings;
+        self.git_settings_error = None;
+    }
+
+    pub fn apply_and_persist_git_settings(&mut self, settings: GitSettings) -> Result<(), String> {
+        if let Err(error) = settings.validate() {
+            self.git_settings_error = Some(error.clone());
+            return Err(error);
+        }
+        if let Some(config_dir) = &self.config_dir {
+            crate::config::save_git_settings(config_dir, &settings).map_err(|error| {
+                let message = format!("Could not save Git settings: {error}");
+                self.status_message = Some(message.clone());
+                self.git_settings_error = Some(message.clone());
+                message
+            })?;
+        }
+        self.git_settings = settings;
+        self.git_settings_error = None;
+        Ok(())
+    }
+
+    pub fn settings_adjust_git_row(&mut self, row: GitRow, direction: i32) {
+        let mut settings = self.git_settings.clone();
+        match row {
+            GitRow::DefaultWhere => {
+                settings.default_where = settings.default_where.stepped(direction)
+            }
+            GitRow::DefaultBase => settings.default_base = settings.default_base.stepped(direction),
+            GitRow::BranchLine => settings.branch_line = settings.branch_line.stepped(direction),
+            GitRow::DefaultClosePolicy => {
+                settings.default_close_policy = settings.default_close_policy.stepped(direction)
+            }
+            GitRow::BranchPrefix => {
+                self.settings_open_git_text_field(GitTextField::BranchPrefix);
+                return;
+            }
+            GitRow::WorktreeLocationTemplate => {
+                self.settings_open_git_text_field(GitTextField::WorktreeLocationTemplate);
+                return;
+            }
+            GitRow::SetupCommand => {
+                self.settings_open_git_text_field(GitTextField::SetupCommand);
+                return;
+            }
+        }
+        if let Err(error) = self.apply_and_persist_git_settings(settings) {
+            self.status_message = Some(error);
+        }
+    }
+
+    pub fn settings_open_git_text_field(&mut self, field: GitTextField) {
+        let value = match field {
+            GitTextField::BranchPrefix => &self.git_settings.branch_prefix,
+            GitTextField::WorktreeLocationTemplate => &self.git_settings.worktree_location_template,
+            GitTextField::SetupCommand => &self.git_settings.setup_command,
+        };
+        self.push_modal(Mode::GitSettingPrompt(field, TextPromptState::new(value)));
+    }
+
+    pub fn settings_commit_git_text_field(&mut self, field: GitTextField, value: String) {
+        let mut settings = self.git_settings.clone();
+        match field {
+            GitTextField::BranchPrefix => settings.branch_prefix = value.trim().to_string(),
+            GitTextField::WorktreeLocationTemplate => {
+                settings.worktree_location_template = value.trim().to_string()
+            }
+            GitTextField::SetupCommand => settings.setup_command = value,
+        }
+        if let Err(error) = self.apply_and_persist_git_settings(settings) {
+            self.status_message = Some(error);
+        }
     }
 
     /// Installs startup voice settings without starting the actor. The event
@@ -5446,6 +5666,23 @@ impl App {
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
+    /// Cycles curated fill families while leaving a custom TOML family
+    /// untouched until the user explicitly changes this Settings row.
+    pub fn settings_adjust_progress_fill_style(&mut self, direction: i32) {
+        if direction == 0 {
+            return;
+        }
+        let current = crate::icon_settings::task_progress_preset_index(
+            &self.ui_settings.icons.task_progress_frames,
+        );
+        let count = crate::icon_settings::TASK_PROGRESS_STYLE_NAMES.len() as i32;
+        let next = current.map_or(0, |index| (index as i32 + direction).rem_euclid(count));
+        let mut ui = self.ui_settings.clone();
+        ui.icons.task_progress_frames =
+            crate::icon_settings::task_progress_preset_frames(next as usize);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     /// Switches whether a left-button drag over a terminal pane's content is
     /// claimed as a local text selection (see `crate::terminal_selection`)
     /// or forwarded to the pane's PTY like every other terminal mouse event.
@@ -5714,7 +5951,7 @@ impl App {
     /// Opens the Sol/Terra/Luna reasoning-strength submenu directly below
     /// `anchor` (that tier button's own screen rect from
     /// `agent_toolbar::button_rect_for`), clamped to stay on screen exactly
-    /// like `open_context_tree_order_submenu`.
+    /// like `open_context_submenu`.
     pub fn open_agent_toolbar_model_submenu(
         &mut self,
         pane_id: NodeId,
@@ -5835,6 +6072,7 @@ impl App {
             AppearanceRow::ProgressMonitorMaxLines => {
                 self.settings_adjust_progress_max_lines(direction)
             }
+            AppearanceRow::ProgressFillStyle => self.settings_adjust_progress_fill_style(direction),
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
             AppearanceRow::LockClosedEnabled => self.settings_toggle_lock_closed_enabled(),
         }
@@ -6669,6 +6907,56 @@ impl App {
         self.queue_request(ClientRequest::ClosePane { pane_id: target });
     }
 
+    pub(crate) fn request_interactive_close(&mut self, target: NodeId) {
+        if self.tree.get(target).is_none() {
+            return;
+        }
+        if self.tree.pane_workspace(target).is_none() {
+            self.request_close(target);
+            return;
+        }
+        let request_id = self.next_workspace_request_id();
+        self.mode = Mode::WaitingWorkspaceCloseOffer {
+            request_id,
+            pane_id: target,
+        };
+        self.queue_request(ClientRequest::QueryWorkspaceCloseOffer {
+            request_id,
+            pane_id: target,
+        });
+    }
+
+    pub(crate) fn receive_workspace_close_offer(
+        &mut self,
+        request_id: u64,
+        pane_id: NodeId,
+        can_offer: bool,
+    ) {
+        if !matches!(
+            &self.mode,
+            Mode::WaitingWorkspaceCloseOffer { request_id: pending_request, pane_id: pending_pane }
+                if *pending_request == request_id && *pending_pane == pane_id
+        ) {
+            return;
+        }
+        if can_offer && self.tree.pane_workspace(pane_id).is_some() {
+            self.mode = Mode::ConfirmWorkspaceCloseOffer(pane_id);
+        } else {
+            self.mode = Mode::Normal;
+            self.request_close(pane_id);
+        }
+    }
+
+    pub(crate) fn confirm_workspace_close_removal(&mut self, pane_id: NodeId) {
+        self.mode = Mode::Normal;
+        let request_id = self.next_workspace_request_id();
+        self.queue_request(ClientRequest::ClosePaneWithWorkspaceDisposition {
+            request_id,
+            pane_id,
+            disposition: ilium_ipc::WorkspaceDisposition::RemoveWorktree,
+        });
+    }
+
     pub fn request_move(&mut self, node_id: NodeId, direction: ilium_core::TreeMoveDirection) {
         self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::MoveNode { node_id, direction });
@@ -7359,8 +7647,379 @@ impl App {
             area,
             actions,
             selected_index: 0,
-            tree_order_submenu: None,
+            submenu: None,
+            worktree_unavailable_reason: Some("Checking Git repository…".to_string()),
+            hover_candidate: None,
         });
+        let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
+        let request_id = self.request_workspace_repo_facts(project);
+        self.active_workspace_menu_query = Some((request_id, project));
+    }
+
+    fn next_workspace_request_id(&mut self) -> u64 {
+        let request_id = self.next_workspace_request_id;
+        self.next_workspace_request_id = request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    fn request_workspace_repo_facts(&mut self, project: NodeId) -> u64 {
+        let request_id = self.next_workspace_request_id();
+        self.queue_request(ClientRequest::QueryRepoFacts {
+            request_id,
+            project,
+        });
+        request_id
+    }
+
+    /// Opens the same prompt-first form from a tree menu, footer icon, or
+    /// leader action. The repository snapshot is queried once on open.
+    pub fn open_create_agent_workspace_dialog(
+        &mut self,
+        provider: BuiltinAgentProvider,
+        target: NodeId,
+        existing: bool,
+    ) {
+        let parent_group = if target == ROOT_ID {
+            self.group_for_new_node()
+        } else {
+            self.create_group_target_for_click(target)
+        };
+        let project = self.tree.project_ancestor(parent_group).unwrap_or(ROOT_ID);
+        let mode = if existing {
+            WorktreeDialogMode::Existing
+        } else {
+            WorktreeDialogMode::New
+        };
+        self.agent_popover = None;
+        self.active_workspace_create_request_id = None;
+        self.mode =
+            Mode::CreateAgentWorkspace(Box::new(WorktreeDialogState::new_with_git_settings(
+                project,
+                parent_group,
+                provider,
+                mode,
+                self.git_settings.clone(),
+            )));
+        let request_id = self.request_workspace_repo_facts(project);
+        self.active_workspace_dialog_query = Some((request_id, project));
+    }
+
+    pub fn submit_create_agent_workspace(&mut self, mut state: Box<WorktreeDialogState>) {
+        let (provider, spec, initial_input) = match state.validated_request() {
+            Ok(request) => request,
+            Err(error) => {
+                state.set_create_error(error);
+                self.mode = Mode::CreateAgentWorkspace(state);
+                return;
+            }
+        };
+        let close_policy = match state.close_policy {
+            crate::worktree_dialog::WorktreeClosePolicy::Keep => {
+                ilium_ipc::WorkspaceClosePolicy::Keep
+            }
+            crate::worktree_dialog::WorktreeClosePolicy::OfferRemovalWhenSafe => {
+                ilium_ipc::WorkspaceClosePolicy::OfferRemovalWhenSafe
+            }
+        };
+        let spec = match spec {
+            ilium_ipc::WorkspaceCreateSpec::New {
+                branch,
+                base_ref,
+                path,
+            } => ilium_ipc::WorkspaceCreateSpec::NewWithOptions {
+                branch,
+                base_ref,
+                path,
+                setup_command: String::new(),
+                close_policy,
+            },
+            ilium_ipc::WorkspaceCreateSpec::NewWithSetup {
+                branch,
+                base_ref,
+                path,
+                setup_command,
+            } => ilium_ipc::WorkspaceCreateSpec::NewWithOptions {
+                branch,
+                base_ref,
+                path,
+                setup_command,
+                close_policy,
+            },
+            ilium_ipc::WorkspaceCreateSpec::Existing { path } => {
+                ilium_ipc::WorkspaceCreateSpec::ExistingWithOptions { path, close_policy }
+            }
+            other => other,
+        };
+        let request_id = self.next_workspace_request_id();
+        self.active_workspace_create_request_id = Some(request_id);
+        self.queue_request(ClientRequest::CreateAgentInWorkspace {
+            request_id,
+            parent_group: state.parent_group,
+            provider,
+            spec,
+            initial_input,
+        });
+        state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
+        self.mode = Mode::CreateAgentWorkspace(state);
+    }
+
+    /// Enqueues a control-originated worktree creation independently of any
+    /// interactive dialog's active request ID.
+    pub(crate) fn queue_control_workspace_create(
+        &mut self,
+        parent_group: NodeId,
+        provider: BuiltinAgentProvider,
+        spec: ilium_ipc::WorkspaceCreateSpec,
+        initial_input: Option<String>,
+    ) -> u64 {
+        let setup_command = self.git_settings.setup_command.clone();
+        let spec = if setup_command.trim().is_empty() {
+            spec
+        } else {
+            match spec {
+                ilium_ipc::WorkspaceCreateSpec::New {
+                    branch,
+                    base_ref,
+                    path,
+                } => ilium_ipc::WorkspaceCreateSpec::NewWithSetup {
+                    branch,
+                    base_ref,
+                    path,
+                    setup_command,
+                },
+                ilium_ipc::WorkspaceCreateSpec::NewAtDefaultPath { branch, base_ref } => {
+                    ilium_ipc::WorkspaceCreateSpec::NewAtDefaultPathWithSetup {
+                        branch,
+                        base_ref,
+                        setup_command,
+                    }
+                }
+                other => other,
+            }
+        };
+        let request_id = self.next_workspace_request_id();
+        self.queue_request(ClientRequest::CreateAgentInWorkspace {
+            request_id,
+            parent_group,
+            provider,
+            spec,
+            initial_input,
+        });
+        request_id
+    }
+
+    pub fn receive_repo_facts(
+        &mut self,
+        request_id: u64,
+        project: NodeId,
+        result: Result<ilium_ipc::RepoFacts, String>,
+    ) {
+        if self.active_workspace_dialog_query == Some((request_id, project)) {
+            self.active_workspace_dialog_query = None;
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                if state.project_id == project {
+                    match result {
+                        Ok(facts) => state.apply_facts(facts),
+                        Err(error) => state.apply_facts_error(error),
+                    }
+                }
+            }
+            return;
+        }
+        if self.active_workspace_menu_query == Some((request_id, project)) {
+            self.active_workspace_menu_query = None;
+            if let Mode::ContextMenu(menu) = &mut self.mode {
+                let menu_project = self.tree.project_ancestor(menu.target).unwrap_or(ROOT_ID);
+                if menu_project == project {
+                    menu.set_worktree_unavailable_reason(result.err());
+                }
+            }
+            return;
+        }
+        if self.active_workspace_popover_query == Some((request_id, project)) {
+            self.active_workspace_popover_query = None;
+            if let Some(popover) = &mut self.agent_popover {
+                popover.enabled = result.is_ok();
+                popover.unavailable_reason = result.err();
+            }
+        }
+    }
+
+    pub fn receive_workspace_create_progress(
+        &mut self,
+        request_id: u64,
+        stage: ilium_ipc::WorkspaceCreateStage,
+    ) {
+        if self.active_workspace_create_request_id == Some(request_id) {
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                state.set_stage(stage);
+            }
+        }
+    }
+
+    pub fn receive_workspace_created(&mut self, request_id: u64, pane_id: NodeId) {
+        if self.active_workspace_create_request_id != Some(request_id) {
+            return;
+        }
+        self.active_workspace_create_request_id = None;
+        self.mode = Mode::Normal;
+        self.status_message = Some(format!("Agent started in worktree (pane {})", pane_id.0));
+        if self.tree.get(pane_id).is_some() {
+            self.focus_pane(pane_id);
+        }
+    }
+
+    pub fn receive_workspace_create_failed(&mut self, request_id: u64, error: String) {
+        if self.active_workspace_create_request_id != Some(request_id) {
+            return;
+        }
+        self.active_workspace_create_request_id = None;
+        if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+            state.set_create_error(error);
+        } else {
+            self.status_message = Some(format!("Worktree creation failed: {error}"));
+        }
+    }
+
+    pub fn open_worktree_manager(&mut self, target: NodeId) {
+        let Some(project) = self.tree.project_ancestor(target) else {
+            self.status_message = Some("Select a project to manage worktrees".into());
+            return;
+        };
+        let request_id = self.next_workspace_request_id();
+        self.mode = Mode::WorktreeManager(Box::new(WorktreeManagerState::new(project, request_id)));
+        self.queue_request(ClientRequest::QueryWorkspaceInventory {
+            request_id,
+            project,
+        });
+    }
+
+    pub fn refresh_worktree_manager(&mut self, mut state: Box<WorktreeManagerState>) {
+        let request_id = self.next_workspace_request_id();
+        state.begin_refresh(request_id);
+        let project = state.project;
+        self.mode = Mode::WorktreeManager(state);
+        self.queue_request(ClientRequest::QueryWorkspaceInventory {
+            request_id,
+            project,
+        });
+    }
+
+    pub fn submit_worktree_manager_prune(&mut self, mut state: Box<WorktreeManagerState>) {
+        let request_id = self.next_workspace_request_id();
+        match state.confirmed_prune(request_id) {
+            Ok((target, mode, branch_policy)) => {
+                let project = state.project;
+                self.mode = Mode::WorktreeManager(state);
+                self.queue_request(ClientRequest::PruneWorkspace {
+                    request_id,
+                    project,
+                    target,
+                    mode,
+                    branch_policy,
+                });
+            }
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = Mode::WorktreeManager(state);
+            }
+        }
+    }
+
+    pub fn receive_worktree_inventory(
+        &mut self,
+        request_id: u64,
+        project: NodeId,
+        result: Result<ilium_ipc::WorkspaceInventory, String>,
+    ) {
+        if let Mode::WorktreeManager(state) = &mut self.mode {
+            let _ = state.receive_inventory(request_id, project, result);
+        }
+    }
+
+    pub fn receive_worktree_prune(
+        &mut self,
+        request_id: u64,
+        project: NodeId,
+        target: ilium_ipc::WorkspacePruneTarget,
+        result: ilium_ipc::WorkspacePruneResult,
+    ) {
+        let summary = format!(
+            "Worktree {}: {:?}; {}",
+            target.worktree_root.display(),
+            result.outcome,
+            result.reasons.join("; ")
+        );
+        let accepted = if let Mode::WorktreeManager(state) = &mut self.mode {
+            state.receive_prune(request_id, project, target, result)
+        } else {
+            false
+        };
+        if !accepted {
+            self.status_message = Some(summary);
+        }
+    }
+
+    pub fn hover_agent_popover(
+        &mut self,
+        provider: BuiltinAgentProvider,
+        anchor: Rect,
+        now: Instant,
+        pin: bool,
+    ) {
+        if let Some(popover) = &mut self.agent_popover {
+            if popover.provider == provider && popover.anchor == anchor {
+                if pin {
+                    popover.pin();
+                }
+                return;
+            }
+        }
+        self.agent_popover = Some(if pin {
+            AgentPopover::pinned(
+                provider,
+                anchor,
+                now,
+                false,
+                Some("Checking Git repository…".into()),
+            )
+        } else {
+            AgentPopover::hover(
+                provider,
+                anchor,
+                now,
+                false,
+                Some("Checking Git repository…".into()),
+            )
+        });
+        self.agent_popover_last_visible = pin;
+        let parent_group = self.group_for_new_node();
+        let project = self.tree.project_ancestor(parent_group).unwrap_or(ROOT_ID);
+        let request_id = self.request_workspace_repo_facts(project);
+        self.active_workspace_popover_query = Some((request_id, project));
+    }
+
+    pub fn update_agent_popover_pointer(&mut self, position: Position, now: Instant) {
+        if let Some(popover) = &mut self.agent_popover {
+            popover.pointer_moved(position, self.layout.tree_area, now);
+        }
+    }
+
+    pub fn tick_agent_popover(&mut self, now: Instant) -> bool {
+        let Some(popover) = &self.agent_popover else {
+            return false;
+        };
+        let is_visible = popover.is_visible(now);
+        if popover.should_close(now) {
+            self.agent_popover = None;
+            self.active_workspace_popover_query = None;
+            let changed = self.agent_popover_last_visible;
+            self.agent_popover_last_visible = false;
+            return changed;
+        }
+        let changed = self.agent_popover_last_visible != is_visible;
+        self.agent_popover_last_visible = is_visible;
+        changed
     }
 
     pub fn is_detected_agent_pane(&self, pane_id: NodeId) -> bool {
@@ -7785,16 +8444,102 @@ impl App {
         }
     }
 
-    /// Opens the Order by submenu beside its parent row, flipping it to the
-    /// left only when the terminal has no room on the right.
-    pub fn open_context_tree_order_submenu(&self, menu: &mut ContextMenu) {
+    /// Opens a submenu beside its parent row, flipping it to the left when
+    /// the terminal has no room on the right.
+    pub fn open_context_submenu(&self, menu: &mut ContextMenu, parent: ContextMenuAction) {
+        let (items, selected_index): (Vec<SubmenuItem>, usize) = match parent {
+            ContextMenuAction::OrderBy => (
+                TreeOrder::ALL
+                    .iter()
+                    .map(|tree_order| SubmenuItem {
+                        action: SubmenuItemAction::SetTreeOrder(*tree_order),
+                        label: tree_order.label().to_string(),
+                        disabled_reason: None,
+                    })
+                    .collect(),
+                TreeOrder::ALL
+                    .iter()
+                    .position(|tree_order| *tree_order == self.ui_settings.tree_order)
+                    .unwrap_or(0),
+            ),
+            ContextMenuAction::NewAgent(provider) => (
+                vec![
+                    SubmenuItem {
+                        action: SubmenuItemAction::AgentHere(provider),
+                        label: "Here".to_string(),
+                        disabled_reason: None,
+                    },
+                    SubmenuItem {
+                        action: SubmenuItemAction::AgentInNewWorktree(provider),
+                        label: "In new worktree…".to_string(),
+                        disabled_reason: menu.worktree_unavailable_reason.clone(),
+                    },
+                    SubmenuItem {
+                        action: SubmenuItemAction::AgentInExistingWorktree(provider),
+                        label: "In existing worktree…".to_string(),
+                        disabled_reason: menu.worktree_unavailable_reason.clone(),
+                    },
+                ],
+                if menu.worktree_unavailable_reason.is_some() {
+                    0
+                } else {
+                    match self.git_settings.default_where {
+                        crate::config::GitDefaultWhere::Here => 0,
+                        crate::config::GitDefaultWhere::NewWorktree => 1,
+                        crate::config::GitDefaultWhere::ExistingWorktree => 2,
+                    }
+                },
+            ),
+            ContextMenuAction::Worktree => {
+                let workspace = self.tree.pane_workspace(menu.target);
+                let removal_reason = match workspace {
+                    Some(workspace)
+                        if !workspace.created_by_ilium || workspace.workspace_id.is_none() =>
+                    {
+                        Some("This worktree was not created by Ilium".to_string())
+                    }
+                    Some(_) => None,
+                    None => Some("This pane has no worktree".to_string()),
+                };
+                (
+                    vec![
+                        SubmenuItem {
+                            action: SubmenuItemAction::CopyWorktreeBranch,
+                            label: "Copy branch".to_string(),
+                            disabled_reason: None,
+                        },
+                        SubmenuItem {
+                            action: SubmenuItemAction::CopyWorktreePath,
+                            label: "Copy path".to_string(),
+                            disabled_reason: None,
+                        },
+                        SubmenuItem {
+                            action: SubmenuItemAction::NewTerminalInWorktree,
+                            label: "New terminal here".to_string(),
+                            disabled_reason: None,
+                        },
+                        SubmenuItem {
+                            action: SubmenuItemAction::OpenWorktreeFolder,
+                            label: "Open folder in sidebar".to_string(),
+                            disabled_reason: None,
+                        },
+                        SubmenuItem {
+                            action: SubmenuItemAction::RemoveWorktree,
+                            label: "Remove worktree…".to_string(),
+                            disabled_reason: removal_reason,
+                        },
+                    ],
+                    0,
+                )
+            }
+            _ => return,
+        };
         let submenu_width = 32.min(self.layout.screen_area.width.max(1));
-        let submenu_height =
-            (TreeOrder::ALL.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
-        let order_row = menu
+        let submenu_height = (items.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let parent_row = menu
             .actions
             .iter()
-            .position(|action| *action == ContextMenuAction::OrderBy)
+            .position(|action| *action == parent)
             .unwrap_or(0) as u16;
         let preferred_x = menu.area.right();
         let x = if preferred_x.saturating_add(submenu_width) <= self.layout.screen_area.right() {
@@ -7802,20 +8547,91 @@ impl App {
         } else {
             menu.area.x.saturating_sub(submenu_width)
         };
-        let preferred_y = menu.area.y.saturating_add(1).saturating_add(order_row);
+        let preferred_y = menu.area.y.saturating_add(1).saturating_add(parent_row);
         let max_y = self
             .layout
             .screen_area
             .bottom()
             .saturating_sub(submenu_height);
-        let selected_index = TreeOrder::ALL
-            .iter()
-            .position(|tree_order| *tree_order == self.ui_settings.tree_order)
-            .unwrap_or(0);
-        menu.tree_order_submenu = Some(TreeOrderSubmenu {
+        menu.submenu = Some(Submenu {
+            parent,
             area: Rect::new(x, preferred_y.min(max_y), submenu_width, submenu_height),
+            items,
             selected_index,
         });
+        menu.hover_candidate = None;
+    }
+
+    pub fn execute_context_submenu_item(&mut self, item: &SubmenuItem, target: NodeId) {
+        if let Some(reason) = &item.disabled_reason {
+            self.status_message = Some(reason.clone());
+            return;
+        }
+        self.select_node(target);
+        match item.action {
+            SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
+            SubmenuItemAction::AgentHere(provider) => {
+                self.action_new_command_pane(provider.command_line())
+            }
+            SubmenuItemAction::AgentInNewWorktree(provider) => {
+                self.open_create_agent_workspace_dialog(provider, target, false)
+            }
+            SubmenuItemAction::AgentInExistingWorktree(provider) => {
+                self.open_create_agent_workspace_dialog(provider, target, true)
+            }
+            SubmenuItemAction::CopyWorktreeBranch => {
+                if let Some(workspace) = self.tree.pane_workspace(target) {
+                    let live_status = self.workspace_git_statuses.get(&target);
+                    if live_status.is_some_and(|status| status.detached && !status.missing) {
+                        self.status_message = Some("Detached HEAD has no branch to copy".into());
+                    } else {
+                        let branch =
+                            tree_ui::displayed_worktree_branch(&workspace.branch, live_status)
+                                .to_string();
+                        self.copy_terminal_text_to_clipboard(branch, "Branch copied to clipboard");
+                    }
+                }
+            }
+            SubmenuItemAction::CopyWorktreePath => {
+                if let Some(workspace) = self.tree.pane_workspace(target) {
+                    self.copy_terminal_text_to_clipboard(
+                        workspace.worktree_root.display().to_string(),
+                        "Worktree path copied to clipboard",
+                    );
+                }
+            }
+            SubmenuItemAction::NewTerminalInWorktree => {
+                self.request_new_terminal_in_worktree(target)
+            }
+            SubmenuItemAction::OpenWorktreeFolder => self.open_worktree_folder_in_sidebar(target),
+            SubmenuItemAction::RemoveWorktree => self.mode = Mode::ConfirmRemoveWorkspace(target),
+        }
+        if matches!(self.mode, Mode::ContextMenu(_)) {
+            self.mode = Mode::Normal;
+        }
+    }
+
+    /// Called by the client tick after a stationary pointer has lingered on
+    /// a submenu parent. The mouse path only records the candidate.
+    pub fn tick_context_menu_hover(&mut self, now: Instant) -> bool {
+        if !matches!(self.mode, Mode::ContextMenu(_)) {
+            return false;
+        }
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            unreachable!("context menu mode checked above");
+        };
+        let candidate = menu.hover_candidate;
+        let should_open = candidate.is_some_and(|(parent, since)| {
+            parent.has_submenu()
+                && now.saturating_duration_since(since) >= Duration::from_millis(180)
+        });
+        if should_open {
+            if let Some((parent, _)) = candidate {
+                self.open_context_submenu(&mut menu, parent);
+            }
+        }
+        self.mode = Mode::ContextMenu(menu);
+        should_open
     }
 
     /// Opens the dedicated one-line editor menu at the right-click position.
@@ -8152,6 +8968,12 @@ impl App {
             // that never depends on the target actually existing.
             None => return ContextMenuAction::GLOBAL_ACTIONS.to_vec(),
         }
+        if self.tree.pane_workspace(target).is_some() {
+            actions.insert(1.min(actions.len()), ContextMenuAction::Worktree);
+        }
+        if self.tree.project_ancestor(target).is_some() {
+            actions.push(ContextMenuAction::ManageWorktrees);
+        }
         actions.extend([
             ContextMenuAction::SetBookmark {
                 is_bookmarked: !self.tree.get(target).is_some_and(|node| node.is_bookmarked),
@@ -8228,9 +9050,10 @@ impl App {
                 self.request_move(target, ilium_core::TreeMoveDirection::Down)
             }
             ContextMenuAction::Close => self.action_close(target),
+            ContextMenuAction::ManageWorktrees => self.open_worktree_manager(target),
             // Input handlers open this entry without leaving the parent menu;
             // direct execution is intentionally a harmless no-op.
-            ContextMenuAction::OrderBy => {}
+            ContextMenuAction::OrderBy | ContextMenuAction::Worktree => {}
             ContextMenuAction::Restart => {
                 self.request_client_exit(ClientExitReason::RestartRequested)
             }
@@ -8313,6 +9136,55 @@ impl App {
         self.request_new_terminal(parent);
     }
 
+    fn request_new_terminal_in_worktree(&mut self, pane_id: NodeId) {
+        if self.tree.pane_workspace(pane_id).is_none() {
+            self.status_message = Some("This pane has no worktree".to_string());
+            return;
+        }
+        let parent_group = self.tree.parent_of(pane_id).unwrap_or(ROOT_ID);
+        self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
+        self.queue_request(ClientRequest::NewPane {
+            parent_group,
+            kind: ilium_ipc::NewPaneKind::PlainShell,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(pane_id),
+        });
+    }
+
+    fn open_worktree_folder_in_sidebar(&mut self, pane_id: NodeId) {
+        let Some(path) = self
+            .tree
+            .pane_workspace(pane_id)
+            .map(|workspace| workspace.worktree_root.clone())
+        else {
+            self.status_message = Some("This pane has no worktree".to_string());
+            return;
+        };
+        let parent_group = self.normal_group_for_node(pane_id).unwrap_or(ROOT_ID);
+        self.request_new_folder(parent_group, path);
+    }
+
+    pub fn confirm_remove_workspace(&mut self, pane_id: NodeId) {
+        let Some(workspace) = self.tree.pane_workspace(pane_id) else {
+            self.status_message = Some("This pane has no worktree".to_string());
+            self.mode = Mode::Normal;
+            return;
+        };
+        if !workspace.created_by_ilium || workspace.workspace_id.is_none() {
+            self.status_message = Some("This worktree was not created by Ilium".to_string());
+            self.mode = Mode::Normal;
+            return;
+        }
+        let request_id = self.next_workspace_request_id();
+        self.queue_request(ClientRequest::RemoveWorkspace {
+            request_id,
+            pane_id,
+            force_path: None,
+            remove_branch: false,
+        });
+        self.status_message = Some("Checking worktree removal safety…".to_string());
+        self.mode = Mode::Normal;
+    }
+
     /// Creates a specific command-line pane (e.g. `claude`, `codex`, `agy`) under
     /// the currently targeted group.
     pub fn action_new_command_pane(&mut self, command_line: impl Into<String>) {
@@ -8393,7 +9265,7 @@ impl App {
         }
         match self.close_confirmation_message(id) {
             Some(_) => self.mode = Mode::ConfirmClose(id),
-            None => self.request_close(id),
+            None => self.request_interactive_close(id),
         }
     }
 
@@ -11816,16 +12688,189 @@ mod tests {
         let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("right-click should open the tree context menu");
         };
-        app.open_context_tree_order_submenu(&mut menu);
+        app.open_context_submenu(&mut menu, ContextMenuAction::OrderBy);
         let submenu = menu
-            .tree_order_submenu
+            .submenu
             .expect("Order by should open an adjacent submenu");
 
         assert_eq!(
-            TreeOrder::ALL[submenu.selected_index],
-            TreeOrder::AgeDescending
+            submenu.items[submenu.selected_index].action,
+            SubmenuItemAction::SetTreeOrder(TreeOrder::AgeDescending)
         );
         assert!(submenu.area.x >= menu.area.right() || submenu.area.right() <= menu.area.x);
+    }
+
+    #[test]
+    fn worktree_menu_uses_server_resolved_cwd_and_guards_unowned_removal() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let path = PathBuf::from("/tmp/ilium-worktree-menu-test");
+        app.tree.set_pane_launch_cwd(pane, path.clone()).unwrap();
+        let mut workspace = ilium_core::PaneWorkspace {
+            workspace_id: None,
+            repo_common_dir: PathBuf::from("/tmp/.git"),
+            worktree_root: path.clone(),
+            branch: "agent/fix".to_string(),
+            base_ref: "main".to_string(),
+            base_commit: "abc123".to_string(),
+            created_by_ilium: false,
+            created_at_unix: 1,
+        };
+        app.tree
+            .set_pane_workspace(pane, Some(workspace.clone()))
+            .unwrap();
+        assert!(app
+            .context_actions_for(pane)
+            .contains(&ContextMenuAction::Worktree));
+        app.open_context_menu(pane, 2, 2);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("menu should open")
+        };
+        app.open_context_submenu(&mut menu, ContextMenuAction::Worktree);
+        let submenu = menu.submenu.as_ref().unwrap();
+        assert_eq!(submenu.items.len(), 5);
+        assert!(submenu.items[4]
+            .disabled_reason
+            .as_deref()
+            .unwrap()
+            .contains("not created"));
+
+        workspace.workspace_id = Some("owned".to_string());
+        workspace.created_by_ilium = true;
+        app.tree.set_pane_workspace(pane, Some(workspace)).unwrap();
+        app.request_new_terminal_in_worktree(pane);
+        assert!(app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request,
+            ClientRequest::NewPane { parent_group, kind: ilium_ipc::NewPaneKind::PlainShell,
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source) }
+                if *parent_group == group && *source == pane)));
+    }
+
+    #[test]
+    fn interactive_worktree_close_uses_correlated_offer_and_keeps_by_default() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_workspace(
+                pane_id,
+                Some(ilium_core::PaneWorkspace {
+                    workspace_id: Some("owned".into()),
+                    repo_common_dir: PathBuf::from("/tmp/repo/.git"),
+                    worktree_root: PathBuf::from("/tmp/repo.agent"),
+                    branch: "agent/test".into(),
+                    base_ref: "main".into(),
+                    base_commit: "abc123".into(),
+                    created_by_ilium: true,
+                    created_at_unix: 1,
+                }),
+            )
+            .unwrap();
+
+        app.request_interactive_close(pane_id);
+        let requests = app.take_outbound_requests();
+        let [ClientRequest::QueryWorkspaceCloseOffer {
+            request_id,
+            pane_id: queried_pane,
+        }] = requests.as_slice()
+        else {
+            panic!("interactive close must query the server");
+        };
+        let request_id = *request_id;
+        assert_eq!(*queried_pane, pane_id);
+        app.receive_workspace_close_offer(request_id + 1, pane_id, true);
+        assert!(matches!(app.mode, Mode::WaitingWorkspaceCloseOffer { .. }));
+        app.receive_workspace_close_offer(request_id, pane_id, false);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ClosePane { pane_id }]
+        );
+
+        app.request_interactive_close(pane_id);
+        let requests = app.take_outbound_requests();
+        let [ClientRequest::QueryWorkspaceCloseOffer { request_id, .. }] = requests.as_slice()
+        else {
+            panic!("second close must query the server");
+        };
+        let request_id = *request_id;
+        app.receive_workspace_close_offer(request_id, pane_id, true);
+        assert!(matches!(app.mode, Mode::ConfirmWorkspaceCloseOffer(id) if id == pane_id));
+        app.confirm_workspace_close_removal(pane_id);
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ClientRequest::ClosePaneWithWorkspaceDisposition {
+                pane_id: requested_pane,
+                disposition: ilium_ipc::WorkspaceDisposition::RemoveWorktree,
+                ..
+            }] if *requested_pane == pane_id
+        ));
+    }
+
+    #[test]
+    fn new_agent_submenu_starts_with_here_and_updates_worktree_availability() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("context menu should open");
+        };
+        let parent = ContextMenuAction::NewAgent(BuiltinAgentProvider::Claude);
+        app.open_context_submenu(&mut menu, parent);
+        let submenu = menu.submenu.as_ref().expect("agent submenu should open");
+        assert_eq!(submenu.parent, parent);
+        assert_eq!(submenu.selected_index, 0);
+        assert_eq!(
+            submenu.items[0].action,
+            SubmenuItemAction::AgentHere(BuiltinAgentProvider::Claude)
+        );
+        assert!(submenu.items[0].disabled_reason.is_none());
+        assert!(submenu.items[1].disabled_reason.is_some());
+
+        menu.set_worktree_unavailable_reason(None);
+        let submenu = menu.submenu.as_ref().unwrap();
+        assert!(submenu.items[1..]
+            .iter()
+            .all(|item| item.disabled_reason.is_none()));
+        menu.set_worktree_unavailable_reason(Some("Not a Git repository".to_string()));
+        let submenu = menu.submenu.as_ref().unwrap();
+        assert!(submenu.items[1..]
+            .iter()
+            .all(|item| item.disabled_reason.as_deref() == Some("Not a Git repository")));
+    }
+
+    #[test]
+    fn context_submenu_hover_opens_only_after_delay() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(menu) = &mut app.mode else {
+            panic!("menu should open");
+        };
+        let started = Instant::now();
+        menu.hover_candidate = Some((
+            ContextMenuAction::NewAgent(BuiltinAgentProvider::Codex),
+            started,
+        ));
+        assert!(!app.tick_context_menu_hover(started + Duration::from_millis(179)));
+        assert!(app.tick_context_menu_hover(started + Duration::from_millis(180)));
+        let Mode::ContextMenu(menu) = &app.mode else {
+            panic!("menu should remain open");
+        };
+        assert_eq!(
+            menu.submenu.as_ref().unwrap().parent,
+            ContextMenuAction::NewAgent(BuiltinAgentProvider::Codex)
+        );
     }
 
     #[test]
@@ -15087,7 +16132,8 @@ mod tests {
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
-        assert_eq!(SettingsTab::Session.next(), SettingsTab::KanbanBoard);
+        assert_eq!(SettingsTab::Session.next(), SettingsTab::Git);
+        assert_eq!(SettingsTab::Git.next(), SettingsTab::KanbanBoard);
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
@@ -15154,6 +16200,32 @@ mod tests {
                 .unwrap()
                 .ui
                 .use_stable_glyphs
+        );
+    }
+
+    #[test]
+    fn progress_fill_style_row_changes_and_persists_the_frame_family() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        app.settings_adjust_row(AppearanceRow::ProgressFillStyle, 1);
+        let blocks = crate::icon_settings::task_progress_preset_frames(1);
+        assert_eq!(app.ui_settings.icons.task_progress_frames, blocks);
+        assert_eq!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .icons
+                .task_progress_frames,
+            blocks
+        );
+        app.settings_adjust_row(AppearanceRow::ProgressFillStyle, -1);
+        assert_eq!(
+            crate::icon_settings::task_progress_preset_index(
+                &app.ui_settings.icons.task_progress_frames
+            ),
+            Some(0)
         );
     }
 

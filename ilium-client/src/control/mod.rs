@@ -864,6 +864,49 @@ mod tests {
     }
 
     #[test]
+    fn git_settings_control_paths_persist_and_read_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("default".to_owned(), directory.path().join("project"));
+        app.config_dir = Some(directory.path().to_path_buf());
+        let mut plane = ControlPlane::default();
+
+        for (call_id, arguments_json) in [
+            (
+                "git-setting-1",
+                r#"{"action":"set","path":"git.branch_prefix","value":"review/"}"#,
+            ),
+            (
+                "git-setting-2",
+                r#"{"action":"set","path":"git.branch_line","value":"off"}"#,
+            ),
+        ] {
+            let result = plane.execute_invocation(
+                &mut app,
+                VoiceToolInvocation {
+                    call_id: call_id.to_owned(),
+                    name: tools::SETTINGS_TOOL_NAME.to_owned(),
+                    arguments_json: arguments_json.to_owned(),
+                },
+            );
+            assert_eq!(result.result["status"], "ok", "{}", result.result);
+        }
+
+        let saved = crate::config::load(directory.path()).unwrap();
+        assert_eq!(saved.git.branch_prefix, "review/");
+        assert_eq!(saved.git.branch_line, crate::config::GitBranchLine::Off);
+        let readback = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "git-setting-3".to_owned(),
+                name: tools::SETTINGS_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"action":"get"}"#.to_owned(),
+            },
+        );
+        assert_eq!(readback.result["data"]["git"]["branch_prefix"], "review/");
+        assert_eq!(readback.result["data"]["git"]["branch_line"], "off");
+    }
+
+    #[test]
     fn semantic_search_returns_local_content_and_opens_the_exact_result() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -927,6 +970,56 @@ mod tests {
                 },
                 ..
             }] if command_line == "codex" && initial_input == "/goal inspect this"
+        ));
+    }
+
+    #[test]
+    fn built_in_agent_tool_can_request_a_server_derived_worktree() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let mut plane = ControlPlane::default();
+        let output = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "agent-worktree".to_owned(),
+                name: tools::TREE_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"action":"create_agent","parent":{"id":0},"provider":"codex","workspace":{"branch":"agent/fix","base":"main"}}"#.to_owned(),
+            },
+        );
+
+        assert_eq!(output.result["status"], "queued");
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::CreateAgentInWorkspace {
+                parent_group: ROOT_ID,
+                provider: ilium_core::BuiltinAgentProvider::Codex,
+                spec: ilium_ipc::WorkspaceCreateSpec::NewAtDefaultPath {
+                    branch,
+                    base_ref: Some(base),
+                },
+                ..
+            }] if branch == "agent/fix" && base == "main"
+        ));
+
+        app.git_settings.setup_command = "printf ready".to_string();
+        let configured = plane.execute_invocation(
+            &mut app,
+            VoiceToolInvocation {
+                call_id: "agent-worktree-configured".to_owned(),
+                name: tools::TREE_TOOL_NAME.to_owned(),
+                arguments_json: r#"{"action":"create_agent","parent":{"id":0},"provider":"codex","workspace":{"branch":"agent/next","base":"main"}}"#.to_owned(),
+            },
+        );
+        assert_eq!(configured.result["status"], "queued");
+        assert!(matches!(
+            app.take_outbound_requests().as_slice(),
+            [ilium_ipc::ClientRequest::CreateAgentInWorkspace {
+                spec: ilium_ipc::WorkspaceCreateSpec::NewAtDefaultPathWithSetup {
+                    branch,
+                    base_ref: Some(base),
+                    setup_command,
+                },
+                ..
+            }] if branch == "agent/next" && base == "main" && setup_command == "printf ready"
         ));
     }
 }

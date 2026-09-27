@@ -74,6 +74,12 @@ pub(crate) async fn deliver_initial_prompt_when_ready(
 
 fn initial_prompt_is_ready(runtime: &crate::pane::TerminalPaneRuntime) -> bool {
     let screen = runtime.session.screen_snapshot();
+    // Codex can draw an empty composer before its startup finishes. An Enter
+    // sent at that point can be consumed by startup, leaving the initial task
+    // in the composer indefinitely (S09 take 20260927-012123).
+    if codex_startup_is_pending(&screen.text) {
+        return false;
+    }
     if let Some(agent_class) = runtime.detected_agent_class.as_ref() {
         return ilium_detect::is_agent_prompt_ready_at_cursor(
             agent_class,
@@ -97,6 +103,12 @@ fn initial_prompt_is_ready(runtime: &crate::pane::TerminalPaneRuntime) -> bool {
         })
 }
 
+fn codex_startup_is_pending(screen_text: &str) -> bool {
+    screen_text.lines().any(|line| {
+        line.contains("model:") && line.contains("loading") || line.contains("Waiting for startup")
+    })
+}
+
 /// Delivers a terminal or monitor-failure notification at the next safe
 /// composer boundary. Progress monitoring never touches the agent's `/goal`:
 /// this notification is its only effect on the pane's input.
@@ -106,7 +118,9 @@ pub(crate) async fn deliver_result(
     monitor_id: u64,
     message: String,
 ) -> Result<(), String> {
-    queue_result_delivery(&state, pane_id, monitor_id).await?;
+    if !queue_result_delivery(&state, pane_id, monitor_id).await? {
+        return Ok(());
+    }
     deliver_when_ready(
         &state,
         pane_id,
@@ -339,7 +353,7 @@ async fn queue_result_delivery(
     state: &ServerState,
     pane_id: NodeId,
     monitor_id: u64,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let mut panes = state.panes.write().await;
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
         return Err("pane closed before result delivery".to_string());
@@ -347,23 +361,37 @@ async fn queue_result_delivery(
     if !runtime.is_current_progress_monitor(monitor_id) {
         return Err(format!("progress monitor {monitor_id} is stale"));
     }
+    let has_supported_composer = runtime
+        .detected_agent_class
+        .as_ref()
+        .and_then(ilium_core::AgentClass::provider)
+        .is_some();
     let monitor = runtime
         .progress_monitor
         .as_mut()
         .expect("current monitor was checked above");
     match monitor.result_delivery {
-        ProgressDeliveryState::NotQueued | ProgressDeliveryState::Queued => {
-            monitor.result_delivery = ProgressDeliveryState::Queued;
-        }
         ProgressDeliveryState::Attempted
         | ProgressDeliveryState::DeliveredToPty
         | ProgressDeliveryState::Uncertain => {
             return Err("progress result delivery was already attempted".to_string());
         }
+        ProgressDeliveryState::NotDeliverable => return Ok(false),
+        ProgressDeliveryState::NotQueued | ProgressDeliveryState::Queued => {}
     }
+    // A plain shell has no agent composer, and a custom/unknown agent has no
+    // verified prompt contract. Keep the result in PaneProgress rather than
+    // leaving a queue that can never drain or typing it into a shell.
+    if !has_supported_composer {
+        monitor.result_delivery = ProgressDeliveryState::NotDeliverable;
+        drop(panes);
+        state.request_snapshot_save();
+        return Ok(false);
+    }
+    monitor.result_delivery = ProgressDeliveryState::Queued;
     drop(panes);
     state.request_snapshot_save();
-    Ok(())
+    Ok(true)
 }
 
 fn nonempty_status(message: &str) -> &str {
@@ -431,5 +459,18 @@ mod tests {
         let sanitized = sanitize_delivery_text(&source);
         assert!(!sanitized.contains('\u{1b}'));
         assert!(sanitized.len() <= MAXIMUM_DELIVERY_TEXT_BYTES);
+    }
+
+    #[test]
+    fn initial_prompt_waits_past_codex_loading_composer() {
+        assert!(codex_startup_is_pending(
+            ">_ OpenAI Codex\nmodel:     loading   /model to change\n› Ask Codex to do anything"
+        ));
+        assert!(codex_startup_is_pending(
+            ">_ OpenAI Codex\n› Ask Codex to do anything\nWaiting for startup  · esc cancel"
+        ));
+        assert!(!codex_startup_is_pending(
+            ">_ OpenAI Codex\nmodel:     GPT-6-Luna low   /model to change\n› Ask Codex to do anything"
+        ));
     }
 }

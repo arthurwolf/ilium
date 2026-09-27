@@ -6,7 +6,7 @@ use ilium_core::{
     AgentProvider, BuiltinAgentProvider, PromptQueueDelivery, SplitOrientation, TreeMoveDirection,
     MAXIMUM_SPLIT_VIEW_PANES,
 };
-use ilium_ipc::{ClientRequest, PromptSubmissionSource};
+use ilium_ipc::{ClientRequest, PromptSubmissionSource, WorkspaceCreateSpec};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -287,6 +287,30 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                 AgentProviderChoice::Codex => BuiltinAgentProvider::Codex,
                 AgentProviderChoice::Antigravity => BuiltinAgentProvider::Antigravity,
             };
+            if let Some(workspace) = command.workspace {
+                ilium_core::validate_branch_name(&workspace.branch)
+                    .map_err(|error| format!("invalid workspace branch: {error}"))?;
+                if workspace
+                    .base
+                    .as_ref()
+                    .is_some_and(|base| base.trim().is_empty())
+                {
+                    return Err("workspace base must not be empty".into());
+                }
+                app.queue_control_workspace_create(
+                    parent,
+                    provider,
+                    WorkspaceCreateSpec::NewAtDefaultPath {
+                        branch: workspace.branch,
+                        base_ref: workspace.base,
+                    },
+                    command.initial_input,
+                );
+                return Ok(ExecutionReceipt::queued(format!(
+                    "Creating a {} agent in a Git worktree",
+                    provider.label()
+                )));
+            }
             if let Some(initial_input) = command.initial_input {
                 app.request_new_command_pane_with_input(
                     parent,

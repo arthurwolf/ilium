@@ -425,3 +425,15 @@ and Pursuing goal, rendered their changing output, switched the selected pane,
 and recovered that pane's current journal stream. A final installed-image
 10-second interval measured 0.90% client, 1.50% server, and 2.40% combined CPU.
 The user's existing project session was not restarted.
+
+## Agent worktree Git status sampling (2026-09-26)
+
+The ignored `measure_live_git_status_with_49_workspace_panes` integration
+test creates 49 owned worktrees in a temporary repository, keeps their fake
+Codex panes attached to an isolated server, and samples that server with
+`pidstat -u -w -p <pid> 1 20`. The debug server averaged **0.60% CPU**
+(0.35% user, 0.25% system) over twenty one-second intervals. This measures
+the live two-tier coordinator together with the existing server loops, not
+the coordinator in isolation or the final release TUI. The same temporary
+repository test verifies dirty-count refresh, a mid-run branch switch, and
+status replay on attach.

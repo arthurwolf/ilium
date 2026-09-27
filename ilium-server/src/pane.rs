@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ilium_core::{
-    AgentClass, AgentProvider, BuiltinAgentProvider, GoalState, NodeId, PaneProgress,
+    AgentClass, AgentProvider, BuiltinAgentProvider, NodeId, PaneProgress,
     SessionIdentityTransitionRule,
 };
 use ilium_ipc::ProgressMonitorStatus;
@@ -45,6 +45,9 @@ pub enum ProgressDeliveryState {
     Attempted,
     DeliveredToPty,
     Uncertain,
+    /// The pane had no supported agent composer when the result arrived.
+    /// The task result remains visible in its persisted progress report.
+    NotDeliverable,
 }
 
 impl From<ProgressDeliveryState> for crate::persistence::PersistedProgressDeliveryState {
@@ -55,6 +58,7 @@ impl From<ProgressDeliveryState> for crate::persistence::PersistedProgressDelive
             ProgressDeliveryState::Attempted => Self::Attempted,
             ProgressDeliveryState::DeliveredToPty => Self::DeliveredToPty,
             ProgressDeliveryState::Uncertain => Self::Uncertain,
+            ProgressDeliveryState::NotDeliverable => Self::NotDeliverable,
         }
     }
 }
@@ -69,6 +73,9 @@ impl From<crate::persistence::PersistedProgressDeliveryState> for ProgressDelive
                 Self::DeliveredToPty
             }
             crate::persistence::PersistedProgressDeliveryState::Uncertain => Self::Uncertain,
+            crate::persistence::PersistedProgressDeliveryState::NotDeliverable => {
+                Self::NotDeliverable
+            }
         }
     }
 }
@@ -134,10 +141,23 @@ impl TerminalOrigin {
 /// background task that forwards its raw output bytes to attached clients.
 pub struct TerminalPaneRuntime {
     pub session: PtySession,
+    /// Durable refusal token for an Ilium-owned linked checkout.
+    pub(crate) custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
     /// Serializes semantic input for this pane across the gap between an
     /// automated text write and its later Enter. Other panes remain usable.
     pub input_gate: std::sync::Arc<Mutex<()>>,
     pub origin: TerminalOrigin,
+    /// The agent origin retained while a missing worktree is represented by
+    /// a safe project-root shell. Snapshots keep this instead of persisting
+    /// the fallback shell as the user's intended pane.
+    pub deferred_workspace_origin: Option<TerminalOrigin>,
+    /// A validated worktree could not be found at restore time. Automated
+    /// input producers must not deliver workspace-targeted text to the shell.
+    pub missing_workspace: Option<String>,
+    /// A persisted monitor remains authored state while its worktree is
+    /// missing. It must survive subsequent snapshots without probing or
+    /// delivering its command in the fallback shell.
+    pub deferred_progress_monitor: Option<crate::persistence::PersistedProgressMonitor>,
     pub shell_command_tracker: Option<ShellCommandTracker>,
     /// Observes submitted agent slash commands only so an in-process
     /// `/resume`-style transition can invalidate launch-time identity before
@@ -173,10 +193,9 @@ pub struct TerminalPaneRuntime {
     /// `/goal clear`, or a different PID/class removes it so one process can never
     /// leak its flag into a replacement CLI in the same terminal pane.
     pub confirmed_goal_owner: Option<ConfirmedGoalOwner>,
-    /// Identifies one continuous goal owner independently of its phase.
-    /// Active -> paused -> active transitions retain the epoch; clearing the
-    /// goal or replacing its process/provider advances it.
-    pub goal_owner_epoch: u64,
+    /// Last evidence that produced the status currently displayed in the
+    /// tree. Replayed to new clients independently of optional debug logs.
+    pub detection_evidence: Option<ilium_ipc::PaneDetectionEvidence>,
     pub detection_schedule: DetectionSchedule,
     /// This pane's agent session/thread ID, once `crate::session_id`
     /// discovers one. Rechecked while an agent is detected because `/resume`
@@ -196,6 +215,9 @@ pub struct TerminalPaneRuntime {
     /// identity, letting initial prompt delivery prefer a process-confirmed
     /// provider when it has already arrived.
     pub detected_agent_class: Option<AgentClass>,
+    /// One raw Idle sample after an active turn is provisional. The next
+    /// coherent sample must also be Idle before completion becomes unread.
+    pub pending_idle_confirmation: bool,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -238,41 +260,9 @@ pub struct TerminalPaneRuntime {
     /// check and full text-to-Enter submission of progress-owned effects.
     pub progress_effect_gate: std::sync::Arc<Mutex<()>>,
     pub progress_monitor: Option<ProgressMonitorRuntimeState>,
-    /// Goal-owner epoch in which the user typed `/goal pause` at the
-    /// keyboard. Agent-requested resume refuses that pause; typing
-    /// `/goal resume` or a new goal owner (new epoch) releases it.
-    pub user_paused_goal_epoch: Option<u64>,
-    /// Pending agent-requested `/goal resume` (see `crate::goal_control`).
-    pub agent_goal_resume: Option<AgentGoalResumeRequest>,
-    /// Waiter that submits `agent_goal_resume` at the next safe composer.
-    /// Owned here so closing the pane or cancelling the request stops it.
-    agent_goal_resume_task: Option<JoinHandle<()>>,
-    /// Idle paused-goal reminder bookkeeping (see
-    /// `crate::goal_control::spawn_idle_reminder`).
-    pub goal_reminder: Option<GoalReminderState>,
-    /// Goal-owner epoch in which detection last saw the goal `Active`. A
-    /// pause whose epoch was never seen active has an unknown origin (it
-    /// predates this server, for example) and fails closed.
-    pub goal_active_seen_epoch: Option<u64>,
-    /// When Ilium last wrote an agent-requested `/goal resume`. Detection
-    /// needs a moment to observe `Active`; during that window the pause is
-    /// reported as resume-queued so nothing queues a duplicate resume.
-    pub goal_resume_submitted_at: Option<Instant>,
-}
-
-/// One continuous episode in which this pane's goal stayed resumable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GoalReminderState {
-    pub goal_owner_epoch: u64,
-    pub resumable_since: Instant,
-    pub is_delivered: bool,
-}
-
-/// One agent-requested resume, fenced to the paused goal it was issued for.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentGoalResumeRequest {
-    pub goal_owner_epoch: u64,
-    pub process_id: u32,
+    /// Terminal side effects are emitted once per monitor identity, even if
+    /// a coordinator callback is repeated after the final report was stored.
+    notified_progress_outcome_monitor_id: Option<u64>,
 }
 
 impl TerminalPaneRuntime {
@@ -284,6 +274,7 @@ impl TerminalPaneRuntime {
     ) -> Self {
         Self {
             session,
+            custody_ticket: None,
             input_gate: std::sync::Arc::new(Mutex::new(())),
             shell_command_tracker: matches!(&origin, TerminalOrigin::PlainShell)
                 .then(ShellCommandTracker::default),
@@ -295,8 +286,11 @@ impl TerminalPaneRuntime {
             title_generation: 0,
             is_showing_fresh_agent_screen: false,
             confirmed_goal_owner: None,
-            goal_owner_epoch: 0,
+            detection_evidence: None,
             origin,
+            deferred_workspace_origin: None,
+            missing_workspace: None,
+            deferred_progress_monitor: None,
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
                 // waiting a full interval -- a freshly-spawned pane's
@@ -315,6 +309,7 @@ impl TerminalPaneRuntime {
             session_agent_class: None,
             detected_agent_process_id: None,
             detected_agent_class: None,
+            pending_idle_confirmation: false,
             session_process_id: None,
             auto_answered_interstitial_prompt_for_pid: None,
             forward_task: None,
@@ -324,12 +319,7 @@ impl TerminalPaneRuntime {
             progress_monitor_generation: ProgressMonitorGeneration::default(),
             progress_effect_gate: std::sync::Arc::new(Mutex::new(())),
             progress_monitor: None,
-            user_paused_goal_epoch: None,
-            agent_goal_resume: None,
-            agent_goal_resume_task: None,
-            goal_reminder: None,
-            goal_active_seen_epoch: None,
-            goal_resume_submitted_at: None,
+            notified_progress_outcome_monitor_id: None,
         }
     }
 
@@ -377,30 +367,6 @@ impl TerminalPaneRuntime {
     pub fn cancel_progress_delivery_task(&mut self) {
         if let Some(task) = self.progress_delivery_task.take() {
             task.abort();
-        }
-    }
-
-    pub fn set_agent_goal_resume_task(&mut self, task: JoinHandle<()>) {
-        if let Some(previous_task) = self.agent_goal_resume_task.replace(task) {
-            previous_task.abort();
-        }
-    }
-
-    /// Drops a pending agent-requested resume and stops its waiter.
-    pub fn cancel_agent_goal_resume(&mut self) {
-        self.agent_goal_resume = None;
-        if let Some(task) = self.agent_goal_resume_task.take() {
-            task.abort();
-        }
-    }
-
-    /// Records keyboard `/goal pause` and `/goal resume` so agent-requested
-    /// resume never overrides a pause the user chose.
-    pub fn observe_user_goal_command(&mut self, submitted_line: &str) {
-        if pauses_agent_goal(submitted_line) {
-            self.user_paused_goal_epoch = Some(self.goal_owner_epoch);
-        } else if resumes_agent_goal(submitted_line) || clears_agent_goal(submitted_line) {
-            self.user_paused_goal_epoch = None;
         }
     }
 
@@ -467,6 +433,20 @@ impl TerminalPaneRuntime {
         true
     }
 
+    pub fn claim_progress_outcome_notification(&mut self, monitor_id: u64) -> bool {
+        if !self.is_current_progress_monitor(monitor_id)
+            || !self.progress_monitor.as_ref().is_some_and(|monitor| {
+                monitor.latest_progress.is_terminal()
+                    || monitor.latest_progress.monitor_health.is_failed()
+            })
+            || self.notified_progress_outcome_monitor_id == Some(monitor_id)
+        {
+            return false;
+        }
+        self.notified_progress_outcome_monitor_id = Some(monitor_id);
+        true
+    }
+
     pub fn progress_monitor_status(&self, pane_id: NodeId) -> ProgressMonitorStatus {
         ProgressMonitorStatus {
             pane_id,
@@ -506,32 +486,6 @@ impl TerminalPaneRuntime {
         Ok(())
     }
 
-    /// Replaces detector-owned goal evidence while maintaining a stable
-    /// epoch across phase-only transitions of the same process/provider.
-    pub fn update_confirmed_goal_owner(&mut self, owner: Option<ConfirmedGoalOwner>) {
-        let same_continuous_owner =
-            same_goal_owner_identity(self.confirmed_goal_owner.as_ref(), owner.as_ref());
-        if !same_continuous_owner && self.confirmed_goal_owner != owner {
-            self.goal_owner_epoch = self.goal_owner_epoch.wrapping_add(1).max(1);
-        }
-        self.confirmed_goal_owner = owner;
-        if self
-            .confirmed_goal_owner
-            .as_ref()
-            .is_some_and(|owner| owner.goal_state == GoalState::Active)
-        {
-            self.goal_active_seen_epoch = Some(self.goal_owner_epoch);
-        }
-    }
-
-    /// Explicit goal clearing is an identity boundary even before the next
-    /// detector pass sees the provider's footer disappear.
-    pub fn clear_confirmed_goal_owner(&mut self) {
-        if self.confirmed_goal_owner.take().is_some() {
-            self.goal_owner_epoch = self.goal_owner_epoch.wrapping_add(1).max(1);
-        }
-    }
-
     /// Cancels this pane's active progress-monitor loop, if any. Used by
     /// `ClearPaneProgressMonitor` and by the server's own progress-monitor
     /// setting being disabled mid-run.
@@ -559,25 +513,21 @@ impl TerminalPaneRuntime {
         }
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_monitor();
-        self.cancel_agent_goal_resume();
     }
-}
-
-fn same_goal_owner_identity(
-    previous: Option<&ConfirmedGoalOwner>,
-    next: Option<&ConfirmedGoalOwner>,
-) -> bool {
-    previous.zip(next).is_some_and(|(previous, next)| {
-        previous.process_id == next.process_id && previous.agent_class == next.agent_class
-    })
 }
 
 /// Identity boundary for a server-retained goal signal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmedGoalOwner {
     pub process_id: u32,
+    pub process_started_at_unix_seconds: u64,
     pub agent_class: AgentClass,
     pub goal_state: ilium_core::GoalState,
+    /// The provider-owned row that last confirmed this phase. An inconclusive
+    /// redraw retains this exact evidence only for the same process.
+    pub evidence_line: Option<String>,
+    pub evidence_rule: Option<ilium_detect::GoalEvidenceRule>,
+    pub evidence_pattern: Option<&'static str>,
 }
 
 /// Returns the exact provider rule that invalidates a persisted identity.
@@ -613,16 +563,6 @@ pub fn clears_agent_conversation(submitted_line: &str) -> bool {
 /// must not clear the sidebar signal while their footer is temporarily hidden.
 pub fn clears_agent_goal(submitted_line: &str) -> bool {
     submitted_line.split_whitespace().eq(["/goal", "clear"])
-}
-
-/// A submitted `/goal pause` (Codex).
-pub fn pauses_agent_goal(submitted_line: &str) -> bool {
-    submitted_line.split_whitespace().eq(["/goal", "pause"])
-}
-
-/// A submitted `/goal resume` (Codex).
-pub fn resumes_agent_goal(submitted_line: &str) -> bool {
-    submitted_line.split_whitespace().eq(["/goal", "resume"])
 }
 
 impl Drop for TerminalPaneRuntime {
@@ -795,6 +735,7 @@ pub struct PaneIdentityEnv<'a> {
     pub pane_id: NodeId,
     pub session_name: &'a str,
     pub socket_path: &'a Path,
+    pub worktree_root: Option<&'a Path>,
 }
 
 pub fn spawn_terminal_session(
@@ -810,13 +751,19 @@ pub fn spawn_terminal_session(
             .arg(command_flag)
             .arg(command_line),
     };
-    let command = command
+    let mut command = command
         .env(ilium_ipc::pane_env::PANE_ID, identity.pane_id.0.to_string())
         .env(ilium_ipc::pane_env::SESSION_NAME, identity.session_name)
         .env(
             ilium_ipc::pane_env::SESSION_SOCKET,
             identity.socket_path.to_string_lossy().into_owned(),
         );
+    if let Some(worktree_root) = identity.worktree_root {
+        command = command.env(
+            ilium_ipc::pane_env::WORKTREE,
+            worktree_root.to_string_lossy().into_owned(),
+        );
+    }
     Ok(SpawnedTerminalSession {
         session: PtySession::spawn(command)?,
         session_id: launch_plan.session_id,
@@ -902,43 +849,6 @@ mod tests {
         ] {
             assert!(!clears_agent_goal(command));
         }
-    }
-
-    #[test]
-    fn only_exact_goal_pause_and_resume_commands_are_recognised() {
-        assert!(pauses_agent_goal(" /goal   pause "));
-        assert!(resumes_agent_goal("/goal resume"));
-        for command in [
-            "/goal",
-            "/goal pause now",
-            "please /goal pause",
-            "/goal resume later",
-        ] {
-            assert!(!pauses_agent_goal(command), "{command}");
-            assert!(!resumes_agent_goal(command), "{command}");
-        }
-    }
-
-    #[test]
-    fn goal_phase_changes_preserve_identity_but_clear_and_replacement_do_not() {
-        let active = ConfirmedGoalOwner {
-            process_id: 42,
-            agent_class: AgentClass::Codex,
-            goal_state: GoalState::Active,
-        };
-        let paused = ConfirmedGoalOwner {
-            goal_state: GoalState::Paused,
-            ..active.clone()
-        };
-        let replacement = ConfirmedGoalOwner {
-            process_id: 43,
-            ..active.clone()
-        };
-
-        assert!(same_goal_owner_identity(Some(&active), Some(&paused)));
-        assert!(!same_goal_owner_identity(Some(&active), None));
-        assert!(!same_goal_owner_identity(None, Some(&active)));
-        assert!(!same_goal_owner_identity(Some(&active), Some(&replacement)));
     }
 
     #[test]

@@ -19,8 +19,8 @@ use ilium_agent_debug::{
     AgentDebugSeverity, AgentDebugSource,
 };
 use ilium_agent_session::TranscriptLocator;
-use ilium_core::{AgentActivity, NodeId, PaneStatus};
-use ilium_ipc::ServerEvent;
+use ilium_core::{AgentActivity, AgentState, AgentTurn, NodeId, PaneStatus};
+use ilium_ipc::{DetectionReason, PaneDetectionEvidence, ServerEvent};
 use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
@@ -498,6 +498,8 @@ async fn run_due_panes(
         activity_evidence_line: Option<String>,
         goal_evidence: Option<ilium_detect::GoalEvidence>,
         goal_evidence_line: Option<String>,
+        goal_evidence_rule: Option<ilium_detect::GoalEvidenceRule>,
+        goal_evidence_pattern: Option<&'static str>,
         goal_was_retained: bool,
         /// Key to auto-send if this tick's screen shows a known one-time
         /// interstitial dialog (see `ilium_detect::interstitial_prompt_response`),
@@ -596,6 +598,8 @@ async fn run_due_panes(
                 activity_evidence_line: classified_identity.activity_evidence_line,
                 goal_evidence: classified_identity.goal_evidence,
                 goal_evidence_line: classified_identity.goal_evidence_line,
+                goal_evidence_rule: classified_identity.goal_evidence_rule,
+                goal_evidence_pattern: classified_identity.goal_evidence_pattern,
                 goal_was_retained: classified_identity.goal_was_retained,
                 interstitial_prompt_response,
                 screen_classification_cache,
@@ -628,13 +632,13 @@ async fn run_due_panes(
     > = std::collections::HashMap::new();
     let mut session_discovery_exclusions: std::collections::HashMap<NodeId, Vec<String>> =
         std::collections::HashMap::new();
-    let pane_project_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
+    let pane_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
         let tree = state.tree.read().await;
         classifications
             .iter()
             .filter(|pane| pane.needs_session_discovery)
             .filter_map(|pane| {
-                tree.project_path_for(pane.pane_id)
+                tree.pane_cwd(pane.pane_id)
                     .map(|path| (pane.pane_id, path.to_path_buf()))
             })
             .collect()
@@ -661,9 +665,7 @@ async fn run_due_panes(
             .filter(|(_, owner)| **owner != pane.pane_id)
             .map(|(session_id, _)| session_id.clone())
             .collect();
-        let project_cwd = pane_project_cwds
-            .get(&pane.pane_id)
-            .unwrap_or(&state.session_cwd);
+        let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
         let transcript_locator = TranscriptLocator::new(&state.home_dir, project_cwd);
         excluded_session_ids.extend(ambiguous_session_ids.iter().cloned());
         // `/resume` can leave the old transcript descriptor open until the
@@ -784,6 +786,7 @@ async fn run_due_panes(
     let mut pending_activity_updates = Vec::new();
     let mut tree_snapshot_changed = false;
     let mut pending_debug_events = Vec::new();
+    let mut pending_detection_evidence = Vec::new();
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
         let mut tree = state.tree.write().await;
@@ -836,7 +839,8 @@ async fn run_due_panes(
             let screen_changed_after_snapshot = classified_pane.identity.is_some()
                 && runtime.session.screen_generation() != classified_pane.screen_generation;
 
-            runtime.update_confirmed_goal_owner(classified_pane.confirmed_goal_owner.clone());
+            let previous_detected_identity = runtime.detection_schedule.cached_identity.clone();
+            runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
             runtime.detection_schedule.identity_system_generation = Some(system_generation);
             runtime.detection_schedule.cached_identity = classified_pane.identity.clone();
             runtime.detection_schedule.cached_screen_classification =
@@ -847,11 +851,8 @@ async fn run_due_panes(
                 ilium_core::NodeKind::Container(_) | ilium_core::NodeKind::Folder { .. } => None,
             });
 
-            // Raw classification (`classify_pane`/`ilium_detect::classify_activity`)
-            // never produces `Done` -- it has no memory of what a pane was
-            // doing a moment ago. `promote_to_done` is what actually turns
-            // "just went idle" into the durable completed-turn state; see its
-            // doc comment.
+            // The detector reports a raw turn. Completion memory and the
+            // one-sample Idle hold belong to this server reducer.
             let raw_status = classified_pane.status.clone();
             // An agent that ends its turn while one of this pane's progress
             // monitors still observes a live task is parked, not finished:
@@ -863,42 +864,39 @@ async fn run_due_panes(
                 .progress_monitor
                 .as_ref()
                 .is_some_and(|monitor| monitor.latest_progress.is_live());
-            let settle = |raw_activity| {
-                if is_parked_on_monitor {
-                    // Raw classification never yields `Done`, so passing it
-                    // through also clears any completion left from before.
-                    raw_activity
-                } else {
-                    promote_to_done(previous_status.as_ref(), raw_activity)
-                }
-            };
-            let new_status = match classified_pane.status {
-                PaneStatus::Agent(class, raw_activity) => {
-                    PaneStatus::Agent(class, settle(raw_activity))
-                }
-                PaneStatus::AgentWithGoal(class, raw_activity, goal_state) => {
-                    PaneStatus::AgentWithGoal(class, settle(raw_activity), goal_state)
-                }
-                other => other,
-            };
+            let same_process = classified_pane.identity.as_ref().is_some_and(|identity| {
+                previous_detected_identity.as_ref().is_some_and(|previous| {
+                    previous.pid == identity.pid
+                        && previous.started_at_unix_seconds == identity.started_at_unix_seconds
+                        && previous.class == identity.class
+                })
+            });
+            let new_status = settle_agent_status(
+                classified_pane.status,
+                previous_status.as_ref(),
+                same_process,
+                is_parked_on_monitor,
+                &mut runtime.pending_idle_confirmation,
+            );
 
             runtime.detection_schedule.current_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
                 &state.detection_config,
             );
-            runtime.detection_schedule.next_due = if screen_changed_after_snapshot {
-                // Bounded catch-up, not a flat 1s reschedule: a pane whose
-                // configured `working_poll_interval` is already below
-                // `FOCUSED_POLL_INTERVAL` (the minimum is 500ms, see
-                // `config::MINIMUM_POLL_INTERVAL`) must keep polling at its
-                // own faster tier, not get slowed down by this branch --
-                // the whole point of which is to never push a pane to a
-                // slower tier than it would otherwise get.
-                now + FOCUSED_POLL_INTERVAL.min(runtime.detection_schedule.current_interval)
-            } else {
-                now + runtime.detection_schedule.current_interval
-            };
+            runtime.detection_schedule.next_due =
+                if screen_changed_after_snapshot || runtime.pending_idle_confirmation {
+                    // Bounded catch-up, not a flat 1s reschedule: a pane whose
+                    // configured `working_poll_interval` is already below
+                    // `FOCUSED_POLL_INTERVAL` (the minimum is 500ms, see
+                    // `config::MINIMUM_POLL_INTERVAL`) must keep polling at its
+                    // own faster tier, not get slowed down by this branch --
+                    // the whole point of which is to never push a pane to a
+                    // slower tier than it would otherwise get.
+                    now + FOCUSED_POLL_INTERVAL.min(runtime.detection_schedule.current_interval)
+                } else {
+                    now + runtime.detection_schedule.current_interval
+                };
 
             let detected_agent_class = classified_pane
                 .identity
@@ -1089,9 +1087,7 @@ async fn run_due_panes(
                 title_generation: runtime.title_generation,
             };
             if let Some(phases) = session_discovery_traces.get(&pane_id) {
-                let project_cwd = pane_project_cwds
-                    .get(&pane_id)
-                    .unwrap_or(&state.session_cwd);
+                let project_cwd = pane_cwds.get(&pane_id).unwrap_or(&state.session_cwd);
                 let exclusion_details = session_discovery_exclusions
                     .get(&pane_id)
                     .filter(|details| !details.is_empty())
@@ -1190,6 +1186,7 @@ async fn run_due_panes(
                         &raw_status,
                         &new_status,
                         classified_pane.activity_evidence,
+                        runtime.pending_idle_confirmation,
                     ),
                 ),
                 AgentDebugField::plain(
@@ -1207,7 +1204,25 @@ async fn run_due_panes(
                         runtime.session_id.as_deref(),
                     ),
                 ),
-                AgentDebugField::plain("Applied pane state", describe_pane_status(&new_status)),
+                AgentDebugField::plain(
+                    "Applied pane state",
+                    describe_pane_status(
+                        &new_status,
+                        runtime
+                            .progress_monitor
+                            .as_ref()
+                            .map(|monitor| &monitor.latest_progress),
+                        tree.get(pane_id).is_some_and(|node| {
+                            matches!(
+                                &node.kind,
+                                ilium_core::NodeKind::Pane {
+                                    scheduled_input: Some(_),
+                                    ..
+                                }
+                            )
+                        }),
+                    ),
+                ),
             ];
             if let Some(line) = classified_pane.activity_evidence_line.as_deref() {
                 detection_fields.push(AgentDebugField::sensitive(
@@ -1219,6 +1234,12 @@ async fn run_due_panes(
                 detection_fields.push(AgentDebugField::sensitive(
                     "Matched goal evidence",
                     normalize_dynamic_terminal_evidence(line),
+                ));
+            }
+            if let Some(rule) = classified_pane.goal_evidence_rule {
+                detection_fields.push(AgentDebugField::plain(
+                    "Matched goal predicate",
+                    rule.description(),
                 ));
             }
             let was_agent = matches!(
@@ -1313,7 +1334,29 @@ async fn run_due_panes(
                 ));
             }
 
+            let detection_evidence = pane_detection_evidence(DetectionEvidenceInputs {
+                identity: classified_pane.identity.as_ref(),
+                shell_pid: classified_pane.shell_pid,
+                raw_status: &raw_status,
+                applied_status: &new_status,
+                activity_evidence: classified_pane.activity_evidence,
+                activity_line: classified_pane.activity_evidence_line.as_deref(),
+                goal_evidence: classified_pane.goal_evidence,
+                goal_rule: classified_pane.goal_evidence_rule,
+                goal_pattern: classified_pane.goal_evidence_pattern,
+                goal_line: classified_pane.goal_evidence_line.as_deref(),
+                goal_owner: runtime.confirmed_goal_owner.as_ref(),
+                goal_was_retained: classified_pane.goal_was_retained,
+                is_parked_on_monitor,
+                pending_idle_confirmation: runtime.pending_idle_confirmation,
+            });
+            let evidence_changed = runtime.detection_evidence.as_ref() != Some(&detection_evidence);
+
             if previous_status.as_ref() == Some(&new_status) {
+                if evidence_changed {
+                    runtime.detection_evidence = Some(detection_evidence.clone());
+                    pending_detection_evidence.push((pane_id, detection_evidence));
+                }
                 continue;
             }
             if matches!(
@@ -1345,6 +1388,7 @@ async fn run_due_panes(
                 tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
                 continue;
             }
+            runtime.detection_evidence = Some(detection_evidence.clone());
             match tree.record_node_activity(pane_id) {
                 Ok(update) => pending_activity_updates.push((pane_id, update)),
                 Err(error) => tracing::error!(
@@ -1369,6 +1413,16 @@ async fn run_due_panes(
             if is_agent_finished_transition(previous_status.as_ref(), &new_status) {
                 completed_pane_ids.push(pane_id);
             }
+            if matches!(
+                previous_status.as_ref().and_then(status_activity),
+                Some(AgentActivity::Working)
+            ) && matches!(
+                status_activity(&new_status),
+                Some(AgentActivity::Idle | AgentActivity::Done)
+            ) && tree.pane_workspace(pane_id).is_some()
+            {
+                let _ = state.queue_full_git_status(pane_id);
+            }
 
             if let Some(event) =
                 ilium_sound::event_for_transition(previous_status.as_ref(), &new_status)
@@ -1382,9 +1436,10 @@ async fn run_due_panes(
                 }
             }
 
-            state.broadcast(ServerEvent::PaneStatusChanged {
+            state.broadcast(ServerEvent::PaneDetectedStateChanged {
                 pane_id,
                 status: new_status,
+                evidence: detection_evidence,
             });
         }
     }
@@ -1396,6 +1451,10 @@ async fn run_due_panes(
     for (pane_id, source, context, event) in pending_debug_events {
         let _ =
             crate::agent_debug::record_with_context(state, pane_id, source, context, event).await;
+    }
+
+    for (pane_id, evidence) in pending_detection_evidence {
+        state.broadcast(ServerEvent::PaneDetectionEvidenceChanged { pane_id, evidence });
     }
 
     for (pane_id, title_generation) in pending_title_clears {
@@ -1478,18 +1537,115 @@ fn explain_identity_decision(
         )
     };
     format!(
-        "{} was selected because executable \"{}\" at process {} matched registry signature \"{}\"; it is {process_position} below {shell_process}.",
+        "{} was selected because executable \"{}\" at process {} (started at Unix second {}) matched registry signature \"{}\"; it is {process_position} below {shell_process}.",
         agent_class_name(&identity.class),
         identity.process_name,
         identity.pid,
+        identity.started_at_unix_seconds,
         identity.matched_signature,
     )
+}
+
+struct DetectionEvidenceInputs<'a> {
+    identity: Option<&'a ilium_detect::AgentIdentity>,
+    shell_pid: Option<u32>,
+    raw_status: &'a PaneStatus,
+    applied_status: &'a PaneStatus,
+    activity_evidence: Option<ilium_detect::ActivityEvidence>,
+    activity_line: Option<&'a str>,
+    goal_evidence: Option<ilium_detect::GoalEvidence>,
+    goal_rule: Option<ilium_detect::GoalEvidenceRule>,
+    goal_pattern: Option<&'a str>,
+    goal_line: Option<&'a str>,
+    goal_owner: Option<&'a ConfirmedGoalOwner>,
+    goal_was_retained: bool,
+    is_parked_on_monitor: bool,
+    pending_idle_confirmation: bool,
+}
+
+/// Builds the small always-on provenance channel from the same classification
+/// and state transition that set the tree status. Optional debug recording
+/// consumes these facts too, but is not required for a hover explanation.
+fn pane_detection_evidence(input: DetectionEvidenceInputs<'_>) -> PaneDetectionEvidence {
+    let identity = Some(DetectionReason {
+        rule: input.identity.map_or_else(
+            || "No registered agent process found below the pane shell".to_string(),
+            |identity| {
+                format!(
+                    "Process name contains registered signature «{}»",
+                    identity.matched_signature
+                )
+            },
+        ),
+        observed: input.identity.map(|identity| identity.process_name.clone()),
+        context: explain_identity_decision(input.identity, input.shell_pid),
+    });
+    let activity = input.activity_evidence.map(|evidence| {
+        let mut context = explain_activity_decision(
+            input.raw_status,
+            input.applied_status,
+            Some(evidence),
+            input.pending_idle_confirmation,
+        );
+        if input.is_parked_on_monitor {
+            context.push_str(" A live monitor suppressed Done promotion, so the agent is parked.");
+        }
+        DetectionReason {
+            rule: evidence.description().to_string(),
+            observed: input.activity_line.map(str::to_string),
+            context,
+        }
+    });
+    let goal = match input.applied_status {
+        PaneStatus::AgentWithGoal(..) => {
+            let rule = if input.goal_was_retained {
+                input.goal_owner.and_then(|owner| owner.evidence_rule)
+            } else {
+                input.goal_rule
+            };
+            let pattern = if input.goal_was_retained {
+                input.goal_owner.and_then(|owner| owner.evidence_pattern)
+            } else {
+                input.goal_pattern
+            };
+            let observed = if input.goal_was_retained {
+                input
+                    .goal_owner
+                    .and_then(|owner| owner.evidence_line.clone())
+            } else {
+                input.goal_line.map(str::to_string)
+            };
+            Some(DetectionReason {
+                rule: rule.map_or_else(
+                    || "Provider goal state was retained without a currently visible confirming row".to_string(),
+                    |rule| match pattern {
+                        Some(pattern) => format!("{}; literal marker «{pattern}»", rule.description()),
+                        None => rule.description().to_string(),
+                    },
+                ),
+                observed,
+                context: explain_goal_decision(
+                    input.applied_status,
+                    input.goal_evidence,
+                    input.goal_was_retained,
+                ),
+            })
+        }
+        _ => None,
+    };
+    PaneDetectionEvidence {
+        applied_status: input.applied_status.clone(),
+        identity,
+        activity,
+        goal,
+    }
 }
 
 fn explain_activity_decision(
     raw_status: &PaneStatus,
     applied_status: &PaneStatus,
     evidence: Option<ilium_detect::ActivityEvidence>,
+    pending_idle_confirmation: bool,
 ) -> String {
     let Some(applied_activity) = status_activity(applied_status) else {
         return "Activity was not evaluated because no agent process was detected.".to_string();
@@ -1520,15 +1676,24 @@ fn explain_activity_decision(
         Some(ilium_detect::ActivityEvidence::SelectionPrompt) => {
             "the visible terminal contains an interactive selection menu or select/cancel footer"
         }
+        Some(ilium_detect::ActivityEvidence::FolderTrustPrompt) => {
+            "Claude Code is waiting for a folder trust decision"
+        }
         Some(ilium_detect::ActivityEvidence::NoActiveMarker) => {
             "the visible terminal contains no working, background-wait, confirmation, or selection marker"
         }
         None => "activity evidence was unavailable",
     };
 
+    if raw_activity == AgentActivity::Idle && pending_idle_confirmation {
+        return format!(
+            "{} — {evidence_explanation}. This first Idle sample is provisional; the preceding active turn stays visible until a second consecutive Idle sample confirms completion.",
+            sentence_case(activity_name(applied_activity))
+        );
+    }
     if raw_activity == AgentActivity::Idle && applied_activity == AgentActivity::Done {
         return format!(
-            "Done — {evidence_explanation}. The pane had previously been active, so ilium keeps that completed turn marked until new terminal input or renewed activity acknowledges it."
+            "Done — {evidence_explanation}. Consecutive Idle samples confirmed the prior active turn ended; ilium keeps that completion unread until pane focus/input or renewed activity acknowledges it."
         );
     }
     format!(
@@ -1554,7 +1719,7 @@ fn explain_goal_decision(
             sentence_case(goal_state_name(goal_state))
         ),
         Some(ilium_detect::GoalEvidence::Inactive) => "Inactive — the provider's goal status row is visible and shows no goal, or the current turn reports that the goal was cleared.".to_string(),
-        Some(ilium_detect::GoalEvidence::Unknown) => "Inactive — the provider's goal status row was not visible (overlay or redraw) and this exact agent process had no previously confirmed goal to retain.".to_string(),
+        Some(ilium_detect::GoalEvidence::Unknown) => "Unknown — the provider's goal status row was not visible (overlay or redraw) and this exact agent process had no previously confirmed goal to retain; no goal icon is shown.".to_string(),
         None => "Goal evidence was unavailable.".to_string(),
     }
 }
@@ -1577,8 +1742,12 @@ fn explain_session_decision(
     }
 }
 
-fn describe_pane_status(status: &PaneStatus) -> String {
-    match status {
+fn describe_pane_status(
+    status: &PaneStatus,
+    progress: Option<&ilium_core::PaneProgress>,
+    has_scheduled_input: bool,
+) -> String {
+    let state = match status {
         PaneStatus::PlainShell => "Plain shell; no agent badge is applied.".to_string(),
         PaneStatus::Agent(class, activity) => format!(
             "{} agent; activity is {}; no active goal badge.",
@@ -1593,7 +1762,12 @@ fn describe_pane_status(status: &PaneStatus) -> String {
         ),
         PaneStatus::Editor { .. } => "Editor pane; agent detection does not apply.".to_string(),
         PaneStatus::Board => "Board pane; agent detection does not apply.".to_string(),
-    }
+    };
+    let signals = ilium_core::project_pane_signals(status, progress, has_scheduled_input, None);
+    format!(
+        "{state} Projected objective {}: {:?}; projected now {}: {:?}.",
+        signals.objective_rule, signals.objective, signals.now_rule, signals.now
+    )
 }
 
 fn agent_class_name(class: &ilium_core::AgentClass) -> &str {
@@ -1751,6 +1925,8 @@ pub(crate) struct IdentityClassification {
     activity_evidence_line: Option<String>,
     goal_evidence: Option<ilium_detect::GoalEvidence>,
     goal_evidence_line: Option<String>,
+    goal_evidence_rule: Option<ilium_detect::GoalEvidenceRule>,
+    goal_evidence_pattern: Option<&'static str>,
     goal_was_retained: bool,
 }
 
@@ -1805,8 +1981,12 @@ fn classify_identity(
             let activity = activity_classification.activity;
             let identity_owner = ConfirmedGoalOwner {
                 process_id: identity.pid,
+                process_started_at_unix_seconds: identity.started_at_unix_seconds,
                 agent_class: identity.class.clone(),
                 goal_state: ilium_core::GoalState::Active,
+                evidence_line: None,
+                evidence_rule: None,
+                evidence_pattern: None,
             };
             let goal_classification =
                 ilium_detect::goal_evidence_for_agent_detailed(&identity.class, screen_text);
@@ -1814,17 +1994,24 @@ fn classify_identity(
                 == ilium_detect::GoalEvidence::Unknown
                 && previous_goal_owner.is_some_and(|owner| {
                     owner.process_id == identity_owner.process_id
+                        && owner.process_started_at_unix_seconds
+                            == identity_owner.process_started_at_unix_seconds
                         && owner.agent_class == identity_owner.agent_class
                 });
             let confirmed_goal_owner = match goal_classification.evidence {
                 ilium_detect::GoalEvidence::State(goal_state) => Some(ConfirmedGoalOwner {
                     goal_state,
+                    evidence_line: goal_classification.matched_line.clone(),
+                    evidence_rule: goal_classification.matched_rule,
+                    evidence_pattern: goal_classification.matched_pattern,
                     ..identity_owner.clone()
                 }),
                 ilium_detect::GoalEvidence::Inactive => None,
                 ilium_detect::GoalEvidence::Unknown
                     if previous_goal_owner.is_some_and(|owner| {
                         owner.process_id == identity_owner.process_id
+                            && owner.process_started_at_unix_seconds
+                                == identity_owner.process_started_at_unix_seconds
                             && owner.agent_class == identity_owner.agent_class
                     }) =>
                 {
@@ -1844,6 +2031,8 @@ fn classify_identity(
                 activity_evidence_line: activity_classification.matched_line,
                 goal_evidence: Some(goal_classification.evidence),
                 goal_evidence_line: goal_classification.matched_line,
+                goal_evidence_rule: goal_classification.matched_rule,
+                goal_evidence_pattern: goal_classification.matched_pattern,
                 goal_was_retained,
             }
         }
@@ -1854,6 +2043,8 @@ fn classify_identity(
             activity_evidence_line: None,
             goal_evidence: None,
             goal_evidence_line: None,
+            goal_evidence_rule: None,
+            goal_evidence_pattern: None,
             goal_was_retained: false,
         },
     }
@@ -1863,36 +2054,49 @@ fn classify_identity(
 /// only ever returns `Working`/`WaitingBackground`/`WaitingApproval`/`Idle`
 /// -- never `Done`, since it looks at nothing but the current screen text)
 /// into the stateful activity this loop actually records: a pane that just
-/// went idle after active work reads as `Done`, not silently as plain
-/// `Idle`. This completion state is shared by sounds and title presentation.
-///
-/// - Any raw activity other than `Idle` passes through unchanged -- only
-///   "just went idle" is ever eligible to become `Done`.
-/// - `Done` is sticky through repeated idle reclassifications until fresh
-///   terminal input acknowledges it or non-idle detection proves that the
-///   agent started processing again.
-fn promote_to_done(
+/// Resolves a raw detector result into the semantic agent state, then derives
+/// the persisted/wire `PaneStatus`. One Idle sample after an active turn is
+/// provisional; a second consecutive sample is needed before the bell/sound
+/// becomes unread. Process replacement cannot inherit the prior turn.
+fn settle_agent_status(
+    raw: PaneStatus,
     previous: Option<&PaneStatus>,
-    raw_activity: ilium_core::AgentActivity,
-) -> ilium_core::AgentActivity {
-    if raw_activity != ilium_core::AgentActivity::Idle {
-        return raw_activity;
+    same_process: bool,
+    live_monitor: bool,
+    pending_idle_confirmation: &mut bool,
+) -> PaneStatus {
+    let Some(mut state) = AgentState::from_status(&raw) else {
+        *pending_idle_confirmation = false;
+        return raw;
+    };
+    let previous_state = same_process
+        .then(|| previous.and_then(AgentState::from_status))
+        .flatten()
+        .filter(|previous| previous.class == state.class);
+
+    if state.turn != AgentTurn::Idle || live_monitor {
+        *pending_idle_confirmation = false;
+        return state.into_status();
     }
-    match previous {
-        Some(
-            PaneStatus::Agent(_, ilium_core::AgentActivity::Working)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working, _)
-            | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingApproval, _)
-            | PaneStatus::Agent(_, ilium_core::AgentActivity::WaitingBackground)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::WaitingBackground, _)
-            | PaneStatus::Agent(_, ilium_core::AgentActivity::BackgroundTaskStillRunning)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::BackgroundTaskStillRunning, _)
-            | PaneStatus::Agent(_, ilium_core::AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Done, _),
-        ) => ilium_core::AgentActivity::Done,
-        _ => ilium_core::AgentActivity::Idle,
+
+    match previous_state {
+        Some(previous) if previous.turn != AgentTurn::Idle && !*pending_idle_confirmation => {
+            *pending_idle_confirmation = true;
+            state.turn = previous.turn;
+        }
+        Some(previous) if previous.turn != AgentTurn::Idle => {
+            *pending_idle_confirmation = false;
+            state.completion_unread = true;
+        }
+        Some(previous) if previous.completion_unread => {
+            *pending_idle_confirmation = false;
+            state.completion_unread = true;
+        }
+        _ => {
+            *pending_idle_confirmation = false;
+        }
     }
+    state.into_status()
 }
 
 /// The next poll interval for a pane just classified as `status`, per
@@ -1993,6 +2197,7 @@ mod tests {
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 1,
@@ -2040,6 +2245,7 @@ mod tests {
         let codex = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 1,
@@ -2056,6 +2262,15 @@ mod tests {
         let owner = active
             .confirmed_goal_owner
             .expect("positive footer evidence must establish process ownership");
+        assert_eq!(
+            owner.evidence_line.as_deref(),
+            Some("model · workspace · Working · Pursuing goal (16m)")
+        );
+        assert_eq!(
+            owner.evidence_rule,
+            Some(ilium_detect::GoalEvidenceRule::CodexFooterGoalSegment)
+        );
+        assert_eq!(owner.evidence_pattern, Some("pursuing goal ("));
 
         let transient = classify_identity(Some(&codex), "Working (esc to interrupt)", Some(&owner));
         assert!(matches!(
@@ -2084,6 +2299,7 @@ mod tests {
         let replacement = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 43,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 1,
@@ -2095,6 +2311,25 @@ mod tests {
             PaneStatus::Agent(AgentClass::Codex, _)
         ));
         assert_eq!(replacement_without_evidence.confirmed_goal_owner, None);
+
+        let reused_pid = ilium_detect::AgentIdentity {
+            pid: codex.pid,
+            started_at_unix_seconds: codex.started_at_unix_seconds + 1,
+            ..codex.clone()
+        };
+        let reused_pid_without_evidence =
+            classify_identity(Some(&reused_pid), "Send a message", Some(&owner));
+        assert!(matches!(
+            reused_pid_without_evidence.status,
+            PaneStatus::Agent(AgentClass::Codex, _)
+        ));
+        assert_eq!(reused_pid_without_evidence.confirmed_goal_owner, None);
+        assert!(explain_goal_decision(
+            &reused_pid_without_evidence.status,
+            reused_pid_without_evidence.goal_evidence,
+            reused_pid_without_evidence.goal_was_retained,
+        )
+        .starts_with("Unknown —"));
     }
 
     #[test]
@@ -2127,8 +2362,21 @@ mod tests {
             &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
             &status,
             Some(ilium_detect::ActivityEvidence::NoActiveMarker),
+            false,
         )
-        .contains("previously been active"));
+        .contains("Consecutive Idle samples"));
+    }
+
+    #[test]
+    fn debug_status_names_the_same_projection_rules_as_the_sidebar() {
+        let status = PaneStatus::AgentWithGoal(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            ilium_core::GoalState::Blocked,
+        );
+        let description = describe_pane_status(&status, None, true);
+        assert!(description.contains("Projected objective B3: Goal(Blocked)"));
+        assert!(description.contains("projected now A2: Working"));
     }
 
     #[test]
@@ -2136,6 +2384,7 @@ mod tests {
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 1,
@@ -2279,71 +2528,138 @@ mod tests {
     }
 
     #[test]
-    fn finishing_active_turn_becomes_done() {
-        assert_eq!(
-            promote_to_done(Some(&agent(AgentActivity::Working)), AgentActivity::Idle),
-            AgentActivity::Done
+    fn finishing_active_turn_requires_two_idle_samples() {
+        let mut pending = false;
+        let first = settle_agent_status(
+            agent(AgentActivity::Idle),
+            Some(&agent(AgentActivity::Working)),
+            true,
+            false,
+            &mut pending,
         );
+        assert_eq!(first, agent(AgentActivity::Working));
+        assert!(pending);
+        let second = settle_agent_status(
+            agent(AgentActivity::Idle),
+            Some(&first),
+            true,
+            false,
+            &mut pending,
+        );
+        assert_eq!(second, agent(AgentActivity::Done));
+        assert!(!pending);
     }
 
     #[test]
     fn done_stays_done_through_repeated_idle_detection() {
+        let mut pending = false;
         assert_eq!(
-            promote_to_done(Some(&agent(AgentActivity::Done)), AgentActivity::Idle),
-            AgentActivity::Done
+            settle_agent_status(
+                agent(AgentActivity::Idle),
+                Some(&agent(AgentActivity::Done)),
+                true,
+                false,
+                &mut pending,
+            ),
+            agent(AgentActivity::Done)
         );
     }
 
     #[test]
     fn already_idle_stays_idle_rather_than_becoming_done() {
+        let mut pending = false;
         assert_eq!(
-            promote_to_done(Some(&agent(AgentActivity::Idle)), AgentActivity::Idle),
-            AgentActivity::Idle
+            settle_agent_status(
+                agent(AgentActivity::Idle),
+                Some(&agent(AgentActivity::Idle)),
+                true,
+                false,
+                &mut pending,
+            ),
+            agent(AgentActivity::Idle)
         );
     }
 
     #[test]
     fn no_prior_status_never_promotes_to_done() {
+        let mut pending = false;
         assert_eq!(
-            promote_to_done(None, AgentActivity::Idle),
-            AgentActivity::Idle
+            settle_agent_status(agent(AgentActivity::Idle), None, false, false, &mut pending),
+            agent(AgentActivity::Idle)
         );
     }
 
     #[test]
-    fn non_idle_raw_activity_always_passes_through_unchanged() {
+    fn one_idle_flicker_does_not_mark_completion() {
+        let mut pending = false;
+        let held = settle_agent_status(
+            agent(AgentActivity::Idle),
+            Some(&agent(AgentActivity::Working)),
+            true,
+            false,
+            &mut pending,
+        );
+        assert_eq!(held, agent(AgentActivity::Working));
+        assert_eq!(
+            settle_agent_status(
+                agent(AgentActivity::Working),
+                Some(&held),
+                true,
+                false,
+                &mut pending,
+            ),
+            agent(AgentActivity::Working)
+        );
+        assert!(!pending);
+    }
+
+    #[test]
+    fn non_idle_raw_activity_clears_completion() {
         for raw in [
             AgentActivity::Working,
             AgentActivity::WaitingApproval,
             AgentActivity::WaitingBackground,
         ] {
-            assert_eq!(promote_to_done(Some(&agent(AgentActivity::Done)), raw), raw);
+            let mut pending = true;
+            assert_eq!(
+                settle_agent_status(
+                    agent(raw),
+                    Some(&agent(AgentActivity::Done)),
+                    true,
+                    false,
+                    &mut pending
+                ),
+                agent(raw)
+            );
+            assert!(!pending);
         }
     }
 
     #[test]
-    fn waiting_approval_or_background_finishing_unfocused_becomes_done() {
+    fn parked_or_replaced_agent_does_not_inherit_completion() {
+        let mut pending = true;
         assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::WaitingApproval)),
-                AgentActivity::Idle
+            settle_agent_status(
+                agent(AgentActivity::Idle),
+                Some(&agent(AgentActivity::Working)),
+                true,
+                true,
+                &mut pending,
             ),
-            AgentActivity::Done
+            agent(AgentActivity::Idle)
         );
+        assert!(!pending);
         assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::WaitingBackground)),
-                AgentActivity::Idle
+            settle_agent_status(
+                agent(AgentActivity::Idle),
+                Some(&agent(AgentActivity::Working)),
+                false,
+                false,
+                &mut pending,
             ),
-            AgentActivity::Done
+            agent(AgentActivity::Idle)
         );
-        assert_eq!(
-            promote_to_done(
-                Some(&agent(AgentActivity::BackgroundTaskStillRunning)),
-                AgentActivity::Idle
-            ),
-            AgentActivity::Done
-        );
+        assert!(!pending);
     }
 
     #[test]
@@ -2445,6 +2761,7 @@ mod tests {
         let identity = Some(ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 2,
@@ -2468,6 +2785,7 @@ mod tests {
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 42,
+            started_at_unix_seconds: 1,
             process_name: "codex".to_string(),
             matched_signature: "codex".to_string(),
             process_tree_depth: 2,
