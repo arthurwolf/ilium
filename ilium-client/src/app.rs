@@ -14162,6 +14162,36 @@ mod tests {
     }
 
     #[test]
+    fn motion_off_suppresses_terminal_activity_frame_wakes_but_keeps_semantic_expiry() {
+        let mut app = app();
+        app.ui_settings.motion_level = crate::config::MotionLevel::Off;
+        let pane_id = NodeId(74);
+        let now = Instant::now();
+        app.started_at = now;
+        app.terminal_activity.record(pane_id, 0);
+
+        let fast_schedule = app.maintenance_schedule(now);
+        assert_eq!(fast_schedule.delay, Duration::from_secs(5));
+        assert!(!fast_schedule.was_animating);
+        assert!(!app.has_active_animation());
+
+        app.started_at = now - Duration::from_millis(6_250);
+        let slow_schedule = app.maintenance_schedule(now);
+        assert_eq!(slow_schedule.delay, Duration::from_secs(1));
+        assert!(!slow_schedule.was_animating);
+
+        app.started_at = now - Duration::from_millis(59_900);
+        let expiry_schedule = app.maintenance_schedule(now);
+        assert_eq!(expiry_schedule.delay, Duration::from_millis(100));
+        assert!(!expiry_schedule.was_animating);
+
+        app.started_at = now - Duration::from_secs(60);
+        let idle_schedule = app.maintenance_schedule(now);
+        assert_eq!(idle_schedule.delay, Duration::from_secs(1));
+        assert!(!idle_schedule.was_animating);
+    }
+
+    #[test]
     fn workspace_search_debounce_wakes_at_its_exact_deadline() {
         let mut app = app();
         let edited_at = Instant::now();
