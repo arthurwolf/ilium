@@ -280,7 +280,10 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
                     crate::status_icons::safe_tooltip_text(&progress.report.job_id),
                 )),
                 ilium_core::NowSignal::ShellOutput(phase) => {
-                    Some(crate::status_icons::shell_output_reason(phase))
+                    let snapshot = app
+                        .terminal_activity
+                        .snapshot(node_id, app.started_at.elapsed().as_millis());
+                    crate::status_icons::shell_output_reason(phase, snapshot)
                 }
                 ilium_core::NowSignal::FinishedUnread => recorded_reason(
                     detection.and_then(|evidence| evidence.activity.as_ref()),

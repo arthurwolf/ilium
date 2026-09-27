@@ -4781,6 +4781,97 @@ mod tests {
     }
 
     #[test]
+    fn agent_monitoring_mode_cards_are_mouse_selectable_at_wide_and_narrow_widths() {
+        use crate::agent_monitoring::AgentMonitoringMode as Mode;
+        use AgentMonitoringContentHit::Mode as ModeHit;
+
+        let app = App::new("test-session".to_string(), std::env::temp_dir());
+        let wide_area = Rect::new(0, 0, 160, 45);
+        let wide_view = agent_monitoring_view(&app, 0, wide_area.width);
+        assert_eq!(wide_view.card_hits.len(), 2);
+        assert_eq!(wide_view.card_hits[0].mode, Mode::Normal);
+        assert_eq!(wide_view.card_hits[1].mode, Mode::Attention);
+        assert_eq!(
+            wide_view.card_hits[0].start_line,
+            wide_view.card_hits[1].start_line
+        );
+        assert!(wide_view.card_hits[0].end_x < wide_view.card_hits[1].start_x);
+
+        for hit in &wide_view.card_hits {
+            assert_eq!(
+                agent_monitoring_content_hit(
+                    wide_area,
+                    0,
+                    Position::new(hit.start_x + 1, hit.start_line),
+                    &app,
+                ),
+                Some(ModeHit(hit.mode))
+            );
+        }
+
+        let narrow_area = Rect::new(0, 0, 60, 45);
+        let narrow_view = agent_monitoring_view(&app, 0, narrow_area.width);
+        assert_eq!(narrow_view.card_hits.len(), 2);
+        assert_eq!(narrow_view.card_hits[0].mode, Mode::Normal);
+        assert_eq!(narrow_view.card_hits[1].mode, Mode::Attention);
+        assert!(narrow_view.card_hits[0].end_line < narrow_view.card_hits[1].start_line);
+
+        for hit in &narrow_view.card_hits {
+            assert_eq!(
+                agent_monitoring_content_hit(
+                    narrow_area,
+                    0,
+                    Position::new(hit.start_x + 1, hit.start_line),
+                    &app,
+                ),
+                Some(ModeHit(hit.mode))
+            );
+        }
+    }
+
+    #[test]
+    fn agent_monitoring_view_exposes_both_status_positions_and_every_status_icon_control() {
+        let app = App::new("test-session".to_string(), std::env::temp_dir());
+        let view = agent_monitoring_view(&app, 0, 160);
+        let rendered = view
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for expected in [
+            "Normal mode",
+            "Attention mode",
+            "What the two status positions mean",
+            "objective / long-term",
+            "current activity / right now",
+            "Objective position:",
+            "Current activity position:",
+            "Attention mode priority",
+            "Only the highest-priority status glyph is shown.",
+        ] {
+            assert!(rendered.contains(expected), "missing {expected:?}");
+        }
+
+        for demo_item in ["demo project", "service", "blocked review", "finished task"] {
+            assert_eq!(
+                rendered.matches(demo_item).count(),
+                2,
+                "each mode must render its own {demo_item:?} example"
+            );
+        }
+
+        for target in crate::agent_monitoring::STATUS_ICON_TARGETS {
+            let expected = monitoring_row_label(crate::app::AgentMonitoringRow::StatusIcon(target));
+            assert!(
+                rendered.contains(expected.as_str()),
+                "missing status control {expected:?}"
+            );
+        }
+    }
+
+    #[test]
     fn appearance_content_hit_selects_cards_and_mode_specific_controls() {
         let area = Rect::new(0, 0, 90, 30);
         let ui = UiSettings::default();

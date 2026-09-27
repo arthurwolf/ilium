@@ -29,6 +29,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use tui_term::widget::PseudoTerminal;
 
+use crate::terminal_activity::{VisibleRowEvidence, VisibleTextEvidence};
+
 /// Starting geometry for a freshly created pane, before the first real
 /// `ResizePane` request (sent once the client knows the pane's actual
 /// on-screen content box) corrects it.
@@ -89,6 +91,64 @@ fn visible_text_fingerprint(screen: &vt100::Screen) -> u64 {
     }
 
     fingerprint
+}
+
+fn visible_row_fingerprints(screen: &vt100::Screen) -> Vec<u64> {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    const CELL_BOUNDARY: u8 = 0xff;
+
+    let (rows, columns) = screen.size();
+    (0..rows)
+        .map(|row| {
+            let mut fingerprint = FNV_OFFSET_BASIS;
+            for column in 0..columns {
+                let contents = screen
+                    .cell(row, column)
+                    .map(vt100::Cell::contents)
+                    .unwrap_or_default();
+                for byte in contents.bytes() {
+                    fingerprint ^= u64::from(byte);
+                    fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+                }
+                fingerprint ^= u64::from(CELL_BOUNDARY);
+                fingerprint = fingerprint.wrapping_mul(FNV_PRIME);
+            }
+            fingerprint
+        })
+        .collect()
+}
+
+fn visible_row_evidence(screen: &vt100::Screen, row: u16) -> VisibleRowEvidence {
+    const MAX_SAMPLE_CHARS: usize = 48;
+
+    let (_, columns) = screen.size();
+    let mut text = String::new();
+    let mut sampled_chars = 0;
+    let mut blank = true;
+    let mut truncated = false;
+    for column in 0..columns {
+        let contents = screen
+            .cell(row, column)
+            .map(vt100::Cell::contents)
+            .unwrap_or_default();
+        for character in contents.chars() {
+            blank &= character.is_whitespace();
+            if sampled_chars < MAX_SAMPLE_CHARS {
+                text.push(character);
+                sampled_chars += 1;
+            } else {
+                truncated = true;
+            }
+        }
+    }
+
+    VisibleRowEvidence {
+        row_number: row.saturating_add(1),
+        text,
+        blank,
+        truncated,
+    }
 }
 
 /// Returns the offset before, and width of, a BEL or ST OSC terminator.
@@ -230,6 +290,10 @@ pub struct TerminalView {
     /// live PTY event into an O(screen cells), allocation-free text-change
     /// decision without any timer-driven screen scan.
     visible_text_fingerprint: u64,
+    /// Per-row fingerprints from the same baseline as `visible_text_fingerprint`.
+    visible_row_fingerprints: Vec<u64>,
+    /// Dimensions that gave meaning to the previous row fingerprints.
+    visible_text_dimensions: (u16, u16),
     /// Changes only when the screen visible to the user changes.
     render_revision: u64,
     /// Presentation cache uses interior mutability because drawing is a
@@ -249,6 +313,8 @@ impl TerminalView {
     pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
         let parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
         let visible_text_fingerprint = visible_text_fingerprint(parser.screen());
+        let visible_row_fingerprints = visible_row_fingerprints(parser.screen());
+        let visible_text_dimensions = parser.screen().size();
 
         Self {
             parser,
@@ -264,6 +330,8 @@ impl TerminalView {
             osc8_links: VecDeque::new(),
             osc8_stream: Vec::new(),
             visible_text_fingerprint,
+            visible_row_fingerprints,
+            visible_text_dimensions,
             render_revision: 0,
             render_cache: RefCell::new(None),
         }
@@ -335,8 +403,26 @@ impl TerminalView {
         bytes: &[u8],
         should_track_visible_text_change: bool,
     ) -> bool {
+        self.apply_live_output_with_evidence(
+            first_sequence,
+            sequence,
+            bytes,
+            should_track_visible_text_change,
+        )
+        .is_some()
+    }
+
+    /// Applies one accepted output batch and returns bounded parsed-screen
+    /// evidence only when tracked visible text actually changed.
+    pub(crate) fn apply_live_output_with_evidence(
+        &mut self,
+        first_sequence: u64,
+        sequence: u64,
+        bytes: &[u8],
+        should_track_visible_text_change: bool,
+    ) -> Option<VisibleTextEvidence> {
         if sequence <= self.last_output_sequence {
-            return false;
+            return None;
         }
         let expected_first_sequence = self.last_output_sequence.saturating_add(1);
         if first_sequence != expected_first_sequence {
@@ -346,7 +432,7 @@ impl TerminalView {
                 last_output_sequence = self.last_output_sequence,
                 "ignoring non-contiguous terminal output"
             );
-            return false;
+            return None;
         }
         self.append_history(bytes);
         self.observe_osc8_links(bytes);
@@ -355,7 +441,11 @@ impl TerminalView {
         self.refresh_scrollback_total();
         self.last_output_sequence = sequence;
 
-        should_track_visible_text_change && self.refresh_visible_text_fingerprint()
+        if should_track_visible_text_change {
+            self.capture_visible_text_change(first_sequence, sequence)
+        } else {
+            None
+        }
     }
 
     /// Re-establishes the visible-text baseline when a detected agent becomes
@@ -368,7 +458,50 @@ impl TerminalView {
     fn refresh_visible_text_fingerprint(&mut self) -> bool {
         let previous_fingerprint = self.visible_text_fingerprint;
         self.visible_text_fingerprint = visible_text_fingerprint(self.parser.screen());
+        self.visible_row_fingerprints = visible_row_fingerprints(self.parser.screen());
+        self.visible_text_dimensions = self.parser.screen().size();
         self.visible_text_fingerprint != previous_fingerprint
+    }
+
+    fn capture_visible_text_change(
+        &mut self,
+        first_sequence: u64,
+        sequence: u64,
+    ) -> Option<VisibleTextEvidence> {
+        let previous_rows = self.visible_row_fingerprints.clone();
+        let previous_dimensions = self.visible_text_dimensions;
+        if !self.refresh_visible_text_fingerprint() {
+            return None;
+        }
+
+        let dimensions = self.parser.screen().size();
+        let changed_positions = if dimensions == previous_dimensions {
+            Some(
+                previous_rows
+                    .iter()
+                    .zip(&self.visible_row_fingerprints)
+                    .enumerate()
+                    .filter(|(_, (previous, current))| previous != current)
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+        let changed_rows = changed_positions.as_ref().map(Vec::len);
+        let rows = changed_positions
+            .into_iter()
+            .flatten()
+            .take(2)
+            .map(|index| visible_row_evidence(self.parser.screen(), index as u16))
+            .collect();
+
+        Some(VisibleTextEvidence {
+            first_sequence,
+            sequence,
+            changed_rows,
+            rows,
+        })
     }
 
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
@@ -1194,6 +1327,26 @@ mod tests {
         assert!(!view.apply_live_output(3, 3, b"\x1b[2;2H", true));
         assert!(!view.apply_live_output(4, 4, b"\x1b[1;1HA", true));
         assert!(view.apply_live_output(5, 5, b"\x1b[1;1HB", true));
+    }
+
+    #[test]
+    fn live_output_evidence_identifies_changed_visible_row_and_ignores_style_only_updates() {
+        let mut view = TerminalView::new(3, 20);
+
+        let evidence = view
+            .apply_live_output_with_evidence(1, 1, b"hello", true)
+            .expect("visible text change");
+
+        assert_eq!(evidence.first_sequence, 1);
+        assert_eq!(evidence.sequence, 1);
+        assert_eq!(evidence.changed_rows, Some(1));
+        assert_eq!(evidence.rows.len(), 1);
+        assert_eq!(evidence.rows[0].row_number, 1);
+        assert_eq!(evidence.rows[0].text, "hello");
+        assert!(!evidence.rows[0].blank);
+        assert!(view
+            .apply_live_output_with_evidence(2, 2, b"\x1b[31m", true)
+            .is_none());
     }
 
     #[test]

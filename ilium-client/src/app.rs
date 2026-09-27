@@ -55,7 +55,8 @@ use crate::search_ui::{
 use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
 use crate::split_layout::{self, PaneViewport};
 use crate::terminal_activity::{
-    TerminalActivityTracker, TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
+    TerminalActivityCause, TerminalActivityTracker, VisibleTextEvidence,
+    TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
 };
 use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
 use crate::terminal_title_inference;
@@ -2425,17 +2426,22 @@ impl App {
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
-        match &request {
-            ClientRequest::KeyInput { pane_id, bytes, .. } if !bytes.is_empty() => {
-                self.record_plain_terminal_activity(*pane_id, Instant::now());
-            }
+        let activity = match &request {
+            ClientRequest::KeyInput { pane_id, bytes, .. } if !bytes.is_empty() => Some((
+                *pane_id,
+                TerminalActivityCause::KeyInputQueued {
+                    byte_count: bytes.len(),
+                },
+            )),
             ClientRequest::SubmitTerminalText { pane_id, .. } => {
-                self.record_plain_terminal_activity(*pane_id, Instant::now());
+                Some((*pane_id, TerminalActivityCause::TerminalTextQueued))
             }
-            _ => {}
-        }
-
+            _ => None,
+        };
         self.outbox.push(request);
+        if let Some((pane_id, cause)) = activity {
+            self.record_plain_terminal_activity(pane_id, Instant::now(), cause);
+        }
     }
 
     /// Writes raw bytes into a terminal pane's PTY, scrolling that pane's
@@ -2512,16 +2518,26 @@ impl App {
     pub(crate) fn record_terminal_screen_change(
         &mut self,
         pane_id: NodeId,
-        did_visible_text_change: bool,
+        evidence: Option<VisibleTextEvidence>,
     ) {
-        if did_visible_text_change {
-            self.record_plain_terminal_activity(pane_id, Instant::now());
-        }
+        let Some(evidence) = evidence else {
+            return;
+        };
+        self.record_plain_terminal_activity(
+            pane_id,
+            Instant::now(),
+            TerminalActivityCause::VisibleTextChanged(evidence),
+        );
     }
 
     /// Starts or refreshes activity only for an ordinary PTY-backed terminal.
     /// Detected agents retain their existing provider/activity indicators.
-    fn record_plain_terminal_activity(&mut self, pane_id: NodeId, now: Instant) {
+    fn record_plain_terminal_activity(
+        &mut self,
+        pane_id: NodeId,
+        now: Instant,
+        cause: TerminalActivityCause,
+    ) {
         let is_plain_terminal = self.tree.get(pane_id).is_some_and(|node| {
             matches!(
                 node.kind,
@@ -2538,7 +2554,8 @@ impl App {
         }
 
         let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
-        self.terminal_activity.record(pane_id, elapsed_ms);
+        self.terminal_activity
+            .record_with_cause(pane_id, elapsed_ms, cause);
     }
 
     pub fn active_pane_id(&self) -> Option<NodeId> {
@@ -12410,7 +12427,45 @@ mod tests {
             Some(crate::terminal_activity::TerminalActivityPhase::Fast)
         );
         assert_eq!(app.terminal_activity.phase(agent_id, elapsed_ms), None);
+        let shell_snapshot = app
+            .terminal_activity
+            .snapshot(shell_id, elapsed_ms)
+            .expect("plain shell keeps its queued key-input observation");
+        assert!(matches!(
+            shell_snapshot.cause,
+            crate::terminal_activity::TerminalActivityCause::KeyInputQueued { byte_count: 1 }
+        ));
         assert!(app.has_active_animation());
+    }
+
+    #[test]
+    fn submit_terminal_text_records_queued_activity_for_plain_terminal() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let shell_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        app.queue_request(ClientRequest::SubmitTerminalText {
+            pane_id: shell_id,
+            text: "queued text fixture".to_owned(),
+            source: ilium_ipc::PromptSubmissionSource::Keyboard,
+        });
+
+        let elapsed_ms = app.started_at.elapsed().as_millis();
+        let snapshot = app
+            .terminal_activity
+            .snapshot(shell_id, elapsed_ms)
+            .expect("plain shell keeps its queued terminal-text observation");
+        assert_eq!(
+            snapshot.phase,
+            crate::terminal_activity::TerminalActivityPhase::Fast
+        );
+        assert!(matches!(
+            snapshot.cause,
+            crate::terminal_activity::TerminalActivityCause::TerminalTextQueued
+        ));
     }
 
     #[test]

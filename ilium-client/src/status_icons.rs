@@ -145,10 +145,106 @@ pub(crate) fn missing_identity_evidence_reason(content: PaneContentKind) -> Stri
     }
 }
 
-pub(crate) fn shell_output_reason(phase: ShellOutputPhase) -> String {
-    format!(
-        "Why: parsed visible terminal text changed recently; this client's tracker places that change in the {phase:?} activity window."
-    )
+fn bounded_shell_reason(text: &str) -> String {
+    const LIMIT: usize = 512;
+    const MARKER: &str = " [truncated]";
+
+    let mut result = String::new();
+    for (index, character) in text.chars().enumerate() {
+        if index >= LIMIT {
+            let retained = LIMIT - MARKER.chars().count();
+            result = result.chars().take(retained).collect();
+            result.push_str(MARKER);
+            return result;
+        }
+
+        let unsafe_character = character.is_control()
+            || matches!(
+                character,
+                '\u{061c}'
+                    | '\u{200e}'
+                    | '\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+            );
+        result.push(if unsafe_character {
+            '\u{fffd}'
+        } else {
+            character
+        });
+    }
+    result
+}
+
+pub(crate) fn shell_output_reason(
+    phase: ShellOutputPhase,
+    snapshot: Option<crate::terminal_activity::TerminalActivitySnapshot<'_>>,
+) -> Option<String> {
+    use crate::terminal_activity::{
+        TerminalActivityCause, TerminalActivityPhase, TERMINAL_ACTIVITY_FAST_WINDOW_MS,
+        TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS,
+    };
+
+    let snapshot = snapshot?;
+    let matches_phase = matches!(
+        (phase, snapshot.phase),
+        (ShellOutputPhase::Fast, TerminalActivityPhase::Fast)
+            | (ShellOutputPhase::Slow, TerminalActivityPhase::Slow)
+    );
+    if !matches_phase {
+        return None;
+    }
+
+    let (lower_ms, upper_ms) = match snapshot.phase {
+        TerminalActivityPhase::Fast => (0, TERMINAL_ACTIVITY_FAST_WINDOW_MS),
+        TerminalActivityPhase::Slow => (
+            TERMINAL_ACTIVITY_FAST_WINDOW_MS,
+            TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS,
+        ),
+    };
+    let mut reason = match snapshot.cause {
+        TerminalActivityCause::VisibleTextChanged(evidence) => format!(
+            "Why: latest event: parsed visible-cell text fingerprint changed while handling live seq {}..{}.",
+            evidence.first_sequence, evidence.sequence
+        ),
+        TerminalActivityCause::KeyInputQueued { byte_count } => format!(
+            "Why: latest event: input queued: KeyInput; bytes.len() = {} > 0. Server/PTY receipt and execution unconfirmed.",
+            byte_count
+        ),
+        TerminalActivityCause::TerminalTextQueued => "Why: latest event: input queued: SubmitTerminalText. Server/PTY receipt and execution unconfirmed.".to_owned(),
+    };
+    reason.push_str(&format!(
+        " {:?}: {} <= age_ms {} < {}.",
+        snapshot.phase, lower_ms, snapshot.age_ms, upper_ms
+    ));
+
+    if let TerminalActivityCause::VisibleTextChanged(evidence) = snapshot.cause {
+        match evidence.changed_rows {
+            None => reason.push_str(" Row layouts were not comparable."),
+            Some(0) => reason.push_str(" Row hashes did not localize the fingerprint change."),
+            Some(count) => reason.push_str(&format!(
+                " {} changed row positions; {} sampled. Scrolling/erasure can do this.",
+                count,
+                evidence.rows.len()
+            )),
+        }
+        if !evidence.rows.is_empty() {
+            reason.push_str(" Samples join cell text; empty cells omitted.");
+        }
+        for row in &evidence.rows {
+            if row.blank {
+                reason.push_str(&format!(" r{} blank at update.", row.row_number));
+                continue;
+            }
+            reason.push_str(&format!(" r{} at update «{}»", row.row_number, row.text));
+            if row.truncated {
+                reason.push_str(" [truncated]");
+            }
+            reason.push('.');
+        }
+    }
+
+    Some(bounded_shell_reason(&reason))
 }
 
 /// Animates a configured glyph when it belongs to a built-in frame family,
@@ -456,12 +552,12 @@ pub fn now_explanation(signal: NowSignal) -> Option<StatusExplanation> {
             body: "The agent is waiting at its prompt with nothing running and nothing unread.",
         },
         NowSignal::ShellOutput(ShellOutputPhase::Fast) => StatusExplanation {
-            title: "Output flowing",
-            body: "This shell printed output within the last few seconds.",
+            title: "Terminal activity",
+            body: "This client queued input or observed changed visible terminal text within the last five seconds. WHY identifies the latest event.",
         },
         NowSignal::ShellOutput(ShellOutputPhase::Slow) => StatusExplanation {
-            title: "Recent output",
-            body: "This shell printed output within the last minute. The animation stops after a minute of quiet.",
+            title: "Recent terminal activity",
+            body: "The latest client input-queue or visible-text observation is five to sixty seconds old. The animation stops at sixty seconds.",
         },
     })
 }
@@ -868,11 +964,59 @@ mod tests {
     }
 
     #[test]
-    fn shell_output_provenance_names_the_visible_text_change_trigger() {
-        let reason = shell_output_reason(ShellOutputPhase::Fast);
-        assert!(reason.contains("parsed visible terminal text changed"));
-        assert!(reason.contains("Fast activity window"));
-        assert!(!reason.contains("accepted input"));
+    fn shell_activity_provenance_reports_the_latest_cause_and_suppresses_stale_phase() {
+        use crate::terminal_activity::{TerminalActivityCause, TerminalActivityTracker};
+
+        let pane_id = ilium_core::NodeId(43);
+        let mut tracker = TerminalActivityTracker::default();
+        tracker.record_with_cause(
+            pane_id,
+            100,
+            TerminalActivityCause::KeyInputQueued { byte_count: 1 },
+        );
+        let snapshot = tracker.snapshot(pane_id, 100);
+
+        let reason = shell_output_reason(ShellOutputPhase::Fast, snapshot)
+            .expect("matching key-input activity");
+        assert!(reason.contains("KeyInput"));
+        assert!(reason.contains("bytes.len() = 1 > 0"));
+        assert!(reason.contains("Server/PTY receipt and execution unconfirmed"));
+        assert!(!reason.contains("visible-cell text fingerprint changed"));
+        assert!(shell_output_reason(ShellOutputPhase::Slow, snapshot).is_none());
+    }
+
+    #[test]
+    fn shell_activity_reason_sanitizes_and_bounds_observed_terminal_text() {
+        use crate::terminal_activity::{
+            TerminalActivityCause, TerminalActivityTracker, VisibleRowEvidence,
+            VisibleTextEvidence,
+        };
+
+        let pane_id = ilium_core::NodeId(44);
+        let mut tracker = TerminalActivityTracker::default();
+        tracker.record_with_cause(
+            pane_id,
+            0,
+            TerminalActivityCause::VisibleTextChanged(VisibleTextEvidence {
+                first_sequence: 9,
+                sequence: 10,
+                changed_rows: Some(1),
+                rows: vec![VisibleRowEvidence {
+                    row_number: 2,
+                    text: format!("unsafe\u{202e}{}", "x".repeat(600)),
+                    blank: false,
+                    truncated: true,
+                }],
+            }),
+        );
+
+        let reason = shell_output_reason(ShellOutputPhase::Fast, tracker.snapshot(pane_id, 0))
+            .expect("matching visible-text observation");
+        assert!(reason.contains("seq 9..10"));
+        assert!(reason.contains("r2 at update"));
+        assert!(reason.contains("[truncated]"));
+        assert!(!reason.contains('\u{202e}'));
+        assert!(reason.chars().count() <= 512);
     }
 
     #[test]

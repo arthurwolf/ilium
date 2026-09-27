@@ -1,9 +1,8 @@
 //! Client-local activity windows for ordinary terminal panes.
 //!
 //! The PTY stream itself is already event-driven, so terminal activity does
-//! not need a polling task. `TerminalView` reports a live visible-text change
-//! while parsing output, input dispatch reports accepted key bytes, and this
-//! tracker keeps only the presentation window and phase used by the sidebar.
+//! not need a polling task. Live visible-text changes and client-queued input
+//! refresh this tracker; input contents are never retained as evidence.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -29,30 +28,98 @@ pub enum TerminalActivityPhase {
     Slow,
 }
 
+/// One bounded row sample from the live screen at the accepted update.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VisibleRowEvidence {
+    pub(crate) row_number: u16,
+    pub(crate) text: String,
+    pub(crate) blank: bool,
+    pub(crate) truncated: bool,
+}
+
+/// Evidence captured when the parsed visible-text fingerprint changes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VisibleTextEvidence {
+    pub(crate) first_sequence: u64,
+    pub(crate) sequence: u64,
+    pub(crate) changed_rows: Option<usize>,
+    pub(crate) rows: Vec<VisibleRowEvidence>,
+}
+
+/// The latest local cause for a plain terminal's activity indicator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TerminalActivityCause {
+    VisibleTextChanged(VisibleTextEvidence),
+    KeyInputQueued { byte_count: usize },
+    TerminalTextQueued,
+}
+
+#[derive(Debug)]
+struct TerminalActivityEntry {
+    elapsed_ms: u128,
+    cause: TerminalActivityCause,
+}
+
+/// A consistent phase and cause read from one tracker entry.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TerminalActivitySnapshot<'a> {
+    pub(crate) phase: TerminalActivityPhase,
+    pub(crate) age_ms: u128,
+    pub(crate) cause: &'a TerminalActivityCause,
+}
+
 /// Last activity edge for each currently animated plain terminal.
 #[derive(Debug, Default)]
 pub struct TerminalActivityTracker {
-    last_activity_ms: HashMap<NodeId, u128>,
+    last_activity_ms: HashMap<NodeId, TerminalActivityEntry>,
 }
 
 impl TerminalActivityTracker {
-    /// Starts or refreshes one pane's activity window.
+    /// Starts or refreshes a timing-only test entry.
     pub fn record(&mut self, pane_id: NodeId, elapsed_ms: u128) {
-        self.last_activity_ms.insert(pane_id, elapsed_ms);
+        self.record_with_cause(pane_id, elapsed_ms, TerminalActivityCause::TerminalTextQueued);
+    }
+
+    /// Starts or refreshes one pane's window and replaces its prior cause.
+    pub(crate) fn record_with_cause(
+        &mut self,
+        pane_id: NodeId,
+        elapsed_ms: u128,
+        cause: TerminalActivityCause,
+    ) {
+        self.last_activity_ms
+            .insert(pane_id, TerminalActivityEntry { elapsed_ms, cause });
     }
 
     /// Selects the pane's animation phase from its last activity edge.
     pub fn phase(&self, pane_id: NodeId, elapsed_ms: u128) -> Option<TerminalActivityPhase> {
-        let age_ms = elapsed_ms.saturating_sub(*self.last_activity_ms.get(&pane_id)?);
+        self.snapshot(pane_id, elapsed_ms)
+            .map(|snapshot| snapshot.phase)
+    }
 
-        if age_ms < TERMINAL_ACTIVITY_FAST_WINDOW_MS {
-            return Some(TerminalActivityPhase::Fast);
-        }
-        if age_ms < TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS {
-            return Some(TerminalActivityPhase::Slow);
+    /// Reads the phase and latest cause from the same unexpired observation.
+    pub(crate) fn snapshot(
+        &self,
+        pane_id: NodeId,
+        elapsed_ms: u128,
+    ) -> Option<TerminalActivitySnapshot<'_>> {
+        let entry = self.last_activity_ms.get(&pane_id)?;
+        let age_ms = elapsed_ms.saturating_sub(entry.elapsed_ms);
+        if age_ms >= TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS {
+            return None;
         }
 
-        None
+        let phase = if age_ms < TERMINAL_ACTIVITY_FAST_WINDOW_MS {
+            TerminalActivityPhase::Fast
+        } else {
+            TerminalActivityPhase::Slow
+        };
+
+        Some(TerminalActivitySnapshot {
+            phase,
+            age_ms,
+            cause: &entry.cause,
+        })
     }
 
     /// Whether at least one terminal needs the existing fast redraw cadence.
@@ -83,8 +150,8 @@ impl TerminalActivityTracker {
     pub fn next_slow_expiry_delay(&self, elapsed_ms: u128) -> Option<Duration> {
         self.last_activity_ms
             .values()
-            .filter_map(|last_activity_ms| {
-                let age_ms = elapsed_ms.saturating_sub(*last_activity_ms);
+            .filter_map(|entry| {
+                let age_ms = elapsed_ms.saturating_sub(entry.elapsed_ms);
                 if !(TERMINAL_ACTIVITY_FAST_WINDOW_MS..TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS)
                     .contains(&age_ms)
                 {
@@ -105,8 +172,8 @@ impl TerminalActivityTracker {
     pub fn next_fast_expiry_delay(&self, elapsed_ms: u128) -> Option<Duration> {
         self.last_activity_ms
             .values()
-            .filter_map(|last_activity_ms| {
-                let age_ms = elapsed_ms.saturating_sub(*last_activity_ms);
+            .filter_map(|entry| {
+                let age_ms = elapsed_ms.saturating_sub(entry.elapsed_ms);
                 if age_ms >= TERMINAL_ACTIVITY_FAST_WINDOW_MS {
                     return None;
                 }
@@ -121,8 +188,8 @@ impl TerminalActivityTracker {
     pub fn prune_expired(&mut self, elapsed_ms: u128) -> bool {
         let previous_count = self.last_activity_ms.len();
 
-        self.last_activity_ms.retain(|_pane_id, last_activity_ms| {
-            elapsed_ms.saturating_sub(*last_activity_ms) < TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS
+        self.last_activity_ms.retain(|_pane_id, entry| {
+            elapsed_ms.saturating_sub(entry.elapsed_ms) < TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS
         });
 
         self.last_activity_ms.len() != previous_count
@@ -246,12 +313,12 @@ mod tests {
             }],
         };
 
-        tracker.record(
+        tracker.record_with_cause(
             pane_id,
             100,
             TerminalActivityCause::VisibleTextChanged(output),
         );
-        tracker.record(
+        tracker.record_with_cause(
             pane_id,
             100,
             TerminalActivityCause::KeyInputQueued { byte_count: 3 },

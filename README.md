@@ -13,7 +13,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>01 · AI reorganizes the pane tree</strong>
+<strong>AI organizes your workspace</strong>
 </p>
 <p>
 <a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -23,9 +23,8 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>02 · Voice control (simulated speech understanding)</strong>
+<strong>Voice control (simulated speech)</strong>
 </p>
-<p>Typed commands travel through Ilium&#x27;s real voice relay and trigger real UI actions. The demo opens a terminal, sends <code>ls -lh</code>, and shows its real shell output. That command was captured in a separate isolated take and composed into the agent scene. A loopback model selects the tools; no microphone audio or live OpenAI Realtime inference is used. The first prompt reaches a real Claude session.</p>
 <p>
 <a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer">
 <img src="assets/demos/02-voice-control.gif" alt="Voice command demonstration with a loopback model, real Ilium UI actions, and a real Claude prompt" width="420">
@@ -36,7 +35,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>03 · Automatic titles from agent context</strong>
+<strong>Automatic agent titles</strong>
 </p>
 <p>
 <a href="assets/demos/03-contextual-titles.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -46,7 +45,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>04 · Delayed input to agents and terminals</strong>
+<strong>Schedule input</strong>
 </p>
 <p>
 <a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -58,7 +57,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>05 · Screen transfer</strong>
+<strong>Move screens between panes</strong>
 </p>
 <p>
 <a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -68,7 +67,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>06 · Agent costs and stats</strong>
+<strong>Agent costs and usage</strong>
 </p>
 <p>
 <a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -80,7 +79,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>07a · Settings: interface and board</strong>
+<strong>Interface and board settings</strong>
 </p>
 <p>
 <a href="assets/demos/07a-settings-tour-a.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -90,7 +89,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>07b · Settings: voice and inference</strong>
+<strong>Voice and AI provider settings</strong>
 </p>
 <p>
 <a href="assets/demos/07b-settings-tour-b.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -102,7 +101,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>07c · Settings: titles and setup</strong>
+<strong>Automatic title settings</strong>
 </p>
 <p>
 <a href="assets/demos/07c-settings-tour-c.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -112,9 +111,8 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>08 · Agent activity (simulated objective icon)</strong>
+<strong>Agent status (simulated goal icon)</strong>
 </p>
-<p>Three real agents show working, approval, and unread completion. The Codex objective icon is recreated on the captured sidebar; its recorded turn was an ordinary prompt, while the other state changes are real.</p>
 <p>
 <a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
 <img src="assets/demos/08-agent-activity.gif" alt="Real agent activity with a disclosed simulated Codex objective icon" width="420">
@@ -125,7 +123,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>09 · Rearrangeable pane tree</strong>
+<strong>Rearrange panes without restarting</strong>
 </p>
 <p>
 <a href="assets/demos/09-pane-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -135,7 +133,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>10 · Persistent mixed splits</strong>
+<strong>Agents, editors, and terminals side by side</strong>
 </p>
 <p>
 <a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -147,7 +145,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>11 · Smart Copy</strong>
+<strong>Select and copy terminal output</strong>
 </p>
 <p>
 <a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -157,7 +155,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>12 · Ask for update</strong>
+<strong>Request agent updates</strong>
 </p>
 <p>
 <a href="assets/demos/12-ask-for-update.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -169,7 +167,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>13 · Prompt queue</strong>
+<strong>Queue prompts</strong>
 </p>
 <p>
 <a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -179,7 +177,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>14 · Progress monitor</strong>
+<strong>Background tasks report back</strong>
 </p>
 <p>
 <a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -191,7 +189,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>15 · Kanban board</strong>
+<strong>Built-in Kanban board</strong>
 </p>
 <p>
 <a href="assets/demos/15-kanban.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -201,7 +199,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>16 · Create an agent from a line</strong>
+<strong>Fix TODOs with Codex</strong>
 </p>
 <p>
 <a href="assets/demos/16-agent-from-line.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -213,9 +211,8 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>17 · Workspace search (corrected terminal replay)</strong>
+<strong>Search agents, files, and terminals (edited replay)</strong>
 </p>
-<p>A real capture searches agent output, shell history, and files, then jumps to matching lines. The recording repaints stale terminal cells in two search screens and the Ledger title; the original capture is preserved.</p>
 <p>
 <a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
 <img src="assets/demos/17-workspace-search.gif" alt="Workspace search returns real agent, shell, and file matches and jumps to their lines; disclosed terminal-cell repaint" width="420">
@@ -224,7 +221,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>18 · Detach and reattach</strong>
+<strong>Detach without stopping agents</strong>
 </p>
 <p>
 <a href="assets/demos/18-detach-reattach.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -236,7 +233,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>19 · Markdown editor</strong>
+<strong>Built-in Markdown editor</strong>
 </p>
 <p>
 <a href="assets/demos/19-markdown-editor.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -246,9 +243,8 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>20 · Chatroom handoff (simulated sidebar titles)</strong>
+<strong>Codex–Claude handoff (simulated sidebar titles)</strong>
 </p>
-<p>Codex posts a real handoff and Claude posts a real reply. The two sidebar titles are recreated in this recording because the captured rows had no useful names.</p>
 <p>
 <a href="assets/demos/20-chatroom.gif?raw=true" target="_blank" rel="noopener noreferrer">
 <img src="assets/demos/20-chatroom.gif" alt="Real Codex and Claude Chatroom exchange with disclosed simulated sidebar titles" width="420">
@@ -259,7 +255,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>21 · Text triggers</strong>
+<strong>Auto-answer confirmation prompts</strong>
 </p>
 <p>
 <a href="assets/demos/21-text-triggers.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -269,7 +265,7 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </td>
 <td valign="top">
 <p>
-<strong>22 · Goal indicators</strong>
+<strong>Live agent goals</strong>
 </p>
 <p>
 <a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -281,9 +277,8 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 <tr>
 <td valign="top">
 <p>
-<strong>23 · Snapshot resume</strong>
+<strong>Restore panes and resume agents</strong>
 </p>
-<p>After a server restart restores the tree, real Claude and Codex sessions each recall a code given before the restart. Setup and wait periods are cut in the recording.</p>
 <p>
 <a href="assets/demos/23-snapshot-resume.gif?raw=true" target="_blank" rel="noopener noreferrer">
 <img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and real Claude and Codex sessions answer from their resumed context" width="420">
@@ -295,21 +290,6 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </tr>
 </tbody>
 </table>
-
-These recordings show ilium running in a terminal. Scene captions identify simulated portions. Select a GIF to view it at full size.
-
-```
-╭  ≡ ● · Ilium──────────────────┬  ≡ ● · cargo run─────────────────────────────────────────────────────╮
-│▼  🗂️   acme-api               │   Compiling acme-api v0.1.0 (/ram/acme-api)                          │
-│›▼  📁   default               │    Finished `dev` profile [unoptimized + debuginfo] target(s)        │
-│››   📟   shell                │     Running `target/debug/acme-api`                                  │
-│››   📟   cargo test           │acme-api up                                                           │
-│››   📟   cargo build --release│█                                                                     │
-│››   📟   cargo run            │                                                                      │
-│                               │                                                                      │
-│                               │                                                                      │
-╰───────────────────────────────┴──────────────────────────────────────────────────────────────────────╯
-```
 
 ## Status
 

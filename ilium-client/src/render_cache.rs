@@ -72,18 +72,18 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     }
                 )
             });
-            let did_visible_text_change =
+            let evidence =
                 if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                    view.apply_live_output(
+                    view.apply_live_output_with_evidence(
                         first_sequence,
                         sequence,
                         &bytes,
                         should_track_visible_text_change,
                     )
                 } else {
-                    false
+                    None
                 };
-            app.record_terminal_screen_change(pane_id, did_visible_text_change);
+            app.record_terminal_screen_change(pane_id, evidence);
             None
         }
         ServerEvent::TerminalReplay {
