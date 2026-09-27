@@ -3491,7 +3491,14 @@ mod smart_copy_mouse_tests {
 
     fn candidate_position(app: &App, pane_id: NodeId) -> Position {
         let area = app.smart_copy_terminal_area(pane_id).unwrap();
-        let candidate = &app.smart_copy_session.as_ref().unwrap().candidates[0];
+        let candidate = app
+            .smart_copy_session
+            .as_ref()
+            .unwrap()
+            .candidates
+            .iter()
+            .find(|candidate| candidate.kind == "url")
+            .expect("the pre-scan should provide a URL candidate");
         let span = candidate.spans[0];
         Position::new(
             area.x.saturating_add(span.start_column),
@@ -3519,7 +3526,7 @@ mod smart_copy_mouse_tests {
             app.smart_copy_session
                 .as_ref()
                 .and_then(|session| session.current_candidate())
-                .map(|candidate| candidate.label.as_str()),
+                .map(|candidate| candidate.kind.as_str()),
             Some("url")
         );
         app.status_message = None;

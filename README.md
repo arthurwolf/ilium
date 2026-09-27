@@ -291,13 +291,15 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </p>
 <p>
 <a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/24-agents-survive-reboots.gif" alt="A staged reboot and vintage boot sequence leads to retained footage of Ilium restoring the pane layout and resuming real Claude and Codex sessions; this is a composite, not a live machine reboot capture" width="100%">
+<img src="assets/demos/24-agents-survive-reboots.gif" alt="A real Ilium terminal runs a safely simulated reboot command; CRT shutoff footage and staged vintage boot scenes lead to retained footage of Ilium restoring the pane layout and resuming Claude and Codex sessions. This is a composite, not a live machine reboot capture." width="100%">
 </a>
 </p>
 </td>
 </tr>
 </tbody>
 </table>
+
+Reboot demo credits: [CRT turn-off footage by Snowman Digital](https://www.youtube.com/watch?v=jntnUWWkZlA); [IBM VGA font from Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/) (CC BY-SA 4.0). The reboot and boot screens are simulated; the Ilium terminal and session recovery footage are real captures.
 
 ## Status
 

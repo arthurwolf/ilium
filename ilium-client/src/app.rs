@@ -15279,7 +15279,7 @@ mod tests {
     }
 
     #[test]
-    fn smart_copy_freezes_the_visible_screen_and_accepts_the_first_streamed_record() {
+    fn smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -15314,7 +15314,8 @@ mod tests {
             generation: request.generation,
             pane_id,
             update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
-                r#"{"label":"command","kind":"command","parts":[{"lines":[1]}]}"#.to_string(),
+                r#"{"label":"curl","kind":"word","parts":[{"line":1,"from":"w1","through":"w1"}]}"#
+                    .to_string(),
             ),
         });
 
@@ -15322,9 +15323,18 @@ mod tests {
             .smart_copy_session
             .as_ref()
             .expect("selection session should remain active");
-        assert_eq!(session.candidates.len(), 1);
-        assert_eq!(session.candidates[0].text, "curl https://example.test/api");
-        assert!(!session.candidates[0].text.contains("live output changed"));
+        assert_eq!(session.candidates.len(), 3);
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "word" && candidate.text == "curl"));
+        let paragraph = session
+            .candidates
+            .iter()
+            .find(|candidate| candidate.kind == "paragraph")
+            .expect("the pre-scan should retain the frozen paragraph");
+        assert_eq!(paragraph.text, "curl https://example.test/api");
+        assert!(!paragraph.text.contains("live output changed"));
     }
 
     fn codex_pane(app: &mut App) -> NodeId {
