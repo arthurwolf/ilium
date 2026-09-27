@@ -10,9 +10,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use ilium_core::{
-    project_pane_signals, AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider,
-    ContainerKind, Node, NodeId, NodeKind, PaneProgress, PaneStatus, ShellOutputPhase, Tree,
-    ROOT_ID,
+    AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, ContainerKind, Node, NodeId,
+    NodeKind, PaneProgress, PaneStatus, ShellOutputPhase, Tree, ROOT_ID,
 };
 use ilium_ipc::WorkspaceGitStatus;
 use ratatui::buffer::Buffer;
@@ -1153,7 +1152,7 @@ pub(crate) const fn shell_output_phase(phase: TerminalActivityPhase) -> ShellOut
 
 /// Builds one pane row: identity icon, long-term slot, right-now slot, then
 /// the title. Which state each slot shows comes solely from
-/// `ilium_core::project_pane_signals`; this function only decides identity
+/// the selected presentation projection; this function only decides identity
 /// and title styling.
 fn pane_label_with_icons(
     status: &PaneStatus,
@@ -1194,7 +1193,8 @@ fn pane_label_with_icons(
             _ => current_title,
         }
     };
-    let signals = project_pane_signals(
+    let signals = crate::agent_monitoring::displayed_pane_signals(
+        agent_monitoring_mode,
         status,
         progress,
         has_scheduled_input,
@@ -1254,16 +1254,10 @@ fn pane_label_with_icons(
             Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
         ),
     };
-    let (objective_signal, now_signal) = match agent_monitoring_mode {
-        crate::agent_monitoring::AgentMonitoringMode::Normal => (signals.objective, signals.now),
-        crate::agent_monitoring::AgentMonitoringMode::Attention => {
-            crate::agent_monitoring::attention_status_signals(status, progress)
-        }
-    };
     status_row_label(
         identity,
-        crate::status_icons::objective_span(objective_signal, icons, use_stable_glyphs),
-        crate::status_icons::now_span(now_signal, icons, elapsed_ms, use_stable_glyphs),
+        crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs),
+        crate::status_icons::now_span(signals.now, icons, elapsed_ms, use_stable_glyphs),
         text,
     )
 }

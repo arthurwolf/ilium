@@ -6541,23 +6541,28 @@ impl App {
             );
         }
 
+        let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         if self.terminal_activity.has_fast_activity(elapsed_ms) {
-            requirements.is_active = true;
-            retain_minimum_delay(
-                &mut requirements.next_semantic_delay,
-                elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_FAST_FRAME_MS),
-            );
+            if !motion_off {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_semantic_delay,
+                    elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_FAST_FRAME_MS),
+                );
+            }
             if let Some(delay) = self.terminal_activity.next_fast_expiry_delay(elapsed_ms) {
                 retain_minimum_delay(&mut requirements.next_semantic_delay, delay);
             }
         }
 
         if self.terminal_activity.has_slow_activity(elapsed_ms) {
-            requirements.is_active = true;
-            retain_minimum_delay(
-                &mut requirements.next_ordinary_delay,
-                elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
-            );
+            if !motion_off {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_ordinary_delay,
+                    elapsed_frame_delay(elapsed_ms, TERMINAL_ACTIVITY_SLOW_FRAME_MS),
+                );
+            }
             if let Some(delay) = self.terminal_activity.next_slow_expiry_delay(elapsed_ms) {
                 retain_minimum_delay(&mut requirements.next_ordinary_delay, delay);
             }

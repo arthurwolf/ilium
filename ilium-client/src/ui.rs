@@ -207,7 +207,6 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         }
     }
     let NodeKind::Pane {
-        content,
         status,
         progress,
         scheduled_input,
@@ -220,7 +219,8 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         .terminal_activity
         .phase(node_id, app.started_at.elapsed().as_millis())
         .map(tree_ui::shell_output_phase);
-    let signals = ilium_core::project_pane_signals(
+    let signals = crate::agent_monitoring::displayed_pane_signals(
+        app.ui_settings.agent_monitoring_mode,
         status,
         progress.as_deref(),
         scheduled_input.is_some(),
@@ -240,8 +240,10 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
             reason.map(crate::status_icons::detection_reason_text)
         };
         let reason = match slot {
-            StatusSlot::Identity => recorded_reason(detection.and_then(|evidence| evidence.identity.as_ref()))
-                .or_else(|| Some(crate::status_icons::missing_identity_evidence_reason(*content))),
+            StatusSlot::Identity => Some(crate::status_icons::identity_provenance_reason(
+                status,
+                detection.and_then(|evidence| evidence.identity.as_ref()),
+            )),
             StatusSlot::Objective => match signals.objective {
                 ilium_core::ObjectiveSignal::Goal(_) => recorded_reason(
                     detection.and_then(|evidence| evidence.goal.as_ref()),
@@ -300,6 +302,18 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
             },
         }
         .map(|reason| match slot {
+            StatusSlot::Objective
+                if app.ui_settings.agent_monitoring_mode
+                    == crate::agent_monitoring::AgentMonitoringMode::Attention =>
+            {
+                format!("{reason} Attention selection rule: {}.", signals.objective_rule)
+            }
+            StatusSlot::Now
+                if app.ui_settings.agent_monitoring_mode
+                    == crate::agent_monitoring::AgentMonitoringMode::Attention =>
+            {
+                format!("{reason} Attention selection rule: {}.", signals.now_rule)
+            }
             StatusSlot::Objective => format!("{reason} Projection rule {}.", signals.objective_rule),
             StatusSlot::Now => format!("{reason} Projection rule {}.", signals.now_rule),
             StatusSlot::Identity => reason,
@@ -2333,11 +2347,114 @@ mod tests {
     use super::*;
     use crate::app::{PaneRuntime, RightPanelTarget};
     use crate::terminal_view::TerminalView;
-    use ilium_core::{PaneContentKind, SplitOrientation};
+    use ilium_core::{AgentActivity, GoalState, PaneContentKind, SplitOrientation};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn attention_mode_hides_tooltips_for_status_slots_without_a_glyph() {
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "waiting agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(
+                    AgentClass::Codex,
+                    AgentActivity::WaitingApproval,
+                    Some(GoalState::Blocked),
+                ),
+            )
+            .unwrap();
+        app.ui_settings.agent_monitoring_mode =
+            crate::agent_monitoring::AgentMonitoringMode::Attention;
+        app.set_screen_area(Rect::new(0, 0, 100, 24));
+        app.hovered_status_slot = Some((
+            pane_id,
+            crate::status_icons::StatusSlot::Objective,
+            Position::new(12, 3),
+        ));
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| draw_status_tooltip(frame, &app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(
+            !rendered.contains("Goal stalled"),
+            "Attention mode does not draw the blocked-goal icon when approval is selected"
+        );
+
+        app.hovered_status_slot = Some((
+            pane_id,
+            crate::status_icons::StatusSlot::Now,
+            Position::new(15, 3),
+        ));
+        terminal
+            .draw(|frame| draw_status_tooltip(frame, &app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        let rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(rendered.contains("Needs your approval"));
+        assert!(rendered.contains("Attention selection rule:"));
+        assert!(rendered.contains("Attention priority 1:"));
+    }
+
+    #[test]
+    fn editor_identity_why_reports_the_authoritative_dirty_flag() {
+        for (dirty, expected_reason) in [(true, "dirty=true"), (false, "dirty=false")] {
+            let mut app = App::new("test".to_owned(), std::env::temp_dir());
+            let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+            let pane_id = app
+                .tree
+                .add_pane(group, "notes.md", PaneContentKind::Editor)
+                .unwrap();
+            app.tree
+                .set_pane_status(pane_id, PaneStatus::Editor { dirty })
+                .unwrap();
+            app.set_screen_area(Rect::new(0, 0, 100, 24));
+            app.hovered_status_slot = Some((
+                pane_id,
+                crate::status_icons::StatusSlot::Identity,
+                Position::new(8, 3),
+            ));
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+            terminal
+                .draw(|frame| draw_status_tooltip(frame, &app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+
+            assert!(
+                rendered.contains(expected_reason),
+                "editor WHY must expose the server-owned {expected_reason} state"
+            );
+        }
+    }
 
     #[test]
     fn scheduled_reset_uses_a_right_aligned_orange_and_light_blue_status_segment() {

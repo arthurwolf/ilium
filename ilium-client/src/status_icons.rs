@@ -145,6 +145,45 @@ pub(crate) fn missing_identity_evidence_reason(content: PaneContentKind) -> Stri
     }
 }
 
+/// Explains the state used by the tree's identity icon. Detection-backed
+/// panes name their recorded predicate; local editor dirty state comes from
+/// the authoritative server-owned pane status rather than an agent detector.
+pub(crate) fn identity_provenance_reason(
+    status: &PaneStatus,
+    detection: Option<&ilium_ipc::DetectionReason>,
+) -> String {
+    if let Some(detection) = detection {
+        return detection_reason_text(detection);
+    }
+
+    match status {
+        PaneStatus::Editor { dirty: true } => {
+            "Why: the server-owned pane status reports dirty=true, so the editor is marked as having unsaved changes.".to_string()
+        }
+        PaneStatus::Editor { dirty: false } => {
+            "Why: the server-owned pane status reports dirty=false, so the editor is shown as saved.".to_string()
+        }
+        PaneStatus::Board => {
+            "Why: the server-owned pane status identifies this entry as a board pane.".to_string()
+        }
+        PaneStatus::Agent(agent) => {
+            let class_name = match &agent.class {
+                ilium_core::AgentClass::Claude => "Claude Code",
+                ilium_core::AgentClass::Codex => "Codex",
+                ilium_core::AgentClass::Antigravity => "Antigravity",
+                ilium_core::AgentClass::Other(name) => name,
+            };
+            format!(
+                "Why: the server's current status identifies a {} agent; its matching detector details were not included yet.",
+                safe_tooltip_text(class_name)
+            )
+        }
+        PaneStatus::PlainShell => {
+            missing_identity_evidence_reason(PaneContentKind::Terminal)
+        }
+    }
+}
+
 fn bounded_shell_reason(text: &str) -> String {
     const LIMIT: usize = 512;
     const MARKER: &str = " [truncated]";
@@ -706,38 +745,67 @@ pub fn render_tooltip(
     use ratatui::layout::Rect;
     use ratatui::text::Line;
     use ratatui::widgets::{Clear, Paragraph};
-    use unicode_width::UnicodeWidthStr;
 
     let text_width = TOOLTIP_MAX_TEXT_WIDTH.min(screen.width.saturating_sub(4));
     if text_width < 8 {
         return;
     }
-    let mut lines = vec![Line::from(Span::styled(
+    let title = Line::from(Span::styled(
         explanation.title().to_string(),
         Style::new().add_modifier(Modifier::BOLD),
-    ))];
-    let body_lines = crate::last_prompt_banner::wrap_lines(explanation.body(), text_width);
-    let reason_lines = explanation
+    ));
+    let mut body_lines = crate::last_prompt_banner::wrap_lines(explanation.body(), text_width);
+    let mut reason_lines = explanation
         .reason()
         .map(|reason| crate::last_prompt_banner::wrap_lines(reason, text_width));
-    let content_width = body_lines
+
+    let content_capacity = screen.height.saturating_sub(2) as usize;
+    let mut lines = Vec::new();
+    if let Some(reason_lines) = &mut reason_lines {
+        match content_capacity {
+            0 => {}
+            1 => {
+                truncate_tooltip_lines(reason_lines, 1, text_width);
+                lines.extend(
+                    reason_lines.drain(..).map(|line| {
+                        Line::from(Span::styled(line, Style::new().fg(Color::DarkGray)))
+                    }),
+                );
+            }
+            2 => {
+                truncate_tooltip_lines(reason_lines, 1, text_width);
+                lines.push(title);
+                lines.extend(
+                    reason_lines.drain(..).map(|line| {
+                        Line::from(Span::styled(line, Style::new().fg(Color::DarkGray)))
+                    }),
+                );
+            }
+            _ => {
+                truncate_tooltip_lines(reason_lines, content_capacity - 2, text_width);
+                let body_capacity = content_capacity - 2 - reason_lines.len();
+                truncate_tooltip_lines(&mut body_lines, body_capacity, text_width);
+                lines.push(title);
+                lines.extend(body_lines.drain(..).map(Line::from));
+                lines.push(Line::from(""));
+                lines.extend(
+                    reason_lines.drain(..).map(|line| {
+                        Line::from(Span::styled(line, Style::new().fg(Color::DarkGray)))
+                    }),
+                );
+            }
+        }
+    } else if content_capacity > 0 {
+        truncate_tooltip_lines(&mut body_lines, content_capacity - 1, text_width);
+        lines.push(title);
+        lines.extend(body_lines.into_iter().map(Line::from));
+    }
+    let content_width = lines
         .iter()
         .map(|line| line.width())
-        .chain(reason_lines.iter().flatten().map(|line| line.width()))
-        .chain(std::iter::once(explanation.title().width()))
         .max()
         .unwrap_or(0)
         .min(usize::from(text_width)) as u16;
-    lines.extend(body_lines.into_iter().map(Line::from));
-    if let Some(reason_lines) = reason_lines {
-        lines.push(Line::from(""));
-        lines.extend(reason_lines.into_iter().map(|line| {
-            Line::from(Span::styled(
-                line.to_string(),
-                Style::new().fg(Color::DarkGray),
-            ))
-        }));
-    }
     let width = content_width + 4;
     let height = (lines.len() as u16 + 2).min(screen.height);
     let below = anchor.y.saturating_add(1);
@@ -757,6 +825,32 @@ pub fn render_tooltip(
             .block(crate::theme::block(true).padding(ratatui::widgets::Padding::horizontal(1))),
         area,
     );
+}
+
+fn truncate_tooltip_lines(lines: &mut Vec<String>, max_lines: usize, max_width: u16) {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+
+    if lines.len() <= max_lines {
+        return;
+    }
+    lines.truncate(max_lines);
+    let Some(last_line) = lines.last_mut() else {
+        return;
+    };
+    let ellipsis_width = UnicodeWidthStr::width("…");
+    let content_width = usize::from(max_width).saturating_sub(ellipsis_width);
+    let mut prefix = String::new();
+    let mut width = 0;
+    for grapheme in last_line.graphemes(true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if width + grapheme_width > content_width {
+            break;
+        }
+        prefix.push_str(grapheme);
+        width += grapheme_width;
+    }
+    *last_line = format!("{}…", prefix.trim_end());
 }
 
 #[cfg(test)]
@@ -943,7 +1037,31 @@ mod tests {
         for task in tasks {
             assert!(objective_explanation(ObjectiveSignal::Task(task)).is_some());
         }
+        for goal in [
+            GoalState::Active,
+            GoalState::Paused,
+            GoalState::Blocked,
+            GoalState::UsageLimited,
+            GoalState::Reached,
+        ] {
+            assert!(objective_explanation(ObjectiveSignal::Goal(goal)).is_some());
+        }
+        assert!(objective_explanation(ObjectiveSignal::ScheduledInput).is_some());
         assert!(objective_explanation(ObjectiveSignal::None).is_none());
+
+        for signal in [
+            NowSignal::NeedsApproval,
+            NowSignal::Working,
+            NowSignal::WaitingSubagents,
+            NowSignal::Settling,
+            NowSignal::Parked,
+            NowSignal::FinishedUnread,
+            NowSignal::Idle,
+            NowSignal::ShellOutput(ShellOutputPhase::Fast),
+            NowSignal::ShellOutput(ShellOutputPhase::Slow),
+        ] {
+            assert!(now_explanation(signal).is_some());
+        }
         assert!(now_explanation(NowSignal::None).is_none());
     }
 
@@ -961,6 +1079,34 @@ mod tests {
             assert!(reason.contains("rather than an agent process"));
             assert!(!reason.contains("classification evidence yet"));
         }
+    }
+
+    #[test]
+    fn identity_provenance_fallback_matches_the_server_status_kind() {
+        let agent = PaneStatus::from_activity(
+            ilium_core::AgentClass::Codex,
+            ilium_core::AgentActivity::Working,
+            None,
+        );
+        let reason = identity_provenance_reason(&agent, None);
+        assert!(reason.contains("Codex agent"));
+        assert!(reason.contains("detector details were not included yet"));
+        assert!(!reason.contains("process-classification evidence yet"));
+
+        let editor = identity_provenance_reason(&PaneStatus::Editor { dirty: true }, None);
+        assert!(editor.contains("dirty=true"));
+        let board = identity_provenance_reason(&PaneStatus::Board, None);
+        assert!(board.contains("board pane"));
+
+        let detector = DetectionReason {
+            rule: "process marker matched".to_string(),
+            observed: Some("agent banner".to_string()),
+            context: "current process tree".to_string(),
+        };
+        assert_eq!(
+            identity_provenance_reason(&PaneStatus::Editor { dirty: true }, Some(&detector)),
+            detection_reason_text(&detector)
+        );
     }
 
     #[test]
@@ -1050,6 +1196,30 @@ mod tests {
         assert!(reason_row > body_row + 1);
         let reason_cell = &buffer[(4, reason_row as u16)];
         assert_eq!(reason_cell.fg, Color::DarkGray);
+    }
+
+    #[test]
+    fn provenance_stays_visible_when_a_long_body_exceeds_the_screen_height() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Position;
+        use ratatui::Terminal;
+
+        let explanation = TooltipContent {
+            title: "Task running".to_string(),
+            body: "Long explanation detail.\n".repeat(12),
+            reason: Some("Why: monitor #4 reported the selected task as running.".to_string()),
+        };
+        let mut terminal = Terminal::new(TestBackend::new(48, 8)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_tooltip(frame, frame.area(), Position::new(2, 3), &explanation);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (0..8)
+            .map(|y| (0..48).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        assert!(rows.iter().any(|row| row.contains("Why: monitor #4")));
     }
 
     #[test]

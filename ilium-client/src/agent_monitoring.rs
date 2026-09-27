@@ -1,8 +1,8 @@
 //! Client presentation policy and settings for monitoring detected agents.
 
 use ilium_core::{
-    AgentTurn, GoalState, NowSignal, ObjectiveSignal, PaneProgress, PaneStatus, ProgressTaskStatus,
-    TaskSignal,
+    project_pane_signals, AgentTurn, GoalState, NowSignal, ObjectiveSignal, PaneProgress,
+    PaneSignals, PaneStatus, ProgressTaskStatus, ShellOutputPhase, TaskSignal,
 };
 
 use crate::icon_settings::IconTarget;
@@ -121,7 +121,47 @@ pub fn attention_status_signals(
     status: &PaneStatus,
     progress: Option<&PaneProgress>,
 ) -> (ObjectiveSignal, NowSignal) {
-    let Some(target) = attention_status_target(status, progress) else {
+    attention_signals_for_target(status, progress, attention_status_target(status, progress))
+}
+
+/// Selects the exact pair shown in the tree so rendering and hover provenance
+/// use one mode-specific decision, including the Attention priority rule.
+pub fn displayed_pane_signals(
+    mode: AgentMonitoringMode,
+    status: &PaneStatus,
+    progress: Option<&PaneProgress>,
+    has_scheduled_input: bool,
+    shell_output: Option<ShellOutputPhase>,
+) -> PaneSignals {
+    if mode == AgentMonitoringMode::Normal {
+        return project_pane_signals(status, progress, has_scheduled_input, shell_output);
+    }
+
+    let target = attention_status_target(status, progress);
+    let (objective, now) = attention_signals_for_target(status, progress, target);
+    let selection_rule = attention_selection_rule(target);
+    PaneSignals {
+        objective,
+        now,
+        objective_rule: if objective == ObjectiveSignal::None {
+            "A9"
+        } else {
+            selection_rule
+        },
+        now_rule: if now == NowSignal::None {
+            "A9"
+        } else {
+            selection_rule
+        },
+    }
+}
+
+fn attention_signals_for_target(
+    status: &PaneStatus,
+    progress: Option<&PaneProgress>,
+    target: Option<IconTarget>,
+) -> (ObjectiveSignal, NowSignal) {
+    let Some(target) = target else {
         return (ObjectiveSignal::None, NowSignal::None);
     };
     match target {
@@ -145,6 +185,35 @@ pub fn attention_status_signals(
         IconTarget::WaitingApproval => (ObjectiveSignal::None, NowSignal::NeedsApproval),
         IconTarget::Done => (ObjectiveSignal::None, NowSignal::FinishedUnread),
         _ => (ObjectiveSignal::None, NowSignal::None),
+    }
+}
+
+fn attention_selection_rule(target: Option<IconTarget>) -> &'static str {
+    match target {
+        Some(IconTarget::WaitingApproval) => {
+            "Attention priority 1: approval is checked before monitor, task, goal, and unread-turn statuses"
+        }
+        Some(IconTarget::MonitorFailed) => {
+            "Attention priority 2: a failed live monitor is checked after approval and before task errors or goals"
+        }
+        Some(IconTarget::TaskError) => {
+            "Attention priority 3: a task error is checked after approval and monitor health, before goals"
+        }
+        Some(
+            IconTarget::GoalPaused
+            | IconTarget::GoalBlocked
+            | IconTarget::GoalUsageLimited
+            | IconTarget::GoalReached,
+        ) => {
+            "Attention priority 4: a non-active goal is checked after approval and task errors"
+        }
+        Some(IconTarget::TaskDone) => {
+            "Attention priority 5: an unread successful monitor report is checked after approval, failures, and non-active goals"
+        }
+        Some(IconTarget::Done) => {
+            "Attention priority 6: an unread completed turn is checked after approval, monitor/task failures, non-active goals, and unread monitor success"
+        }
+        _ => "No Attention status was selected",
     }
 }
 
