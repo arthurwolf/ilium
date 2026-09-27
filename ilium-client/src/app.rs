@@ -44,6 +44,7 @@ use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
 use crate::popover::AgentPopover;
 use crate::prompt_queue::PromptQueueDialogState;
+use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeStyle};
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
 use crate::screen_transfer::ScreenTransfer;
@@ -395,6 +396,7 @@ pub enum SettingsTab {
     KanbanBoard,
     Sound,
     VoiceControl,
+    ResetPlanning,
     Debug,
     Api,
     About,
@@ -554,7 +556,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 18] = [
+    pub const ALL: [SettingsTab; 19] = [
         Self::Appearance,
         Self::Icons,
         Self::Keyboard,
@@ -565,6 +567,7 @@ impl SettingsTab {
         Self::KanbanBoard,
         Self::Sound,
         Self::VoiceControl,
+        Self::ResetPlanning,
         Self::Inference,
         Self::Titles,
         Self::Triggers,
@@ -592,6 +595,7 @@ impl SettingsTab {
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
+            Self::ResetPlanning => "Reset planning",
             Self::Debug => "Debug",
             Self::Api => "API",
             Self::About => "About",
@@ -1697,6 +1701,8 @@ pub struct App {
     /// actor remains owned by `crate::run`, following the same outbox pattern
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
+    pub reset_planning_settings: ResetPlanningSettings,
+    pub reset_monitor_state: ResetMonitorState,
     pub debug_settings: DebugSettings,
     pub api_settings: ApiSettings,
     pub voice_connection_state: ilium_voice::VoiceConnectionState,
@@ -2077,6 +2083,8 @@ impl App {
             git_settings: GitSettings::default(),
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
+            reset_planning_settings: ResetPlanningSettings::default(),
+            reset_monitor_state: ResetMonitorState::default(),
             debug_settings: DebugSettings::default(),
             api_settings: ApiSettings::default(),
             voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
@@ -2336,10 +2344,7 @@ impl App {
         let NodeKind::Pane { status, .. } = &node.kind else {
             return None;
         };
-        let class = match status {
-            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => class.clone(),
-            PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
-        };
+        let class = status.agent_state()?.class.clone();
         let pane_cwd = self
             .tree
             .pane_cwd(pane_id)
@@ -2802,12 +2807,7 @@ impl App {
         let NodeKind::Pane { status, .. } = &node.kind else {
             return None;
         };
-        match status {
-            PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
-                class.provider()
-            }
-            _ => None,
-        }
+        status.agent_state()?.class.provider()
     }
 
     pub fn pane_viewport(&self, pane_id: NodeId) -> Option<PaneViewport> {
@@ -2882,10 +2882,9 @@ impl App {
             self.tree.get(pane_id).map(|node| &node.kind),
             Some(NodeKind::Pane {
                 content: PaneContentKind::Terminal,
-                status: PaneStatus::Agent(_, AgentActivity::Done)
-                    | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _),
+                status: PaneStatus::Agent(agent),
                 ..
-            })
+            }) if agent.completion_unread
         )
     }
 
@@ -3356,10 +3355,12 @@ impl App {
                     return None;
                 };
                 match status {
-                    PaneStatus::Agent(class, activity)
-                    | PaneStatus::AgentWithGoal(class, activity, _) => {
-                        Some(format!("{} — {} ({activity:?})", class.label(), node.name))
-                    }
+                    PaneStatus::Agent(agent) => Some(format!(
+                        "{} — {} ({:?})",
+                        agent.class.label(),
+                        node.name,
+                        agent.activity()
+                    )),
                     _ => None,
                 }
             })
@@ -3573,6 +3574,40 @@ impl App {
     /// loop decides startup after all dependencies and the control plane exist.
     pub fn apply_voice_settings(&mut self, settings: VoiceSettings) {
         self.voice_settings = settings;
+    }
+
+    pub fn apply_reset_planning_settings(&mut self, settings: ResetPlanningSettings) {
+        self.reset_planning_settings = settings;
+    }
+
+    pub fn settings_adjust_reset_planning_row(&mut self, row: usize) {
+        let mut settings = self.reset_planning_settings.clone();
+        match row {
+            0 => {
+                settings.monitor_claude = !settings.monitor_claude;
+                self.reset_monitor_state.claude = Default::default();
+            }
+            1 => {
+                settings.monitor_codex = !settings.monitor_codex;
+                self.reset_monitor_state.codex = Default::default();
+            }
+            2 => {
+                settings.time_style = match settings.time_style {
+                    ResetTimeStyle::Exact => ResetTimeStyle::Human,
+                    ResetTimeStyle::Human => ResetTimeStyle::Exact,
+                }
+            }
+            _ => return,
+        }
+        self.reset_planning_settings = settings;
+        if let Some(config_dir) = &self.config_dir {
+            if let Err(error) = crate::config::save_reset_planning_settings(
+                config_dir,
+                &self.reset_planning_settings,
+            ) {
+                self.status_message = Some(format!("Could not save reset planning: {error}"));
+            }
+        }
     }
 
     /// Installs startup diagnostics policy. The process writer is owned by the
@@ -5338,10 +5373,7 @@ impl App {
 
             match (content, runtime) {
                 (PaneContentKind::Terminal, PaneRuntime::Terminal(view)) => {
-                    let kind = if matches!(
-                        status,
-                        PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
-                    ) {
+                    let kind = if matches!(status, PaneStatus::Agent(..)) {
                         SearchObjectKind::Agent
                     } else {
                         SearchObjectKind::Shell
@@ -6335,20 +6367,16 @@ impl App {
                 );
             }
 
-            let frame_millis = match status {
-                PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity, _) => {
-                    match activity {
-                        AgentActivity::Working => Some(tree_ui::SPINNER_FRAME_MS as u64),
-                        AgentActivity::WaitingBackground => {
-                            Some(tree_ui::BACKGROUND_FRAME_MS as u64)
-                        }
-                        AgentActivity::Done => Some(tree_ui::DONE_PULSE_MS as u64),
-                        AgentActivity::Idle
-                        | AgentActivity::WaitingApproval
-                        | AgentActivity::BackgroundTaskStillRunning => None,
-                    }
-                }
-                PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
+            let frame_millis = match status.agent_state().map(ilium_core::AgentState::activity) {
+                Some(activity) => match activity {
+                    AgentActivity::Working => Some(tree_ui::SPINNER_FRAME_MS as u64),
+                    AgentActivity::WaitingBackground => Some(tree_ui::BACKGROUND_FRAME_MS as u64),
+                    AgentActivity::Done => Some(tree_ui::DONE_PULSE_MS as u64),
+                    AgentActivity::Idle
+                    | AgentActivity::WaitingApproval
+                    | AgentActivity::BackgroundTaskStillRunning => None,
+                },
+                None => None,
             };
             if let Some(frame_millis) = frame_millis {
                 requirements.is_active = true;
@@ -7526,7 +7554,7 @@ impl App {
     fn split_choice_kind_label(&self, pane_id: NodeId) -> &'static str {
         match self.tree.get(pane_id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
+                status: PaneStatus::Agent(_),
                 ..
             }) => "agent",
             Some(NodeKind::Pane {
@@ -8028,7 +8056,7 @@ impl App {
                 &node.kind,
                 NodeKind::Pane {
                     content: PaneContentKind::Terminal,
-                    status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
+                    status: PaneStatus::Agent(_),
                     ..
                 }
             )
@@ -8257,9 +8285,9 @@ impl App {
         match &node.kind {
             NodeKind::Pane {
                 content: PaneContentKind::Terminal,
-                status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
+                status: PaneStatus::Agent(agent),
                 ..
-            } => format!("{} agent", class.label()),
+            } => format!("{} agent", agent.class.label()),
             _ => "terminal".to_string(),
         }
     }
@@ -10054,7 +10082,7 @@ impl App {
         if matches!(
             self.tree.get(id).map(|node| &node.kind),
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                status: PaneStatus::Agent(..),
                 ..
             })
         ) {
@@ -10132,7 +10160,7 @@ impl App {
         }
         match self.tree.get(id).map(|node| &node.kind) {
             Some(NodeKind::Pane {
-                status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                status: PaneStatus::Agent(..),
                 ..
             }) => {
                 let Some(input) = crate::title_inference::session_title_input(self, id, true)
@@ -12005,7 +12033,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground),
+                PaneStatus::from_activity(
+                    AgentClass::Claude,
+                    AgentActivity::WaitingBackground,
+                    None,
+                ),
             )
             .unwrap();
 
@@ -12157,7 +12189,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 agent_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             )
             .unwrap();
 
@@ -12913,7 +12945,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 idle_pane,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         for target in [ROOT_ID, project, idle_pane] {
@@ -12927,7 +12959,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 idle_pane,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
             )
             .unwrap();
         let unrelated_group = app.tree.add_group(ROOT_ID, "empty").unwrap();
@@ -12955,7 +12987,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 idle_pane,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
             )
             .unwrap();
         let done_pane = app
@@ -12965,10 +12997,10 @@ mod tests {
         app.tree
             .set_pane_status(
                 done_pane,
-                PaneStatus::AgentWithGoal(
+                PaneStatus::from_activity(
                     AgentClass::Codex,
                     AgentActivity::Done,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             )
             .unwrap();
@@ -12979,7 +13011,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 working_pane,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         // A plain shell is never a candidate, even when technically idle.
@@ -13187,7 +13219,10 @@ mod tests {
             (AgentActivity::Done, Duration::from_millis(50)),
         ] {
             app.tree
-                .set_pane_status(pane_id, PaneStatus::Agent(AgentClass::Codex, activity))
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::from_activity(AgentClass::Codex, activity, None),
+                )
                 .unwrap();
 
             assert_eq!(
@@ -13500,7 +13535,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         app.agent_session_ids
@@ -13534,7 +13569,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         // Deliberately no `agent_session_ids` entry: this pane's session
@@ -13573,10 +13608,10 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::AgentWithGoal(
+                PaneStatus::from_activity(
                     AgentClass::Claude,
                     AgentActivity::WaitingApproval,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             )
             .unwrap();
@@ -13780,7 +13815,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             )
             .unwrap();
         app.panes.insert(
@@ -13819,7 +13854,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None),
             )
             .unwrap();
         app.agent_session_ids
@@ -14006,9 +14041,10 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(
+                PaneStatus::from_activity(
                     ilium_core::AgentClass::Claude,
                     ilium_core::AgentActivity::Done,
+                    None,
                 ),
             )
             .unwrap();
@@ -14027,9 +14063,10 @@ mod tests {
         match &app.tree.get(pane_id).unwrap().kind {
             NodeKind::Pane { status, .. } => assert_eq!(
                 *status,
-                PaneStatus::Agent(
+                PaneStatus::from_activity(
                     ilium_core::AgentClass::Claude,
-                    ilium_core::AgentActivity::Done
+                    ilium_core::AgentActivity::Done,
+                    None
                 )
             ),
             _ => panic!("expected a pane"),
@@ -14528,7 +14565,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             )
             .unwrap();
         app.panes.insert(
@@ -14561,7 +14598,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
             )
             .unwrap();
         assert!(app
@@ -14622,7 +14659,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             )
             .unwrap();
         // Becoming a detected agent reserves the toolbar row and the
@@ -14697,7 +14734,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             )
             .unwrap();
         app.agent_session_ids
@@ -14932,7 +14969,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         app.take_outbound_requests();
@@ -15047,7 +15084,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             )
             .unwrap();
         app.take_outbound_requests();
@@ -15280,7 +15317,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         app.agent_toolbar_latched_panes.insert(pane_id);
@@ -15412,7 +15449,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         app.panes.insert(
@@ -15487,7 +15524,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 destination_pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             )
             .unwrap();
         let mut source_view = TerminalView::new(12, 40);
@@ -15649,10 +15686,10 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::AgentWithGoal(
+                PaneStatus::from_activity(
                     AgentClass::Claude,
                     AgentActivity::WaitingApproval,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             )
             .unwrap();
@@ -16136,7 +16173,8 @@ mod tests {
         assert_eq!(SettingsTab::Git.next(), SettingsTab::KanbanBoard);
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
-        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
+        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::ResetPlanning);
+        assert_eq!(SettingsTab::ResetPlanning.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::Titles);
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::TextTriggers);
@@ -16146,6 +16184,30 @@ mod tests {
         assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
         assert_eq!(SettingsTab::Setup.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::Setup);
+    }
+
+    #[test]
+    fn reset_planning_controls_are_independent_and_persist_immediately() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        assert!(app.reset_planning_settings.monitor_claude);
+        assert!(app.reset_planning_settings.monitor_codex);
+
+        app.settings_adjust_reset_planning_row(0);
+        app.settings_adjust_reset_planning_row(2);
+        assert!(!app.reset_planning_settings.monitor_claude);
+        assert!(app.reset_planning_settings.monitor_codex);
+        assert_eq!(
+            app.reset_planning_settings.time_style,
+            ResetTimeStyle::Human
+        );
+        assert_eq!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .reset_planning,
+            app.reset_planning_settings
+        );
     }
 
     #[test]

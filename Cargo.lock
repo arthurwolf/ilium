@@ -2468,6 +2468,7 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "unicode-width",
+ "ureq",
  "uuid",
  "vt100",
  "zbus",

@@ -78,6 +78,7 @@ pub mod project_naming;
 pub mod prompt_queue;
 mod proxy_database;
 pub mod render_cache;
+pub mod reset_planning;
 pub mod restructure;
 pub mod scheduled_input;
 pub mod screen_transfer;
@@ -533,6 +534,7 @@ async fn run_inner(
     app.apply_session_settings(config.session);
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
+    app.apply_reset_planning_settings(config.reset_planning);
     app.apply_debug_settings(config.debug);
     app.apply_api_settings(config.api);
     app.request_debug_logging_reconciliation();
@@ -561,6 +563,10 @@ async fn run_inner(
     let (icon_search_events_tx, mut icon_search_events_rx) =
         mpsc::channel(ICON_SEARCH_EVENTS_CHANNEL_CAPACITY);
     let mut icon_search_workers = IconSearchWorkers::new(icon_search_events_tx);
+    let (reset_events_tx, mut reset_events_rx) = mpsc::channel(4);
+    let (reset_settings_tx, reset_settings_rx) =
+        tokio::sync::watch::channel(app.reset_planning_settings.clone());
+    let reset_monitor = crate::reset_planning::spawn_monitor(reset_settings_rx, reset_events_tx);
     let mut control_plane = crate::control::ControlPlane::default();
     let mut voice_service = if app.voice_settings.enabled {
         start_voice_service(&mut app, &control_plane)
@@ -634,6 +640,12 @@ async fn run_inner(
         let mut tick_delay = maintenance_schedule.delay;
         if needs_redraw && !needs_immediate_redraw {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
+        }
+        if let Some(interval) = app
+            .reset_monitor_state
+            .display_tick_interval(&app.reset_planning_settings)
+        {
+            tick_delay = tick_delay.min(interval);
         }
 
         tokio::select! {
@@ -712,6 +724,11 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
+            Some(reset_event) = reset_events_rx.recv() => {
+                app.reset_monitor_state.apply(reset_event, &app.reset_planning_settings);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
             voice_event = next_voice_event(&mut voice_service) => {
                 match voice_event {
                     Some(event) => {
@@ -752,7 +769,18 @@ async fn run_inner(
                 ) {
                     needs_redraw = true;
                 }
+                if app
+                    .reset_monitor_state
+                    .display_tick_interval(&app.reset_planning_settings)
+                    .is_some()
+                {
+                    needs_redraw = true;
+                }
             }
+        }
+
+        if *reset_settings_tx.borrow() != app.reset_planning_settings {
+            let _ = reset_settings_tx.send(app.reset_planning_settings.clone());
         }
 
         dispatch_pending_app_work(
@@ -859,6 +887,7 @@ async fn run_inner(
             last_draw_at = Instant::now();
         }
     }
+    reset_monitor.abort();
 
     smart_copy_workers.cancel();
 
@@ -1898,9 +1927,10 @@ mod responsiveness_tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                ilium_core::PaneStatus::Agent(
+                ilium_core::PaneStatus::from_activity(
                     ilium_core::AgentClass::Codex,
                     ilium_core::AgentActivity::Idle,
+                    None,
                 ),
             )
             .unwrap();

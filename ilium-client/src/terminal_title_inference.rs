@@ -140,9 +140,10 @@ mod tests {
 
     #[test]
     fn an_agent_pane_is_never_eligible() {
-        let (app, pane_id) = app_with_terminal_pane(PaneStatus::Agent(
+        let (app, pane_id) = app_with_terminal_pane(PaneStatus::from_activity(
             AgentClass::Claude,
             AgentActivity::Working,
+            None,
         ));
         assert!(!terminal_ready_for_retitle(&app, pane_id));
     }

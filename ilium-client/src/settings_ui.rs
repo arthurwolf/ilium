@@ -355,6 +355,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             voice_lines(app, state.selected_row),
             state.scroll,
         ),
+        SettingsTab::ResetPlanning => render_scrollable(
+            frame,
+            layout.content_area,
+            reset_planning_lines(app, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::Debug => render_scrollable(
             frame,
             layout.content_area,
@@ -644,6 +650,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             sound_lines(&app.sound_settings, &app.sound_discovery, selected_row).len() as u16
         }
         SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
+        SettingsTab::ResetPlanning => reset_planning_lines(app, selected_row).len() as u16,
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
@@ -3267,6 +3274,71 @@ fn api_lines(settings: &crate::config::ApiSettings, selected: usize) -> Vec<Line
     )
 }
 
+fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
+    use crate::reset_planning::{ResetProvider, ResetTimeStyle};
+
+    let settings = &app.reset_planning_settings;
+    let codex_status = &app.reset_monitor_state.codex;
+    let claude_status = &app.reset_monitor_state.claude;
+    let status_label = |provider: ResetProvider, enabled: bool| {
+        if !enabled {
+            return "Off".to_owned();
+        }
+        let status = app.reset_monitor_state.provider(provider);
+        if let Some(error) = &status.last_error {
+            return format!("On · check failed: {error}");
+        }
+        if status.last_checked.is_none() {
+            return "On · checking…".to_owned();
+        }
+        if status.scheduled.is_some() {
+            return "On · reset announced".to_owned();
+        }
+        "On · no scheduled reset".to_owned()
+    };
+    let mut lines = setting_lines(
+        &[
+            (
+                "Monitor Claude resets",
+                status_label(ResetProvider::Claude, settings.monitor_claude),
+                "Checks the public Claude reset feed hourly. It currently supplies history, not future reset times.",
+            ),
+            (
+                "Monitor Codex resets",
+                status_label(ResetProvider::Codex, settings.monitor_codex),
+                "Checks announced public resets hourly. An exact countdown appears only when the announcement gives a time.",
+            ),
+            (
+                "Time display",
+                match settings.time_style {
+                    ResetTimeStyle::Exact => "Exact · d h m s".to_owned(),
+                    ResetTimeStyle::Human => "Human · rounded".to_owned(),
+                },
+                "Switch between a live seconds countdown and rounded wording such as 'tomorrow' or '3 hours'.",
+            ),
+        ],
+        selected,
+    );
+    lines.push(Line::from(""));
+    lines.push(Line::from(format!(
+        "Claude feed: {} · Codex feed: {}",
+        if claude_status.last_checked.is_some() {
+            "checked"
+        } else {
+            "pending"
+        },
+        if codex_status.last_checked.is_some() {
+            "checked"
+        } else {
+            "pending"
+        },
+    )));
+    lines.push(Line::from(
+        "Public announcements are separate from your account's rolling usage windows.",
+    ));
+    lines
+}
+
 fn voice_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     let settings = &app.voice_settings;
     let state = match &app.voice_connection_state {
@@ -3825,24 +3897,28 @@ mod tests {
         );
         assert_eq!(
             tab_at(area, Position::new(2, 11)),
-            Some(SettingsTab::Inference)
+            Some(SettingsTab::ResetPlanning)
         );
         assert_eq!(
             tab_at(area, Position::new(2, 12)),
-            Some(SettingsTab::Titles)
+            Some(SettingsTab::Inference)
         );
         assert_eq!(
             tab_at(area, Position::new(2, 13)),
-            Some(SettingsTab::Triggers)
+            Some(SettingsTab::Titles)
         );
         assert_eq!(
             tab_at(area, Position::new(2, 14)),
+            Some(SettingsTab::Triggers)
+        );
+        assert_eq!(
+            tab_at(area, Position::new(2, 15)),
             Some(SettingsTab::TextTriggers)
         );
-        assert_eq!(tab_at(area, Position::new(2, 15)), Some(SettingsTab::Debug));
-        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::Api));
-        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::About));
-        assert_eq!(tab_at(area, Position::new(2, 18)), Some(SettingsTab::Setup));
+        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::Debug));
+        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::Api));
+        assert_eq!(tab_at(area, Position::new(2, 18)), Some(SettingsTab::About));
+        assert_eq!(tab_at(area, Position::new(2, 19)), Some(SettingsTab::Setup));
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
@@ -3851,22 +3927,26 @@ mod tests {
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
         assert_eq!(
             tab_at(spacious, Position::new(2, 27)),
-            Some(SettingsTab::TextTriggers)
+            Some(SettingsTab::Triggers)
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 29)),
-            Some(SettingsTab::Debug)
+            Some(SettingsTab::TextTriggers)
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 31)),
-            Some(SettingsTab::Api)
+            Some(SettingsTab::Debug)
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 33)),
-            Some(SettingsTab::About)
+            Some(SettingsTab::Api)
         );
         assert_eq!(
             tab_at(spacious, Position::new(2, 35)),
+            Some(SettingsTab::About)
+        );
+        assert_eq!(
+            tab_at(spacious, Position::new(2, 37)),
             Some(SettingsTab::Setup)
         );
 

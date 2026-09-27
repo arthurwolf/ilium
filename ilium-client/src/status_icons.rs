@@ -8,8 +8,8 @@
 //! means; which signal applies is decided once, in `ilium-core`.
 
 use ilium_core::{
-    GoalState, NowSignal, ObjectiveSignal, PaneStatus, PaneWorkspace, ShellOutputPhase, TaskSignal,
-    TASK_PROGRESS_BUCKETS,
+    GoalState, NowSignal, ObjectiveSignal, PaneContentKind, PaneStatus, PaneWorkspace,
+    ShellOutputPhase, TaskSignal, TASK_PROGRESS_BUCKETS,
 };
 use ilium_ipc::DetectionReason;
 use ilium_ipc::WorkspaceGitStatus;
@@ -104,7 +104,7 @@ pub fn identity_explanation(status: &PaneStatus) -> StatusExplanation {
             title: "Plain terminal",
             body: "No supported agent process was identified in this terminal's process tree.",
         },
-        PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => match class {
+        PaneStatus::Agent(agent) => match &agent.class {
             ilium_core::AgentClass::Claude => StatusExplanation {
                 title: "Claude Code agent",
                 body: "Ilium identified a Claude Code process in this terminal's process tree.",
@@ -137,6 +137,20 @@ pub fn identity_explanation(status: &PaneStatus) -> StatusExplanation {
     }
 }
 
+pub(crate) fn missing_identity_evidence_reason(content: PaneContentKind) -> String {
+    match content {
+        PaneContentKind::Terminal => "Why: the server has not sent this terminal's process-classification evidence yet.".to_string(),
+        PaneContentKind::Editor => "Why: the saved tree marks this as an editor pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
+        PaneContentKind::Board => "Why: the saved tree marks this as a board pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
+    }
+}
+
+pub(crate) fn shell_output_reason(phase: ShellOutputPhase) -> String {
+    format!(
+        "Why: parsed visible terminal text changed recently; this client's tracker places that change in the {phase:?} activity window."
+    )
+}
+
 /// Animates a configured glyph when it belongs to a built-in frame family,
 /// starting from that glyph's own position, so customising an animated role
 /// to another member of its family (for example 🕗 for the clock) keeps it
@@ -159,7 +173,7 @@ fn animated_from_family(
     family[(start + offset) % family.len()].to_string()
 }
 
-fn task_span(task: TaskSignal, icons: &IconSettings) -> Span<'static> {
+fn task_span(task: TaskSignal, icons: &IconSettings, use_stable_glyphs: bool) -> Span<'static> {
     let emphasis = |unread: bool| {
         if unread {
             Style::new().add_modifier(Modifier::BOLD)
@@ -169,7 +183,9 @@ fn task_span(task: TaskSignal, icons: &IconSettings) -> Span<'static> {
     };
     match task {
         TaskSignal::Pending => Span::styled(
-            icons.glyph(IconTarget::TaskPending).to_string(),
+            icons
+                .glyph_for_display(IconTarget::TaskPending, use_stable_glyphs)
+                .to_string(),
             Style::new().fg(Color::Gray),
         ),
         TaskSignal::Running { bucket, degraded } => Span::styled(
@@ -177,15 +193,21 @@ fn task_span(task: TaskSignal, icons: &IconSettings) -> Span<'static> {
             Style::new().fg(if degraded { Color::Yellow } else { Color::Cyan }),
         ),
         TaskSignal::Done { unread } => Span::styled(
-            icons.glyph(IconTarget::TaskDone).to_string(),
+            icons
+                .glyph_for_display(IconTarget::TaskDone, use_stable_glyphs)
+                .to_string(),
             emphasis(unread),
         ),
         TaskSignal::Error { unread } => Span::styled(
-            icons.glyph(IconTarget::TaskError).to_string(),
+            icons
+                .glyph_for_display(IconTarget::TaskError, use_stable_glyphs)
+                .to_string(),
             emphasis(unread),
         ),
         TaskSignal::MonitorFailed { unread } => Span::styled(
-            icons.glyph(IconTarget::MonitorFailed).to_string(),
+            icons
+                .glyph_for_display(IconTarget::MonitorFailed, use_stable_glyphs)
+                .to_string(),
             emphasis(unread).fg(Color::Yellow),
         ),
     }
@@ -217,7 +239,11 @@ const fn goal_icon_target(goal_state: GoalState) -> IconTarget {
 
 /// The long-term slot's glyph. Nothing here animates: a goal or a task's
 /// progress changes only when its underlying fact changes.
-pub fn objective_span(signal: ObjectiveSignal, icons: &IconSettings) -> Span<'static> {
+pub fn objective_span(
+    signal: ObjectiveSignal,
+    icons: &IconSettings,
+    use_stable_glyphs: bool,
+) -> Span<'static> {
     match signal {
         ObjectiveSignal::None => Span::raw(""),
         ObjectiveSignal::Goal(goal_state) => {
@@ -227,11 +253,18 @@ pub fn objective_span(signal: ObjectiveSignal, icons: &IconSettings) -> Span<'st
                 }
                 GoalState::Active | GoalState::Paused | GoalState::Reached => Style::new(),
             };
-            Span::styled(icons.glyph(goal_icon_target(goal_state)).to_string(), style)
+            Span::styled(
+                icons
+                    .glyph_for_display(goal_icon_target(goal_state), use_stable_glyphs)
+                    .to_string(),
+                style,
+            )
         }
-        ObjectiveSignal::Task(task) => task_span(task, icons),
+        ObjectiveSignal::Task(task) => task_span(task, icons, use_stable_glyphs),
         ObjectiveSignal::ScheduledInput => Span::styled(
-            icons.glyph(IconTarget::ScheduledInput).to_string(),
+            icons
+                .glyph_for_display(IconTarget::ScheduledInput, use_stable_glyphs)
+                .to_string(),
             Style::new().fg(Color::Gray),
         ),
     }
@@ -239,23 +272,33 @@ pub fn objective_span(signal: ObjectiveSignal, icons: &IconSettings) -> Span<'st
 
 /// The right-now slot's glyph at `elapsed_ms` (zero freezes every
 /// animation, which is how motion level Off is applied).
-pub fn now_span(signal: NowSignal, icons: &IconSettings, elapsed_ms: u128) -> Span<'static> {
+pub fn now_span(
+    signal: NowSignal,
+    icons: &IconSettings,
+    elapsed_ms: u128,
+    use_stable_glyphs: bool,
+) -> Span<'static> {
     match signal {
         NowSignal::None => Span::raw(""),
         NowSignal::NeedsApproval => Span::styled(
-            icons.glyph(IconTarget::WaitingApproval).to_string(),
+            icons
+                .glyph_for_display(IconTarget::WaitingApproval, use_stable_glyphs)
+                .to_string(),
             Style::new().add_modifier(Modifier::BOLD),
         ),
         NowSignal::Working => Span::raw(animated_from_family(
-            icons.glyph(IconTarget::Working),
+            icons.glyph_for_display(IconTarget::Working, use_stable_glyphs),
             SPINNER_FRAMES,
             SPINNER_FRAME_MS,
             elapsed_ms,
         )),
         NowSignal::WaitingSubagents => {
-            let configured = icons.glyph(IconTarget::WaitingBackground);
+            let configured =
+                icons.glyph_for_display(IconTarget::WaitingBackground, use_stable_glyphs);
             // The historical default `◷` is a stand-in for the clock family.
-            let configured = if configured == IconTarget::WaitingBackground.default_glyph() {
+            let configured = if !use_stable_glyphs
+                && configured == IconTarget::WaitingBackground.default_glyph()
+            {
                 "🕛"
             } else {
                 configured
@@ -269,11 +312,13 @@ pub fn now_span(signal: NowSignal, icons: &IconSettings, elapsed_ms: u128) -> Sp
         }
         NowSignal::Settling => Span::raw(
             icons
-                .glyph(IconTarget::BackgroundTaskStillRunning)
+                .glyph_for_display(IconTarget::BackgroundTaskStillRunning, use_stable_glyphs)
                 .to_string(),
         ),
         NowSignal::Parked => Span::styled(
-            icons.glyph(IconTarget::Parked).to_string(),
+            icons
+                .glyph_for_display(IconTarget::Parked, use_stable_glyphs)
+                .to_string(),
             Style::new().fg(Color::Gray),
         ),
         NowSignal::FinishedUnread => {
@@ -282,9 +327,18 @@ pub fn now_span(signal: NowSignal, icons: &IconSettings, elapsed_ms: u128) -> Sp
             } else {
                 Style::new()
             };
-            Span::styled(icons.glyph(IconTarget::Done).to_string(), style)
+            Span::styled(
+                icons
+                    .glyph_for_display(IconTarget::Done, use_stable_glyphs)
+                    .to_string(),
+                style,
+            )
         }
-        NowSignal::Idle => Span::raw(icons.glyph(IconTarget::Idle).to_string()),
+        NowSignal::Idle => Span::raw(
+            icons
+                .glyph_for_display(IconTarget::Idle, use_stable_glyphs)
+                .to_string(),
+        ),
         NowSignal::ShellOutput(phase) => {
             let frame_ms = match phase {
                 ShellOutputPhase::Fast => u128::from(TERMINAL_ACTIVITY_FAST_FRAME_MS),
@@ -795,6 +849,30 @@ mod tests {
         }
         assert!(objective_explanation(ObjectiveSignal::None).is_none());
         assert!(now_explanation(NowSignal::None).is_none());
+    }
+
+    #[test]
+    fn missing_identity_provenance_matches_each_pane_content_kind() {
+        let terminal = missing_identity_evidence_reason(PaneContentKind::Terminal);
+        assert!(terminal.contains("process-classification evidence"));
+
+        for (content, pane_name) in [
+            (PaneContentKind::Editor, "editor pane"),
+            (PaneContentKind::Board, "board pane"),
+        ] {
+            let reason = missing_identity_evidence_reason(content);
+            assert!(reason.contains(pane_name));
+            assert!(reason.contains("rather than an agent process"));
+            assert!(!reason.contains("classification evidence yet"));
+        }
+    }
+
+    #[test]
+    fn shell_output_provenance_names_the_visible_text_change_trigger() {
+        let reason = shell_output_reason(ShellOutputPhase::Fast);
+        assert!(reason.contains("parsed visible terminal text changed"));
+        assert!(reason.contains("Fast activity window"));
+        assert!(!reason.contains("accepted input"));
     }
 
     #[test]

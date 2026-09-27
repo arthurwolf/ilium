@@ -21,9 +21,7 @@ pub fn decorate_agent_title(activity: AgentActivity, title: &str) -> String {
 /// title unchanged.
 pub fn decorate_pane_title(status: &PaneStatus, title: &str) -> String {
     match status {
-        PaneStatus::Agent(_, activity) | PaneStatus::AgentWithGoal(_, activity, _) => {
-            decorate_agent_title(*activity, title)
-        }
+        PaneStatus::Agent(agent) => decorate_agent_title(agent.activity(), title),
         PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => title.to_string(),
     }
 }
@@ -38,17 +36,17 @@ mod tests {
     fn done_marker_is_exact_idempotent_and_agent_only() {
         assert_eq!(
             decorate_pane_title(
-                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+                &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
                 "Fix authentication"
             ),
             "[done] Fix authentication"
         );
         assert_eq!(
             decorate_pane_title(
-                &PaneStatus::AgentWithGoal(
+                &PaneStatus::from_activity(
                     AgentClass::Claude,
                     AgentActivity::Done,
-                    ilium_core::GoalState::Active
+                    Some(ilium_core::GoalState::Active)
                 ),
                 "[done] Goal"
             ),
@@ -56,7 +54,7 @@ mod tests {
         );
         assert_eq!(
             decorate_pane_title(
-                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
                 "Fix authentication"
             ),
             "Fix authentication"

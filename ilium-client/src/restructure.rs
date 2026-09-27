@@ -212,15 +212,14 @@ pub fn gather_leaf_contexts(
             agent_lookup: None,
         };
         match (panes.get(&pane_id), status) {
-            (
-                Some(PaneRuntime::Terminal(view)),
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
-            ) if agent_session_ids.contains_key(&pane_id) => {
+            (Some(PaneRuntime::Terminal(view)), PaneStatus::Agent(agent))
+                if agent_session_ids.contains_key(&pane_id) =>
+            {
                 context.automatic_content_fingerprint =
                     stable_restructure_fingerprint(&view.with_screen(|screen| screen.contents()));
                 context.agent_lookup = tree.pane_cwd(pane_id).map(|cwd| {
                     (
-                        class.clone(),
+                        agent.class.clone(),
                         agent_session_ids[&pane_id].clone(),
                         cwd.to_path_buf(),
                     )
@@ -507,8 +506,12 @@ fn format_transcript_entries(entries: &[crate::transcript_context::TranscriptEnt
 fn describe_pane_status(status: &PaneStatus) -> String {
     match status {
         PaneStatus::PlainShell => "Plain shell".to_string(),
-        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
-            format!("{} agent ({})", class.label(), describe_activity(activity))
+        PaneStatus::Agent(agent) => {
+            format!(
+                "{} agent ({})",
+                agent.class.label(),
+                describe_activity(&agent.activity())
+            )
         }
         PaneStatus::Editor { .. } => "Editor".to_string(),
         PaneStatus::Board => "Board".to_string(),

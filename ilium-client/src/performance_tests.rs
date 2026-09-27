@@ -89,10 +89,10 @@ fn many_pane_fixture() -> ManyPaneFixture {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::AgentWithGoal(
+                PaneStatus::from_activity(
                     AgentClass::Codex,
                     AgentActivity::Working,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             )
             .expect("mark benchmark pane working");

@@ -89,9 +89,9 @@ fn type_rank(node: &Node) -> u8 {
         NodeKind::Folder { .. } => 2,
         NodeKind::Pane {
             content: PaneContentKind::Terminal,
-            status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
+            status: PaneStatus::Agent(agent),
             ..
-        } => class.type_sort_rank(),
+        } => agent.class.type_sort_rank(),
         NodeKind::Pane {
             content: PaneContentKind::Terminal,
             ..
@@ -170,7 +170,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             codex,
-            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
         )
         .unwrap();
         tree.add_pane(parent, "editor", PaneContentKind::Editor)

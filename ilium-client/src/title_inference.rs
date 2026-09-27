@@ -113,11 +113,10 @@ pub fn session_title_input(
     if title_source.is_user_specified() && !allow_user_specified_title {
         return None;
     }
-    let (class, activity, has_persistent_goal) = match status {
-        PaneStatus::Agent(class, activity) => (class, activity, false),
-        PaneStatus::AgentWithGoal(class, activity, _) => (class, activity, true),
-        PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
-    };
+    let agent = status.agent_state()?;
+    let class = &agent.class;
+    let activity = agent.activity();
+    let has_persistent_goal = agent.goal.is_some();
     class.provider()?;
     let terminal_screen = match app.panes.get(&pane_id) {
         Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
@@ -145,7 +144,7 @@ pub fn session_title_input(
         current_short_title: node.short_name.clone(),
         current_icon: node.inferred_icon.clone(),
         title_source: *title_source,
-        activity: *activity,
+        activity,
         has_persistent_goal,
         terminal_screen,
         parent_group,
@@ -194,13 +193,14 @@ pub fn pane_ready_for_inference(
         return None;
     }
     let NodeKind::Pane {
-        status: PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _),
+        status: PaneStatus::Agent(agent),
         title_source,
         ..
     } = &app.tree.get(pane_id)?.kind
     else {
         return None;
     };
+    let class = &agent.class;
     if title_source.is_user_specified() {
         return None;
     }
@@ -232,7 +232,7 @@ mod tests {
             .add_pane(group, "claude", PaneContentKind::Terminal)
             .unwrap();
         app.tree
-            .set_pane_status(pane_id, PaneStatus::Agent(class, activity))
+            .set_pane_status(pane_id, PaneStatus::from_activity(class, activity, None))
             .unwrap();
         (app, pane_id)
     }

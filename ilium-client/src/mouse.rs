@@ -1921,6 +1921,18 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         return;
                     }
                 }
+            } else if state.tab == crate::app::SettingsTab::ResetPlanning {
+                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    3,
+                ) {
+                    state.selected_row = index;
+                    app.mode = Mode::Settings(state);
+                    app.settings_adjust_reset_planning_row(index);
+                    return;
+                }
             } else if state.tab == crate::app::SettingsTab::Debug {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
                     layout.content_area,
@@ -3411,7 +3423,7 @@ mod smart_copy_mouse_tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                ilium_core::PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                ilium_core::PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
             )
             .unwrap();
         let mut view = TerminalView::new(4, 40);

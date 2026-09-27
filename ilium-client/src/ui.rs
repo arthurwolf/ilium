@@ -141,6 +141,7 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         }
     }
     let NodeKind::Pane {
+        content,
         status,
         progress,
         scheduled_input,
@@ -174,7 +175,7 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         };
         let reason = match slot {
             StatusSlot::Identity => recorded_reason(detection.and_then(|evidence| evidence.identity.as_ref()))
-                .or_else(|| Some("Why: this pane kind comes from the server's current tree status; the process classification evidence has not arrived yet.".to_string())),
+                .or_else(|| Some(crate::status_icons::missing_identity_evidence_reason(*content))),
             StatusSlot::Objective => match signals.objective {
                 ilium_core::ObjectiveSignal::Goal(_) => recorded_reason(
                     detection.and_then(|evidence| evidence.goal.as_ref()),
@@ -212,9 +213,9 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
                     progress.monitor_id,
                     crate::status_icons::safe_tooltip_text(&progress.report.job_id),
                 )),
-                ilium_core::NowSignal::ShellOutput(phase) => Some(format!(
-                    "Why: this client's visible terminal-cell tracker recorded recent output or accepted input; its current activity window is {phase:?}."
-                )),
+                ilium_core::NowSignal::ShellOutput(phase) => {
+                    Some(crate::status_icons::shell_output_reason(phase))
+                }
                 ilium_core::NowSignal::FinishedUnread => recorded_reason(
                     detection.and_then(|evidence| evidence.activity.as_ref()),
                 ).map(|reason| format!("{reason} The server retained this completed turn as unread until pane focus or input."))
@@ -2005,8 +2006,8 @@ fn pane_title(app: &App, id: NodeId) -> String {
     match &node.kind {
         NodeKind::Pane { status, .. } => {
             let logical_title = match status {
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
-                    format!("{} — {}", node.name, agent_class_title(class))
+                PaneStatus::Agent(agent) => {
+                    format!("{} — {}", node.name, agent_class_title(&agent.class))
                 }
                 _ => node.name.clone(),
             };
@@ -2134,7 +2135,62 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(theme::STATUSBAR_CAP_LEFT).style(cap_style),
         left_cap,
     );
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(bar_style), inner);
+    let now = chrono::Utc::now();
+    let mut reset_labels = Vec::new();
+    for provider in [
+        crate::reset_planning::ResetProvider::Claude,
+        crate::reset_planning::ResetProvider::Codex,
+    ] {
+        if !provider.enabled(&app.reset_planning_settings) {
+            continue;
+        }
+        if let Some(scheduled) = &app.reset_monitor_state.provider(provider).scheduled {
+            reset_labels.push(crate::reset_planning::countdown_text(
+                provider,
+                scheduled,
+                app.reset_planning_settings.time_style,
+                now,
+            ));
+        }
+    }
+    let maximum_pill_width = usize::from(inner.width.saturating_sub(20));
+    let combined = reset_labels.join("  ·  ");
+    let reset_label = if !reset_labels.is_empty()
+        && UnicodeWidthStr::width(combined.as_str()) + 2 <= maximum_pill_width
+    {
+        Some(combined)
+    } else {
+        reset_labels
+            .into_iter()
+            .find(|label| UnicodeWidthStr::width(label.as_str()) + 2 <= maximum_pill_width)
+    };
+    let pill_width = reset_label
+        .as_ref()
+        .map(|label| UnicodeWidthStr::width(label.as_str()) as u16 + 2)
+        .unwrap_or(0);
+    let left_width = inner
+        .width
+        .saturating_sub(pill_width.saturating_add(u16::from(pill_width > 0)));
+    frame.render_widget(Paragraph::new("").style(bar_style), inner);
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(bar_style),
+        Rect::new(inner.x, inner.y, left_width, inner.height),
+    );
+    if let Some(label) = reset_label {
+        let pill_area = Rect::new(
+            inner.right().saturating_sub(pill_width),
+            inner.y,
+            pill_width,
+            inner.height,
+        );
+        let pill_style = Style::new()
+            .fg(Color::Rgb(0xd8, 0xed, 0xff))
+            .bg(Color::Rgb(0x98, 0x45, 0x13));
+        frame.render_widget(
+            Paragraph::new(format!(" {label} ")).style(pill_style),
+            pill_area,
+        );
+    }
     frame.render_widget(
         Paragraph::new(theme::STATUSBAR_CAP_RIGHT).style(cap_style),
         right_cap,
@@ -2214,6 +2270,40 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn scheduled_reset_uses_a_right_aligned_orange_and_light_blue_status_segment() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
+        let now = chrono::Utc::now();
+        app.reset_monitor_state.codex.scheduled = Some(crate::reset_planning::ScheduledReset {
+            announced_at: now,
+            scheduled_for: Some(now + chrono::Duration::hours(2)),
+            source_url: "https://x.com/thsottiaux/status/1".to_owned(),
+            is_banked: false,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(100, 1)).unwrap();
+        terminal
+            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let line = (0..100)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(line.contains("Codex reset in"));
+        let pill_cell = &buffer[(90, 0)];
+        assert_eq!(pill_cell.fg, Color::Rgb(0xd8, 0xed, 0xff));
+        assert_eq!(pill_cell.bg, Color::Rgb(0x98, 0x45, 0x13));
+
+        app.reset_planning_settings.monitor_codex = false;
+        terminal
+            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let line = (0..100)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(!line.contains("Codex reset"));
+    }
+
+    #[test]
     fn terminal_scrollbar_thumb_tracks_the_full_viewport_from_top_to_tail() {
         let mut view = TerminalView::new(4, 20);
         for line in 0..10 {
@@ -2261,7 +2351,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Done),
+                PaneStatus::from_activity(AgentClass::Codex, ilium_core::AgentActivity::Done, None),
             )
             .unwrap();
 
@@ -2274,7 +2364,11 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Working),
+                PaneStatus::from_activity(
+                    AgentClass::Codex,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
             )
             .unwrap();
         assert_eq!(pane_title(&app, pane_id), "Review authentication — Codex");
@@ -2291,7 +2385,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Codex, ilium_core::AgentActivity::Done),
+                PaneStatus::from_activity(AgentClass::Codex, ilium_core::AgentActivity::Done, None),
             )
             .unwrap();
         app.panes.insert(

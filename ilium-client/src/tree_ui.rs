@@ -262,27 +262,8 @@ impl TreeRowAction {
         }
     }
 
-    /// A deliberately plain, one-cell alternative for terminals where a
-    /// user has opted out of rich emoji. Never use this as a rendering
-    /// fallback: normal icons must be fixed at the rendering layer instead.
-    const fn stable_glyph(self) -> &'static str {
-        match self {
-            Self::Rename => "✎",
-            Self::MoveUp => "↑",
-            Self::MoveDown => "↓",
-            Self::Close => "×",
-            Self::Retitle => "↻",
-            Self::ProjectRestructure => "⟳",
-            Self::AskForUpdate => "?",
-        }
-    }
-
     fn glyph(self, icons: &IconSettings, use_stable_glyphs: bool) -> &str {
-        let configured = icons.glyph(self.icon_target());
-        if use_stable_glyphs && configured == self.icon_target().default_glyph() {
-            return self.stable_glyph();
-        }
-        configured
+        icons.glyph_for_display(self.icon_target(), use_stable_glyphs)
     }
 }
 
@@ -437,8 +418,8 @@ pub struct TreeRenderOptions<'a> {
     pub show_worktree_branch_line: bool,
     pub tree_order: TreeOrder,
     pub sidebar_density: SidebarDensity,
-    /// An explicit opt-in for text-only row-action symbols. The default is
-    /// false so normal UTF-8 icons are always the primary experience.
+    /// An explicit opt-in for stable text symbols on default status and row
+    /// action icons. Custom configured glyphs are never replaced.
     pub use_stable_glyphs: bool,
     /// Whether persisted LLM-suggested title icons should be rendered.
     pub show_inferred_title_icons: bool,
@@ -474,6 +455,7 @@ struct TreeItemBuildContext<'a> {
     show_worktree_branch_line: bool,
     tree_order: TreeOrder,
     sidebar_density: SidebarDensity,
+    use_stable_glyphs: bool,
     show_inferred_title_icons: bool,
     panel_width: u16,
     /// Full widget identifier paths that users have expanded. Folder nodes
@@ -703,6 +685,7 @@ fn build_item(
                     editor_filename: editor_filename.as_deref(),
                     progress: progress.as_deref(),
                     has_scheduled_input: scheduled_input.is_some(),
+                    use_stable_glyphs: context.use_stable_glyphs,
                 },
             );
             let label = apply_unread_title_bold(
@@ -1135,11 +1118,9 @@ fn should_apply_unread_title_bold(
 ) -> bool {
     has_activity_since_focus
         && !is_currently_focused
-        && !matches!(
-            status,
-            PaneStatus::Agent(_, AgentActivity::Done)
-                | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
-        )
+        && !status
+            .agent_state()
+            .is_some_and(|agent| agent.completion_unread)
 }
 
 /// Presentation-only inputs shared by every pane-label variant.
@@ -1155,6 +1136,7 @@ struct PaneLabelContext<'a> {
     /// Whether a durable scheduled input is pending (its countdown is part
     /// of the title text; the long-term slot may show its marker).
     has_scheduled_input: bool,
+    use_stable_glyphs: bool,
 }
 
 /// Maps the client-local output tracker onto the domain's shell phase.
@@ -1183,6 +1165,7 @@ fn pane_label_with_icons(
         editor_filename,
         progress,
         has_scheduled_input,
+        use_stable_glyphs,
     } = context;
 
     // Keep the last known name visible while inference is pending. Replacing
@@ -1220,7 +1203,9 @@ fn pane_label_with_icons(
             ),
             Span::raw(title),
         ),
-        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
+        PaneStatus::Agent(agent) => {
+            let class = &agent.class;
+            let activity = agent.activity();
             let identity = Span::raw(agent_node_icon(class, agent_identifiers, icons).to_string());
             let text = agent_title(class, &title, agent_identifiers.mode);
             let text = match activity {
@@ -1231,7 +1216,7 @@ fn pane_label_with_icons(
                         Style::new()
                     };
                     Span::styled(
-                        crate::pane_title::decorate_agent_title(*activity, &text),
+                        crate::pane_title::decorate_agent_title(activity, &text),
                         style,
                     )
                 }
@@ -1266,8 +1251,8 @@ fn pane_label_with_icons(
     };
     status_row_label(
         identity,
-        crate::status_icons::objective_span(signals.objective, icons),
-        crate::status_icons::now_span(signals.now, icons, elapsed_ms),
+        crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs),
+        crate::status_icons::now_span(signals.now, icons, elapsed_ms, use_stable_glyphs),
         text,
     )
 }
@@ -1309,6 +1294,7 @@ fn pane_label(
             editor_filename,
             progress: None,
             has_scheduled_input: false,
+            use_stable_glyphs: false,
         },
     )
 }
@@ -1597,7 +1583,7 @@ fn row_supports_retitle(tree: &Tree, id: NodeId) -> bool {
     matches!(
         tree.get(id).map(|node| &node.kind),
         Some(NodeKind::Pane {
-            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..) | PaneStatus::PlainShell,
+            status: PaneStatus::Agent(..) | PaneStatus::PlainShell,
             ..
         })
     )
@@ -1825,6 +1811,7 @@ impl TreeItemCache {
                     show_worktree_branch_line: true,
                     tree_order,
                     sidebar_density: SidebarDensity::default(),
+                    use_stable_glyphs: false,
                     show_inferred_title_icons: false,
                     panel_width: 0,
                     opened_paths,
@@ -1877,6 +1864,7 @@ pub fn render(
             show_worktree_branch_line: options.show_worktree_branch_line,
             tree_order: options.tree_order,
             sidebar_density: options.sidebar_density,
+            use_stable_glyphs: options.use_stable_glyphs,
             show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: area.width,
             opened_paths: state.opened(),
@@ -1919,6 +1907,7 @@ pub fn render(
                 show_worktree_branch_line: options.show_worktree_branch_line,
                 tree_order: options.tree_order,
                 sidebar_density: options.sidebar_density,
+                use_stable_glyphs: options.use_stable_glyphs,
                 show_inferred_title_icons: options.show_inferred_title_icons,
                 panel_width: area.width,
                 opened_paths: state.opened(),
@@ -2287,6 +2276,140 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_documented_icon_pair_keeps_titles_aligned_with_normal_and_stable_glyphs() {
+        let signal_pairs: Vec<(u8, u8)> =
+            include_str!("../../ilium-core/tests/fixtures/pane_icon_pairs.tsv")
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .filter_map(|line| {
+                    let mut fields = line.split('\t');
+                    let _category = fields.next()?;
+                    let _row = fields.next()?;
+                    let _activity_rule = fields.next()?;
+                    let _objective_rule = fields.next()?;
+                    Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+                })
+                .collect();
+        assert_eq!(signal_pairs.len(), 126);
+
+        let now_signal = |number| match number {
+            1 => ilium_core::NowSignal::NeedsApproval,
+            2 => ilium_core::NowSignal::Working,
+            3 => ilium_core::NowSignal::WaitingSubagents,
+            4 => ilium_core::NowSignal::Settling,
+            5 => ilium_core::NowSignal::Parked,
+            6 => ilium_core::NowSignal::FinishedUnread,
+            7 => ilium_core::NowSignal::Idle,
+            8 => ilium_core::NowSignal::ShellOutput(ilium_core::ShellOutputPhase::Fast),
+            9 => ilium_core::NowSignal::None,
+            _ => panic!("unknown D5 now-signal id {number}"),
+        };
+        let objective_signal = |number| match number {
+            0 => ilium_core::ObjectiveSignal::None,
+            1 => ilium_core::ObjectiveSignal::Goal(ilium_core::GoalState::Active),
+            2 => ilium_core::ObjectiveSignal::Goal(ilium_core::GoalState::Paused),
+            3 => ilium_core::ObjectiveSignal::Goal(ilium_core::GoalState::Blocked),
+            4 => ilium_core::ObjectiveSignal::Goal(ilium_core::GoalState::UsageLimited),
+            5 => ilium_core::ObjectiveSignal::Goal(ilium_core::GoalState::Reached),
+            6 => ilium_core::ObjectiveSignal::Task(ilium_core::TaskSignal::Pending),
+            7 => ilium_core::ObjectiveSignal::Task(ilium_core::TaskSignal::Running {
+                bucket: 6,
+                degraded: false,
+            }),
+            8 => ilium_core::ObjectiveSignal::Task(ilium_core::TaskSignal::Done { unread: true }),
+            9 => ilium_core::ObjectiveSignal::Task(ilium_core::TaskSignal::Error { unread: true }),
+            10 => ilium_core::ObjectiveSignal::Task(ilium_core::TaskSignal::MonitorFailed {
+                unread: true,
+            }),
+            11 => ilium_core::ObjectiveSignal::ScheduledInput,
+            _ => panic!("unknown D5 objective-signal id {number}"),
+        };
+
+        let icons = IconSettings::default();
+        let agent_identifiers = AgentIdentifierSettings::default();
+        for use_stable_glyphs in [false, true] {
+            let mut rows = signal_pairs
+                .iter()
+                .enumerate()
+                .map(|(index, (now, objective))| {
+                    status_row_label(
+                        Span::raw(
+                            icons
+                                .glyph_for_display(IconTarget::Codex, use_stable_glyphs)
+                                .to_string(),
+                        ),
+                        crate::status_icons::objective_span(
+                            objective_signal(*objective),
+                            &icons,
+                            use_stable_glyphs,
+                        ),
+                        crate::status_icons::now_span(
+                            now_signal(*now),
+                            &icons,
+                            0,
+                            use_stable_glyphs,
+                        ),
+                        Span::raw(format!("Title-{index:03}")),
+                    )
+                })
+                .collect::<Vec<_>>();
+            rows.push(node_label(
+                Span::raw(
+                    icons
+                        .glyph_for_display(IconTarget::Project, use_stable_glyphs)
+                        .to_string(),
+                ),
+                None,
+                Span::raw("Title-project"),
+            ));
+            rows.push(node_label(
+                Span::raw(
+                    icons
+                        .glyph_for_display(IconTarget::Folder, use_stable_glyphs)
+                        .to_string(),
+                ),
+                None,
+                Span::raw("Title-folder"),
+            ));
+            rows.push(pane_label_with_icons(
+                &PaneStatus::Editor { dirty: false },
+                "Title-editor",
+                PaneLabelContext {
+                    elapsed_ms: 0,
+                    is_title_loading: false,
+                    terminal_activity_phase: None,
+                    agent_identifiers: &agent_identifiers,
+                    icons: &icons,
+                    editor_filename: None,
+                    progress: None,
+                    has_scheduled_input: false,
+                    use_stable_glyphs,
+                },
+            ));
+
+            let row_count = rows.len();
+            let mut terminal = Terminal::new(TestBackend::new(96, row_count as u16)).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(ratatui::widgets::Paragraph::new(rows), frame.area());
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let title_columns = (0..row_count)
+                .map(|row| {
+                    (0..96)
+                        .find(|column| buffer[(*column, row as u16)].symbol() == "T")
+                        .expect("each matrix row renders a title")
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                title_columns.iter().all(|column| *column == 8),
+                "title offsets differ with stable glyphs {use_stable_glyphs}: {title_columns:?}"
+            );
+        }
+    }
+
     fn line_text(line: &Line<'_>) -> String {
         line.spans
             .iter()
@@ -2604,7 +2727,7 @@ mod tests {
 
     #[test]
     fn agent_identifier_modes_render_full_names_letters_icons_or_nothing() {
-        let status = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
+        let status = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
         let mut settings = AgentIdentifierSettings {
             mode: AgentIdentifierMode::FullName,
             ..AgentIdentifierSettings::default()
@@ -2635,7 +2758,7 @@ mod tests {
 
     #[test]
     fn codex_letter_is_x_and_every_curated_icon_fits_the_fixed_column() {
-        let status = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working);
+        let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let mut settings = AgentIdentifierSettings {
             mode: AgentIdentifierMode::Letter,
             ..AgentIdentifierSettings::default()
@@ -2659,6 +2782,21 @@ mod tests {
     }
 
     #[test]
+    fn variation_selector_and_ambiguous_width_icons_preserve_fixed_columns() {
+        for icon in ["⏸️", "🖥️", "⚛️", "🗂️"] {
+            assert_eq!(UnicodeWidthStr::width(icon), 2, "{icon:?}");
+        }
+        for icon in ["⌂", "·", "◷", "@", "||", "ok"] {
+            let column = fixed_width_icon_column(icon, NODE_ICON_COLUMN_WIDTH);
+            assert_eq!(
+                UnicodeWidthStr::width(column.as_str()),
+                NODE_ICON_COLUMN_WIDTH,
+                "{icon:?}"
+            );
+        }
+    }
+
+    #[test]
     fn hidden_agent_identifier_preserves_every_activity_indicator() {
         let settings = AgentIdentifierSettings {
             mode: AgentIdentifierMode::Hidden,
@@ -2672,7 +2810,7 @@ mod tests {
             AgentActivity::Done,
         ] {
             let line = pane_label(
-                &PaneStatus::Agent(AgentClass::Claude, activity),
+                &PaneStatus::from_activity(AgentClass::Claude, activity, None),
                 "Task",
                 0,
                 false,
@@ -2692,7 +2830,7 @@ mod tests {
             ..AgentIdentifierSettings::default()
         };
         let line = pane_label(
-            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             "Review auth",
             0,
             false,
@@ -2727,7 +2865,7 @@ mod tests {
             true
         ));
         assert!(!should_apply_unread_title_bold(
-            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             true,
             false
         ));
@@ -2737,10 +2875,10 @@ mod tests {
     fn goal_owns_the_long_term_slot_before_the_right_now_slot() {
         let settings = AgentIdentifierSettings::default();
         let goal_line = pane_label(
-            &PaneStatus::AgentWithGoal(
+            &PaneStatus::from_activity(
                 AgentClass::Codex,
                 AgentActivity::Working,
-                GoalState::Active,
+                Some(GoalState::Active),
             ),
             "Goal work",
             0,
@@ -2749,7 +2887,7 @@ mod tests {
             None,
         );
         let ordinary_line = pane_label(
-            &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             "Ordinary work",
             0,
             false,
@@ -2784,7 +2922,11 @@ mod tests {
 
         for (goal_state, glyph) in expected {
             let line = pane_label(
-                &PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, goal_state),
+                &PaneStatus::from_activity(
+                    AgentClass::Codex,
+                    AgentActivity::Idle,
+                    Some(goal_state),
+                ),
                 "Goal work",
                 0,
                 false,
@@ -2817,6 +2959,7 @@ mod tests {
                         editor_filename: None,
                         progress: None,
                         has_scheduled_input: false,
+                        use_stable_glyphs: false,
                     },
                 );
 
@@ -2836,6 +2979,7 @@ mod tests {
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: false,
+                use_stable_glyphs: false,
             },
         );
         assert!(inactive.spans[1].content.trim().is_empty());
@@ -3001,9 +3145,10 @@ mod tests {
         let agent_identifiers = AgentIdentifierSettings::default();
 
         let label = pane_label_with_icons(
-            &PaneStatus::Agent(
+            &PaneStatus::from_activity(
                 AgentClass::Claude,
                 AgentActivity::BackgroundTaskStillRunning,
+                None,
             ),
             "agent",
             PaneLabelContext {
@@ -3015,6 +3160,7 @@ mod tests {
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: false,
+                use_stable_glyphs: false,
             },
         );
 
@@ -3573,6 +3719,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::Standard,
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: area.width,
                 opened_paths: state.opened(),
@@ -3693,6 +3840,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3718,6 +3866,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3746,6 +3895,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3793,6 +3943,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3843,7 +3994,7 @@ mod tests {
     #[test]
     fn pane_label_shows_the_name_normally_when_no_title_inference_is_in_flight() {
         let line = pane_label(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
             "claude",
             0,
             false,
@@ -3864,7 +4015,11 @@ mod tests {
 
         for (frame_index, expected_clock) in BACKGROUND_CLOCK_FRAMES.iter().enumerate() {
             let line = pane_label(
-                &PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground),
+                &PaneStatus::from_activity(
+                    AgentClass::Claude,
+                    AgentActivity::WaitingBackground,
+                    None,
+                ),
                 "claude",
                 frame_index as u128 * BACKGROUND_FRAME_MS,
                 false,
@@ -3879,7 +4034,7 @@ mod tests {
         }
 
         let wrapped = pane_label(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingBackground),
+            &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::WaitingBackground, None),
             "claude",
             BACKGROUND_CLOCK_FRAMES.len() as u128 * BACKGROUND_FRAME_MS,
             false,
@@ -3900,7 +4055,7 @@ mod tests {
         };
         let icons = IconSettings::default();
         let line = pane_label_with_icons(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             "1h 01m 01s Fix auth",
             PaneLabelContext {
                 elapsed_ms: 0,
@@ -3911,6 +4066,7 @@ mod tests {
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: true,
+                use_stable_glyphs: false,
             },
         );
         assert_eq!(line.spans[1].content.trim_end(), "⏰");
@@ -3924,7 +4080,7 @@ mod tests {
     #[test]
     fn pane_label_keeps_the_agent_name_visible_while_title_inference_is_in_flight() {
         let line = pane_label(
-            &PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done),
+            &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None),
             "claude",
             0,
             true,
@@ -4022,6 +4178,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -4291,6 +4448,7 @@ mod tests {
                 show_worktree_branch_line: true,
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
+                use_stable_glyphs: false,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,

@@ -151,17 +151,14 @@ impl App {
 
     /// Whether the pane's detected agent keeps a readable JSONL transcript.
     pub fn stats_agent_is_supported(&self, pane_id: NodeId) -> bool {
-        use ilium_core::{AgentClass, NodeKind, PaneStatus};
+        use ilium_core::{AgentClass, NodeKind};
         self.tree.get(pane_id).is_some_and(|node| {
             let NodeKind::Pane { status, .. } = &node.kind else {
                 return false;
             };
-            match status {
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
-                    matches!(class, AgentClass::Claude | AgentClass::Codex)
-                }
-                _ => false,
-            }
+            status
+                .agent_state()
+                .is_some_and(|agent| matches!(agent.class, AgentClass::Claude | AgentClass::Codex))
         })
     }
 
@@ -240,7 +237,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
             )
             .unwrap();
         app.panes.insert(
@@ -436,7 +433,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Antigravity, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Antigravity, AgentActivity::Idle, None),
             )
             .unwrap();
         assert!(!app.stats_agent_is_supported(pane_id));

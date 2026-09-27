@@ -52,7 +52,7 @@ impl VoiceTargetContext {
                 matches!(
                     &node.kind,
                     NodeKind::Pane {
-                        status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
+                        status: PaneStatus::Agent(_),
                         ..
                     }
                 )
@@ -538,7 +538,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 agent_pane_id,
-                PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
             )
             .unwrap();
 
@@ -557,10 +557,10 @@ mod tests {
         app.tree
             .set_pane_status(
                 agent_pane_id,
-                PaneStatus::AgentWithGoal(
+                PaneStatus::from_activity(
                     AgentClass::Codex,
                     AgentActivity::Working,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             )
             .unwrap();

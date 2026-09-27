@@ -120,17 +120,21 @@ fn node_snapshot(app: &App, node_id: NodeId, include_content: bool) -> Option<No
 fn pane_status_snapshot(status: &PaneStatus) -> Value {
     match status {
         PaneStatus::PlainShell => json!({ "kind": "plain_shell" }),
-        PaneStatus::Agent(class, activity) => json!({
-            "kind": "agent",
-            "agent_class": agent_class_key(class),
-            "activity": agent_activity_key(activity),
-        }),
-        PaneStatus::AgentWithGoal(class, activity, goal_state) => json!({
-            "kind": "agent_with_goal",
-            "agent_class": agent_class_key(class),
-            "activity": agent_activity_key(activity),
-            "goal_state": goal_state_key(goal_state),
-        }),
+        PaneStatus::Agent(agent) => match agent.goal {
+            Some(goal_state) => json!({
+                "kind": "agent_with_goal",
+                "agent_class": agent_class_key(&agent.class),
+                "activity": agent_activity_key(&agent.activity()),
+                "goal_state": goal_state_key(&goal_state),
+                "completion_unread": agent.completion_unread,
+            }),
+            None => json!({
+                "kind": "agent",
+                "agent_class": agent_class_key(&agent.class),
+                "activity": agent_activity_key(&agent.activity()),
+                "completion_unread": agent.completion_unread,
+            }),
+        },
         PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
         PaneStatus::Board => json!({ "kind": "board" }),
     }
@@ -267,6 +271,8 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
             "voice.confirm_terminal_submissions", "voice.pause_media_while_active",
             "voice.custom_prompt",
+            "reset_planning.monitor_claude", "reset_planning.monitor_codex",
+            "reset_planning.time_style",
             "debug.file_logging_enabled",
             "git.default_where", "git.branch_prefix", "git.worktree_location_template",
             "git.default_base", "git.branch_line", "git.setup_command", "git.default_close_policy"
@@ -406,6 +412,16 @@ fn settings_snapshot(app: &App) -> Value {
         },
         "debug": {
             "file_logging_enabled": app.debug_settings.file_logging_enabled,
+        },
+        "reset_planning": {
+            "monitor_claude": app.reset_planning_settings.monitor_claude,
+            "monitor_codex": app.reset_planning_settings.monitor_codex,
+            "time_style": match app.reset_planning_settings.time_style {
+                crate::reset_planning::ResetTimeStyle::Exact => "exact",
+                crate::reset_planning::ResetTimeStyle::Human => "human",
+            },
+            "claude_last_error": app.reset_monitor_state.claude.last_error,
+            "codex_last_error": app.reset_monitor_state.codex.last_error,
         },
     })
 }

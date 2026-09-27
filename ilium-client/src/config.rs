@@ -35,6 +35,7 @@ use crate::layout::{
     DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
     MIN_TREE_WIDTH,
 };
+use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
 
@@ -84,6 +85,8 @@ pub struct ClientConfig {
     pub debug: DebugSettings,
     /// Loopback HTTP API listener configuration read by the detached server.
     pub api: ApiSettings,
+    /// Public reset-announcement polling and status-bar presentation.
+    pub reset_planning: ResetPlanningSettings,
 }
 
 impl Default for ClientConfig {
@@ -106,6 +109,7 @@ impl Default for ClientConfig {
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
             api: ApiSettings::default(),
+            reset_planning: ResetPlanningSettings::default(),
         }
     }
 }
@@ -1057,6 +1061,8 @@ struct RawClientConfig {
     debug: DebugSettings,
     #[serde(default)]
     api: ApiSettings,
+    #[serde(default)]
+    reset_planning: ResetPlanningSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -1356,6 +1362,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         voice: raw.voice,
         debug: raw.debug,
         api: raw.api,
+        reset_planning: raw.reset_planning,
     })
 }
 
@@ -1998,6 +2005,17 @@ pub fn save_git_settings(config_dir: &Path, settings: &GitSettings) -> Result<()
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "git", value)
+}
+
+pub fn save_reset_planning_settings(
+    config_dir: &Path,
+    settings: &ResetPlanningSettings,
+) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "reset_planning", value)
 }
 pub fn save_editor_settings(
     config_dir: &Path,
@@ -3471,6 +3489,27 @@ mod tests {
     fn color_scheme_parsing_is_case_insensitive() {
         assert_eq!(parse_color_scheme("DARK").unwrap(), ColorScheme::Dark);
         assert_eq!(parse_color_scheme("Light").unwrap(), ColorScheme::Light);
+    }
+
+    #[test]
+    fn reset_planning_defaults_on_and_round_trips_independently() {
+        let dir = scratch_dir();
+        assert!(load(&dir).unwrap().reset_planning.monitor_claude);
+        assert!(load(&dir).unwrap().reset_planning.monitor_codex);
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_context_menu_icons = false\n",
+        )
+        .unwrap();
+        let settings = ResetPlanningSettings {
+            monitor_claude: false,
+            monitor_codex: true,
+            time_style: crate::reset_planning::ResetTimeStyle::Human,
+        };
+        save_reset_planning_settings(&dir, &settings).unwrap();
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.reset_planning, settings);
+        assert!(!loaded.ui.show_context_menu_icons);
     }
 
     #[test]

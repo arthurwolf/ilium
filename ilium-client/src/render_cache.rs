@@ -125,13 +125,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 NodeKind::Pane { status, .. } => Some(status.clone()),
                 NodeKind::Container(_) | NodeKind::Folder { .. } => None,
             });
-            let became_agent = matches!(
-                status,
-                PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
-            ) && !matches!(
-                previous_status.as_ref(),
-                Some(PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..))
-            );
+            let became_agent = matches!(status, PaneStatus::Agent(..))
+                && !matches!(previous_status.as_ref(), Some(PaneStatus::Agent(..)));
             // Only report `PaneBecameDone` -- and thus trigger a title
             // inference attempt -- if the status actually landed in the
             // tree. If `pane_id` doesn't resolve to a pane here (a status
@@ -254,7 +249,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     matches!(
                         node.kind,
                         NodeKind::Pane {
-                            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                            status: PaneStatus::Agent(..),
                             ..
                         }
                     )
@@ -314,7 +309,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     matches!(
                         node.kind,
                         NodeKind::Pane {
-                            status: PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
+                            status: PaneStatus::Agent(..),
                             ..
                         }
                     )
@@ -622,8 +617,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         if matches!(
             &node.kind,
             ilium_core::NodeKind::Pane {
-                status: ilium_core::PaneStatus::Agent(_, _)
-                    | ilium_core::PaneStatus::AgentWithGoal(_, _, _),
+                status: ilium_core::PaneStatus::Agent(_),
                 ..
             }
         ) {
@@ -919,7 +913,7 @@ mod tests {
         let pane_id = tree
             .add_pane(group, "agent", PaneContentKind::Terminal)
             .unwrap();
-        let status = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle);
+        let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
         tree.set_pane_status(pane_id, status.clone()).unwrap();
         let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
             applied_status: status.clone(),
@@ -972,7 +966,7 @@ mod tests {
             .add_pane(group, "agent", PaneContentKind::Terminal)
             .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
-        let status = PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working);
+        let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let evidence = ilium_ipc::PaneDetectionEvidence {
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
@@ -1451,7 +1445,7 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id: agent,
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
             },
         );
 
@@ -1492,7 +1486,7 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             },
         );
 
@@ -1596,7 +1590,7 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
             },
         );
         let after_toolbar = app.pane_viewport(pane_id).unwrap();
@@ -1989,7 +1983,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             pane_id,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
         )
         .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
@@ -2188,9 +2182,10 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: PaneStatus::Agent(
+                status: PaneStatus::from_activity(
                     ilium_core::AgentClass::Codex,
                     ilium_core::AgentActivity::Working,
+                    None,
                 ),
             },
         );
@@ -2262,9 +2257,10 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: ilium_core::PaneStatus::Agent(
+                status: ilium_core::PaneStatus::from_activity(
                     ilium_core::AgentClass::Claude,
                     ilium_core::AgentActivity::Working,
+                    None,
                 ),
             },
         );
@@ -2280,9 +2276,10 @@ mod tests {
         match &app.tree.get(pane_id).unwrap().kind {
             NodeKind::Pane { status, .. } => assert_eq!(
                 *status,
-                ilium_core::PaneStatus::Agent(
+                ilium_core::PaneStatus::from_activity(
                     ilium_core::AgentClass::Claude,
-                    ilium_core::AgentActivity::Working
+                    ilium_core::AgentActivity::Working,
+                    None
                 )
             ),
             _ => panic!("expected a pane"),
@@ -2299,7 +2296,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             pane_id,
-            PaneStatus::Agent(AgentClass::Codex, AgentActivity::WaitingBackground),
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::WaitingBackground, None),
         )
         .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
@@ -2308,7 +2305,7 @@ mod tests {
             &mut app,
             ServerEvent::PaneStatusChanged {
                 pane_id,
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             },
         );
 
@@ -2321,11 +2318,12 @@ mod tests {
         );
         assert_eq!(
             ilium_sound::event_for_transition(
-                Some(&PaneStatus::Agent(
+                Some(&PaneStatus::from_activity(
                     AgentClass::Codex,
                     AgentActivity::WaitingBackground,
+                    None
                 )),
-                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+                &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
             ),
             Some(ilium_sound::SoundEvent::AgentFinished)
         );
@@ -2333,11 +2331,12 @@ mod tests {
         // finished turn.
         assert_eq!(
             ilium_sound::event_for_transition(
-                Some(&PaneStatus::Agent(
+                Some(&PaneStatus::from_activity(
                     AgentClass::Codex,
-                    AgentActivity::Working
+                    AgentActivity::Working,
+                    None
                 )),
-                &PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle),
+                &PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
             ),
             None
         );
@@ -2356,7 +2355,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             agent_id,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
         )
         .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));

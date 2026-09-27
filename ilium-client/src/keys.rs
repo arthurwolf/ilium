@@ -2399,6 +2399,25 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 return;
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::ResetPlanning => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::ResetPlanning => {
+            state.selected_row = (state.selected_row + 1).min(2);
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::ResetPlanning =>
+        {
+            let row = state.selected_row;
+            app.mode = Mode::Settings(state);
+            app.settings_adjust_reset_planning_row(row);
+            return;
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Debug => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }

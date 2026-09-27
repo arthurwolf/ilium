@@ -535,6 +535,26 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             settings.custom_prompt = string(&value)?.to_owned();
             Ok(())
         })?,
+        "reset_planning.monitor_claude" => {
+            if app.reset_planning_settings.monitor_claude != boolean(&value)? {
+                app.settings_adjust_reset_planning_row(0);
+            }
+        }
+        "reset_planning.monitor_codex" => {
+            if app.reset_planning_settings.monitor_codex != boolean(&value)? {
+                app.settings_adjust_reset_planning_row(1);
+            }
+        }
+        "reset_planning.time_style" => {
+            let target = match normalized(string(&value)?).as_str() {
+                "exact" => crate::reset_planning::ResetTimeStyle::Exact,
+                "human" => crate::reset_planning::ResetTimeStyle::Human,
+                _ => return Err("reset planning time style must be exact or human".to_owned()),
+            };
+            if app.reset_planning_settings.time_style != target {
+                app.settings_adjust_reset_planning_row(2);
+            }
+        }
         "debug.file_logging_enabled" => {
             if app.debug_settings.file_logging_enabled != boolean(&value)? {
                 app.settings_toggle_file_logging();
@@ -663,6 +683,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
             crate::voice_settings::VoiceRow::PauseMediaWhileActive,
             direction,
         ),
+        "reset_planning.monitor_claude" => app.settings_adjust_reset_planning_row(0),
+        "reset_planning.monitor_codex" => app.settings_adjust_reset_planning_row(1),
+        "reset_planning.time_style" => app.settings_adjust_reset_planning_row(2),
         _ => return Err(format!("Setting {path:?} is not adjustable; use set")),
     }
     Ok(())
@@ -1022,5 +1045,21 @@ mod tests {
         app.terminal_settings.scrollback_budget_mib = 32;
         set_setting(&mut app, "terminal.scrollback_budget_mib", json!(64)).unwrap();
         assert_eq!(app.terminal_settings.scrollback_budget_mib, 64);
+    }
+
+    #[test]
+    fn reset_planning_control_paths_toggle_independently() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        set_setting(&mut app, "reset_planning.monitor_claude", json!(false)).unwrap();
+        set_setting(&mut app, "reset_planning.time_style", json!("human")).unwrap();
+        assert!(!app.reset_planning_settings.monitor_claude);
+        assert!(app.reset_planning_settings.monitor_codex);
+        assert_eq!(
+            app.reset_planning_settings.time_style,
+            crate::reset_planning::ResetTimeStyle::Human
+        );
+        assert!(set_setting(&mut app, "reset_planning.time_style", json!("soon")).is_err());
+        adjust_setting(&mut app, "reset_planning.monitor_codex", 1).unwrap();
+        assert!(!app.reset_planning_settings.monitor_codex);
     }
 }

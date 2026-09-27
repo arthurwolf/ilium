@@ -452,7 +452,7 @@ mod tests {
         app.tree
             .set_pane_status(
                 pane_id,
-                PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
         app.agent_session_ids

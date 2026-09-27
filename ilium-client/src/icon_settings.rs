@@ -365,6 +365,33 @@ impl IconTarget {
         }
     }
 
+    pub const fn stable_glyph(self) -> Option<&'static str> {
+        match self {
+            Self::WaitingApproval => Some("?"),
+            Self::Done => Some("!"),
+            Self::WaitingBackground => Some("◷"),
+            Self::BackgroundTaskStillRunning => Some("~"),
+            Self::Parked => Some("z"),
+            Self::GoalActive => Some("@"),
+            Self::GoalPaused => Some("||"),
+            Self::GoalBlocked => Some("#"),
+            Self::GoalUsageLimited => Some("%"),
+            Self::GoalReached => Some("="),
+            Self::TaskDone => Some("ok"),
+            Self::TaskError => Some("x"),
+            Self::MonitorFailed => Some("!"),
+            Self::ScheduledInput => Some("t"),
+            Self::RowRename => Some("✎"),
+            Self::RowMoveUp => Some("↑"),
+            Self::RowMoveDown => Some("↓"),
+            Self::RowClose => Some("×"),
+            Self::RowRetitle => Some("↻"),
+            Self::RowProjectRestructure => Some("⟳"),
+            Self::AskForUpdate => Some("?"),
+            _ => None,
+        }
+    }
+
     pub const fn suggestions(self) -> &'static [&'static str] {
         match self {
             Self::Group | Self::Project | Self::Folder => &["📁", "📂", "🗂️", "🧺"],
@@ -652,6 +679,15 @@ impl IconSettings {
             IconTarget::AgentToolbarExit => &self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
+        }
+    }
+
+    pub fn glyph_for_display(&self, target: IconTarget, use_stable_glyphs: bool) -> &str {
+        let configured = self.glyph(target);
+        if use_stable_glyphs && configured == target.default_glyph() {
+            target.stable_glyph().unwrap_or(configured)
+        } else {
+            configured
         }
     }
 
@@ -1081,7 +1117,8 @@ fn category_label(subgroup: &'static str) -> &'static str {
 mod tests {
     use super::{
         all_picker_search_results, catalogue_icon_count, catalogue_icon_count_for, icon_categories,
-        semantic_picker_search_results, IconCatalogFamily, IconSemanticSearchHit,
+        semantic_picker_search_results, IconCatalogFamily, IconSemanticSearchHit, IconSettings,
+        IconTarget,
     };
 
     #[test]
@@ -1161,5 +1198,51 @@ mod tests {
             assert_eq!(target.default_glyph(), glyph);
             assert_eq!(super::IconTarget::from_key(key), Some(target));
         }
+    }
+
+    #[test]
+    fn stable_glyph_preference_maps_status_defaults_and_preserves_custom_icons() {
+        let icons = IconSettings::default();
+        for (target, expected) in [
+            (IconTarget::WaitingApproval, "?"),
+            (IconTarget::Done, "!"),
+            (IconTarget::WaitingBackground, "◷"),
+            (IconTarget::BackgroundTaskStillRunning, "~"),
+            (IconTarget::Parked, "z"),
+            (IconTarget::GoalActive, "@"),
+            (IconTarget::GoalPaused, "||"),
+            (IconTarget::GoalBlocked, "#"),
+            (IconTarget::GoalUsageLimited, "%"),
+            (IconTarget::GoalReached, "="),
+            (IconTarget::TaskDone, "ok"),
+            (IconTarget::TaskError, "x"),
+            (IconTarget::MonitorFailed, "!"),
+            (IconTarget::ScheduledInput, "t"),
+            (IconTarget::RowRename, "✎"),
+            (IconTarget::RowMoveUp, "↑"),
+            (IconTarget::RowMoveDown, "↓"),
+            (IconTarget::RowClose, "×"),
+            (IconTarget::RowRetitle, "↻"),
+            (IconTarget::RowProjectRestructure, "⟳"),
+            (IconTarget::AskForUpdate, "?"),
+        ] {
+            assert_eq!(
+                icons.glyph_for_display(target, true),
+                expected,
+                "{target:?}"
+            );
+            assert_eq!(
+                icons.glyph_for_display(target, false),
+                target.default_glyph(),
+                "normal mode changed {target:?}"
+            );
+        }
+
+        let mut customized = IconSettings::default();
+        customized.set(IconTarget::GoalPaused, "😴".to_string());
+        assert_eq!(
+            customized.glyph_for_display(IconTarget::GoalPaused, true),
+            "😴"
+        );
     }
 }

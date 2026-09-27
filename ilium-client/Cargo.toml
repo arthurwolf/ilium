@@ -52,6 +52,7 @@ two-face = "0.5.1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-onig", "parsing", "dump-load"] }
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
+ureq = { version = "3.2.0", features = ["json"] }
 zbus = "5.18.0"
 uuid = { version = "1.23.5", features = ["v4"] }
 
