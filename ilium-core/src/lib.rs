@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -733,47 +733,101 @@ impl AgentState {
     }
 
     pub fn from_status(status: &PaneStatus) -> Option<Self> {
-        let (class, activity, goal) = match status {
-            PaneStatus::Agent(class, activity) => (class, activity, None),
-            PaneStatus::AgentWithGoal(class, activity, goal) => (class, activity, Some(*goal)),
-            PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => return None,
-        };
-        Some(Self::from_activity(class.clone(), *activity, goal))
+        status.agent_state().cloned()
     }
 
-    /// The current persisted/wire status is a compatibility projection of
-    /// this semantic state. No caller should independently rebuild the same
-    /// class/turn/goal combination.
-    pub fn into_status(self) -> PaneStatus {
-        let activity = match (self.turn, self.completion_unread) {
+    pub fn activity(&self) -> AgentActivity {
+        match (self.turn, self.completion_unread) {
             (AgentTurn::Working, _) => AgentActivity::Working,
             (AgentTurn::WaitingApproval, _) => AgentActivity::WaitingApproval,
             (AgentTurn::WaitingSubagents, _) => AgentActivity::WaitingBackground,
             (AgentTurn::Settling, _) => AgentActivity::BackgroundTaskStillRunning,
             (AgentTurn::Idle, true) => AgentActivity::Done,
             (AgentTurn::Idle, false) => AgentActivity::Idle,
-        };
-        match self.goal {
-            Some(goal) => PaneStatus::AgentWithGoal(self.class, activity, goal),
-            None => PaneStatus::Agent(self.class, activity),
         }
+    }
+
+    pub fn into_status(self) -> PaneStatus {
+        PaneStatus::Agent(self)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneStatus {
     /// Terminal pane, no agent CLI detected in it.
     PlainShell,
-    /// Terminal pane running a detected agent CLI.
-    Agent(AgentClass, AgentActivity),
-    /// Terminal pane running a detected agent CLI with a visible persistent
-    /// task goal. Kept distinct so goal state travels through the existing
-    /// snapshot/status-change contract without parallel client-local state.
-    AgentWithGoal(AgentClass, AgentActivity, GoalState),
+    /// One canonical state for the identified process, current turn, retained
+    /// provider goal, and server-owned completion attention.
+    Agent(AgentState),
     /// Editor pane; `true` means it has unsaved changes.
     Editor { dirty: bool },
     /// A client-local kanban board backed by a user-selected path.
     Board,
+}
+
+impl PaneStatus {
+    pub const fn agent_state(&self) -> Option<&AgentState> {
+        match self {
+            Self::Agent(state) => Some(state),
+            Self::PlainShell | Self::Editor { .. } | Self::Board => None,
+        }
+    }
+
+    pub fn from_activity(
+        class: AgentClass,
+        activity: AgentActivity,
+        goal: Option<GoalState>,
+    ) -> Self {
+        Self::Agent(AgentState::from_activity(class, activity, goal))
+    }
+}
+
+// Keep snapshots and IPC bincode frames on the established encoding while
+// the in-memory tree uses AgentState as its sole agent-status representation.
+#[derive(Serialize, Deserialize)]
+enum PaneStatusWire {
+    PlainShell,
+    Agent(AgentClass, AgentActivity),
+    AgentWithGoal(AgentClass, AgentActivity, GoalState),
+    Editor { dirty: bool },
+    Board,
+}
+
+impl Serialize for PaneStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wire = match self {
+            Self::PlainShell => PaneStatusWire::PlainShell,
+            Self::Agent(state) => match state.goal {
+                Some(goal) => {
+                    PaneStatusWire::AgentWithGoal(state.class.clone(), state.activity(), goal)
+                }
+                None => PaneStatusWire::Agent(state.class.clone(), state.activity()),
+            },
+            Self::Editor { dirty } => PaneStatusWire::Editor { dirty: *dirty },
+            Self::Board => PaneStatusWire::Board,
+        };
+        wire.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PaneStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match PaneStatusWire::deserialize(deserializer)? {
+            PaneStatusWire::PlainShell => Self::PlainShell,
+            PaneStatusWire::Agent(class, activity) => Self::from_activity(class, activity, None),
+            PaneStatusWire::AgentWithGoal(class, activity, goal) => {
+                Self::from_activity(class, activity, Some(goal))
+            }
+            PaneStatusWire::Editor { dirty } => Self::Editor { dirty },
+            PaneStatusWire::Board => Self::Board,
+        })
+    }
 }
 
 /// Output liveness of a plain shell. Only the client observes raw output
@@ -878,10 +932,7 @@ pub fn project_pane_signals(
     shell_output: Option<ShellOutputPhase>,
 ) -> PaneSignals {
     let agent = match status {
-        // Both matched variants are exactly the two accepted by from_status.
-        PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..) => {
-            AgentState::from_status(status).expect("agent status has agent state")
-        }
+        PaneStatus::Agent(agent) => agent.clone(),
         PaneStatus::PlainShell => {
             let (objective, objective_rule) =
                 project_objective_signal(progress, None, has_scheduled_input);
@@ -2025,14 +2076,9 @@ impl Tree {
                 &node.kind,
                 NodeKind::Pane {
                     content: PaneContentKind::Terminal,
-                    status: PaneStatus::Agent(_, AgentActivity::Idle | AgentActivity::Done)
-                        | PaneStatus::AgentWithGoal(
-                            _,
-                            AgentActivity::Idle | AgentActivity::Done,
-                            _
-                        ),
+                    status: PaneStatus::Agent(agent),
                     ..
-                }
+                } if agent.turn == AgentTurn::Idle
             )
         })
     }
@@ -3241,12 +3287,13 @@ impl Tree {
             return Err(TreeError::NotAPane(id));
         };
         let acknowledged_status = match status {
-            PaneStatus::Agent(class, AgentActivity::Done) => {
-                Some(PaneStatus::Agent(class.clone(), AgentActivity::Idle))
+            PaneStatus::Agent(agent)
+                if agent.turn == AgentTurn::Idle && agent.completion_unread =>
+            {
+                let mut acknowledged = agent.clone();
+                acknowledged.completion_unread = false;
+                Some(PaneStatus::Agent(acknowledged))
             }
-            PaneStatus::AgentWithGoal(class, AgentActivity::Done, goal_state) => Some(
-                PaneStatus::AgentWithGoal(class.clone(), AgentActivity::Idle, *goal_state),
-            ),
             _ => None,
         };
         if let Some(acknowledged_status) = &acknowledged_status {
@@ -5598,30 +5645,38 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             ordinary_pane,
-            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
         )
         .unwrap();
         tree.set_pane_status(
             goal_pane,
-            PaneStatus::AgentWithGoal(AgentClass::Claude, AgentActivity::Done, GoalState::Active),
+            PaneStatus::from_activity(
+                AgentClass::Claude,
+                AgentActivity::Done,
+                Some(GoalState::Active),
+            ),
         )
         .unwrap();
         tree.set_pane_status(
             working_pane,
-            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
         )
         .unwrap();
 
         assert_eq!(
             tree.acknowledge_agent_completion(ordinary_pane).unwrap(),
-            Some(PaneStatus::Agent(AgentClass::Codex, AgentActivity::Idle))
+            Some(PaneStatus::from_activity(
+                AgentClass::Codex,
+                AgentActivity::Idle,
+                None
+            ))
         );
         assert_eq!(
             tree.acknowledge_agent_completion(goal_pane).unwrap(),
-            Some(PaneStatus::AgentWithGoal(
+            Some(PaneStatus::from_activity(
                 AgentClass::Claude,
                 AgentActivity::Idle,
-                GoalState::Active,
+                Some(GoalState::Active),
             ))
         );
         assert_eq!(
@@ -5632,11 +5687,12 @@ mod tests {
         assert!(matches!(
             &tree.get(goal_pane).unwrap().kind,
             NodeKind::Pane {
-                status: PaneStatus::AgentWithGoal(
-                    AgentClass::Claude,
-                    AgentActivity::Idle,
-                    GoalState::Active
-                ),
+                status: PaneStatus::Agent(AgentState {
+                    class: AgentClass::Claude,
+                    turn: AgentTurn::Idle,
+                    goal: Some(GoalState::Active),
+                    completion_unread: false,
+                }),
                 ..
             }
         ));
@@ -6554,7 +6610,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             working,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
         )
         .unwrap();
         let waiting_approval = tree
@@ -6562,7 +6618,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             waiting_approval,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::WaitingApproval),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::WaitingApproval, None),
         )
         .unwrap();
         let idle = tree
@@ -6570,7 +6626,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             idle,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
         )
         .unwrap();
         let done = tree
@@ -6578,7 +6634,11 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             done,
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done, GoalState::Active),
+            PaneStatus::from_activity(
+                AgentClass::Codex,
+                AgentActivity::Done,
+                Some(GoalState::Active),
+            ),
         )
         .unwrap();
         let plain_shell = tree
@@ -6608,7 +6668,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             first_idle_pane,
-            PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle),
+            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
         )
         .unwrap();
 
@@ -6618,7 +6678,7 @@ mod tests {
             .unwrap();
         tree.set_pane_status(
             second_idle_pane,
-            PaneStatus::Agent(AgentClass::Codex, AgentActivity::Done),
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
         )
         .unwrap();
 
@@ -6699,8 +6759,11 @@ mod pane_signal_tests {
 
     #[test]
     fn agent_state_separates_turn_phase_from_unread_completion() {
-        let completed =
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Done, GoalState::Paused);
+        let completed = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Done,
+            Some(GoalState::Paused),
+        );
         let state = AgentState::from_status(&completed).unwrap();
         assert_eq!(state.class, AgentClass::Codex);
         assert_eq!(state.turn, AgentTurn::Idle);
@@ -6708,7 +6771,7 @@ mod pane_signal_tests {
         assert!(state.completion_unread);
         assert_eq!(state.into_status(), completed);
 
-        let idle = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Idle);
+        let idle = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
         assert!(!AgentState::from_status(&idle).unwrap().completion_unread);
         assert_eq!(AgentState::from_status(&idle).unwrap().into_status(), idle);
         assert!(AgentState::from_status(&PaneStatus::PlainShell).is_none());
@@ -6716,8 +6779,11 @@ mod pane_signal_tests {
 
     #[test]
     fn running_task_outweighs_an_active_goal_but_not_a_blocked_goal() {
-        let status =
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Working, GoalState::Active);
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            Some(GoalState::Active),
+        );
         let signals = project_pane_signals(&status, Some(&running(42.0)), false, None);
         assert_eq!(
             signals.objective,
@@ -6728,10 +6794,10 @@ mod pane_signal_tests {
         );
         assert_eq!(signals.now, NowSignal::Working);
         assert_eq!((signals.objective_rule, signals.now_rule), ("B4", "A2"));
-        let blocked = PaneStatus::AgentWithGoal(
+        let blocked = PaneStatus::from_activity(
             AgentClass::Codex,
             AgentActivity::Working,
-            GoalState::Blocked,
+            Some(GoalState::Blocked),
         );
         let signals = project_pane_signals(&blocked, Some(&running(42.0)), false, None);
         assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Blocked));
@@ -6740,7 +6806,7 @@ mod pane_signal_tests {
 
     #[test]
     fn idle_agent_with_live_monitor_is_parked_not_finished() {
-        let without_goal = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Done);
+        let without_goal = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None);
         let signals = project_pane_signals(&without_goal, Some(&running(84.0)), false, None);
         assert_eq!(
             signals.objective,
@@ -6752,8 +6818,11 @@ mod pane_signal_tests {
         assert_eq!(signals.now, NowSignal::Parked);
         assert_eq!((signals.objective_rule, signals.now_rule), ("B4", "A5"));
 
-        let with_goal =
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Paused);
+        let with_goal = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Idle,
+            Some(GoalState::Paused),
+        );
         let signals = project_pane_signals(&with_goal, Some(&running(84.0)), false, None);
         assert!(matches!(
             signals.objective,
@@ -6764,8 +6833,11 @@ mod pane_signal_tests {
 
     #[test]
     fn unread_outcome_outweighs_a_goal_until_seen() {
-        let status =
-            PaneStatus::AgentWithGoal(AgentClass::Codex, AgentActivity::Idle, GoalState::Active);
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Idle,
+            Some(GoalState::Active),
+        );
         let unread =
             project_pane_signals(&status, Some(&done(ProgressAttention::Unread)), false, None);
         assert_eq!(
@@ -6785,7 +6857,7 @@ mod pane_signal_tests {
 
     #[test]
     fn scheduled_input_never_replaces_the_turn_and_yields_to_goals_and_tasks() {
-        let status = PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working);
+        let status = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None);
         let signals = project_pane_signals(&status, None, true, None);
         assert_eq!(signals.objective, ObjectiveSignal::ScheduledInput);
         assert_eq!(signals.now, NowSignal::Working);
@@ -6809,7 +6881,11 @@ mod pane_signal_tests {
     fn projection_reaches_exactly_the_126_documented_icon_pairs() {
         use std::collections::HashSet;
 
-        fn pair(signals: PaneSignals) -> (u8, u8) {
+        fn record_pair(
+            signals: PaneSignals,
+            rules: &mut HashSet<(&'static str, &'static str)>,
+            icons: &mut HashSet<(u8, u8)>,
+        ) {
             let now = match signals.now {
                 NowSignal::NeedsApproval => 1,
                 NowSignal::Working => 2,
@@ -6835,7 +6911,48 @@ mod pane_signal_tests {
                 ObjectiveSignal::Task(TaskSignal::MonitorFailed { .. }) => 10,
                 ObjectiveSignal::ScheduledInput => 11,
             };
-            (now, objective)
+            rules.insert((signals.now_rule, signals.objective_rule));
+            icons.insert((now, objective));
+        }
+
+        fn documented_rule_pairs(category: &str) -> HashSet<(&'static str, &'static str)> {
+            let fixture = include_str!("../tests/fixtures/pane_icon_pairs.tsv");
+            fixture
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .filter_map(|line| {
+                    let mut fields = line.split('\t');
+                    let row_category = fields.next()?;
+                    let _row_number = fields.next()?;
+                    let activity_rules = fields.next()?;
+                    let objective_rules = fields.next()?;
+                    (row_category == category).then_some((activity_rules, objective_rules))
+                })
+                .flat_map(|(activity_rules, objective_rules)| {
+                    activity_rules.split('/').flat_map(move |activity_rule| {
+                        objective_rules
+                            .split('/')
+                            .map(move |objective_rule| (activity_rule, objective_rule))
+                    })
+                })
+                .collect()
+        }
+
+        fn documented_icon_pairs(category: &str) -> HashSet<(u8, u8)> {
+            include_str!("../tests/fixtures/pane_icon_pairs.tsv")
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .filter_map(|line| {
+                    let mut fields = line.split('\t');
+                    let row_category = fields.next()?;
+                    let _row_number = fields.next()?;
+                    let _activity_rule = fields.next()?;
+                    let _objective_rule = fields.next()?;
+                    let now = fields.next()?.parse().ok()?;
+                    let objective = fields.next()?.parse().ok()?;
+                    (row_category == category).then_some((now, objective))
+                })
+                .collect()
         }
 
         let mut reports = vec![None];
@@ -6868,12 +6985,11 @@ mod pane_signal_tests {
         }
 
         let turns = [
-            AgentActivity::WaitingApproval,
-            AgentActivity::Working,
-            AgentActivity::WaitingBackground,
-            AgentActivity::BackgroundTaskStillRunning,
-            AgentActivity::Done,
-            AgentActivity::Idle,
+            AgentTurn::WaitingApproval,
+            AgentTurn::Working,
+            AgentTurn::WaitingSubagents,
+            AgentTurn::Settling,
+            AgentTurn::Idle,
         ];
         let goals = [
             GoalState::Active,
@@ -6882,86 +6998,128 @@ mod pane_signal_tests {
             GoalState::UsageLimited,
             GoalState::Reached,
         ];
-        let mut goal_capable = HashSet::new();
-        let mut no_goal_reader = HashSet::new();
-        let mut plain_shell = HashSet::new();
+        let mut goal_capable_rules = HashSet::new();
+        let mut no_goal_reader_rules = HashSet::new();
+        let mut plain_shell_rules = HashSet::new();
+        let mut goal_capable_icons = HashSet::new();
+        let mut no_goal_reader_icons = HashSet::new();
+        let mut plain_shell_icons = HashSet::new();
         for scheduled in [false, true] {
             for report in &reports {
                 for turn in turns {
-                    no_goal_reader.insert(pair(project_pane_signals(
-                        &PaneStatus::Agent(AgentClass::Antigravity, turn),
-                        report.as_ref(),
-                        scheduled,
-                        None,
-                    )));
-                    goal_capable.insert(pair(project_pane_signals(
-                        &PaneStatus::Agent(AgentClass::Codex, turn),
-                        report.as_ref(),
-                        scheduled,
-                        None,
-                    )));
-                    for goal in goals {
-                        goal_capable.insert(pair(project_pane_signals(
-                            &PaneStatus::AgentWithGoal(AgentClass::Codex, turn, goal),
-                            report.as_ref(),
-                            scheduled,
+                    for completion_unread in [false, true] {
+                        for shell_output in [
                             None,
-                        )));
+                            Some(ShellOutputPhase::Fast),
+                            Some(ShellOutputPhase::Slow),
+                        ] {
+                            record_pair(
+                                project_pane_signals(
+                                    &PaneStatus::Agent(AgentState {
+                                        class: AgentClass::Antigravity,
+                                        turn,
+                                        goal: None,
+                                        completion_unread,
+                                    }),
+                                    report.as_ref(),
+                                    scheduled,
+                                    shell_output,
+                                ),
+                                &mut no_goal_reader_rules,
+                                &mut no_goal_reader_icons,
+                            );
+                            record_pair(
+                                project_pane_signals(
+                                    &PaneStatus::Agent(AgentState {
+                                        class: AgentClass::Codex,
+                                        turn,
+                                        goal: None,
+                                        completion_unread,
+                                    }),
+                                    report.as_ref(),
+                                    scheduled,
+                                    shell_output,
+                                ),
+                                &mut goal_capable_rules,
+                                &mut goal_capable_icons,
+                            );
+                            for goal in goals {
+                                record_pair(
+                                    project_pane_signals(
+                                        &PaneStatus::Agent(AgentState {
+                                            class: AgentClass::Codex,
+                                            turn,
+                                            goal: Some(goal),
+                                            completion_unread,
+                                        }),
+                                        report.as_ref(),
+                                        scheduled,
+                                        shell_output,
+                                    ),
+                                    &mut goal_capable_rules,
+                                    &mut goal_capable_icons,
+                                );
+                            }
+                        }
                     }
                 }
-                for output in [
+                for shell_output in [
                     None,
                     Some(ShellOutputPhase::Fast),
                     Some(ShellOutputPhase::Slow),
                 ] {
-                    plain_shell.insert(pair(project_pane_signals(
-                        &PaneStatus::PlainShell,
-                        report.as_ref(),
-                        scheduled,
-                        output,
-                    )));
+                    record_pair(
+                        project_pane_signals(
+                            &PaneStatus::PlainShell,
+                            report.as_ref(),
+                            scheduled,
+                            shell_output,
+                        ),
+                        &mut plain_shell_rules,
+                        &mut plain_shell_icons,
+                    );
                 }
             }
         }
 
-        let mut expected_goal_capable = HashSet::new();
-        for now in 1..=4 {
-            for objective in 0..=11 {
-                expected_goal_capable.insert((now, objective));
-            }
+        let fixture = include_str!("../tests/fixtures/pane_icon_pairs.tsv");
+        let mut row_numbers = Vec::new();
+        for line in fixture.lines().filter(|line| !line.starts_with('#')) {
+            let mut fields = line.split('\t');
+            let _category = fields.next().expect("fixture category");
+            row_numbers.push(
+                fields
+                    .next()
+                    .expect("fixture row number")
+                    .parse::<u8>()
+                    .expect("numeric fixture row"),
+            );
+            assert!(fields.next().is_some_and(|rule| rule.starts_with('A')));
+            assert!(fields.next().is_some_and(|rule| rule.starts_with('B')));
+            assert!(fields
+                .next()
+                .is_some_and(|signal| signal.parse::<u8>().is_ok()));
+            assert!(fields
+                .next()
+                .is_some_and(|signal| signal.parse::<u8>().is_ok()));
+            assert!(fields.next().is_none());
         }
-        for objective in [3, 4, 6, 7] {
-            expected_goal_capable.insert((5, objective));
-        }
-        for now in [6, 7] {
-            for objective in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11] {
-                expected_goal_capable.insert((now, objective));
-            }
-        }
-        let mut expected_no_goal_reader = HashSet::new();
-        for now in 1..=4 {
-            for objective in [0, 6, 7, 8, 9, 10, 11] {
-                expected_no_goal_reader.insert((now, objective));
-            }
-        }
-        for objective in [6, 7] {
-            expected_no_goal_reader.insert((5, objective));
-        }
-        for now in [6, 7] {
-            for objective in [0, 8, 9, 10, 11] {
-                expected_no_goal_reader.insert((now, objective));
-            }
-        }
-        let expected_plain_shell: HashSet<_> = [8, 9]
-            .into_iter()
-            .flat_map(|now| [0, 6, 7, 8, 9, 10, 11].map(move |objective| (now, objective)))
-            .collect();
+        assert_eq!(row_numbers, (1..=126).collect::<Vec<_>>());
+        let expected_goal_capable_rules = documented_rule_pairs("goal-capable");
+        let expected_no_goal_reader_rules = documented_rule_pairs("no-goal-reader");
+        let expected_plain_shell_rules = documented_rule_pairs("plain-shell");
 
-        assert_eq!(goal_capable, expected_goal_capable);
-        assert_eq!(no_goal_reader, expected_no_goal_reader);
-        assert_eq!(plain_shell, expected_plain_shell);
+        assert_eq!(goal_capable_rules, expected_goal_capable_rules);
+        assert_eq!(no_goal_reader_rules, expected_no_goal_reader_rules);
+        assert_eq!(plain_shell_rules, expected_plain_shell_rules);
+        assert_eq!(goal_capable_icons, documented_icon_pairs("goal-capable"));
         assert_eq!(
-            goal_capable.len() + no_goal_reader.len() + plain_shell.len(),
+            no_goal_reader_icons,
+            documented_icon_pairs("no-goal-reader")
+        );
+        assert_eq!(plain_shell_icons, documented_icon_pairs("plain-shell"));
+        assert_eq!(
+            goal_capable_icons.len() + no_goal_reader_icons.len() + plain_shell_icons.len(),
             126
         );
     }

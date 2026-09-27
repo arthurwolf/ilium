@@ -10,7 +10,7 @@ use ilium_agent_debug::{
     AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
     AgentDebugEventMetadata, AgentDebugField, AgentDebugSeverity, AgentDebugSource, PaneDebugLog,
 };
-use ilium_core::{NodeId, NodeKind, PaneStatus};
+use ilium_core::{NodeId, NodeKind};
 use ilium_ipc::ServerEvent;
 use tokio::sync::RwLock;
 
@@ -425,12 +425,10 @@ async fn current_context(state: &ServerState, pane_id: NodeId) -> Option<AgentDe
     let NodeKind::Pane { status, .. } = &node.kind else {
         return None;
     };
-    let (class, activity) = match status {
-        PaneStatus::Agent(class, activity) | PaneStatus::AgentWithGoal(class, activity, _) => {
-            (Some(class.clone()), Some(*activity))
-        }
-        _ => (None, None),
-    };
+    let (class, activity) = status
+        .agent_state()
+        .map(|agent| (Some(agent.class.clone()), Some(agent.activity())))
+        .unwrap_or((None, None));
     let panes = state.panes.read().await;
     let (process_id, session_id, title_generation) = match panes.get(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => (

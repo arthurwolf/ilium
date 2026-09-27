@@ -22,14 +22,22 @@ const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Injectable blocking playback boundary. Production delegates to
 /// `ilium-sound`; tests use a recorder or no-op and never touch audio.
 pub trait SoundPlayer: Send + Sync {
-    fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError>;
+    fn play(
+        &self,
+        settings: &SoundSettings,
+        event: Option<SoundEvent>,
+    ) -> Result<(), ilium_sound::SoundError>;
 }
 
 /// Real operating-system player used by `ilium-server`'s binary entrypoint.
 pub struct SystemSoundPlayer;
 
 impl SoundPlayer for SystemSoundPlayer {
-    fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
+    fn play(
+        &self,
+        settings: &SoundSettings,
+        _event: Option<SoundEvent>,
+    ) -> Result<(), ilium_sound::SoundError> {
         ilium_sound::play(settings)
     }
 }
@@ -38,7 +46,11 @@ impl SoundPlayer for SystemSoundPlayer {
 pub struct NoopSoundPlayer;
 
 impl SoundPlayer for NoopSoundPlayer {
-    fn play(&self, _settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
+    fn play(
+        &self,
+        _settings: &SoundSettings,
+        _event: Option<SoundEvent>,
+    ) -> Result<(), ilium_sound::SoundError> {
         Ok(())
     }
 }
@@ -59,7 +71,8 @@ pub(crate) fn spawn(
         while let Some(request) = receiver.recv().await {
             let player = Arc::clone(&player);
             let settings = request.settings;
-            let result = tokio::task::spawn_blocking(move || player.play(&settings)).await;
+            let event = request.event;
+            let result = tokio::task::spawn_blocking(move || player.play(&settings, event)).await;
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => tracing::warn!(
@@ -196,13 +209,19 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    type PlaybackCall = (SoundSettings, Option<SoundEvent>);
+
     struct RecordingPlayer {
-        calls: Arc<Mutex<Vec<SoundSettings>>>,
+        calls: Arc<Mutex<Vec<PlaybackCall>>>,
     }
 
     impl SoundPlayer for RecordingPlayer {
-        fn play(&self, settings: &SoundSettings) -> Result<(), ilium_sound::SoundError> {
-            self.calls.lock().unwrap().push(settings.clone());
+        fn play(
+            &self,
+            settings: &SoundSettings,
+            event: Option<SoundEvent>,
+        ) -> Result<(), ilium_sound::SoundError> {
+            self.calls.lock().unwrap().push((settings.clone(), event));
             Ok(())
         }
     }
@@ -240,7 +259,13 @@ mod tests {
         drop(sender);
         task.await.unwrap();
 
-        assert_eq!(*calls.lock().unwrap(), vec![first, second]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                (first, Some(SoundEvent::AgentFinished)),
+                (second, Some(SoundEvent::ApprovalRequired)),
+            ]
+        );
     }
 
     #[tokio::test]

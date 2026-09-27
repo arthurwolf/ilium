@@ -71,8 +71,75 @@ mod tests {
         PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
     use ilium_sound::{SoundSettings, SoundSourceKind};
+    use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    enum LegacyPaneStatus {
+        PlainShell,
+        Agent(AgentClass, AgentActivity),
+        AgentWithGoal(AgentClass, AgentActivity, ilium_core::GoalState),
+        Editor { dirty: bool },
+        Board,
+    }
+
+    #[test]
+    fn canonical_agent_status_keeps_the_legacy_bincode_layout() {
+        let cases = [
+            (
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+                LegacyPaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+            ),
+            (
+                PaneStatus::from_activity(
+                    AgentClass::Codex,
+                    AgentActivity::Done,
+                    Some(ilium_core::GoalState::Active),
+                ),
+                LegacyPaneStatus::AgentWithGoal(
+                    AgentClass::Codex,
+                    AgentActivity::Done,
+                    ilium_core::GoalState::Active,
+                ),
+            ),
+            (PaneStatus::PlainShell, LegacyPaneStatus::PlainShell),
+            (
+                PaneStatus::Editor { dirty: true },
+                LegacyPaneStatus::Editor { dirty: true },
+            ),
+            (PaneStatus::Board, LegacyPaneStatus::Board),
+        ];
+
+        for (current, legacy) in cases {
+            assert_eq!(
+                bincode::serialize(&current).expect("serialize canonical status"),
+                bincode::serialize(&legacy).expect("serialize legacy status"),
+                "canonical status changed the established wire bytes for {current:?}"
+            );
+            assert_eq!(
+                bincode::deserialize::<PaneStatus>(
+                    &bincode::serialize(&legacy).expect("serialize legacy status")
+                )
+                .expect("deserialize legacy status"),
+                current,
+            );
+        }
+
+        let state = ilium_core::AgentState {
+            class: AgentClass::Codex,
+            turn: ilium_core::AgentTurn::Settling,
+            goal: Some(ilium_core::GoalState::Paused),
+            completion_unread: false,
+        };
+        assert_eq!(
+            bincode::deserialize::<ilium_core::AgentState>(
+                &bincode::serialize(&state).expect("serialize canonical agent state")
+            )
+            .expect("deserialize canonical agent state"),
+            state
+        );
+    }
 
     /// Every `ClientRequest` variant, one instance each, so a new variant
     /// added later without a matching round-trip case here is an obvious
@@ -610,21 +677,22 @@ mod tests {
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
-                status: PaneStatus::Agent(AgentClass::Claude, AgentActivity::Working),
+                status: PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
-                status: PaneStatus::Agent(
+                status: PaneStatus::from_activity(
                     AgentClass::Other("opencode".to_string()),
                     AgentActivity::Idle,
+                    None,
                 ),
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
-                status: PaneStatus::AgentWithGoal(
+                status: PaneStatus::from_activity(
                     AgentClass::Codex,
                     AgentActivity::Working,
-                    ilium_core::GoalState::Active,
+                    Some(ilium_core::GoalState::Active),
                 ),
             },
             ServerEvent::Error {
@@ -838,10 +906,10 @@ mod tests {
             ServerEvent::PaneDetectionEvidenceChanged {
                 pane_id: NodeId(2),
                 evidence: PaneDetectionEvidence {
-                    applied_status: PaneStatus::AgentWithGoal(
+                    applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Idle,
-                        ilium_core::GoalState::Paused,
+                        Some(ilium_core::GoalState::Paused),
                     ),
                     identity: Some(DetectionReason {
                         rule: "process name contains codex".into(),
@@ -858,9 +926,13 @@ mod tests {
             },
             ServerEvent::PaneDetectedStateChanged {
                 pane_id: NodeId(2),
-                status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
                 evidence: PaneDetectionEvidence {
-                    applied_status: PaneStatus::Agent(AgentClass::Codex, AgentActivity::Working),
+                    applied_status: PaneStatus::from_activity(
+                        AgentClass::Codex,
+                        AgentActivity::Working,
+                        None,
+                    ),
                     identity: Some(DetectionReason {
                         rule: "process signature codex".into(),
                         observed: Some("codex".into()),

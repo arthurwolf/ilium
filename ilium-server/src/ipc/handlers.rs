@@ -741,7 +741,7 @@ async fn handle_update_agent_debug_menu(state: &ServerState, enabled: bool) {
                     matches!(
                         &node.kind,
                         NodeKind::Pane {
-                            status: PaneStatus::Agent(_, _) | PaneStatus::AgentWithGoal(_, _, _),
+                            status: PaneStatus::Agent(_),
                             ..
                         }
                     )
@@ -4122,12 +4122,7 @@ async fn write_key_input_unlocked(
             else {
                 return (false, None);
             };
-            let agent_class = match status {
-                PaneStatus::Agent(class, _) | PaneStatus::AgentWithGoal(class, _, _) => {
-                    Some(class.clone())
-                }
-                PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => None,
-            };
+            let agent_class = status.agent_state().map(|agent| agent.class.clone());
             (
                 matches!(status, PaneStatus::PlainShell)
                     && *title_source == PaneTitleSource::Automatic,

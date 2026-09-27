@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use ilium_core::{AgentActivity, PaneStatus};
+use ilium_core::{NowSignal, PaneSignals, PaneStatus};
 use serde::{Deserialize, Serialize};
 
 /// Upper bound protecting startup from an unexpectedly enormous mounted
@@ -218,60 +218,40 @@ pub enum SoundError {
 /// `None -> Working` is deliberately silent: it is merely the first poll of
 /// an already-running agent, not evidence that a new turn just started.
 pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> Option<SoundEvent> {
-    let previous = previous?;
+    let previous =
+        previous.map(|status| ilium_core::project_pane_signals(status, None, false, None));
+    let new = ilium_core::project_pane_signals(new, None, false, None);
+    event_for_signals(previous.as_ref(), &new)
+}
+
+/// Selects an alert from the shared tree projection so sound transitions
+/// follow the same precedence and attention state as every client's icons.
+pub fn event_for_signals(previous: Option<&PaneSignals>, new: &PaneSignals) -> Option<SoundEvent> {
+    let previous = previous.map(|signals| signals.now);
+    let new = new.now;
 
     if matches!(
         previous,
-        PaneStatus::Agent(
-            _,
-            AgentActivity::Working
-                | AgentActivity::WaitingBackground
-                | AgentActivity::BackgroundTaskStillRunning
-        ) | PaneStatus::AgentWithGoal(
-            _,
-            AgentActivity::Working
-                | AgentActivity::WaitingBackground
-                | AgentActivity::BackgroundTaskStillRunning,
-            _,
-        )
-    ) && matches!(
-        // Only `Done` is a finished turn. The server leaves an agent `Idle`
-        // after busy work exactly when it parked on a live progress monitor
-        // (`detection.rs`), and a parked agent has not finished anything.
-        new,
-        PaneStatus::Agent(_, AgentActivity::Done)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Done, _)
-    ) {
+        Some(NowSignal::Working | NowSignal::WaitingSubagents | NowSignal::Settling)
+    ) && new == NowSignal::FinishedUnread
+    {
         return Some(SoundEvent::AgentFinished);
     }
 
-    if !matches!(
-        previous,
-        PaneStatus::Agent(_, AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval, _)
-    ) && matches!(
-        new,
-        PaneStatus::Agent(_, AgentActivity::WaitingApproval)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::WaitingApproval, _)
-    ) {
+    if previous != Some(NowSignal::NeedsApproval) && new == NowSignal::NeedsApproval {
         return Some(SoundEvent::ApprovalRequired);
     }
 
     if matches!(
         previous,
-        PaneStatus::Agent(
-            _,
-            AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval
-        ) | PaneStatus::AgentWithGoal(
-            _,
-            AgentActivity::Idle | AgentActivity::Done | AgentActivity::WaitingApproval,
-            _,
+        Some(
+            NowSignal::Idle
+                | NowSignal::NeedsApproval
+                | NowSignal::Parked
+                | NowSignal::FinishedUnread
         )
-    ) && matches!(
-        new,
-        PaneStatus::Agent(_, AgentActivity::Working)
-            | PaneStatus::AgentWithGoal(_, AgentActivity::Working, _)
-    ) {
+    ) && new == NowSignal::Working
+    {
         return Some(SoundEvent::AgentStarted);
     }
 
@@ -283,25 +263,9 @@ pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> 
     // reported running) must not refire the chime.
     if !matches!(
         previous,
-        PaneStatus::Agent(
-            _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
-        ) | PaneStatus::AgentWithGoal(
-            _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning,
-            _,
-        )
-    ) && matches!(
-        new,
-        PaneStatus::Agent(
-            _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning
-        ) | PaneStatus::AgentWithGoal(
-            _,
-            AgentActivity::WaitingBackground | AgentActivity::BackgroundTaskStillRunning,
-            _,
-        )
-    ) {
+        Some(NowSignal::WaitingSubagents | NowSignal::Settling)
+    ) && matches!(new, NowSignal::WaitingSubagents | NowSignal::Settling)
+    {
         return Some(SoundEvent::WaitingBackground);
     }
 
@@ -841,10 +805,10 @@ fn run_prepared_command(program: &str, mut command: Command) -> Result<(), Sound
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ilium_core::AgentClass;
+    use ilium_core::{AgentActivity, AgentClass};
 
     fn status(activity: AgentActivity) -> PaneStatus {
-        PaneStatus::Agent(AgentClass::Claude, activity)
+        PaneStatus::from_activity(AgentClass::Claude, activity, None)
     }
 
     #[test]

@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use ilium_core::{AgentActivity, AgentClass, AgentProvider, BuiltinAgentProvider, GoalState};
+use ilium_core::{AgentClass, AgentProvider, AgentTurn, BuiltinAgentProvider, GoalState};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use unicode_width::UnicodeWidthChar;
 
@@ -153,7 +153,7 @@ impl ActivityEvidence {
             }
             Self::FolderTrustPrompt => "Claude folder trust prompt is visible",
             Self::NoActiveMarker => {
-                "none of the working, background, confirmation, or selection predicates matched"
+                "none of the interrupt marker, provider live-status, background-wait, post-turn running-suffix, confirmation, Claude folder-trust, or selection predicates matched"
             }
         }
     }
@@ -161,7 +161,7 @@ impl ActivityEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityClassification {
-    pub activity: AgentActivity,
+    pub turn: AgentTurn,
     pub evidence: ActivityEvidence,
     /// One bounded, control-character-free terminal-chrome line that produced
     /// the positive classification. `None` for the negative `NoActiveMarker`
@@ -201,8 +201,8 @@ const WORKING_MARKER: &str = "esc to interrupt";
 /// `looks_like_confirmation_prompt` and `looks_like_selection_prompt`)
 /// means the agent is blocked waiting on the user. Anything else is
 /// `Idle`.
-pub fn classify_activity(screen_text: &str) -> AgentActivity {
-    classify_activity_detailed(screen_text).activity
+pub fn classify_activity(screen_text: &str) -> AgentTurn {
+    classify_activity_detailed(screen_text).turn
 }
 
 pub fn classify_activity_detailed(screen_text: &str) -> ActivityClassification {
@@ -216,8 +216,8 @@ pub fn classify_activity_detailed(screen_text: &str) -> ActivityClassification {
 /// transcript rows, so applying that shape to every provider turns finished
 /// Codex panes back into `Working`. Provider-specific status recognition keeps
 /// the shared activity contract while isolating each CLI's volatile UI text.
-pub fn classify_activity_for_agent(class: &AgentClass, screen_text: &str) -> AgentActivity {
-    classify_activity_for_agent_detailed(class, screen_text).activity
+pub fn classify_activity_for_agent(class: &AgentClass, screen_text: &str) -> AgentTurn {
+    classify_activity_for_agent_detailed(class, screen_text).turn
 }
 
 pub fn classify_activity_for_agent_detailed(
@@ -238,40 +238,37 @@ fn classify_screen_activity(
     class: Option<&AgentClass>,
     screen_text: &str,
 ) -> ActivityClassification {
-    let (activity, evidence) = if screen_text.contains(WORKING_MARKER) {
-        (AgentActivity::Working, ActivityEvidence::InterruptMarker)
+    let (turn, evidence) = if screen_text.contains(WORKING_MARKER) {
+        (AgentTurn::Working, ActivityEvidence::InterruptMarker)
     } else if let Some(live_status) = live_status_evidence(class, screen_text) {
-        (AgentActivity::Working, live_status)
+        (AgentTurn::Working, live_status)
     } else if looks_like_background_wait_line(screen_text) {
         (
-            AgentActivity::WaitingBackground,
+            AgentTurn::WaitingSubagents,
             ActivityEvidence::BackgroundWait,
         )
     } else if looks_like_background_task_wait_line(screen_text) {
-        (
-            AgentActivity::BackgroundTaskStillRunning,
-            ActivityEvidence::BackgroundTaskWait,
-        )
+        (AgentTurn::Settling, ActivityEvidence::BackgroundTaskWait)
     } else if looks_like_confirmation_prompt(screen_text) {
         (
-            AgentActivity::WaitingApproval,
+            AgentTurn::WaitingApproval,
             ActivityEvidence::ConfirmationPrompt,
         )
     } else if looks_like_claude_folder_trust_prompt(screen_text) {
         (
-            AgentActivity::WaitingApproval,
+            AgentTurn::WaitingApproval,
             ActivityEvidence::FolderTrustPrompt,
         )
     } else if looks_like_selection_prompt(screen_text) {
         (
-            AgentActivity::WaitingApproval,
+            AgentTurn::WaitingApproval,
             ActivityEvidence::SelectionPrompt,
         )
     } else {
-        (AgentActivity::Idle, ActivityEvidence::NoActiveMarker)
+        (AgentTurn::Idle, ActivityEvidence::NoActiveMarker)
     };
     ActivityClassification {
-        activity,
+        turn,
         evidence,
         matched_line: activity_evidence_line(evidence, screen_text),
     }
@@ -412,9 +409,7 @@ pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
     composer_visible
         && !matches!(
             classify_activity_for_agent(class, screen_text),
-            AgentActivity::Working
-                | AgentActivity::WaitingBackground
-                | AgentActivity::WaitingApproval
+            AgentTurn::Working | AgentTurn::WaitingSubagents | AgentTurn::WaitingApproval
         )
 }
 
@@ -452,9 +447,7 @@ pub fn is_agent_prompt_ready_at_cursor(
     composer_visible
         && !matches!(
             classify_activity_for_agent(class, screen_text),
-            AgentActivity::Working
-                | AgentActivity::WaitingBackground
-                | AgentActivity::WaitingApproval
+            AgentTurn::Working | AgentTurn::WaitingSubagents | AgentTurn::WaitingApproval
         )
 }
 
@@ -1916,7 +1909,7 @@ mod tests {
     fn claude_code_mid_turn_is_working() {
         assert_eq!(
             classify_activity(&fixture("claude_code_working.txt")),
-            AgentActivity::Working
+            AgentTurn::Working
         );
     }
 
@@ -1924,7 +1917,7 @@ mod tests {
     fn claude_code_idle_prompt_is_idle() {
         assert_eq!(
             classify_activity(&fixture("claude_code_idle.txt")),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -1932,7 +1925,7 @@ mod tests {
     fn claude_code_awaiting_approval_is_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("claude_code_awaiting_approval.txt")),
-            AgentActivity::WaitingApproval
+            AgentTurn::WaitingApproval
         );
     }
 
@@ -1981,33 +1974,27 @@ mod tests {
     fn claude_code_waiting_on_background_agents_is_waiting_background() {
         assert_eq!(
             classify_activity(&fixture("claude_code_waiting_background.txt")),
-            AgentActivity::WaitingBackground
+            AgentTurn::WaitingSubagents
         );
     }
 
     #[test]
     fn claude_code_completed_turn_with_shell_still_running_is_background_task_still_running() {
         let fixture_text = fixture("claude_code_shell_still_running.txt");
-        assert_eq!(
-            classify_activity(&fixture_text),
-            AgentActivity::BackgroundTaskStillRunning
-        );
+        assert_eq!(classify_activity(&fixture_text), AgentTurn::Settling);
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Claude, &fixture_text),
-            AgentActivity::BackgroundTaskStillRunning
+            AgentTurn::Settling
         );
     }
 
     #[test]
     fn claude_code_completed_turn_with_monitor_still_running_is_background_task_still_running() {
         let fixture_text = fixture("claude_code_monitor_still_running.txt");
-        assert_eq!(
-            classify_activity(&fixture_text),
-            AgentActivity::BackgroundTaskStillRunning
-        );
+        assert_eq!(classify_activity(&fixture_text), AgentTurn::Settling);
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Claude, &fixture_text),
-            AgentActivity::BackgroundTaskStillRunning
+            AgentTurn::Settling
         );
     }
 
@@ -2015,11 +2002,11 @@ mod tests {
     fn prose_mentioning_shell_or_running_alone_is_idle_not_waiting_background() {
         assert_eq!(
             classify_activity("I opened a new shell for the migration."),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
         assert_eq!(
             classify_activity("The dev server is running now."),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2027,7 +2014,7 @@ mod tests {
     fn codex_mid_turn_is_working() {
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, &fixture("codex_working.txt"),),
-            AgentActivity::Working
+            AgentTurn::Working
         );
     }
 
@@ -2041,7 +2028,7 @@ mod tests {
         // being short-circuited by the interrupt-marker check.
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, "• Working… (5m)"),
-            AgentActivity::Working
+            AgentTurn::Working
         );
     }
 
@@ -2056,7 +2043,7 @@ mod tests {
                 &AgentClass::Codex,
                 "tests are running fine · Running… (5m)"
             ),
-            AgentActivity::Working
+            AgentTurn::Working
         );
     }
 
@@ -2064,7 +2051,7 @@ mod tests {
     fn codex_activity_word_embedded_in_a_longer_word_is_not_working() {
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, "Regenerating… (5m) is not a status"),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2075,7 +2062,7 @@ mod tests {
                 &AgentClass::Codex,
                 "Implemented the requested change… 12s\n\nSend a message",
             ),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2083,7 +2070,7 @@ mod tests {
     fn codex_idle_prompt_is_idle() {
         assert_eq!(
             classify_activity(&fixture("codex_idle.txt")),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2091,7 +2078,7 @@ mod tests {
     fn codex_awaiting_approval_is_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("codex_awaiting_approval.txt")),
-            AgentActivity::WaitingApproval
+            AgentTurn::WaitingApproval
         );
     }
 
@@ -2101,7 +2088,7 @@ mod tests {
         let screen = fixture("codex_trust_folder.txt");
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, &screen),
-            AgentActivity::WaitingApproval
+            AgentTurn::WaitingApproval
         );
         assert!(!is_agent_prompt_ready(&AgentClass::Codex, &screen));
     }
@@ -2112,12 +2099,12 @@ mod tests {
         // folder with one project-local permission rule; no trust was granted.
         let screen = fixture("claude_folder_trust.txt");
         let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
-        assert_eq!(classification.activity, AgentActivity::WaitingApproval);
+        assert_eq!(classification.turn, AgentTurn::WaitingApproval);
         assert_eq!(classification.evidence, ActivityEvidence::FolderTrustPrompt);
         assert!(!is_agent_prompt_ready(&AgentClass::Claude, &screen));
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Claude, "Yes, I trust this folder"),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2125,7 +2112,7 @@ mod tests {
     fn prose_mentioning_yes_and_no_is_idle_not_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("claude_code_prose_with_yes_no.txt")),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2133,11 +2120,11 @@ mod tests {
     fn prose_mentioning_background_or_waiting_alone_is_idle_not_waiting_background() {
         assert_eq!(
             classify_activity("I'll run this in the background and keep waiting for input."),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
         assert_eq!(
             classify_activity("Waiting for the build to finish."),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2145,7 +2132,7 @@ mod tests {
     fn rhetorical_question_with_not_is_not_waiting_approval() {
         assert_eq!(
             classify_activity("Does that make sense, or not?"),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2156,7 +2143,7 @@ mod tests {
         // `looks_like_confirmation_prompt` doesn't false-positive on them.
         assert_eq!(
             classify_activity("Did yesterday's changes land, or is there nothing new?"),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2166,7 +2153,7 @@ mod tests {
             classify_activity(&fixture(
                 "claude_code_numbered_analysis_with_stray_cursor.txt"
             )),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2174,7 +2161,7 @@ mod tests {
     fn rename_plan_confirmation_menu_is_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("claude_code_rename_confirm_prompt.txt")),
-            AgentActivity::WaitingApproval
+            AgentTurn::WaitingApproval
         );
     }
 
@@ -2182,7 +2169,7 @@ mod tests {
     fn plain_shell_prompt_has_no_activity_signal() {
         assert_eq!(
             classify_activity(&fixture("plain_shell.txt")),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2371,9 +2358,9 @@ mod tests {
 
         assert_eq!(
             classify_activity_for_agent(&AgentClass::Codex, screen),
-            AgentActivity::WaitingApproval
+            AgentTurn::WaitingApproval
         );
-        assert_eq!(classify_activity(screen), AgentActivity::WaitingApproval);
+        assert_eq!(classify_activity(screen), AgentTurn::WaitingApproval);
         assert_eq!(
             classify_activity_for_agent_detailed(&AgentClass::Codex, screen)
                 .matched_line
@@ -2393,7 +2380,7 @@ mod tests {
                 &AgentClass::Codex,
                 &fixture("codex_dynamic_placeholder_idle.txt")
             ),
-            AgentActivity::Idle
+            AgentTurn::Idle
         );
     }
 
@@ -2680,7 +2667,7 @@ Goal achieved (3m)
             "older transcript\nWorking (esc to interrupt)\u{7}\nSend a message",
         );
 
-        assert_eq!(classification.activity, AgentActivity::Working);
+        assert_eq!(classification.turn, AgentTurn::Working);
         assert_eq!(classification.evidence, ActivityEvidence::InterruptMarker);
         assert_eq!(
             classification.matched_line.as_deref(),
@@ -2693,6 +2680,21 @@ Goal achieved (3m)
         );
         assert_eq!(idle.evidence, ActivityEvidence::NoActiveMarker);
         assert_eq!(idle.matched_line, None);
+        let no_match_rule = idle.evidence.description();
+        for checked_rule in [
+            "interrupt marker",
+            "provider live-status",
+            "background-wait",
+            "post-turn running-suffix",
+            "confirmation",
+            "Claude folder-trust",
+            "selection",
+        ] {
+            assert!(
+                no_match_rule.contains(checked_rule),
+                "idle explanation must name the checked {checked_rule} rule"
+            );
+        }
     }
 
     #[test]

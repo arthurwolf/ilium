@@ -80,12 +80,16 @@ const WORKING_PHASE_SECONDS: u32 = 12;
 const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct RecordingSoundPlayer {
-    calls: Arc<Mutex<Vec<ilium_sound::SoundSettings>>>,
+    calls: Arc<Mutex<Vec<Option<ilium_sound::SoundEvent>>>>,
 }
 
 impl SoundPlayer for RecordingSoundPlayer {
-    fn play(&self, settings: &ilium_sound::SoundSettings) -> Result<(), ilium_sound::SoundError> {
-        self.calls.lock().unwrap().push(settings.clone());
+    fn play(
+        &self,
+        _settings: &ilium_sound::SoundSettings,
+        event: Option<ilium_sound::SoundEvent>,
+    ) -> Result<(), ilium_sound::SoundError> {
+        self.calls.lock().unwrap().push(event);
         Ok(())
     }
 }
@@ -211,11 +215,26 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
             event,
             ServerEvent::PaneDetectedStateChanged { pane_id: changed_id, status, .. }
                 if *changed_id == pane_id
-                    && matches!(
-                        status,
-                        PaneStatus::Agent(ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Working)
-                    )
+                    && matches!(status, PaneStatus::Agent(agent)
+                        if agent.class == ilium_core::AgentClass::Codex
+                            && agent.turn == ilium_core::AgentTurn::Working
+                            && agent.goal.is_none()
+                            && !agent.completion_unread)
         )
+    })
+    .await;
+
+    let mut observer = server.connect().await;
+    write_frame(
+        &mut observer,
+        &ClientRequest::Attach {
+            session: "focus-acknowledgement-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach the observer client before completion");
+    let _ = expect_event(&mut observer, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::InitialStateSyncComplete)
     })
     .await;
 
@@ -227,10 +246,23 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
             event,
             ServerEvent::PaneDetectedStateChanged { pane_id: changed_id, status, .. }
                 if *changed_id == pane_id
-                    && matches!(
-                        status,
-                        PaneStatus::Agent(ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Done)
-                    )
+                    && matches!(status, PaneStatus::Agent(agent)
+                        if agent.class == ilium_core::AgentClass::Codex
+                            && agent.turn == ilium_core::AgentTurn::Idle
+                            && agent.goal.is_none()
+                            && agent.completion_unread)
+        )
+    })
+    .await;
+    let _ = expect_event(&mut observer, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneDetectedStateChanged { pane_id: changed_id, status, .. }
+                if *changed_id == pane_id
+                    && matches!(status, PaneStatus::Agent(agent)
+                        if agent.class == ilium_core::AgentClass::Codex
+                            && agent.turn == ilium_core::AgentTurn::Idle
+                            && agent.completion_unread)
         )
     })
     .await;
@@ -250,15 +282,30 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
             ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
                 if *changed_id == pane_id
                     && *status
-                        == PaneStatus::Agent(
-                            ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Idle,
-                        )
+                        == PaneStatus::from_activity(ilium_core::AgentClass::Codex, ilium_core::AgentActivity::Idle, None)
         )
     })
     .await;
     assert!(matches!(
         acknowledged_event,
+        ServerEvent::PaneStatusChanged { .. }
+    ));
+
+    let observer_acknowledged_event =
+        expect_event(&mut observer, Duration::from_secs(5), |event| {
+            matches!(
+                event,
+                ServerEvent::PaneStatusChanged { pane_id: changed_id, status }
+                    if *changed_id == pane_id
+                        && matches!(status, PaneStatus::Agent(agent)
+                            if agent.class == ilium_core::AgentClass::Codex
+                                && agent.turn == ilium_core::AgentTurn::Idle
+                                && !agent.completion_unread)
+            )
+        })
+        .await;
+    assert!(matches!(
+        observer_acknowledged_event,
         ServerEvent::PaneStatusChanged { .. }
     ));
 
@@ -403,7 +450,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // matching the literal `"esc to interrupt"` marker this fake script
     // prints), and preserve the `Pursuing goal (5m)` suffix at the end of its
     // shared metadata footer as
-    // `AgentWithGoal` --
+    // `AgentState` --
     // broadcast as a real `PaneDetectedStateChanged` event to this
     // real connected IPC client.
     let working_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
@@ -413,7 +460,11 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                 if *changed_id == pane_id
                     && matches!(
                         status,
-                        PaneStatus::AgentWithGoal(_, ilium_core::AgentActivity::Working, ilium_core::GoalState::Active)
+                        PaneStatus::Agent(ilium_core::AgentState {
+                            turn: ilium_core::AgentTurn::Working,
+                            goal: Some(ilium_core::GoalState::Active),
+                            ..
+                        })
                     )
         )
     })
@@ -424,11 +475,12 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     assert!(
         matches!(
             status,
-            PaneStatus::AgentWithGoal(
-                ilium_core::AgentClass::Codex,
-                _,
-                ilium_core::GoalState::Active
-            )
+            PaneStatus::Agent(ilium_core::AgentState {
+                class: ilium_core::AgentClass::Codex,
+                turn: ilium_core::AgentTurn::Working,
+                goal: Some(ilium_core::GoalState::Active),
+                ..
+            })
         ),
         "expected the real process tree walk to identify this pane as Codex, got {status:?}"
     );
@@ -450,14 +502,11 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
             event,
             ServerEvent::PaneDetectedStateChanged { pane_id: changed_id, status, .. }
                 if *changed_id == pane_id
-                    && matches!(
-                        status,
-                        PaneStatus::AgentWithGoal(
-                            ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Done,
-                            ilium_core::GoalState::Active
-                        )
-                    )
+                    && matches!(status, PaneStatus::Agent(agent)
+                        if agent.class == ilium_core::AgentClass::Codex
+                            && agent.turn == ilium_core::AgentTurn::Idle
+                            && agent.completion_unread
+                            && agent.goal == Some(ilium_core::GoalState::Active))
         )
     })
     .await;
@@ -466,10 +515,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     };
     assert_eq!(
         status,
-        PaneStatus::AgentWithGoal(
+        PaneStatus::from_activity(
             ilium_core::AgentClass::Codex,
             ilium_core::AgentActivity::Done,
-            ilium_core::GoalState::Active
+            Some(ilium_core::GoalState::Active)
         ),
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
@@ -484,11 +533,12 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
                 if *changed_id == pane_id
                     && matches!(
                         status,
-                        PaneStatus::AgentWithGoal(
-                            ilium_core::AgentClass::Codex,
-                            ilium_core::AgentActivity::Idle,
-                            ilium_core::GoalState::Active
-                        )
+                        PaneStatus::Agent(ilium_core::AgentState {
+                            class: ilium_core::AgentClass::Codex,
+                            turn: ilium_core::AgentTurn::Idle,
+                            goal: Some(ilium_core::GoalState::Active),
+                            completion_unread: false,
+                        })
                     )
         )
     })
@@ -519,8 +569,8 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         "expected exactly one server-owned sound after the real Working -> Done transition"
     );
     assert_eq!(
-        sound_calls.lock().unwrap()[0].source,
-        ilium_sound::SoundSourceKind::SystemBeep
+        sound_calls.lock().unwrap().as_slice(),
+        &[Some(ilium_sound::SoundEvent::AgentFinished)]
     );
 
     // Wait for one post-input classification to establish the stable Idle
@@ -1227,8 +1277,16 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         idle_poll_interval: Duration::from_millis(100),
         auto_answer_interstitial_prompts: true,
     };
-    let mut server =
-        TestServer::start_with_detection_config("live-progress-goal-test", detection_config).await;
+    let sound_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut server = TestServer::start_with_sound_player(
+        "live-progress-goal-test",
+        detection_config,
+        ilium_sound::SoundSettings::default(),
+        Arc::new(RecordingSoundPlayer {
+            calls: Arc::clone(&sound_calls),
+        }),
+    )
+    .await;
     write_verified_codex_transcript(&server, session_id);
     let mut client = server.connect().await;
     write_frame(
@@ -1284,11 +1342,13 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
             event,
             ServerEvent::PaneDetectedStateChanged {
                 pane_id: changed_id,
-                status: PaneStatus::AgentWithGoal(
-                    ilium_core::AgentClass::Codex,
-                    _,
-                    ilium_core::GoalState::Active,
-                ),
+                status: PaneStatus::Agent(ilium_core::AgentState {
+                    class: ilium_core::AgentClass::Codex,
+                    goal: Some(ilium_core::GoalState::Active),
+                    turn: ilium_core::AgentTurn::Idle,
+                    completion_unread: false,
+                    ..
+                }),
                 ..
             } if *changed_id == pane_id
         )
@@ -1318,6 +1378,41 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
     })
     .await;
 
+    let running_progress = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(
+            event,
+            ServerEvent::PaneProgressChanged {
+                pane_id: changed_id,
+                progress: Some(progress),
+            } if *changed_id == pane_id
+                && progress.report.status == ilium_core::ProgressTaskStatus::Running
+        )
+    })
+    .await;
+    let ServerEvent::PaneProgressChanged {
+        progress: Some(running_progress),
+        ..
+    } = running_progress
+    else {
+        unreachable!();
+    };
+    let parked = ilium_core::project_pane_signals(
+        &PaneStatus::Agent(ilium_core::AgentState {
+            class: ilium_core::AgentClass::Codex,
+            turn: ilium_core::AgentTurn::Idle,
+            goal: Some(ilium_core::GoalState::Active),
+            completion_unread: false,
+        }),
+        Some(&running_progress),
+        false,
+        None,
+    );
+    assert_eq!(parked.now, ilium_core::NowSignal::Parked);
+    assert!(
+        sound_calls.lock().unwrap().is_empty(),
+        "a Codex parked on a live task must not emit AgentFinished"
+    );
+
     std::fs::write(
         &probe_report,
         r#"{"job_id":"live-render","status":"done","percent":100,"message":"render complete"}"#,
@@ -1334,6 +1429,16 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         )
     })
     .await;
+    let sound_dispatched = common::wait_until(
+        || sound_calls.lock().unwrap().len() == 1,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(sound_dispatched, "the terminal task must emit one sound");
+    assert_eq!(
+        sound_calls.lock().unwrap().as_slice(),
+        &[Some(ilium_sound::SoundEvent::TaskSucceeded)]
+    );
     // The result is delivered at the next ready composer. Progress must be
     // the only thing written to the agent: no `/goal pause`, no `/goal resume`.
     let deadline = std::time::Instant::now() + WAIT_TIMEOUT;
