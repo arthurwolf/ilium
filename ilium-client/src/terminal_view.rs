@@ -456,11 +456,14 @@ impl TerminalView {
 
     /// Updates the saved visible-text baseline and reports whether it changed.
     fn refresh_visible_text_fingerprint(&mut self) -> bool {
-        let previous_fingerprint = self.visible_text_fingerprint;
-        self.visible_text_fingerprint = visible_text_fingerprint(self.parser.screen());
-        self.visible_row_fingerprints = visible_row_fingerprints(self.parser.screen());
-        self.visible_text_dimensions = self.parser.screen().size();
-        self.visible_text_fingerprint != previous_fingerprint
+        let fingerprint = visible_text_fingerprint(self.parser.screen());
+        let did_change = fingerprint != self.visible_text_fingerprint;
+        self.visible_text_fingerprint = fingerprint;
+        if did_change {
+            self.visible_row_fingerprints = visible_row_fingerprints(self.parser.screen());
+            self.visible_text_dimensions = self.parser.screen().size();
+        }
+        did_change
     }
 
     fn capture_visible_text_change(

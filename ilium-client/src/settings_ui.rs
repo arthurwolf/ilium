@@ -4847,9 +4847,16 @@ mod tests {
             "objective / long-term",
             "current activity / right now",
             "Objective position:",
+            "goal active, paused, blocked, usage-limited, reached;",
+            "task pending, running progress, degraded observation, done, failed, monitor failed; scheduled input.",
             "Current activity position:",
+            "needs approval, working, waiting on subagents, settling,",
+            "parked on a monitored task, finished unread, idle; plain-shell fast/slow recent output.",
+            "Unread task success/error and acknowledged outcomes share their state glyph; bold marks unread.",
             "Attention mode priority",
-            "Only the highest-priority status glyph is shown.",
+            "Approval → monitor failed → task error → blocked → usage limited → paused → reached",
+            "→ unread task success → unread agent turn. Only the highest-priority status glyph is shown.",
+            "A goal remains until its provider changes or clears it; opening the pane acknowledges results, not goals.",
         ] {
             assert!(rendered.contains(expected), "missing {expected:?}");
         }

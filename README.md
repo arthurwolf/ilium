@@ -8,284 +8,284 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 
 ## See it in action
 
-<table>
+<table width="100%">
 <tbody>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>AI organizes your workspace</strong>
 </p>
 <p>
 <a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/01-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="420">
+<img src="assets/demos/01-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Voice control (simulated speech)</strong>
 </p>
 <p>
 <a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/02-voice-control.gif" alt="Voice command demonstration with a loopback model, real Ilium UI actions, and a real Claude prompt" width="420">
+<img src="assets/demos/02-voice-control.gif" alt="Typed voice commands use a loopback model to drive real Ilium actions and a real Claude prompt; the shell-command scene is composited from a separate take" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Automatic agent titles</strong>
 </p>
 <p>
 <a href="assets/demos/03-contextual-titles.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/03-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="420">
+<img src="assets/demos/03-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Schedule input</strong>
 </p>
 <p>
 <a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="420">
+<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Move screens between panes</strong>
 </p>
 <p>
 <a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/05-screen-transfer.gif" alt="The visible screen is transferred between panes" width="420">
+<img src="assets/demos/05-screen-transfer.gif" alt="The visible screen is transferred between panes" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Agent costs and usage</strong>
 </p>
 <p>
 <a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/06-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="420">
+<img src="assets/demos/06-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Interface and board settings</strong>
 </p>
 <p>
 <a href="assets/demos/07a-settings-tour-a.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07a-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="420">
+<img src="assets/demos/07a-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Voice and AI provider settings</strong>
 </p>
 <p>
 <a href="assets/demos/07b-settings-tour-b.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07b-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="420">
+<img src="assets/demos/07b-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Automatic title settings</strong>
 </p>
 <p>
 <a href="assets/demos/07c-settings-tour-c.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07c-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="420">
+<img src="assets/demos/07c-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Agent status (simulated goal icon)</strong>
 </p>
 <p>
 <a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/08-agent-activity.gif" alt="Real agent activity with a disclosed simulated Codex objective icon" width="420">
+<img src="assets/demos/08-agent-activity.gif" alt="Real agent activity with a disclosed simulated Codex objective icon" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Rearrange panes without restarting</strong>
 </p>
 <p>
 <a href="assets/demos/09-pane-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="420">
+<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Agents, editors, and terminals side by side</strong>
 </p>
 <p>
 <a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/10-mixed-splits.gif" alt="A split view displays several terminal panes together" width="420">
+<img src="assets/demos/10-mixed-splits.gif" alt="A split view displays several terminal panes together" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Select and copy terminal output</strong>
 </p>
 <p>
 <a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/11-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="420">
+<img src="assets/demos/11-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Request agent updates</strong>
 </p>
 <p>
 <a href="assets/demos/12-ask-for-update.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/12-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="420">
+<img src="assets/demos/12-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Queue prompts</strong>
 </p>
 <p>
 <a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="420">
+<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Background tasks report back</strong>
 </p>
 <p>
 <a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/14-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="420">
+<img src="assets/demos/14-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Built-in Kanban board</strong>
 </p>
 <p>
 <a href="assets/demos/15-kanban.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/15-kanban.gif" alt="A card moves through the built-in Kanban board" width="420">
+<img src="assets/demos/15-kanban.gif" alt="A card moves through the built-in Kanban board" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Fix TODOs with Codex</strong>
 </p>
 <p>
 <a href="assets/demos/16-agent-from-line.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/16-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="420">
+<img src="assets/demos/16-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Search agents, files, and terminals (edited replay)</strong>
 </p>
 <p>
 <a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/17-workspace-search.gif" alt="Workspace search returns real agent, shell, and file matches and jumps to their lines; disclosed terminal-cell repaint" width="420">
+<img src="assets/demos/17-workspace-search.gif" alt="Workspace search returns real agent, shell, and file matches and jumps to their lines; disclosed terminal-cell repaint" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Detach without stopping agents</strong>
 </p>
 <p>
 <a href="assets/demos/18-detach-reattach.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/18-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="420">
+<img src="assets/demos/18-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Built-in Markdown editor</strong>
 </p>
 <p>
 <a href="assets/demos/19-markdown-editor.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/19-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="420">
+<img src="assets/demos/19-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Codex–Claude handoff (simulated sidebar titles)</strong>
 </p>
 <p>
 <a href="assets/demos/20-chatroom.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/20-chatroom.gif" alt="Real Codex and Claude Chatroom exchange with disclosed simulated sidebar titles" width="420">
+<img src="assets/demos/20-chatroom.gif" alt="Real Codex and Claude Chatroom exchange with disclosed simulated sidebar titles" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Auto-answer confirmation prompts</strong>
 </p>
 <p>
 <a href="assets/demos/21-text-triggers.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent&#x27;s confirmation question" width="420">
+<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent&#x27;s confirmation question" width="100%">
 </a>
 </p>
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Live agent goals</strong>
 </p>
 <p>
 <a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="420">
+<img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="100%">
 </a>
 </p>
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <p>
 <strong>Restore panes and resume agents</strong>
 </p>
 <p>
 <a href="assets/demos/23-snapshot-resume.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and real Claude and Codex sessions answer from their resumed context" width="420">
+<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and real Claude and Codex sessions answer from their resumed context; setup and wait periods are cut" width="100%">
 </a>
 </p>
 </td>
-<td>
+<td width="50%">
 </td>
 </tr>
 </tbody>

@@ -4,7 +4,7 @@
 //! not need a polling task. Live visible-text changes and client-queued input
 //! refresh this tracker; input contents are never retained as evidence.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use ilium_core::NodeId;
@@ -76,7 +76,8 @@ pub struct TerminalActivityTracker {
 
 impl TerminalActivityTracker {
     /// Starts or refreshes a timing-only test entry.
-    pub fn record(&mut self, pane_id: NodeId, elapsed_ms: u128) {
+    #[cfg(test)]
+    pub(crate) fn record(&mut self, pane_id: NodeId, elapsed_ms: u128) {
         self.record_with_cause(pane_id, elapsed_ms, TerminalActivityCause::TerminalTextQueued);
     }
 
@@ -192,6 +193,14 @@ impl TerminalActivityTracker {
             elapsed_ms.saturating_sub(entry.elapsed_ms) < TERMINAL_ACTIVITY_VISIBLE_WINDOW_MS
         });
 
+        self.last_activity_ms.len() != previous_count
+    }
+
+    /// Drops observations for panes absent from the authoritative tree snapshot.
+    pub(crate) fn retain_panes(&mut self, live_pane_ids: &HashSet<NodeId>) -> bool {
+        let previous_count = self.last_activity_ms.len();
+        self.last_activity_ms
+            .retain(|pane_id, _| live_pane_ids.contains(pane_id));
         self.last_activity_ms.len() != previous_count
     }
 }
@@ -332,5 +341,20 @@ mod tests {
             TerminalActivityCause::KeyInputQueued { byte_count: 3 }
         ));
         assert_eq!(tracker.last_activity_ms.len(), 1);
+    }
+
+    #[test]
+    fn snapshot_removal_drops_activity_evidence_for_deleted_panes() {
+        let pane_id = NodeId(45);
+        let mut tracker = TerminalActivityTracker::default();
+        tracker.record_with_cause(
+            pane_id,
+            100,
+            TerminalActivityCause::KeyInputQueued { byte_count: 2 },
+        );
+
+        assert!(tracker.retain_panes(&HashSet::new()));
+        assert!(tracker.snapshot(pane_id, 101).is_none());
+        assert!(!tracker.retain_panes(&HashSet::new()));
     }
 }

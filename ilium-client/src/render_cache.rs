@@ -611,6 +611,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         app.tree.panes().map(|node| node.id).collect();
     app.panes
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.terminal_activity.retain_panes(&live_pane_ids);
     app.retain_requested_pane_sizes(&live_pane_ids);
     // Latches every pane currently showing a detected agent so its toolbar
     // row, once reserved, survives a later detection revert back to
