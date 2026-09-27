@@ -4,6 +4,90 @@ A terminal multiplexer for people running several AI coding agents at once.
 
 Like tmux, ilium keeps your terminals alive in a background server you can detach from and reattach to. Unlike tmux, it organizes them as a **tree** you can rearrange, and it **watches each pane to tell you what its agent is doing** — thinking, waiting for your approval, or done — so a glance at the sidebar tells you which session needs you.
 
+## See it in action
+
+These recordings show ilium running in a terminal with real agent sessions. Select a GIF to view it at full size.
+
+**AI reorganizes the pane tree**
+
+<a href="assets/demos/12-ai-tree.gif"><img src="assets/demos/12-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="840"></a>
+
+**Automatic titles from agent context**
+
+<a href="assets/demos/20-contextual-titles.gif"><img src="assets/demos/20-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="840"></a>
+
+**Delayed input to agents and terminals**
+
+<a href="assets/demos/15-scheduled-input.gif"><img src="assets/demos/15-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="840"></a>
+
+**Screen transfer**
+
+<a href="assets/demos/18-screen-transfer.gif"><img src="assets/demos/18-screen-transfer.gif" alt="The visible screen is transferred between panes" width="840"></a>
+
+**Agent costs and stats**
+
+<a href="assets/demos/23-cost-and-stats.gif"><img src="assets/demos/23-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="840"></a>
+
+**Settings: interface and board**
+
+<a href="assets/demos/21-settings-tour-a.gif"><img src="assets/demos/21-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="840"></a>
+
+**Settings: voice and inference**
+
+<a href="assets/demos/21-settings-tour-b.gif"><img src="assets/demos/21-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="840"></a>
+
+**Settings: titles and setup**
+
+<a href="assets/demos/21-settings-tour-c.gif"><img src="assets/demos/21-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="840"></a>
+
+**Rearrangeable pane tree**
+
+<a href="assets/demos/02-pane-tree.gif"><img src="assets/demos/02-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="840"></a>
+
+**Persistent mixed splits**
+
+<a href="assets/demos/03-mixed-splits.gif"><img src="assets/demos/03-mixed-splits.gif" alt="A split view displays several terminal panes together" width="840"></a>
+
+**Smart Copy**
+
+<a href="assets/demos/04-smart-copy.gif"><img src="assets/demos/04-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="840"></a>
+
+**Ask for update**
+
+<a href="assets/demos/05-ask-for-update.gif"><img src="assets/demos/05-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="840"></a>
+
+**Prompt queue**
+
+<a href="assets/demos/06-prompt-queue.gif"><img src="assets/demos/06-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="840"></a>
+
+**Progress monitor**
+
+<a href="assets/demos/07-progress-monitor.gif"><img src="assets/demos/07-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="840"></a>
+
+**Kanban board**
+
+<a href="assets/demos/08-kanban.gif"><img src="assets/demos/08-kanban.gif" alt="A card moves through the built-in Kanban board" width="840"></a>
+
+**Create an agent from a line**
+
+<a href="assets/demos/09-agent-from-line.gif"><img src="assets/demos/09-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="840"></a>
+
+**Detach and reattach**
+
+<a href="assets/demos/11-detach-reattach.gif"><img src="assets/demos/11-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="840"></a>
+
+**Markdown editor**
+
+<a href="assets/demos/13-markdown-editor.gif"><img src="assets/demos/13-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="840"></a>
+
+**Text triggers**
+
+<a href="assets/demos/16-text-triggers.gif"><img src="assets/demos/16-text-triggers.gif" alt="A text trigger responds to an agent's confirmation question" width="840"></a>
+
+**Goal indicators**
+
+<a href="assets/demos/17-goal-indicators.gif"><img src="assets/demos/17-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="840"></a>
+
 ```
 ╭  ≡ ● · Ilium──────────────────┬  ≡ ● · cargo run─────────────────────────────────────────────────────╮
 │▼  🗂️   acme-api               │   Compiling acme-api v0.1.0 (/ram/acme-api)                          │
