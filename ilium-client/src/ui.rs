@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use ilium_core::{AgentClass, AgentProvider, NodeId, NodeKind, PaneStatus, ROOT_ID};
-use ratatui::buffer::CellDiffOption;
+use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::{Alignment, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -58,7 +58,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_mode_overlay(frame, area, app, mode);
     }
     draw_mode_overlay(frame, area, app, &app.mode);
-    skip_vs16_continuation_cells(frame);
+    skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
 }
 
 /// A VS16 glyph occupies two terminal cells. Ratatui's diff can emit its
@@ -66,9 +66,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 /// CrosstermBackend assumes the previous print advanced only one cell. That
 /// writes the blank at x+2 on terminals that honor the glyph's full width.
 /// The glyph itself paints the continuation cell; omit the duplicate write.
-fn skip_vs16_continuation_cells(frame: &mut Frame) {
-    let area = frame.area();
-    let buffer = frame.buffer_mut();
+fn skip_vs16_continuation_cells(buffer: &mut Buffer, tree_area: Rect) {
+    let area = buffer.area;
     for row in area.top()..area.bottom() {
         for column in area.left()..area.right().saturating_sub(1) {
             let glyph = buffer[(column, row)].symbol();
@@ -77,8 +76,75 @@ fn skip_vs16_continuation_cells(frame: &mut Frame) {
                 if trailing.symbol().trim().is_empty() {
                     trailing.set_diff_option(CellDiffOption::Skip);
                 }
+                // A tree width change can move the title one cell left of its
+                // previous terminal position. Repaint through the row's end so
+                // the old final character is cleared even when Ratatui sees an
+                // unchanged blank cell in its previous buffer.
+                if row >= tree_area.top()
+                    && row < tree_area.bottom()
+                    && column >= tree_area.left()
+                    && column < tree_area.right()
+                {
+                    for repaint_column in (column + 2)..tree_area.right() {
+                        let cell = &mut buffer[(repaint_column, row)];
+                        if cell.diff_option != CellDiffOption::Skip {
+                            cell.set_diff_option(CellDiffOption::AlwaysUpdate);
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod vs16_diff_tests {
+    use super::*;
+
+    #[test]
+    fn tree_row_after_vs16_repaints_old_title_tail() {
+        let area = Rect::new(0, 0, 24, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer.set_string(0, 0, "│››   🖥️       Ledger  │", Style::default());
+        skip_vs16_continuation_cells(&mut buffer, area);
+
+        let icon_column = (0..area.width)
+            .find(|&column| buffer[(column, 0)].symbol().contains('\u{fe0f}'))
+            .expect("fixture has a VS16 icon");
+        assert_eq!(
+            buffer[(icon_column + 1, 0)].diff_option,
+            CellDiffOption::Skip
+        );
+        for column in (icon_column + 2)..area.right() {
+            assert_eq!(
+                buffer[(column, 0)].diff_option,
+                CellDiffOption::AlwaysUpdate,
+                "tree column {column} must repaint to clear a stale title tail"
+            );
+        }
+        // Ratatui can believe this blank is already on screen while the
+        // terminal still has the final character of the former title there.
+        let stale_tail_column = (icon_column + 2..area.right())
+            .find(|&column| {
+                buffer[(column, 0)].symbol().trim().is_empty()
+                    && buffer[(column - 1, 0)].symbol() == "r"
+            })
+            .expect("fixture has a blank after Ledger");
+        let previous = buffer.clone();
+        assert!(previous.diff(&buffer).iter().any(|(column, row, cell)| {
+            *column == stale_tail_column && *row == 0 && cell.symbol().trim().is_empty()
+        }));
+    }
+
+    #[test]
+    fn vs16_outside_tree_still_skips_only_its_continuation() {
+        let area = Rect::new(0, 0, 32, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer.set_string(26, 0, "🖥️  pane", Style::default());
+        skip_vs16_continuation_cells(&mut buffer, Rect::new(0, 0, 24, 1));
+
+        assert_eq!(buffer[(27, 0)].diff_option, CellDiffOption::Skip);
+        assert_eq!(buffer[(28, 0)].diff_option, CellDiffOption::None);
     }
 }
 
