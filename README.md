@@ -80,6 +80,12 @@ These recordings show ilium running in a terminal with real agent sessions. Sele
 
 <a href="assets/demos/13-markdown-editor.gif"><img src="assets/demos/13-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="840"></a>
 
+**Chatroom handoff (temporary preview)**
+
+Codex posts a real handoff. Claude receives it, but its weekly usage limit prevents a reply. This preview will be replaced with the complete exchange after the limit resets.
+
+<a href="assets/demos/14-chatroom-limit-preview.gif"><img src="assets/demos/14-chatroom-limit-preview.gif" alt="Real Codex Chatroom handoff followed by Claude Code's weekly usage limit refusal" width="840"></a>
+
 **Text triggers**
 
 <a href="assets/demos/16-text-triggers.gif"><img src="assets/demos/16-text-triggers.gif" alt="A text trigger responds to an agent's confirmation question" width="840"></a>
@@ -313,10 +319,13 @@ Config lives at `~/.config/ilium/config.toml` and most of it is editable live fr
 | `[http_api]` | `port` for the loopback automation listener (default `8872`) |
 | `[debug]` | `file_logging_enabled` — off by default |
 | `[git]` | Agent worktree defaults: where to start, branch prefix, checkout location, base, branch-line visibility, setup command, and close policy |
+| `[reset_planning]` | Default-on Claude and Codex public reset monitoring, plus exact or human countdown text |
 
 > **Note on the loopback HTTP API.** Each server binds `127.0.0.1:<port>` and serves `POST /create_agent`, which spawns an agent with a given prompt. It is bound to loopback and never a public interface, but it is **unauthenticated**, so any process running as your user can drive it. Change `[http_api].port` per project if you run several sessions at once — a server that cannot bind its port logs the failure and carries on without the API.
 
 Session snapshots are stored per project in `<project>/.ilium/sessions/<name>.json`. Add `.ilium/` to your project's `.gitignore`.
+
+Settings → Reset planning controls two independent, default-on public reset monitors. While the client is open, Ilium checks the Claude and Codex announcement feeds about once per hour. When a feed reports a scheduled reset, the right end of the status bar shows its time; choose **Exact** for a live days/hours/minutes/seconds countdown or **Human** for rounded wording. An announcement without an exact time is shown as scheduled with time TBD. Claude's public feed currently reports reset history but no future schedule, so it cannot provide a public-reset countdown until that source publishes one. These announcements are separate from the rolling reset times of your own account.
 
 ### Agent setup
 
