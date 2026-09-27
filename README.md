@@ -298,10 +298,6 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 
 These recordings show ilium running in a terminal. Scene captions identify simulated portions. Select a GIF to view it at full size.
 
-A terminal multiplexer for people running several AI coding agents at once.
-
-Like tmux, ilium keeps your terminals alive in a background server you can detach from and reattach to. Unlike tmux, it organizes them as a **tree** you can rearrange, and it **watches each pane to tell you what its agent is doing** — thinking, waiting for your approval, or done — so a glance at the sidebar tells you which session needs you.
-
 ```
 ╭  ≡ ● · Ilium──────────────────┬  ≡ ● · cargo run─────────────────────────────────────────────────────╮
 │▼  🗂️   acme-api               │   Compiling acme-api v0.1.0 (/ram/acme-api)                          │

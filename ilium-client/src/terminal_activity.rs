@@ -229,4 +229,41 @@ mod tests {
         );
         assert_eq!(tracker.next_fast_expiry_delay(5_250), None);
     }
+
+    #[test]
+    fn latest_activity_cause_replaces_prior_output_evidence() {
+        let pane_id = NodeId(41);
+        let mut tracker = TerminalActivityTracker::default();
+        let output = VisibleTextEvidence {
+            first_sequence: 1,
+            sequence: 1,
+            changed_rows: Some(1),
+            rows: vec![VisibleRowEvidence {
+                row_number: 1,
+                text: "OLD_OUTPUT".to_owned(),
+                blank: false,
+                truncated: false,
+            }],
+        };
+
+        tracker.record(
+            pane_id,
+            100,
+            TerminalActivityCause::VisibleTextChanged(output),
+        );
+        tracker.record(
+            pane_id,
+            100,
+            TerminalActivityCause::KeyInputQueued { byte_count: 3 },
+        );
+
+        let snapshot = tracker.snapshot(pane_id, 100).expect("latest observation");
+        assert_eq!(snapshot.phase, TerminalActivityPhase::Fast);
+        assert_eq!(snapshot.age_ms, 0);
+        assert!(matches!(
+            snapshot.cause,
+            TerminalActivityCause::KeyInputQueued { byte_count: 3 }
+        ));
+        assert_eq!(tracker.last_activity_ms.len(), 1);
+    }
 }

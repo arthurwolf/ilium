@@ -3311,7 +3311,10 @@ fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
         if status.scheduled.is_some() {
             return "On · reset announced".to_owned();
         }
-        "On · no scheduled reset".to_owned()
+        match provider {
+            ResetProvider::Claude => "On · history only".to_owned(),
+            ResetProvider::Codex => "On · no scheduled reset".to_owned(),
+        }
     };
     let mut lines = setting_lines(
         &[
