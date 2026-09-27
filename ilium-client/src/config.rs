@@ -921,6 +921,9 @@ pub struct UiSettings {
     /// Split-view child order remains structural because it controls pane
     /// placement in the right panel.
     pub tree_order: TreeOrder,
+    /// Per-project Appearance setting mirrored from `.ilium/config.yaml`.
+    /// This value is intentionally excluded from the global `config.toml`.
+    pub show_project_separators: bool,
     pub motion_level: MotionLevel,
     pub sidebar_density: SidebarDensity,
     /// Uses single-cell text symbols in the row-action hover overlay. This
@@ -997,6 +1000,7 @@ impl Default for UiSettings {
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
+            show_project_separators: false,
             motion_level: MotionLevel::default(),
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
@@ -1549,6 +1553,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             antigravity_icon,
         },
         tree_order,
+        show_project_separators: false,
         motion_level,
         sidebar_density,
         use_stable_glyphs: raw.use_stable_glyphs.unwrap_or(defaults.use_stable_glyphs),
@@ -3587,6 +3592,7 @@ mod tests {
                 antigravity_icon: AntigravityAgentIcon::Orbit,
             },
             tree_order: TreeOrder::NameDescending,
+            show_project_separators: false,
             motion_level: MotionLevel::Reduced,
             sidebar_density: SidebarDensity::Comfortable,
             show_inferred_title_icons: true,

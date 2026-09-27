@@ -941,6 +941,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 show_worktree_branch_line: app.git_settings.branch_line
                     == crate::config::GitBranchLine::WorktreeOnly,
                 tree_order: app.ui_settings.tree_order,
+                show_project_separators: app.ui_settings.show_project_separators,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
                 agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
@@ -2900,6 +2901,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::FocusedPanelWidth => "Focused width",
         AppearanceRow::MinimumTerminalWidth => "Minimum terminal width",
         AppearanceRow::TreeOrder => "Tree order",
+        AppearanceRow::ProjectSeparators => "Project separators",
         AppearanceRow::TreeRowManagementControls => "Tree row management buttons",
         AppearanceRow::AgentIdentifierMode => "Agent identifier",
         AppearanceRow::ColorScheme => "Color theme",
@@ -2940,6 +2942,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::TreeOrder => {
             "Order entries independently inside each group; split-view placement stays fixed."
+        }
+        AppearanceRow::ProjectSeparators => {
+            "Draw a frame-style line after each project’s full tree, except the last. Saved for this project."
         }
         AppearanceRow::TreeRowManagementControls => {
             "Show rename and move up/down buttons when a tree row is hovered."
@@ -3010,6 +3015,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
         AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
+        AppearanceRow::ProjectSeparators => {
+            if ui.show_project_separators {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
         AppearanceRow::TreeRowManagementControls => {
             if ui.show_tree_row_management_controls {
                 "On".to_string()
@@ -4995,6 +5007,13 @@ mod tests {
             .contains(&AppearanceRow::FocusedPanelWidth));
         assert!(rendered.contains("Tree order"));
         assert!(rendered.contains("Age up (newest first)"));
+        assert!(rendered.contains("Project separators"));
+        assert_eq!(
+            appearance_row_value(AppearanceRow::ProjectSeparators, &ui),
+            "Off"
+        );
+        assert!(AppearanceRow::visible(LeftPanelSizingMode::Fixed)
+            .contains(&AppearanceRow::ProjectSeparators));
         assert!(rendered.contains("Tree row management buttons"));
         assert!(rendered.contains("Show rename and move up/down buttons"));
         assert_eq!(

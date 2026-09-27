@@ -38,6 +38,7 @@ pub struct TreeItem<'text, Identifier> {
     pub(super) identifier: Identifier,
     pub(super) text: Text<'text>,
     pub(super) children: Vec<Self>,
+    pub(super) separator_after_subtree: bool,
 }
 
 impl<'text, Identifier> TreeItem<'text, Identifier>
@@ -54,6 +55,7 @@ where
             identifier,
             text: text.into(),
             children: Vec::new(),
+            separator_after_subtree: false,
         }
     }
 
@@ -81,7 +83,16 @@ where
             identifier,
             text: text.into(),
             children,
+            separator_after_subtree: false,
         })
+    }
+
+    /// Draws a non-interactive line after this item's visible subtree when
+    /// the containing [`Tree`](crate::Tree) enables subtree separators.
+    #[must_use]
+    pub const fn separator_after_subtree(mut self) -> Self {
+        self.separator_after_subtree = true;
+        self
     }
 
     /// Get a reference to the identifier.

@@ -71,6 +71,10 @@ pub struct Tree<'a, Identifier> {
     node_open_symbol: &'a str,
     /// Symbol displayed in front of a node without children.
     node_no_children_symbol: &'a str,
+    /// Draws marked subtree separators and reserves their rows for scrolling.
+    subtree_separators: bool,
+    subtree_separator_symbol: &'a str,
+    subtree_separator_style: Style,
 }
 
 impl<'a, Identifier> Tree<'a, Identifier>
@@ -104,6 +108,9 @@ where
             node_closed_symbol: "\u{25b6} ", // Arrow to right
             node_open_symbol: "\u{25bc} ",   // Arrow down
             node_no_children_symbol: "  ",
+            subtree_separators: false,
+            subtree_separator_symbol: "─",
+            subtree_separator_style: Style::new().fg(Color::DarkGray),
         })
     }
 
@@ -151,6 +158,18 @@ where
         self.node_no_children_symbol = symbol;
         self
     }
+
+    /// Enables separators after marked items' complete visible subtrees.
+    pub const fn subtree_separators(mut self, enabled: bool) -> Self {
+        self.subtree_separators = enabled;
+        self
+    }
+
+    /// Sets the style used for enabled subtree separators.
+    pub const fn subtree_separator_style(mut self, style: Style) -> Self {
+        self.subtree_separator_style = style;
+        self
+    }
 }
 
 #[test]
@@ -187,11 +206,20 @@ where
         }
 
         let visible = state.flatten(self.items);
+        let separator_after_indices = if self.subtree_separators {
+            subtree_separator_indices(&visible)
+        } else {
+            HashSet::new()
+        };
         state.last_biggest_index = visible.len().saturating_sub(1);
         state.last_item_heights.extend(
             visible
                 .iter()
-                .map(|flattened| flattened.item.height().max(1)),
+                .enumerate()
+                .map(|(index, flattened)| {
+                    flattened.item.height().max(1)
+                        + usize::from(separator_after_indices.contains(&index))
+                }),
         );
         if visible.is_empty() {
             return;
@@ -354,6 +382,23 @@ where
             state
                 .last_rendered_rows
                 .push((area.y, area.height, visible_index));
+
+            if separator_after_indices.contains(&visible_index) {
+                if current_height < available_height as u16 {
+                    let separator_y = area.y.saturating_add(height);
+                    let separator = self
+                        .subtree_separator_symbol
+                        .repeat(area.width as usize);
+                    buf.set_stringn(
+                        area.x,
+                        separator_y,
+                        &separator,
+                        area.width as usize,
+                        self.subtree_separator_style,
+                    );
+                }
+                current_height = current_height.saturating_add(1);
+            }
         }
         // Reuse the existing Vec's allocation across renders (this runs every
         // frame in a TUI redraw loop) instead of dropping it and collecting
@@ -363,6 +408,29 @@ where
             .last_identifiers
             .extend(visible.into_iter().map(|flattened| flattened.identifier));
     }
+}
+
+/// Finds each marked item's last currently visible descendant. The
+/// separator belongs to that rendered row, while remaining absent from the
+/// identifier list so it cannot be selected or hit-tested.
+fn subtree_separator_indices<Identifier>(
+    visible: &[Flattened<'_, Identifier>],
+) -> HashSet<usize> {
+    let mut separators = HashSet::new();
+    for (index, flattened) in visible.iter().enumerate() {
+        if !flattened.item.separator_after_subtree {
+            continue;
+        }
+        let subtree_depth = flattened.identifier.len();
+        let subtree_end = visible
+            .iter()
+            .enumerate()
+            .skip(index + 1)
+            .find(|(_, candidate)| candidate.identifier.len() <= subtree_depth)
+            .map_or(visible.len().saturating_sub(1), |(next, _)| next - 1);
+        separators.insert(subtree_end);
+    }
+    separators
 }
 
 impl<Identifier> Widget for Tree<'_, Identifier>
@@ -415,6 +483,53 @@ mod render_tests {
         assert_eq!(state.rendered_at(Position::new(2, 0)), Some(&["agent"][..]));
         assert_eq!(state.rendered_at(Position::new(2, 1)), Some(&["agent"][..]));
         assert_eq!(state.rendered_at(Position::new(2, 2)), Some(&["next"][..]));
+    }
+
+    #[test]
+    fn subtree_separator_follows_visible_descendants_and_has_no_tree_hit_target() {
+        let items = [
+            TreeItem::new("project-a", "Project A", vec![TreeItem::new_leaf("pane-a", "Pane A")])
+                .unwrap()
+                .separator_after_subtree(),
+            TreeItem::new_leaf("project-b", "Project B"),
+        ];
+        let tree = Tree::new(&items).unwrap().subtree_separators(true);
+        let area = Rect::new(0, 0, 14, 4);
+        let mut buffer = Buffer::empty(area);
+        let mut state = TreeState::default();
+        state.open(vec!["project-a"]);
+
+        StatefulWidget::render(tree, area, &mut buffer, &mut state);
+
+        assert_eq!(state.total_line_count(), 4);
+        assert_eq!(state.rendered_at(Position::new(0, 2)), None);
+        assert_eq!(buffer[(0, 2)].symbol(), "─");
+        assert_eq!(state.rendered_at(Position::new(0, 3)), Some(&["project-b"][..]));
+
+        assert!(state.scroll_down(1));
+        let scroll_area = Rect::new(0, 0, 14, 2);
+        let mut scroll_buffer = Buffer::empty(scroll_area);
+        StatefulWidget::render(
+            Tree::new(&items).unwrap().subtree_separators(true),
+            scroll_area,
+            &mut scroll_buffer,
+            &mut state,
+        );
+        assert_eq!(state.first_visible_line(), 1);
+        assert_eq!(scroll_buffer[(0, 1)].symbol(), "─");
+        assert_eq!(state.rendered_at(Position::new(0, 1)), None);
+        assert!(!state.click_at(Position::new(0, 1)));
+
+        assert!(state.scroll_down(2));
+        let mut final_buffer = Buffer::empty(scroll_area);
+        StatefulWidget::render(
+            Tree::new(&items).unwrap().subtree_separators(true),
+            scroll_area,
+            &mut final_buffer,
+            &mut state,
+        );
+        assert_eq!(state.first_visible_line(), 3);
+        assert_eq!(state.rendered_at(Position::new(0, 0)), Some(&["project-b"][..]));
     }
 
     #[test]

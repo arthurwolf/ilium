@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+use ilium_platform::file_lock::ExclusiveFileLock;
 use serde::{Deserialize, Serialize};
 use serde_norway::Value;
 
@@ -29,24 +30,14 @@ pub struct ProjectConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub project_icon: Option<String>,
+    #[serde(rename = "show project separators", default)]
+    pub show_project_separators: bool,
     // `serde_norway::Value`, not `serde_json::Value`: the JSON data model has
     // no representation for YAML-only values (non-finite floats like `.inf`,
     // `.nan`), so round-tripping through it silently rewrote them to `null`
     // and violated the "unknown fields preserved" contract above.
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
-}
-
-impl ProjectConfig {
-    /// Starts a configuration with only the durable project-name field set.
-    #[cfg(test)]
-    pub fn with_project_name(project_name: impl Into<String>) -> Self {
-        Self {
-            project_name: Some(project_name.into()),
-            project_icon: None,
-            extra: BTreeMap::new(),
-        }
-    }
 }
 
 /// Reads the project configuration. An absent file is a clean, empty config.
@@ -66,8 +57,29 @@ pub fn load(cwd: &Path) -> anyhow::Result<ProjectConfig> {
     Ok(serde_norway::from_str(&contents)?)
 }
 
-/// Atomically stores project configuration without ever touching session state.
-pub fn save(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
+/// Applies a project-config update while preserving fields written by a
+/// concurrent naming or settings operation in another attached client.
+pub fn update(cwd: &Path, mutate: impl FnOnce(&mut ProjectConfig)) -> anyhow::Result<()> {
+    let path = cwd.join(RELATIVE_PATH);
+    let Some(parent) = path.parent() else {
+        anyhow::bail!("project config path {path:?} has no parent");
+    };
+    std::fs::create_dir_all(parent)?;
+
+    let lock_path = parent.join(".config.yaml.lock");
+    let _lock = ExclusiveFileLock::acquire(&lock_path)?;
+    let mut config = load(cwd)?;
+    mutate(&mut config);
+    save_unlocked(cwd, &config)
+}
+
+/// Persists one project-scoped UI setting without replacing project metadata.
+pub fn set_show_project_separators(cwd: &Path, enabled: bool) -> anyhow::Result<()> {
+    update(cwd, |config| config.show_project_separators = enabled)
+}
+
+/// Atomically stores a config snapshot. Callers must hold `.config.yaml.lock`.
+fn save_unlocked(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
     let path = cwd.join(RELATIVE_PATH);
     let Some(parent) = path.parent() else {
         anyhow::bail!("project config path {path:?} has no parent");
@@ -125,16 +137,10 @@ mod tests {
     #[test]
     fn save_and_load_use_the_requested_project_name_property() {
         let cwd = scratch_dir();
-        let config = ProjectConfig {
-            project_name: Some("Ilium".to_string()),
-            project_icon: None,
-            extra: BTreeMap::new(),
-        };
-
-        save(&cwd, &config).unwrap();
+        update(&cwd, |latest| latest.project_name = Some("Ilium".to_string())).unwrap();
         assert_eq!(
             std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap(),
-            "project name: Ilium\n"
+            "project name: Ilium\nshow project separators: false\n"
         );
         assert_eq!(load(&cwd).unwrap().project_name.as_deref(), Some("Ilium"));
     }
@@ -148,8 +154,7 @@ mod tests {
         std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
         std::fs::write(cwd.join(RELATIVE_PATH), "ratio: .inf\n").unwrap();
 
-        let config = load(&cwd).unwrap();
-        save(&cwd, &config).unwrap();
+        update(&cwd, |_| {}).unwrap();
 
         let saved = std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap();
         assert!(saved.contains("ratio: .inf"), "got: {saved}");
@@ -161,12 +166,67 @@ mod tests {
         std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
         std::fs::write(cwd.join(RELATIVE_PATH), "theme: dusk\n").unwrap();
 
-        let mut config = load(&cwd).unwrap();
-        config.project_name = Some("Moonlight".to_string());
-        save(&cwd, &config).unwrap();
+        update(&cwd, |config| config.project_name = Some("Moonlight".to_string())).unwrap();
 
         let saved = std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap();
         assert!(saved.contains("theme: dusk"));
         assert!(saved.contains("project name: Moonlight"));
+    }
+
+    #[test]
+    fn project_subtree_separators_default_off_and_update_without_losing_metadata() {
+        let cwd = scratch_dir();
+        std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
+        std::fs::write(
+            cwd.join(RELATIVE_PATH),
+            "project name: Ilium\nproject icon: 🧭\ncustom: keep-me\n",
+        )
+        .unwrap();
+
+        let before = load(&cwd).unwrap();
+        assert!(!before.show_project_separators);
+
+        set_show_project_separators(&cwd, true).unwrap();
+
+        let after = load(&cwd).unwrap();
+        assert!(after.show_project_separators);
+        assert_eq!(after.project_name.as_deref(), Some("Ilium"));
+        assert_eq!(after.project_icon.as_deref(), Some("🧭"));
+        assert!(
+            std::fs::read_to_string(cwd.join(RELATIVE_PATH))
+                .unwrap()
+                .contains("custom: keep-me")
+        );
+    }
+
+    #[test]
+    fn concurrent_project_config_updates_preserve_both_fields() {
+        let cwd = scratch_dir();
+        let first_cwd = cwd.clone();
+        let second_cwd = cwd.clone();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let first_barrier = barrier.clone();
+        let second_barrier = barrier.clone();
+
+        let name_writer = std::thread::spawn(move || {
+            first_barrier.wait();
+            update(&first_cwd, |config| {
+                config.project_name = Some("Concurrent name".to_string());
+                config.project_icon = Some("🧭".to_string());
+            })
+            .unwrap();
+        });
+        let setting_writer = std::thread::spawn(move || {
+            second_barrier.wait();
+            set_show_project_separators(&second_cwd, true).unwrap();
+        });
+        barrier.wait();
+        name_writer.join().unwrap();
+        setting_writer.join().unwrap();
+
+        let config = load(&cwd).unwrap();
+        assert_eq!(config.project_name.as_deref(), Some("Concurrent name"));
+        assert_eq!(config.project_icon.as_deref(), Some("🧭"));
+        assert!(config.show_project_separators);
     }
 }

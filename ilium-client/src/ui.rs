@@ -428,6 +428,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             show_worktree_branch_line: app.git_settings.branch_line
                 != crate::config::GitBranchLine::Off,
             tree_order: app.ui_settings.tree_order,
+            show_project_separators: app.ui_settings.show_project_separators,
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,

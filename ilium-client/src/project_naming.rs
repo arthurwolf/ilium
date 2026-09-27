@@ -84,7 +84,7 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
     cwd: &Path,
     generator: &G,
 ) -> anyhow::Result<ProjectNameBootstrap> {
-    let mut config = project_config::load(cwd)?;
+    let config = project_config::load(cwd)?;
     if let Some(project_name) = stored_project_name(&config) {
         return Ok(ProjectNameBootstrap {
             project_name,
@@ -104,9 +104,10 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
         parse_project_name_response,
     )?;
 
-    config.project_name = Some(project_name.clone());
-    config.project_icon = Some(icon.clone());
-    project_config::save(cwd, &config)?;
+    project_config::update(cwd, |config| {
+        config.project_name = Some(project_name.clone());
+        config.project_icon = Some(icon.clone());
+    })?;
     Ok(ProjectNameBootstrap {
         project_name,
         icon: Some(icon),
@@ -245,10 +246,9 @@ mod tests {
     #[test]
     fn stored_name_skips_the_gateway_entirely() {
         let cwd = scratch_dir();
-        project_config::save(
-            &cwd,
-            &project_config::ProjectConfig::with_project_name("Existing Name"),
-        )
+        project_config::update(&cwd, |config| {
+            config.project_name = Some("Existing Name".to_string());
+        })
         .unwrap();
         let generator = FakeGenerator::new(r#"{"project_name":"Wrong"}"#);
 
@@ -273,6 +273,29 @@ mod tests {
         assert_eq!(
             project_config::load(&cwd).unwrap().project_name.as_deref(),
             Some("Stellar Tools")
+        );
+    }
+
+    #[test]
+    fn inference_update_preserves_project_scoped_ui_preferences() {
+        let cwd = scratch_dir();
+        std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
+        std::fs::write(
+            cwd.join(".ilium/config.yaml"),
+            "show project separators: true\ncustom: preserve\n",
+        )
+        .unwrap();
+        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools","icon":"✨"}"#);
+
+        let result = bootstrap_project_name(&cwd, &generator).unwrap();
+
+        let config = project_config::load(&cwd).unwrap();
+        assert_eq!(result.project_name, "Stellar Tools");
+        assert!(config.show_project_separators);
+        assert!(
+            std::fs::read_to_string(cwd.join(".ilium/config.yaml"))
+                .unwrap()
+                .contains("custom: preserve")
         );
     }
 

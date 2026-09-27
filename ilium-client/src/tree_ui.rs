@@ -416,6 +416,7 @@ pub struct TreeRenderOptions<'a> {
     pub workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
     pub show_worktree_branch_line: bool,
     pub tree_order: TreeOrder,
+    pub show_project_separators: bool,
     pub sidebar_density: SidebarDensity,
     /// An explicit opt-in for stable text symbols on default status and row
     /// action icons. Custom configured glyphs are never replaced.
@@ -543,13 +544,39 @@ fn build_children(
     ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
     let children = tree_ordering::ordered_children(tree, parent, context.tree_order);
+    let preceding_project_ids = if parent == ROOT_ID {
+        let project_ids = children
+            .iter()
+            .copied()
+            .filter(|child_id| {
+                tree.get(*child_id).is_some_and(|node| {
+                    matches!(
+                        &node.kind,
+                        NodeKind::Container(container)
+                            if matches!(&container.kind, ContainerKind::Project { .. })
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        project_ids
+            .iter()
+            .take(project_ids.len().saturating_sub(1))
+            .copied()
+            .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
     let mut items = Vec::with_capacity(children.len());
     let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
     identifier_path.extend_from_slice(ancestor_path);
     for child_id in children.iter().copied() {
         identifier_path.push(child_id);
         if let Some(node) = tree.get(child_id) {
-            items.push(build_item(tree, node, context, &identifier_path));
+            let mut item = build_item(tree, node, context, &identifier_path);
+            if preceding_project_ids.contains(&child_id) {
+                item = item.separator_after_subtree();
+            }
+            items.push(item);
         }
         identifier_path.pop();
     }
@@ -1945,7 +1972,9 @@ pub fn render(
     // among them is unreachable.
     let widget = TreeWidget::new(&items)
         .expect("top-level items have unique identifiers")
-        .highlight_style(theme::selected_style());
+        .highlight_style(theme::selected_style())
+        .subtree_separators(options.show_project_separators)
+        .subtree_separator_style(theme::border_style(options.focused));
     frame.render_stateful_widget(widget, list, state);
     let visible_line_count = state.total_line_count();
 
@@ -1978,7 +2007,9 @@ pub fn render(
         frame.render_widget(Clear, list);
         let presentation_widget = TreeWidget::new(&presentation_items)
             .expect("top-level presentation items have unique identifiers")
-            .highlight_style(theme::selected_style());
+            .highlight_style(theme::selected_style())
+            .subtree_separators(options.show_project_separators)
+            .subtree_separator_style(theme::border_style(options.focused));
         frame.render_stateful_widget(presentation_widget, list, &mut presentation_state);
         apply_row_motions(
             frame,
@@ -2492,6 +2523,7 @@ mod tests {
             recently_created,
             elapsed_ms,
             Rect::new(0, 0, 40, 8),
+            false,
         )
     }
 
@@ -2502,6 +2534,7 @@ mod tests {
         recently_created: &HashMap<NodeId, u128>,
         elapsed_ms: u128,
         area: Rect,
+        show_project_separators: bool,
     ) -> Buffer {
         render_tree_buffer_with_branch_visibility(
             tree,
@@ -2511,6 +2544,7 @@ mod tests {
             elapsed_ms,
             area,
             (true, &HashMap::new()),
+            show_project_separators,
         )
     }
 
@@ -2522,6 +2556,7 @@ mod tests {
         elapsed_ms: u128,
         area: Rect,
         branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>),
+        show_project_separators: bool,
     ) -> Buffer {
         let (show_branch_line, workspace_git_statuses) = branch_rendering;
         let titles_loading = HashSet::new();
@@ -2552,6 +2587,7 @@ mod tests {
                         workspace_git_statuses,
                         show_worktree_branch_line: show_branch_line,
                         tree_order: TreeOrder::Manual,
+                        show_project_separators,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3323,6 +3359,7 @@ mod tests {
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
+                        show_project_separators: false,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3368,6 +3405,7 @@ mod tests {
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
+                        show_project_separators: false,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3433,6 +3471,7 @@ mod tests {
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
                         tree_order: TreeOrder::Manual,
+                        show_project_separators: false,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3584,6 +3623,7 @@ mod tests {
                 &recently_created,
                 0,
                 area,
+                false,
             );
             let list = list_area(area);
             let last_cell = &buffer[(list.right().saturating_sub(1), list.y)];
@@ -3673,6 +3713,45 @@ mod tests {
     }
 
     #[test]
+    fn project_separator_follows_the_expanded_subtree_and_skips_the_last_project() {
+        let mut tree = Tree::new();
+        let first_project = tree
+            .add_project(PathBuf::from("/tmp/first-project"))
+            .unwrap();
+        let group = tree.add_group(first_project, "Nested group").unwrap();
+        tree.add_pane(group, "Shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let last_project = tree
+            .add_project(PathBuf::from("/tmp/last-project"))
+            .unwrap();
+        let area = Rect::new(0, 0, 40, 9);
+        let list = list_area(area);
+        let mut state = TreeState::default();
+        state.open(vec![first_project]);
+        state.open(vec![first_project, group]);
+
+        let buffer = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            true,
+        );
+
+        let separator_y = list.y + 3;
+        assert_eq!(state.total_line_count(), 5);
+        assert!((list.x..list.right()).all(|x| buffer[(x, separator_y)].symbol() == "─"));
+        assert_eq!(state.rendered_at(Position::new(list.x, separator_y)), None);
+        assert!(!state.click_at(Position::new(list.x, separator_y)));
+        assert_eq!(
+            state.rendered_at(Position::new(list.x, separator_y + 1)),
+            Some(&[last_project][..])
+        );
+    }
+
+    #[test]
     fn mixed_tree_rows_hit_both_worktree_lines_and_select_both() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "project").unwrap();
@@ -3708,6 +3787,7 @@ mod tests {
             &HashMap::new(),
             0,
             area,
+            false,
         );
         let branch_row = buffer_row_text(&buffer, list.y + 2);
         assert!(
@@ -3741,6 +3821,7 @@ mod tests {
             0,
             area,
             (true, &live_statuses),
+            false,
         );
         let live_branch_row = buffer_row_text(&live, list.y + 2);
         assert!(
@@ -3766,6 +3847,7 @@ mod tests {
             0,
             area,
             (false, &HashMap::new()),
+            false,
         );
         let row_after_agent = buffer_row_text(&hidden, list.y + 2);
         assert!(row_after_agent.contains("tail"), "{row_after_agent:?}");

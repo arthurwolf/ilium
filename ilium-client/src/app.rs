@@ -637,6 +637,7 @@ pub enum AppearanceRow {
     FocusedPanelWidth,
     MinimumTerminalWidth,
     TreeOrder,
+    ProjectSeparators,
     TreeRowManagementControls,
     AgentIdentifierMode,
     ColorScheme,
@@ -658,8 +659,9 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 16] = [
+    const GENERAL: [AppearanceRow; 17] = [
         Self::TreeOrder,
+        Self::ProjectSeparators,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
         Self::ColorScheme,
@@ -5799,6 +5801,18 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Toggles the durable project-scoped divider preference. Project names,
+    /// icons, and unknown YAML fields are merged under the same file lock.
+    pub fn settings_toggle_project_separators(&mut self) {
+        let enabled = !self.ui_settings.show_project_separators;
+        match crate::project_config::set_show_project_separators(&self.session_cwd, enabled) {
+            Ok(()) => self.ui_settings.show_project_separators = enabled,
+            Err(error) => {
+                self.status_message = Some(format!("Could not save project settings: {error}"));
+            }
+        }
+    }
+
     /// Toggles the optional rename and one-step move buttons in hovered tree
     /// rows. Context menus and keyboard shortcuts remain available either way.
     pub fn settings_toggle_tree_row_management_controls(&mut self) {
@@ -6291,6 +6305,7 @@ impl App {
                 self.settings_adjust_minimum_terminal_width(direction)
             }
             AppearanceRow::TreeOrder => self.settings_adjust_tree_order(direction),
+            AppearanceRow::ProjectSeparators => self.settings_toggle_project_separators(),
             AppearanceRow::TreeRowManagementControls => {
                 self.settings_toggle_tree_row_management_controls()
             }
@@ -16577,6 +16592,31 @@ mod tests {
         assert_eq!(app.take_pending_debug_logging_enabled(), Some(true));
         let loaded = crate::config::load(config_dir.path()).expect("saved debug config");
         assert!(loaded.debug.file_logging_enabled);
+    }
+
+    #[test]
+    fn project_separator_setting_persists_in_its_project_and_preserves_metadata() {
+        let project = tempfile::tempdir().unwrap();
+        let other_project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
+        std::fs::write(
+            project.path().join(".ilium/config.yaml"),
+            "project name: Current\nproject icon: 🧭\ncustom: preserve\n",
+        )
+        .unwrap();
+        let mut app = App::new("test-session".to_string(), project.path().to_path_buf());
+
+        assert!(!app.ui_settings.show_project_separators);
+        app.settings_adjust_row(AppearanceRow::ProjectSeparators, 1);
+
+        assert!(app.ui_settings.show_project_separators);
+        let persisted = crate::project_config::load(project.path()).unwrap();
+        assert!(persisted.show_project_separators);
+        assert_eq!(persisted.project_name.as_deref(), Some("Current"));
+        assert_eq!(persisted.project_icon.as_deref(), Some("🧭"));
+        assert!(!crate::project_config::load(other_project.path())
+            .unwrap()
+            .show_project_separators);
     }
 
     #[test]

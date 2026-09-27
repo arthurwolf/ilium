@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/ilium-mark.svg" alt="" width="68" height="68"></p>
 <h1 align="center">Ilium</h1>
-<p align="center"><strong>One project tree for coding agents and the tools around them.</strong><br>Arrange the work, track agent activity, and return to a saved session.</p>
+<p align="center"><strong>AI names agents and organizes your project tree.</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
 <p align="center"><sub>Linux-first · Rust · MIT</sub></p>
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#worktrees-and-session-recovery">Worktrees</a> · <a href="#full-reference">Reference</a></p>
 
@@ -64,21 +64,21 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>AI organizes your workspace</strong>
+<strong>AI names agents and organizes the project tree</strong>
 </p>
 <p>
 <a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/01-ai-tree.gif" alt="AI reorganizes the tree and opens agents whose work matches their new titles" width="100%">
+<img src="assets/demos/01-ai-tree.gif" alt="Ilium names agent panes and organizes the project tree around their work" width="100%">
 </a>
 </p>
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Voice control (simulated speech)</strong>
+<strong>Control Ilium and prompt agents with voice</strong>
 </p>
 <p>
 <a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/02-voice-control.gif" alt="Typed voice commands use a loopback model to drive real Ilium actions and a real Claude prompt; the shell-command scene is composited from a separate take" width="100%">
+<img src="assets/demos/02-voice-control.gif" alt="Voice commands trigger Ilium actions and send a prompt to Claude" width="100%">
 </a>
 </p>
 </td>
@@ -86,7 +86,7 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Automatic agent titles</strong>
+<strong>Give agent panes automatic titles</strong>
 </p>
 <p>
 <a href="assets/demos/03-contextual-titles.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -96,11 +96,11 @@ Normal mode separates agent identity, longer-running work, and current activity.
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Schedule input</strong>
+<strong>Transfer a terminal screen between panes</strong>
 </p>
 <p>
-<a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text first to an agent and then to a terminal" width="100%">
+<a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/05-screen-transfer.gif" alt="Transfer the visible screen to another pane" width="100%">
 </a>
 </p>
 </td>
@@ -108,47 +108,126 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Move screens between panes</strong>
+<strong>Inspect agent usage and recorded costs</strong>
 </p>
 <p>
-<a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/05-screen-transfer.gif" alt="The visible screen is transferred between panes" width="100%">
+<a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/06-cost-and-stats.gif" alt="Review an agent’s tokens, activity, prompts, and recorded cost" width="100%">
 </a>
 </p>
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Agents, editors, and terminals side by side</strong>
+<strong>Track agent status and current goals</strong>
 </p>
 <p>
-<a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/10-mixed-splits.gif" alt="A split view displays several terminal panes together" width="100%">
+<a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/08-agent-activity.gif" alt="Agent status changes as work progresses, with its goal shown in the tree" width="100%">
 </a>
 </p>
 </td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<p>
+<strong>Use agents, editors, and terminals side by side</strong>
+</p>
+<p>
+<a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/10-mixed-splits.gif" alt="View terminal, editor, and board panes together in a split view" width="100%">
+</a>
+</p>
+</td>
+<td width="50%" valign="top">
+<p>
+<strong>Select and copy terminal output</strong>
+</p>
+<p>
+<a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/11-smart-copy.gif" alt="Select a region of terminal output and copy it" width="100%">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<p>
+<strong>Queue prompts for an agent</strong>
+</p>
+<p>
+<a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach the agent in order as its turns finish" width="100%">
+</a>
+</p>
+</td>
+<td width="50%" valign="top">
+<p>
+<strong>Get results from background tasks</strong>
+</p>
+<p>
+<a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/14-progress-monitor.gif" alt="A background task reports its result to an agent" width="100%">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<p>
+<strong>Search agents, files, and terminals</strong>
+</p>
+<p>
+<a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/17-workspace-search.gif" alt="Find agents, files, and terminals, then jump to a match" width="100%">
+</a>
+</p>
+</td>
+<td width="50%" valign="top">
+<p>
+<strong>See live agent goals in the project tree</strong>
+</p>
+<p>
+<a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/22-goal-indicators.gif" alt="A live Codex goal changes the objective icon in the project tree" width="100%">
+</a>
+</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<p>
+<strong>Resume agent sessions after a reboot</strong>
+</p>
+<p>
+<a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/24-agents-survive-reboots.gif" alt="After a reboot sequence, Ilium restores the pane layout and resumes Claude and Codex" width="100%">
+</a>
+</p>
+</td>
+<td width="50%" valign="top"></td>
 </tr>
 </tbody>
 </table>
 
 <details>
-<summary>Show the other 20 demos</summary>
+<summary>Show the other 13 demos</summary>
 
 <table width="100%">
 <tbody>
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Agent costs and usage</strong>
+<strong>Schedule input for a pane</strong>
 </p>
 <p>
-<a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/06-cost-and-stats.gif" alt="The agent stats popover shows transcript-backed usage and activity" width="100%">
+<a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text to an agent and then to a terminal" width="100%">
 </a>
 </p>
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Interface and board settings</strong>
+<strong>Set interface and board preferences</strong>
 </p>
 <p>
 <a href="assets/demos/07a-settings-tour-a.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -160,7 +239,7 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Voice and AI provider settings</strong>
+<strong>Configure voice and AI providers</strong>
 </p>
 <p>
 <a href="assets/demos/07b-settings-tour-b.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -170,7 +249,7 @@ Normal mode separates agent identity, longer-running work, and current activity.
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Automatic title settings</strong>
+<strong>Configure automatic titles</strong>
 </p>
 <p>
 <a href="assets/demos/07c-settings-tour-c.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -182,43 +261,21 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Agent status (simulated goal icon)</strong>
-</p>
-<p>
-<a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/08-agent-activity.gif" alt="Real agent activity with a disclosed simulated Codex objective icon" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Rearrange panes without restarting</strong>
+<strong>Rearrange panes without stopping their processes</strong>
 </p>
 <p>
 <a href="assets/demos/09-pane-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it without restarting its process" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Select and copy terminal output</strong>
-</p>
-<p>
-<a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/11-smart-copy.gif" alt="Smart Copy selects a region of real terminal output and copies it" width="100%">
+<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it while its process keeps running" width="100%">
 </a>
 </p>
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Request agent updates</strong>
+<strong>Request updates from active agents</strong>
 </p>
 <p>
 <a href="assets/demos/12-ask-for-update.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/12-ask-for-update.gif" alt="Ask for update sends a prompt to active agents" width="100%">
+<img src="assets/demos/12-ask-for-update.gif" alt="Send an update request to active agents" width="100%">
 </a>
 </p>
 </td>
@@ -226,43 +283,21 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Queue prompts</strong>
-</p>
-<p>
-<a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach an agent in order as its turns finish" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Background tasks report back</strong>
-</p>
-<p>
-<a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/14-progress-monitor.gif" alt="A detached progress monitor reports a task result to an agent" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Built-in Kanban board</strong>
+<strong>Track work on a Kanban board</strong>
 </p>
 <p>
 <a href="assets/demos/15-kanban.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/15-kanban.gif" alt="A card moves through the built-in Kanban board" width="100%">
+<img src="assets/demos/15-kanban.gif" alt="Move a card through the Kanban board" width="100%">
 </a>
 </p>
 </td>
 <td width="50%" valign="top">
 <p>
-<strong>Fix TODOs with Codex</strong>
+<strong>Start a Codex agent from a TODO</strong>
 </p>
 <p>
 <a href="assets/demos/16-agent-from-line.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/16-agent-from-line.gif" alt="Create a real Codex agent from a source TODO; its goal includes the file path and line, and it repairs the source" width="100%">
+<img src="assets/demos/16-agent-from-line.gif" alt="Start Codex from a TODO line and have it repair the source" width="100%">
 </a>
 </p>
 </td>
@@ -270,29 +305,17 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Search agents, files, and terminals (edited replay)</strong>
-</p>
-<p>
-<a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/17-workspace-search.gif" alt="Workspace search returns real agent, shell, and file matches and jumps to their lines; disclosed terminal-cell repaint" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Detach without stopping agents</strong>
+<strong>Detach and reconnect while agents keep running</strong>
 </p>
 <p>
 <a href="assets/demos/18-detach-reattach.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/18-detach-reattach.gif" alt="Detach from a session and reattach while its agent and panes keep running" width="100%">
+<img src="assets/demos/18-detach-reattach.gif" alt="Reattach while agents and panes keep running" width="100%">
 </a>
 </p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <p>
-<strong>Built-in Markdown editor</strong>
+<strong>Edit Markdown in a pane</strong>
 </p>
 <p>
 <a href="assets/demos/19-markdown-editor.gif?raw=true" target="_blank" rel="noopener noreferrer">
@@ -300,35 +323,25 @@ Normal mode separates agent identity, longer-running work, and current activity.
 </a>
 </p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <p>
-<strong>Codex–Claude handoff (simulated sidebar titles)</strong>
+<strong>Coordinate Claude and Codex with Chatroom</strong>
 </p>
 <p>
 <a href="assets/demos/20-chatroom.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/20-chatroom.gif" alt="Real Codex and Claude Chatroom exchange with disclosed simulated sidebar titles" width="100%">
+<img src="assets/demos/20-chatroom.gif" alt="Claude and Codex exchange a handoff through Chatroom" width="100%">
 </a>
 </p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <p>
-<strong>Auto-answer confirmation prompts</strong>
+<strong>Respond to confirmation prompts automatically</strong>
 </p>
 <p>
 <a href="assets/demos/21-text-triggers.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent&#x27;s confirmation question" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Live agent goals</strong>
-</p>
-<p>
-<a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/22-goal-indicators.gif" alt="A real Codex goal changes the objective icon in the pane tree" width="100%">
+<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent confirmation question" width="100%">
 </a>
 </p>
 </td>
@@ -336,29 +349,18 @@ Normal mode separates agent identity, longer-running work, and current activity.
 <tr>
 <td width="50%" valign="top">
 <p>
-<strong>Restore panes and resume agents</strong>
+<strong>Restore panes and resume agent sessions</strong>
 </p>
 <p>
 <a href="assets/demos/23-snapshot-resume.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and real Claude and Codex sessions answer from their resumed context; setup and wait periods are cut" width="100%">
+<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and Claude and Codex continue from resumed context" width="100%">
 </a>
 </p>
 </td>
-<td width="50%" valign="top">
-<p>
-<strong>Agents survive reboots</strong>
-</p>
-<p>
-<a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/24-agents-survive-reboots.gif" alt="A real Ilium terminal runs a safely simulated reboot command; CRT shutoff footage and staged vintage boot scenes lead to retained footage of Ilium restoring the pane layout and resuming Claude and Codex sessions. This is a composite, not a live machine reboot capture." width="100%">
-</a>
-</p>
-</td>
+<td width="50%" valign="top"></td>
 </tr>
 </tbody>
 </table>
-
-Reboot demo credits: [CRT turn-off footage by Snowman Digital](https://www.youtube.com/watch?v=jntnUWWkZlA); [IBM VGA font from Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/) (CC BY-SA 4.0). The reboot and boot screens are simulated; the Ilium terminal and session recovery footage are real captures.
 
 </details>
 
@@ -382,7 +384,15 @@ After a server restart or reboot, Ilium rebuilds the tree and relaunches pane pr
 
 ### Install and platform support
 
-Ilium is version `0.1.0`; Linux is primary. Check [CI](https://github.com/arthurwolf/ilium/actions) for current macOS and Windows status. Builds need Git, Make, rustup/Cargo, a C toolchain, and native development libraries. Ubuntu also needs:
+Ilium is version `0.1.0`. Linux is the primary platform; macOS and Windows have platform-specific transport, process, and PTY implementations. The current CI workflow builds and tests the full workspace, with different coverage and results by OS:
+
+| Platform | Implementation and limits | Automated checks | Latest public CI for `ed82eb0` |
+| --- | --- | --- | --- |
+| Linux | Primary platform. Worktree post-create setup is available. | Workspace build and tests, plus formatting and Clippy. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597492305): formatting and Clippy passed; workspace tests failed. |
+| macOS | Platform support is implemented; worktree post-create setup is Linux-only. | Workspace build and tests on pushes to `master` and manual runs; skipped on pull requests. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597491928): build passed; workspace tests failed. |
+| Windows | Platform support is implemented; worktree post-create setup is Linux-only. Most PTY integration tests are Unix-only; one ConPTY smoke test runs on Windows. | Workspace build and tests. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597492028): build failed, so tests did not run. |
+
+Run #102 is the latest public CI result checked on 2026-09-27. The public run page reports job and step outcomes; it does not expose the underlying failure details while logged out. Check [CI](https://github.com/arthurwolf/ilium/actions) for newer results. Builds need Git, Make, rustup/Cargo, a C toolchain, and native development libraries. Ubuntu also needs:
 
 ```sh
 sudo apt-get update

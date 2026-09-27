@@ -516,6 +516,14 @@ async fn run_inner(
     // real terminal attached, once. See `App::probe_terminal_image_support`.
     app.probe_terminal_image_support();
     app.apply_ui_settings(config.ui);
+    match crate::project_config::load(&app.session_cwd) {
+        Ok(project_config) => {
+            app.ui_settings.show_project_separators = project_config.show_project_separators;
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to load project-scoped UI settings");
+        }
+    }
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
