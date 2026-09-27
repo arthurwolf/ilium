@@ -90,6 +90,7 @@ pub mod session_stats;
 pub mod session_stats_popover;
 pub mod session_stats_store;
 pub mod session_stats_ui;
+pub mod settings_help;
 pub mod settings_ui;
 pub mod setup_prompt;
 pub mod smart_copy;

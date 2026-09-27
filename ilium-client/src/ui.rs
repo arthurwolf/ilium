@@ -484,6 +484,20 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             app.keyboard_settings.navigation_shortcut_base,
             &app.keybindings,
         ),
+        Mode::SettingsHelp(state) => {
+            let Some(topic) = crate::settings_help::catalog::by_id(&state.topic_id) else {
+                crate::settings_help::dialog::render_missing(frame, area, &state.topic_id);
+                return;
+            };
+            crate::settings_help::dialog::render(
+                frame,
+                area,
+                topic,
+                state,
+                app.ui_settings.motion_level,
+                Instant::now(),
+            );
+        }
         Mode::ContextMenu(menu) => {
             draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings);
         }
@@ -2176,6 +2190,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         // than a wildcard so this stays exhaustive if that early return is
         // ever removed.
         Mode::Settings(_) => "SETTINGS",
+        Mode::SettingsHelp(_) => "SETTINGS HELP",
     };
 
     let bar_style = theme::statusbar_style();

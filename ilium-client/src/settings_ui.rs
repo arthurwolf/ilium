@@ -170,6 +170,14 @@ pub struct SettingsLayout {
     pub header_area: Rect,
     pub tab_list_area: Rect,
     pub content_area: Rect,
+    pub help_rail_area: Rect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsHelpAnchor {
+    pub topic_id: String,
+    pub hit_area: Rect,
+    pub selected: bool,
 }
 
 /// Splits `area` into the header/tab-list/content regions. No vertical
@@ -195,6 +203,7 @@ pub fn compute_layout(area: Rect) -> SettingsLayout {
             Constraint::Length(tab_list_width),
             Constraint::Length(gap_width),
             Constraint::Min(1),
+            Constraint::Length(if body_area.width >= 4 { 3 } else { 0 }),
         ])
         .split(body_area);
 
@@ -202,6 +211,7 @@ pub fn compute_layout(area: Rect) -> SettingsLayout {
         header_area,
         tab_list_area: columns[0],
         content_area: columns[2],
+        help_rail_area: columns[3],
     }
 }
 
@@ -249,6 +259,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     render_tab_list(frame, layout.tab_list_area, state.tab);
     if state.tab == SettingsTab::Icons {
         render_icons_tab(frame, layout.content_area, app, state);
+        render_settings_help_anchors(frame, &layout, app, state);
         return;
     }
     match state.tab {
@@ -384,6 +395,410 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
     }
+    render_settings_help_anchors(frame, &layout, app, state);
+}
+
+fn push_help_anchor(
+    anchors: &mut Vec<SettingsHelpAnchor>,
+    layout: &SettingsLayout,
+    topic_id: &str,
+    virtual_line: u16,
+    scroll: u16,
+    selected: bool,
+) {
+    let Some(topic) = crate::settings_help::catalog::by_id(topic_id) else {
+        return;
+    };
+    let _ = topic;
+    if virtual_line < scroll {
+        return;
+    }
+    let Some(y) = layout
+        .content_area
+        .y
+        .checked_add(virtual_line.saturating_sub(scroll))
+    else {
+        return;
+    };
+    if y >= layout.content_area.bottom() || layout.help_rail_area.width == 0 {
+        return;
+    }
+    anchors.push(SettingsHelpAnchor {
+        topic_id: topic_id.to_owned(),
+        hit_area: Rect::new(layout.help_rail_area.x, y, layout.help_rail_area.width, 1),
+        selected,
+    });
+}
+
+/// Geometry for the visible question-mark rail. Row positions use the same
+/// source line lists and scroll offset as the settings renderer.
+pub fn settings_help_anchors(
+    layout: &SettingsLayout,
+    app: &App,
+    state: &SettingsState,
+) -> Vec<SettingsHelpAnchor> {
+    let mut anchors = Vec::new();
+    let simple_rows = |prefix: &'static str, count: usize| {
+        (0..count)
+            .map(|index| (index, format!("{prefix}{:02}", index + 1)))
+            .collect::<Vec<_>>()
+    };
+    match state.tab {
+        SettingsTab::About => {}
+        SettingsTab::Terminal => {
+            for (i, id) in simple_rows("TERM-", 2) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Editor => {
+            for (i, id) in simple_rows("ED-", 6) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Session => {
+            for (i, id) in simple_rows("SES-", 2) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Git => {
+            for (i, id) in simple_rows("GIT-", 7) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::KanbanBoard => {
+            for (i, id) in simple_rows("KAN-", 2) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Sound => {
+            for (i, id) in simple_rows("SND-", 9) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::VoiceControl => {
+            for (i, id) in simple_rows("VOICE-", 14) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::ResetPlanning => {
+            for (i, id) in simple_rows("RESET-", 3) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Debug => push_help_anchor(
+            &mut anchors,
+            layout,
+            "DEBUG-01",
+            1,
+            state.scroll,
+            state.selected_row == 0,
+        ),
+        SettingsTab::Api => push_help_anchor(
+            &mut anchors,
+            layout,
+            "API-01",
+            1,
+            state.scroll,
+            state.selected_row == 0,
+        ),
+        SettingsTab::TextTriggers => {
+            for i in 0..app.text_trigger_settings.triggers.len() {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    "TEXTTRIGGER-01",
+                    3 + i as u16,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "TEXTTRIGGER-01",
+                4 + app.text_trigger_settings.triggers.len() as u16,
+                state.scroll,
+                state.selected_row == app.text_trigger_settings.triggers.len(),
+            );
+        }
+        SettingsTab::Appearance => {
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "AP-01",
+                4,
+                state.scroll,
+                state.selected_row == 0,
+            );
+            let view = appearance_view(
+                &app.ui_settings,
+                state.selected_row,
+                layout.content_area.width,
+            );
+            for (row, line) in view.row_lines {
+                let id = match row {
+                    AppearanceRow::LeftPanelSizingMode => "AP-01",
+                    AppearanceRow::FixedPanelWidth => "AP-02",
+                    AppearanceRow::UnfocusedPanelWidth => "AP-03",
+                    AppearanceRow::FocusedPanelWidth => "AP-04",
+                    AppearanceRow::MinimumTerminalWidth => "AP-05",
+                    AppearanceRow::TreeOrder => "AP-06",
+                    AppearanceRow::TreeRowManagementControls => "AP-07",
+                    AppearanceRow::AgentIdentifierMode => "AP-08",
+                    AppearanceRow::ColorScheme => "AP-09",
+                    AppearanceRow::MotionLevel => "AP-10",
+                    AppearanceRow::SidebarDensity => "AP-11",
+                    AppearanceRow::UseStableGlyphs => "AP-12",
+                    AppearanceRow::ShowInferredTitleIcons => "AP-13",
+                    AppearanceRow::AgentDebugMenu => "AP-14",
+                    AppearanceRow::ContextMenuIcons => "AP-15",
+                    AppearanceRow::AgentToolbar => "AP-16",
+                    AppearanceRow::ShowToolbarLabels => "AP-17",
+                    AppearanceRow::LastPrompt => "AP-18",
+                    AppearanceRow::LastPromptMaxLines => "AP-19",
+                    AppearanceRow::ProgressMonitor => "AP-20",
+                    AppearanceRow::ProgressMonitorMaxLines => "AP-21",
+                    AppearanceRow::ProgressFillStyle => "AP-22",
+                    AppearanceRow::TerminalTextSelection => "AP-23",
+                    AppearanceRow::LockClosedEnabled => "AP-24",
+                    AppearanceRow::ProjectSeparators => "AP-25",
+                };
+                let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
+                    .get(state.selected_row)
+                    == Some(&row);
+                push_help_anchor(&mut anchors, layout, id, line, state.scroll, selected);
+            }
+        }
+        SettingsTab::AgentMonitoring => {
+            let view = agent_monitoring_view(app, state.selected_row, layout.content_area.width);
+            for (row, line) in view.row_lines {
+                let id = match row {
+                    crate::app::AgentMonitoringRow::Mode => "AM-01".to_owned(),
+                    crate::app::AgentMonitoringRow::WorkingPollSeconds => "AM-02".to_owned(),
+                    crate::app::AgentMonitoringRow::IdlePollSeconds => "AM-03".to_owned(),
+                    crate::app::AgentMonitoringRow::CustomSignaturesHeading
+                    | crate::app::AgentMonitoringRow::CustomSignature(_)
+                    | crate::app::AgentMonitoringRow::AddCustomSignature => "AM-04".to_owned(),
+                    crate::app::AgentMonitoringRow::ProgressMonitor => "AP-20".to_owned(),
+                    crate::app::AgentMonitoringRow::ProgressMonitorMaxLines => "AP-21".to_owned(),
+                    crate::app::AgentMonitoringRow::ProgressFillStyle => "AP-22".to_owned(),
+                    crate::app::AgentMonitoringRow::StatusIcon(target) => {
+                        let offset = crate::agent_monitoring::STATUS_ICON_TARGETS
+                            .iter()
+                            .position(|candidate| *candidate == target)
+                            .unwrap_or(0);
+                        format!("AM-{:02}", offset + 5)
+                    }
+                };
+                let selected = agent_monitoring_rows(app).get(state.selected_row) == Some(&row)
+                    || (matches!(row, crate::app::AgentMonitoringRow::Mode)
+                        && state.selected_row == 0);
+                push_help_anchor(&mut anchors, layout, &id, line, state.scroll, selected);
+            }
+        }
+        SettingsTab::Icons => {
+            for (index, _) in crate::agent_monitoring::general_icon_targets()
+                .iter()
+                .enumerate()
+            {
+                let id = format!("IC-{:02}", index + 1);
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    4 + (index as u16).saturating_sub(state.scroll) * 2,
+                    0,
+                    state.selected_row == index,
+                );
+            }
+        }
+        SettingsTab::Inference => {
+            let warning = if app.inference_settings.selected_provider
+                == ilium_inference::InferenceProviderKind::KiloGateway
+            {
+                2
+            } else {
+                0
+            };
+            for (i, row) in inference_rows(&app.inference_settings).iter().enumerate() {
+                let id = match row {
+                    InferenceRow::Provider => "INF-01",
+                    InferenceRow::RefreshModels => "INF-13",
+                    InferenceRow::Test => "INF-14",
+                    InferenceRow::KiloGatewayModel => "INF-12",
+                    InferenceRow::Field(field) => match field {
+                        InferenceSettingField::OllamaUrl => "INF-02",
+                        InferenceSettingField::OllamaModel => "INF-03",
+                        InferenceSettingField::OpenAiUrl => "INF-04",
+                        InferenceSettingField::OpenAiApiKey => "INF-05",
+                        InferenceSettingField::OpenAiModel => "INF-06",
+                        InferenceSettingField::AnthropicUrl => "INF-07",
+                        InferenceSettingField::AnthropicApiKey => "INF-08",
+                        InferenceSettingField::AnthropicModel => "INF-09",
+                        InferenceSettingField::OpenRouterApiKey => "INF-10",
+                        InferenceSettingField::OpenRouterModel => "INF-11",
+                    },
+                };
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    id,
+                    1 + warning + i as u16 * 3,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Titles => {
+            push_help_anchor(&mut anchors, layout, "TITLE-01", 8, state.scroll, true)
+        }
+        SettingsTab::Triggers => {
+            for i in 0..crate::trigger_settings::TriggerEvent::ALL.len() {
+                let id = format!("TRIGGER-{:02}", i + 1);
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    4 + i as u16 * 4,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Setup => {
+            for (i, row) in app.agent_setup_rows().iter().enumerate() {
+                let id = match row.feature() {
+                    crate::agent_feature_setup::AgentFeature::Chatroom => "SETUP-01",
+                    crate::agent_feature_setup::AgentFeature::Progress => "SETUP-02",
+                };
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    id,
+                    4 + i as u16 * 2,
+                    state.scroll,
+                    state.selected_row == i,
+                );
+            }
+        }
+        SettingsTab::Keyboard => {
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "KEY-01",
+                1,
+                state.scroll,
+                state.selected_row == 0,
+            );
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "KEY-02",
+                3,
+                state.scroll,
+                state.selected_row == 1,
+            );
+            push_help_anchor(&mut anchors, layout, "KEY-38", 7, state.scroll, false);
+            for index in 0..35 {
+                let id = format!("KEY-{:02}", index + 3);
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    KEYBOARD_TABLE_FIRST_ROW + index as u16,
+                    state.scroll,
+                    state.selected_row == index + 2,
+                );
+            }
+        }
+    }
+    anchors
+}
+
+fn render_settings_help_anchors(
+    frame: &mut Frame,
+    layout: &SettingsLayout,
+    app: &App,
+    state: &SettingsState,
+) {
+    for anchor in settings_help_anchors(layout, app, state) {
+        let style = if anchor.selected {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::DIM)
+        };
+        frame.render_widget(Paragraph::new(Span::styled("?", style)), anchor.hit_area);
+    }
+}
+
+pub fn settings_help_at(
+    layout: &SettingsLayout,
+    app: &App,
+    state: &SettingsState,
+    position: Position,
+) -> Option<String> {
+    settings_help_anchors(layout, app, state)
+        .into_iter()
+        .find(|anchor| anchor.hit_area.contains(position))
+        .map(|anchor| anchor.topic_id)
 }
 
 /// Renders the title line (with the [`CLOSE_LABEL`] button right-aligned on
@@ -4268,6 +4683,131 @@ mod tests {
     }
 
     #[test]
+    fn every_visible_settings_help_anchor_resolves_inside_its_reserved_rail() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let app = App::new(
+            "settings-help-anchor-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        let layout = compute_layout(Rect::new(0, 0, 140, 80));
+        assert_eq!(layout.content_area.right(), layout.help_rail_area.x);
+
+        for tab in SettingsTab::ALL {
+            let state = SettingsState {
+                tab,
+                ..SettingsState::default()
+            };
+            let anchors = settings_help_anchors(&layout, &app, &state);
+            if tab == SettingsTab::About {
+                assert!(anchors.is_empty());
+                continue;
+            }
+            assert!(!anchors.is_empty(), "{tab:?} has no help anchors");
+            assert!(
+                anchors.iter().any(|anchor| anchor.selected),
+                "{tab:?} has no selected help anchor"
+            );
+            for anchor in anchors {
+                assert!(
+                    crate::settings_help::catalog::by_id(&anchor.topic_id).is_some(),
+                    "{} has no catalog entry on {tab:?}",
+                    anchor.topic_id
+                );
+                assert!(layout
+                    .help_rail_area
+                    .contains(Position::new(anchor.hit_area.x, anchor.hit_area.y)));
+                assert_eq!(
+                    settings_help_at(
+                        &layout,
+                        &app,
+                        &state,
+                        Position::new(anchor.hit_area.x, anchor.hit_area.y)
+                    ),
+                    Some(anchor.topic_id)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_catalog_topic_is_reachable_from_a_visible_settings_row() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "settings-help-coverage-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        let layout = compute_layout(Rect::new(0, 0, 160, 100));
+        let mut reachable = std::collections::BTreeSet::new();
+
+        for tab in SettingsTab::ALL {
+            match tab {
+                SettingsTab::Appearance => {
+                    for mode in LeftPanelSizingMode::ALL {
+                        app.ui_settings.left_panel_sizing.mode = mode;
+                        let state = SettingsState {
+                            tab,
+                            ..SettingsState::default()
+                        };
+                        reachable.extend(
+                            settings_help_anchors(&layout, &app, &state)
+                                .into_iter()
+                                .map(|anchor| anchor.topic_id),
+                        );
+                    }
+                }
+                SettingsTab::Inference => {
+                    for provider in ilium_inference::InferenceProviderKind::ALL {
+                        app.inference_settings.selected_provider = provider;
+                        let state = SettingsState {
+                            tab,
+                            ..SettingsState::default()
+                        };
+                        reachable.extend(
+                            settings_help_anchors(&layout, &app, &state)
+                                .into_iter()
+                                .map(|anchor| anchor.topic_id),
+                        );
+                    }
+                }
+                SettingsTab::Icons => {
+                    for scroll in 0..crate::agent_monitoring::general_icon_targets().len() as u16 {
+                        let state = SettingsState {
+                            tab,
+                            scroll,
+                            ..SettingsState::default()
+                        };
+                        reachable.extend(
+                            settings_help_anchors(&layout, &app, &state)
+                                .into_iter()
+                                .map(|anchor| anchor.topic_id),
+                        );
+                    }
+                }
+                _ => {
+                    let state = SettingsState {
+                        tab,
+                        ..SettingsState::default()
+                    };
+                    reachable.extend(
+                        settings_help_anchors(&layout, &app, &state)
+                            .into_iter()
+                            .map(|anchor| anchor.topic_id),
+                    );
+                }
+            }
+        }
+
+        let catalog_ids = crate::settings_help::catalog::all()
+            .iter()
+            .map(|topic| topic.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            reachable, catalog_ids,
+            "every topic needs a visible source row"
+        );
+    }
+
+    #[test]
     fn tab_at_maps_each_row_to_its_tab() {
         let area = Rect::new(0, 0, 30, 22);
         for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
@@ -4556,7 +5096,8 @@ mod tests {
 
     #[test]
     fn roomy_icons_table_aligns_later_columns_after_short_and_long_titles() {
-        let content_area = compute_layout(Rect::new(0, 0, 160, 45)).content_area;
+        // The reserved Settings help rail now uses three terminal cells.
+        let content_area = compute_layout(Rect::new(0, 0, 170, 45)).content_area;
         let (table, _) = icon_tab_columns(content_area);
         let geometry = IconTableGeometry::for_outer_width(table.width);
         let choices = IconTarget::Folder

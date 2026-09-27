@@ -137,7 +137,10 @@ mod tests {
     #[test]
     fn save_and_load_use_the_requested_project_name_property() {
         let cwd = scratch_dir();
-        update(&cwd, |latest| latest.project_name = Some("Ilium".to_string())).unwrap();
+        update(&cwd, |latest| {
+            latest.project_name = Some("Ilium".to_string())
+        })
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap(),
             "project name: Ilium\nshow project separators: false\n"
@@ -166,7 +169,10 @@ mod tests {
         std::fs::create_dir_all(cwd.join(".ilium")).unwrap();
         std::fs::write(cwd.join(RELATIVE_PATH), "theme: dusk\n").unwrap();
 
-        update(&cwd, |config| config.project_name = Some("Moonlight".to_string())).unwrap();
+        update(&cwd, |config| {
+            config.project_name = Some("Moonlight".to_string())
+        })
+        .unwrap();
 
         let saved = std::fs::read_to_string(cwd.join(RELATIVE_PATH)).unwrap();
         assert!(saved.contains("theme: dusk"));
@@ -192,11 +198,9 @@ mod tests {
         assert!(after.show_project_separators);
         assert_eq!(after.project_name.as_deref(), Some("Ilium"));
         assert_eq!(after.project_icon.as_deref(), Some("🧭"));
-        assert!(
-            std::fs::read_to_string(cwd.join(RELATIVE_PATH))
-                .unwrap()
-                .contains("custom: keep-me")
-        );
+        assert!(std::fs::read_to_string(cwd.join(RELATIVE_PATH))
+            .unwrap()
+            .contains("custom: keep-me"));
     }
 
     #[test]

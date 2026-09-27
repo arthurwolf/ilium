@@ -332,6 +332,9 @@ pub enum Mode {
     /// Reached via `Action::Settings`, the tree footer's settings button, or
     /// `ContextMenuAction::Settings` (right-click the tree panel).
     Settings(SettingsState),
+    /// Read-only explanation and animated specimen opened from a Settings row.
+    /// The parent Settings state remains on the modal stack for exact return.
+    SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
     /// Full-screen finder over terminal replay and locally-open buffers.
     Search(Box<SearchState>),
 }
@@ -16614,9 +16617,11 @@ mod tests {
         assert!(persisted.show_project_separators);
         assert_eq!(persisted.project_name.as_deref(), Some("Current"));
         assert_eq!(persisted.project_icon.as_deref(), Some("🧭"));
-        assert!(!crate::project_config::load(other_project.path())
-            .unwrap()
-            .show_project_separators);
+        assert!(
+            !crate::project_config::load(other_project.path())
+                .unwrap()
+                .show_project_separators
+        );
     }
 
     #[test]

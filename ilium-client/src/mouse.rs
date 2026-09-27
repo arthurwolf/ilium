@@ -320,6 +320,22 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         }
         return;
     }
+    if matches!(app.mode, Mode::SettingsHelp(_)) {
+        let Mode::SettingsHelp(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::SettingsHelp above");
+        };
+        let layout = crate::settings_help::dialog::layout(app.layout.screen_area);
+        let position = Position::new(mouse.column, mouse.row);
+        state.focus_panel_at(layout, position.x, position.y);
+        match mouse.kind {
+            MouseEventKind::ScrollUp => state.scroll_focused_panel(-3),
+            MouseEventKind::ScrollDown => state.scroll_focused_panel(3),
+            _ => {}
+        }
+        app.mode = Mode::SettingsHelp(state);
+        return;
+    }
+
     if matches!(app.mode, Mode::Settings(_)) {
         let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Settings above");
@@ -1783,6 +1799,19 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             if crate::settings_ui::close_button_hit(layout.header_area, position) {
                 app.mode = Mode::Normal;
                 return;
+            }
+            if let Some(topic_id) =
+                crate::settings_ui::settings_help_at(&layout, app, &state, position)
+            {
+                if let Some(topic) = crate::settings_help::catalog::by_id(&topic_id) {
+                    let help = crate::settings_help::dialog::SettingsHelpState::new(
+                        topic_id,
+                        topic.frames.len(),
+                        app.ui_settings.motion_level,
+                    );
+                    app.push_modal_over(Mode::Settings(state), Mode::SettingsHelp(help));
+                    return;
+                }
             }
             if let Some(tab) =
                 crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)

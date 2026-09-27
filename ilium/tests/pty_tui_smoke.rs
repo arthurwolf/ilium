@@ -1450,6 +1450,34 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected agent identifier controls in User Appearance, got: {:?}",
         tui.screen_text()
     );
+    tui.write(b"?")
+        .expect("opening help for the selected Appearance setting");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Left panel sizing mode")
+                    && screen.contains("What this setting does")
+                    && screen.contains("Illustration")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the selected setting's two-panel help dialog, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b")
+        .expect("closing Settings help back to the same Settings screen");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Agent identifier")
+                && tui.screen_text().contains("Full name"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected Settings to be restored after closing help, got: {:?}",
+        tui.screen_text()
+    );
     tui.write(b"l")
         .expect("selecting the width-dependent sizing card");
     assert!(
@@ -1474,7 +1502,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // Use the settings view's `j`/`l` aliases rather than escape-prefixed
     // arrows: a real PTY can deliver an isolated escape before the rest of
     // a CSI sequence, which would legitimately close this full-screen view.
-    tui.write(b"jjjjjll")
+    let agent_identifier_row = ilium_client::app::AppearanceRow::visible(
+        ilium_client::config::LeftPanelSizingMode::FocusDependent,
+    )
+    .iter()
+    .position(|row| *row == ilium_client::app::AppearanceRow::AgentIdentifierMode)
+    .expect("the focus-dependent Appearance rows include the agent identifier");
+    let settings_navigation = format!("{}ll", "j".repeat(agent_identifier_row));
+    tui.write(settings_navigation.as_bytes())
         .expect("selecting icon mode for agent identifiers");
     let agent_controls_persisted = wait_until(
         || {

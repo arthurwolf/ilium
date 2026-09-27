@@ -212,15 +212,12 @@ where
             HashSet::new()
         };
         state.last_biggest_index = visible.len().saturating_sub(1);
-        state.last_item_heights.extend(
-            visible
-                .iter()
-                .enumerate()
-                .map(|(index, flattened)| {
-                    flattened.item.height().max(1)
-                        + usize::from(separator_after_indices.contains(&index))
-                }),
-        );
+        state
+            .last_item_heights
+            .extend(visible.iter().enumerate().map(|(index, flattened)| {
+                flattened.item.height().max(1)
+                    + usize::from(separator_after_indices.contains(&index))
+            }));
         if visible.is_empty() {
             return;
         }
@@ -386,9 +383,7 @@ where
             if separator_after_indices.contains(&visible_index) {
                 if current_height < available_height as u16 {
                     let separator_y = area.y.saturating_add(height);
-                    let separator = self
-                        .subtree_separator_symbol
-                        .repeat(area.width as usize);
+                    let separator = self.subtree_separator_symbol.repeat(area.width as usize);
                     buf.set_stringn(
                         area.x,
                         separator_y,
@@ -413,9 +408,7 @@ where
 /// Finds each marked item's last currently visible descendant. The
 /// separator belongs to that rendered row, while remaining absent from the
 /// identifier list so it cannot be selected or hit-tested.
-fn subtree_separator_indices<Identifier>(
-    visible: &[Flattened<'_, Identifier>],
-) -> HashSet<usize> {
+fn subtree_separator_indices<Identifier>(visible: &[Flattened<'_, Identifier>]) -> HashSet<usize> {
     let mut separators = HashSet::new();
     for (index, flattened) in visible.iter().enumerate() {
         if !flattened.item.separator_after_subtree {
@@ -427,7 +420,7 @@ fn subtree_separator_indices<Identifier>(
             .enumerate()
             .skip(index + 1)
             .find(|(_, candidate)| candidate.identifier.len() <= subtree_depth)
-            .map_or(visible.len().saturating_sub(1), |(next, _)| next - 1);
+            .map_or_else(|| visible.len().saturating_sub(1), |(next, _)| next - 1);
         separators.insert(subtree_end);
     }
     separators
@@ -488,9 +481,13 @@ mod render_tests {
     #[test]
     fn subtree_separator_follows_visible_descendants_and_has_no_tree_hit_target() {
         let items = [
-            TreeItem::new("project-a", "Project A", vec![TreeItem::new_leaf("pane-a", "Pane A")])
-                .unwrap()
-                .separator_after_subtree(),
+            TreeItem::new(
+                "project-a",
+                "Project A",
+                vec![TreeItem::new_leaf("pane-a", "Pane A")],
+            )
+            .unwrap()
+            .separator_after_subtree(),
             TreeItem::new_leaf("project-b", "Project B"),
         ];
         let tree = Tree::new(&items).unwrap().subtree_separators(true);
@@ -504,7 +501,10 @@ mod render_tests {
         assert_eq!(state.total_line_count(), 4);
         assert_eq!(state.rendered_at(Position::new(0, 2)), None);
         assert_eq!(buffer[(0, 2)].symbol(), "─");
-        assert_eq!(state.rendered_at(Position::new(0, 3)), Some(&["project-b"][..]));
+        assert_eq!(
+            state.rendered_at(Position::new(0, 3)),
+            Some(&["project-b"][..])
+        );
 
         assert!(state.scroll_down(1));
         let scroll_area = Rect::new(0, 0, 14, 2);
@@ -529,7 +529,10 @@ mod render_tests {
             &mut state,
         );
         assert_eq!(state.first_visible_line(), 3);
-        assert_eq!(state.rendered_at(Position::new(0, 0)), Some(&["project-b"][..]));
+        assert_eq!(
+            state.rendered_at(Position::new(0, 0)),
+            Some(&["project-b"][..])
+        );
     }
 
     #[test]

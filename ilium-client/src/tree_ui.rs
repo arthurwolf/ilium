@@ -2543,8 +2543,7 @@ mod tests {
             recently_created,
             elapsed_ms,
             area,
-            (true, &HashMap::new()),
-            show_project_separators,
+            (true, &HashMap::new(), show_project_separators),
         )
     }
 
@@ -2555,10 +2554,9 @@ mod tests {
         recently_created: &HashMap<NodeId, u128>,
         elapsed_ms: u128,
         area: Rect,
-        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>),
-        show_project_separators: bool,
+        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
     ) -> Buffer {
-        let (show_branch_line, workspace_git_statuses) = branch_rendering;
+        let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -3820,8 +3818,7 @@ mod tests {
             &HashMap::new(),
             0,
             area,
-            (true, &live_statuses),
-            false,
+            (true, &live_statuses, false),
         );
         let live_branch_row = buffer_row_text(&live, list.y + 2);
         assert!(
@@ -3846,8 +3843,7 @@ mod tests {
             &HashMap::new(),
             0,
             area,
-            (false, &HashMap::new()),
-            false,
+            (false, &HashMap::new(), false),
         );
         let row_after_agent = buffer_row_text(&hidden, list.y + 2);
         assert!(row_after_agent.contains("tail"), "{row_after_agent:?}");

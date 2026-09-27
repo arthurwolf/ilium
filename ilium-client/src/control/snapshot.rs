@@ -495,6 +495,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
+        Mode::SettingsHelp(_) => "settings_help",
         Mode::Search(_) => "search",
     }
 }

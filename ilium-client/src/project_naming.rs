@@ -292,11 +292,9 @@ mod tests {
         let config = project_config::load(&cwd).unwrap();
         assert_eq!(result.project_name, "Stellar Tools");
         assert!(config.show_project_separators);
-        assert!(
-            std::fs::read_to_string(cwd.join(".ilium/config.yaml"))
-                .unwrap()
-                .contains("custom: preserve")
-        );
+        assert!(std::fs::read_to_string(cwd.join(".ilium/config.yaml"))
+            .unwrap()
+            .contains("custom: preserve"));
     }
 
     #[test]

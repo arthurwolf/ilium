@@ -205,6 +205,7 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_session_recovery_event(app, pane_count, &event)
         }
         Mode::Settings(state) => handle_settings_event(app, state, &event),
+        Mode::SettingsHelp(state) => handle_settings_help_event(app, state, &event),
         Mode::Search(state) => handle_search_event(app, state, &event),
         Mode::Move => {
             app.mode = Mode::Move;
@@ -904,6 +905,53 @@ fn handle_help_event(app: &mut App, event: &Event) {
     } else if keymap::is_leader_key(key, app.keyboard_settings.shortcut_base) {
         app.set_help_leader_pending(true);
     }
+}
+
+fn handle_settings_help_event(
+    app: &mut App,
+    mut state: crate::settings_help::dialog::SettingsHelpState,
+    event: &Event,
+) {
+    let Event::Key(key) = event else {
+        app.mode = Mode::SettingsHelp(state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::SettingsHelp(state);
+        return;
+    }
+
+    let frame_count =
+        crate::settings_help::catalog::by_id(&state.topic_id).map_or(0, |topic| topic.frames.len());
+    let motion = app.ui_settings.motion_level;
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.mode = Mode::SettingsHelp(state);
+            app.pop_modal();
+            return;
+        }
+        KeyCode::Left | KeyCode::Char('h') => state.step_frame(frame_count, -1, motion),
+        KeyCode::Right | KeyCode::Char('l') => state.step_frame(frame_count, 1, motion),
+        KeyCode::Char(' ') => state.toggle_playback(frame_count, motion),
+        KeyCode::Tab => {
+            state.focused_panel = match state.focused_panel {
+                crate::settings_help::dialog::HelpPanel::Explanation => {
+                    crate::settings_help::dialog::HelpPanel::Illustration
+                }
+                crate::settings_help::dialog::HelpPanel::Illustration => {
+                    crate::settings_help::dialog::HelpPanel::Explanation
+                }
+            }
+        }
+        KeyCode::PageUp => state.scroll_focused_panel(-8),
+        KeyCode::PageDown => state.scroll_focused_panel(8),
+        KeyCode::Home => match state.focused_panel {
+            crate::settings_help::dialog::HelpPanel::Explanation => state.explanation_scroll = 0,
+            crate::settings_help::dialog::HelpPanel::Illustration => state.illustration_scroll = 0,
+        },
+        _ => {}
+    }
+    app.mode = Mode::SettingsHelp(state);
 }
 
 /// While `Mode::Explorer` is active: forwards the event to the overlay,
@@ -2186,6 +2234,24 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         app.mode = Mode::Settings(state);
         return;
+    }
+
+    if key.code == KeyCode::Char('?') {
+        let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+        if let Some(anchor) = crate::settings_ui::settings_help_anchors(&layout, app, &state)
+            .into_iter()
+            .find(|anchor| anchor.selected)
+        {
+            if let Some(topic) = crate::settings_help::catalog::by_id(&anchor.topic_id) {
+                let help = crate::settings_help::dialog::SettingsHelpState::new(
+                    anchor.topic_id,
+                    topic.frames.len(),
+                    app.ui_settings.motion_level,
+                );
+                app.push_modal_over(Mode::Settings(state), Mode::SettingsHelp(help));
+                return;
+            }
+        }
     }
 
     match key.code {

@@ -1,0 +1,2474 @@
+[
+  {
+    "id": "AM-01",
+    "title": "Display mode",
+    "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
+    "specimen": "Use a paused-goal fixture that is also waiting for user approval:\n\nNORMAL\nObjective    Current activity   Identity   Title\n[P] paused   [?] approval       Codex      parser\n\nATTENTION\nSelected signal                Identity   Title\n[?] approval                   Codex      parser\n\nThe paused goal still exists; it is not cleared.\n\nThese are semantic enlargements of the actual tree row, not additional permanent columns. Add a compact priority caption:\n\napproval > failed monitor > task error\n> non-active goal > unread successful task\n> unread completed turn",
+    "states": "Normal and Attention, with identical underlying evidence. Attention changes which signal is presented, not the goal, approval state, identity, or title.",
+    "motion": "None; paired stills make suppression versus deletion clear.",
+    "caveat": "Use the actual selector for ties and cases without the listed priority signals; those fallback details are not supplied. On narrow terminals, stack the two mode specimens rather than merging the independent regions.",
+    "frames": [
+      "NORMAL\nObjective: paused goal\nActivity:  waiting approval\n",
+      "ATTENTION\nPriority signal: waiting approval\nObjective remains paused\n"
+    ]
+  },
+  {
+    "id": "AM-02",
+    "title": "Working poll interval",
+    "explanation": "“Set how often Ilium checks detection state while an agent is working, without changing how quickly the agent performs its work.”",
+    "specimen": "Show an agent marked Working above two sampling timelines with identical foreground output:\n\nWorking poll interval — synthetic timeline\n\nAgent output       A.....B.....C.....D\nShorter interval   |..|..|..|..|..|..|\nLonger interval    |.....|.....|.....|\n\n| = an Ilium detection check\n\nBoth specimens:\n  [G] [W] Codex  parser\n  Same foreground output and work progression\n\nPopulate the interval selector with actual supported values; the timelines illustrate relative spacing rather than a numeric default.",
+    "states": "A shorter and longer working-detection interval. Only the illustrated detection-check cadence changes.",
+    "motion": "None required. Static sampling marks avoid making the longer interval appear to slow the child process.",
+    "caveat": "These are detection checks, not progress-monitor polls or agent work steps. Do not promise exact wall-clock scheduling from the schematic tick spacing.",
+    "frames": [
+      "Show an agent marked Working above two sampling timelines with identical foreground output:\n\nWorking poll interval — synthetic timeline\n\nAgent output       A.....B.....C.....D\nShorter interval   |..|..|..|..|..|..|\nLonger interval    |.....|.....|.....|\n\n| = an Ilium detection check\n\nBoth specimens:\n  [G] [W] Codex  parser\n  Same foreground output and work progression\n\nPopulate the interval selector with actual supported values; the timelines illustrate relative spacing rather than a numeric default."
+    ]
+  },
+  {
+    "id": "AM-03",
+    "title": "Idle poll interval",
+    "explanation": "“Set how often Ilium checks detection state while an agent is idle at its prompt.”",
+    "specimen": "Keep the same idle agent and prompt visible throughout:\n\n┌─ Agent pane ────────────────────────────────┐\n│ >                                          │\n└────────────────────────────────────────────┘\n  [G] [I] Codex  parser\n\nIdle poll interval — same observation window\nShorter interval   |..|..|..|..|..|..|\nLonger interval    |.....|.....|.....|\n\n| = a detection check, not submitted input\n\nThe objective remains active in this fixture even though current activity is Idle.",
+    "states": "Two supported idle-detection intervals. Check spacing changes; the prompt, goal, process, and empty input remain identical.",
+    "motion": "None. A static prompt is preferable to fabricated periodic keystrokes or wake-up activity.",
+    "caveat": "Do not imply that the interval periodically runs the agent, submits input, or controls registered-task monitoring. Which other states use this cadence is not established by the supplied facts.",
+    "frames": [
+      "Keep the same idle agent and prompt visible throughout:\n\n┌─ Agent pane ────────────────────────────────┐\n│ >                                          │\n└────────────────────────────────────────────┘\n  [G] [I] Codex  parser\n\nIdle poll interval — same observation window\nShorter interval   |..|..|..|..|..|..|\nLonger interval    |.....|.....|.....|\n\n| = a detection check, not submitted input\n\nThe objective remains active in this fixture even though current activity is Idle."
+    ]
+  },
+  {
+    "id": "AM-04",
+    "title": "Custom agent signatures",
+    "explanation": "“Classify matching process names using a lowercase substring and assigned agent class, without installing or launching an agent.”",
+    "specimen": "Use a miniature settings form and detection preview:\n\nCustom agent signatures — simulated editor\n\nProcess:    demo_agent_worker\nSubstring:  demo_agent\nClass:      Other\n\nChoices: Claude / Codex / Antigravity / Other\n\nMatch: yes\nClass: Other\nDisplayed name: demo_agent_worker\n\nStep through four read-only frames: add that rule; edit its class to Codex; edit its substring to a nonmatching value; remove the custom rule. Keep the synthetic process present and unchanged throughout. Fix the identity display to its full-name presentation.",
+    "states": "Adding and editing affect classification matching. Other uses the actual matched process name. A nonmatch or removal returns classification to the ordinary detection rules rather than forcing a particular fallback class.",
+    "motion": "None; manually selected form snapshots suffice.",
+    "caveat": "Rule precedence for overlapping substrings is not supplied. Use one nonoverlapping example, and do not imply matching against prompts, command output, or arbitrary command-line arguments.",
+    "frames": [
+      "Use a miniature settings form and detection preview:\n\nCustom agent signatures — simulated editor\n\nProcess:    demo_agent_worker\nSubstring:  demo_agent\nClass:      Other\n\nChoices: Claude / Codex / Antigravity / Other\n\nMatch: yes\nClass: Other\nDisplayed name: demo_agent_worker\n\nStep through four read-only frames: add that rule; edit its class to Codex; edit its substring to a nonmatching value; remove the custom rule. Keep the synthetic process present and unchanged throughout. Fix the identity display to its full-name presentation."
+    ]
+  },
+  {
+    "id": "AM-05",
+    "title": "Working status icon",
+    "explanation": "“Choose the symbol for an agent streaming output during an active foreground turn.”",
+    "specimen": "Objective  Now  Identity  Title\nBefore glyph swap      [G]    [W]  Codex     parser\nAfter glyph swap       [G]    [w]  Codex     parser\n\nFixture evidence:\n  Foreground turn: active\n  Foreground output: streaming\n\nPane excerpt:\n  Checking parser cases...\n  Updating the error path...",
+    "states": "The same Working state is shown with two icon assignments. The active objective, agent identity, title, and transcript are unchanged; selecting an icon does not start a turn.",
+    "motion": "Not required. A pair of manually advanced output snapshots may establish streaming, but freeze the same snapshot for the glyph comparison.",
+    "caveat": "Working must not be inferred merely from busy-looking historical output. Supply actual Working evidence to the preview, and prevent a changing animation phase from being mistaken for the selected glyph.",
+    "frames": [
+      "Objective  Now  Identity  Title\nBefore glyph swap      [G]    [W]  Codex     parser\nAfter glyph swap       [G]    [w]  Codex     parser\n\nFixture evidence:\n  Foreground turn: active\n  Foreground output: streaming\n\nPane excerpt:\n  Checking parser cases...\n  Updating the error path..."
+    ]
+  },
+  {
+    "id": "AM-06",
+    "title": "Waiting-on-background-workers status icon",
+    "explanation": "“Choose the symbol for an unfinished foreground turn blocked on work it has dispatched to background workers.”",
+    "specimen": "Before   [G] [b] Codex  repository review\nAfter    [G] [&] Codex  repository review\n\nFixture evidence:\n  Foreground turn: still open\n  Dispatched worker \"scan\": outstanding\n  Agent: waiting for that worker's result\n\nPane excerpt:\n  Waiting for the dispatched scan to finish.",
+    "states": "Two glyph assignments for the same mid-turn waiting state. The turn remains open; the dispatched work remains outstanding. Other row regions do not change.",
+    "motion": "None. A stationary waiting specimen makes the blocked foreground state clearer than a streaming-output animation.",
+    "caveat": "This is not the state where the turn has already wrapped but a background task continues. Do not add a progress-monitor footer unless the fixture independently establishes a registered monitor.",
+    "frames": [
+      "Before   [G] [b] Codex  repository review\nAfter    [G] [&] Codex  repository review\n\nFixture evidence:\n  Foreground turn: still open\n  Dispatched worker \"scan\": outstanding\n  Agent: waiting for that worker's result\n\nPane excerpt:\n  Waiting for the dispatched scan to finish."
+    ]
+  },
+  {
+    "id": "AM-07",
+    "title": "Background-task-still-running status icon",
+    "explanation": "“Choose the symbol for a finished foreground turn that still has a background shell or task running.”",
+    "specimen": "Before   [G] [~] Codex  build\nAfter    [G] [b] Codex  build\n\nFixture evidence:\n  Foreground turn: wrapped\n  Background shell/task: still running\n\nTranscript excerpt:\n  Started the background build.\n  The build continues after this turn.",
+    "states": "The same post-turn background-work state receives two different glyphs. The completed foreground turn and still-running background task remain unchanged.",
+    "motion": "None. Use the explicit “turn wrapped” caption to contrast this specimen with mid-turn waiting.",
+    "caveat": "A running background task does not, by itself, establish either foreground streaming or a live registered progress monitor. Do not depict selecting this icon as launching, stopping, or monitoring the task.",
+    "frames": [
+      "Before   [G] [~] Codex  build\nAfter    [G] [b] Codex  build\n\nFixture evidence:\n  Foreground turn: wrapped\n  Background shell/task: still running\n\nTranscript excerpt:\n  Started the background build.\n  The build continues after this turn."
+    ]
+  },
+  {
+    "id": "AM-08",
+    "title": "Waiting-approval status icon",
+    "explanation": "“Choose the symbol for an agent blocked until the user provides required approval.”",
+    "specimen": "Before   [G] [?] Codex  test changes\nAfter    [G] [!] Codex  test changes\n\nFixture evidence:\n  User approval is required.\n  The proposed action has not been approved.\n\nPane excerpt:\n  Approval required for the proposed test action.\n\nRender the actual approval-state row, but keep any approval interaction inert.",
+    "states": "Both icon choices represent the same unresolved approval request. The goal, identity, request, and blocked state remain unchanged. In Attention mode, approval takes the highest supplied priority.",
+    "motion": "None; flashing is unnecessary to explain the meaning.",
+    "caveat": "Selecting an icon must never grant approval. Do not invent application-specific approval keys or buttons; the specimen should use source-backed presentation or an explicitly explanatory caption.",
+    "frames": [
+      "Before   [G] [?] Codex  test changes\nAfter    [G] [!] Codex  test changes\n\nFixture evidence:\n  User approval is required.\n  The proposed action has not been approved.\n\nPane excerpt:\n  Approval required for the proposed test action.\n\nRender the actual approval-state row, but keep any approval interaction inert."
+    ]
+  },
+  {
+    "id": "AM-09",
+    "title": "Finished-unread status icon",
+    "explanation": "“Choose the symbol for a completed agent turn whose completion has not yet been acknowledged.”",
+    "specimen": "Before   [G] [D] Codex  explain parser\nAfter    [G] [d] Codex  explain parser\n\nFixture evidence:\n  Foreground turn: completed\n  Completion: unread / unacknowledged\n  Long-term goal: still active\n\nPane excerpt:\n  The parser explanation is complete.",
+    "states": "Two glyphs for the same unread completed turn. The unread evidence remains set, and the objective is not changed to Reached.",
+    "motion": "None. Keep the specimen stable rather than fading the indicator away.",
+    "caveat": "This is neither TaskDone nor GoalReached. Do not show a timer clearing it, and do not let opening the help or selecting a preview glyph act as acknowledgment of a real completion.",
+    "frames": [
+      "Before   [G] [D] Codex  explain parser\nAfter    [G] [d] Codex  explain parser\n\nFixture evidence:\n  Foreground turn: completed\n  Completion: unread / unacknowledged\n  Long-term goal: still active\n\nPane excerpt:\n  The parser explanation is complete."
+    ]
+  },
+  {
+    "id": "AM-10",
+    "title": "Idle status icon",
+    "explanation": "“Choose the symbol used when an agent is idle at its prompt.”",
+    "specimen": "Before   [G] [I] Codex  parser\nAfter    [G] [i] Codex  parser\n\n┌─ Agent pane ────────────────────────────────┐\n│ >                                          │\n└────────────────────────────────────────────┘\n\nFixture: idle at prompt; no outstanding background\nwork and not parked awaiting a live monitor.",
+    "states": "The same Idle state with two icon assignments. The process remains available, the input remains empty, and the long-term objective remains active.",
+    "motion": "None. A still prompt is sufficient.",
+    "caveat": "Idle does not mean the process exited, the pane closed, or the goal was reached. The fixture deliberately excludes other conditions that could select a different tree signal.",
+    "frames": [
+      "Before   [G] [I] Codex  parser\nAfter    [G] [i] Codex  parser\n\n┌─ Agent pane ────────────────────────────────┐\n│ >                                          │\n└────────────────────────────────────────────┘\n\nFixture: idle at prompt; no outstanding background\nwork and not parked awaiting a live monitor."
+    ]
+  },
+  {
+    "id": "AM-11",
+    "title": "Active-goal status icon",
+    "explanation": "“Choose the symbol for an active long-term goal, independently of the agent’s current activity.”",
+    "specimen": "Before   [G] [I] Codex  parser tests\nAfter    [g] [I] Codex  parser tests\n          ^\n          objective glyph only\n\nGoal: make the parser tests pass\nGoal state: Active\nCurrent activity: Idle at prompt",
+    "states": "Two glyph assignments for the same active objective. The deliberately idle current-activity slot demonstrates that an active goal is not synonymous with foreground output.",
+    "motion": "None.",
+    "caveat": "Use Normal mode for the direct two-slot comparison. Do not invent Attention fallback behavior or promise that an active-goal icon will remain visible when a higher-priority signal is selected.",
+    "frames": [
+      "Before   [G] [I] Codex  parser tests\nAfter    [g] [I] Codex  parser tests\n          ^\n          objective glyph only\n\nGoal: make the parser tests pass\nGoal state: Active\nCurrent activity: Idle at prompt"
+    ]
+  },
+  {
+    "id": "AM-12",
+    "title": "Paused-goal status icon",
+    "explanation": "“Choose the symbol for a paused long-term goal without changing the agent’s separate current activity.”",
+    "specimen": "Before   [P] [I] Codex  documentation\nAfter    [p] [I] Codex  documentation\n          ^\n          objective glyph only\n\nGoal: update the documentation\nGoal state: Paused\nCurrent activity: Idle at prompt",
+    "states": "Two glyphs for the same explicitly paused goal. The agent identity, idle prompt, goal text, and pause state remain unchanged.",
+    "motion": "None; avoid a play/pause animation that could suggest operating the goal rather than choosing its symbol.",
+    "caveat": "Goal pause is not evidence that the child process has been suspended or shell access disabled. Neither a pause reason nor an automatic resume schedule is supplied, so do not invent either.",
+    "frames": [
+      "Before   [P] [I] Codex  documentation\nAfter    [p] [I] Codex  documentation\n          ^\n          objective glyph only\n\nGoal: update the documentation\nGoal state: Paused\nCurrent activity: Idle at prompt"
+    ]
+  },
+  {
+    "id": "AM-13",
+    "title": "Blocked-goal status icon",
+    "explanation": "“Choose the symbol for a long-term goal marked blocked, separately from approval requests and task failures.”",
+    "specimen": "Before   [B] [I] Codex  parser fixtures\nAfter    [b] [I] Codex  parser fixtures\n\nGoal: complete the parser fixture update\nGoal state: Blocked\nSynthetic context: a required fixture is unavailable\nCurrent activity: Idle at prompt\n\nSet the fixture’s actual goal state to Blocked; the explanatory sentence is not a detection rule.",
+    "states": "Only the blocked-goal glyph changes. The missing-input context, goal state, idle activity, and identity stay fixed.",
+    "motion": "None.",
+    "caveat": "Do not derive Blocked from error-looking terminal text alone. This specimen establishes neither a failed monitored task nor a user-approval gate, and changing its icon does not resolve the blocker.",
+    "frames": [
+      "Before   [B] [I] Codex  parser fixtures\nAfter    [b] [I] Codex  parser fixtures\n\nGoal: complete the parser fixture update\nGoal state: Blocked\nSynthetic context: a required fixture is unavailable\nCurrent activity: Idle at prompt\n\nSet the fixture’s actual goal state to Blocked; the explanatory sentence is not a detection rule."
+    ]
+  },
+  {
+    "id": "AM-14",
+    "title": "Usage-limited-goal status icon",
+    "explanation": "“Choose the symbol for a long-term goal prevented from proceeding by a usage limit.”",
+    "specimen": "Before   [U] [I] Codex  migration plan\nAfter    [u] [I] Codex  migration plan\n\nGoal: prepare the migration plan\nGoal state: Usage limited\nCurrent activity: Idle at prompt\n\nNo quota amount or reset time is assumed.",
+    "states": "The same usage-limited goal with two icon assignments. Neither the limit nor the agent’s current activity changes.",
+    "motion": "None. A countdown would imply information and behavior not established by this fixture.",
+    "caveat": "Do not invent provider-specific quota amounts, a future reset time, or an automatic resumption guarantee. The icon represents the goal’s known state, not a prediction about when work will restart.",
+    "frames": [
+      "Before   [U] [I] Codex  migration plan\nAfter    [u] [I] Codex  migration plan\n\nGoal: prepare the migration plan\nGoal state: Usage limited\nCurrent activity: Idle at prompt\n\nNo quota amount or reset time is assumed."
+    ]
+  },
+  {
+    "id": "AM-15",
+    "title": "Reached-goal status icon",
+    "explanation": "“Choose the symbol for a long-term goal recorded as reached, separately from completed turns or individual task results.”",
+    "specimen": "Before   [R] [I] Codex  parser reference\nAfter    [r] [I] Codex  parser reference\n\nGoal: document the parser interface\nGoal state: Reached\nCurrent activity: Idle at prompt\n\nKeep the goal description and its recorded completion state identical across the two previews.",
+    "states": "Only the reached-goal glyph changes. The icon chooser does not complete the goal, acknowledge a turn, or alter a task result.",
+    "motion": "None; no celebratory sequence is needed.",
+    "caveat": "A reached goal is not proof that every background task succeeded. Preserve any independently supplied task or monitor evidence rather than replacing the whole row with a generic “everything done” presentation.",
+    "frames": [
+      "Before   [R] [I] Codex  parser reference\nAfter    [r] [I] Codex  parser reference\n\nGoal: document the parser interface\nGoal state: Reached\nCurrent activity: Idle at prompt\n\nKeep the goal description and its recorded completion state identical across the two previews."
+    ]
+  },
+  {
+    "id": "AM-16",
+    "title": "Parked-awaiting-monitor status icon",
+    "explanation": "“Choose the symbol for an idle agent waiting on a live progress monitor.”",
+    "specimen": "Use its existing tree placement rather than adding a new permanent status column.\n\nSelected signal, enlarged:\nBefore   [p] Codex  background build\nAfter    [z] Codex  background build\n\nPane: idle at prompt\nTask: build / pending\nMonitor: live and observing\nAgent: awaiting that monitor\n\nKeep the full source-rendered row alongside or above this enlargement, with objective and identity unchanged.",
+    "states": "Two glyphs for the same Parked condition: idle agent, live monitor, and an actual waiting relationship. The task remains unresolved.",
+    "motion": "None; a streaming-output animation would contradict the idle specimen.",
+    "caveat": "Idle alone is insufficient to establish Parked. Do not portray the agent as killed, shell access as disabled, or background work as necessarily finished.",
+    "frames": [
+      "Use its existing tree placement rather than adding a new permanent status column.\n\nSelected signal, enlarged:\nBefore   [p] Codex  background build\nAfter    [z] Codex  background build\n\nPane: idle at prompt\nTask: build / pending\nMonitor: live and observing\nAgent: awaiting that monitor\n\nKeep the full source-rendered row alongside or above this enlargement, with objective and identity unchanged."
+    ]
+  },
+  {
+    "id": "AM-17",
+    "title": "Task-pending status icon",
+    "explanation": "“Choose the symbol for a registered task that does not yet have a terminal success or error result.”",
+    "specimen": "Selected task signal, enlarged:\nBefore   [t] Codex  build\nAfter    [.] Codex  build\n\n┌─ Task evidence ─────────────────────────────┐\n│ Task: build                                │\n│ Status: pending                            │\n│ Terminal outcome: not yet observed          │\n│ Monitor: live                              │\n└────────────────────────────────────────────┘\n\nUse a fixture where the actual tree renderer selects TaskPending; do not force it into an invented third status slot.",
+    "states": "Only the pending-task glyph changes. Task evidence, monitor health, objective, activity data, identity, and title remain fixed.",
+    "motion": "None; a pending icon does not need to simulate work.",
+    "caveat": "Pending does not by itself establish a percentage complete or distinguish queued work from running work. Keep those details absent unless the fixture independently supplies them.",
+    "frames": [
+      "Selected task signal, enlarged:\nBefore   [t] Codex  build\nAfter    [.] Codex  build\n\n┌─ Task evidence ─────────────────────────────┐\n│ Task: build                                │\n│ Status: pending                            │\n│ Terminal outcome: not yet observed          │\n│ Monitor: live                              │\n└────────────────────────────────────────────┘\n\nUse a fixture where the actual tree renderer selects TaskPending; do not force it into an invented third status slot."
+    ]
+  },
+  {
+    "id": "AM-18",
+    "title": "Task-done status icon",
+    "explanation": "“Choose the symbol for a monitored task with a recorded successful result.”",
+    "specimen": "Selected task signal, enlarged:\nBefore   [+] Codex  build\nAfter    [v] Codex  build\n\nTask: build\nRecorded terminal result: success\nSuccessful result: unread\nMonitor failure: none in this fixture\n\nThe recorded success stays unchanged.\n\nAn Attention specimen can use this unread successful task with no higher-priority signal present. Preserve the full row’s independent identity and objective.",
+    "states": "Two glyph assignments for the same recorded success. Changing the icon neither acknowledges the result nor changes delivery or goal-resume processing.",
+    "motion": "None.",
+    "caveat": "Successful task completion is not the same as an unread completed agent turn or a reached goal. Do not imply that every successful task necessarily wins Attention selection regardless of unread state or other signals.",
+    "frames": [
+      "Selected task signal, enlarged:\nBefore   [+] Codex  build\nAfter    [v] Codex  build\n\nTask: build\nRecorded terminal result: success\nSuccessful result: unread\nMonitor failure: none in this fixture\n\nThe recorded success stays unchanged.\n\nAn Attention specimen can use this unread successful task with no higher-priority signal present. Preserve the full row’s independent identity and objective."
+    ]
+  },
+  {
+    "id": "AM-19",
+    "title": "Task-error status icon",
+    "explanation": "“Choose the symbol for a monitored task whose observed terminal result is an error.”",
+    "specimen": "Selected task signal, enlarged:\nBefore   [!] Codex  build\nAfter    [e] Codex  build\n\nTask: build\nRecorded terminal result: error\nObservation: successfully obtained that result\nMonitor failure: none in this fixture\n\nThe companion footer must make the task error distinct from the successful observation of that error.",
+    "states": "Two glyphs for the same known task error. No retry, process stop, goal change, or monitor failure is introduced by the icon selection.",
+    "motion": "None; flashing does not clarify the distinction.",
+    "caveat": "An error-looking transcript line is not sufficient evidence of TaskError. Use the explicit recorded task-result fixture, and do not substitute loss of monitoring for an observed failed outcome.",
+    "frames": [
+      "Selected task signal, enlarged:\nBefore   [!] Codex  build\nAfter    [e] Codex  build\n\nTask: build\nRecorded terminal result: error\nObservation: successfully obtained that result\nMonitor failure: none in this fixture\n\nThe companion footer must make the task error distinct from the successful observation of that error."
+    ]
+  },
+  {
+    "id": "AM-20",
+    "title": "Monitor-failed status icon",
+    "explanation": "“Choose the symbol for failed task observation, which does not by itself establish that the task failed.”",
+    "specimen": "Selected monitor signal, enlarged:\nBefore   [x] Codex  build\nAfter    [m] Codex  build\n\nTask: build\nLast successful observation: pending\nTerminal outcome: unknown\nMonitor: failed\n\nNo terminal success or error was captured.\n\nThis fixture deliberately has no recorded final task result. Use the real footer to separate the task evidence from monitor health.",
+    "states": "Only the failed-monitor glyph changes. Observation remains failed, and the unknown task outcome is not converted into TaskError.",
+    "motion": "None. Do not show the task crashing as an illustration of losing observation.",
+    "caveat": "Preserve any terminal result that was already recorded in other fixtures; monitor failure must not visually erase known success or error. Here, “unknown” refers specifically to an outcome that was never captured.",
+    "frames": [
+      "Selected monitor signal, enlarged:\nBefore   [x] Codex  build\nAfter    [m] Codex  build\n\nTask: build\nLast successful observation: pending\nTerminal outcome: unknown\nMonitor: failed\n\nNo terminal success or error was captured.\n\nThis fixture deliberately has no recorded final task result. Use the real footer to separate the task evidence from monitor health."
+    ]
+  },
+  {
+    "id": "AM-21",
+    "title": "Scheduled-input status icon",
+    "explanation": "“Choose the marker for input queued for the future, without implying that it has already been submitted.”",
+    "specimen": "Enlarge the existing marker in its actual position while leaving the rest of the row unchanged.\n\nScheduled-input marker, enlarged:\nBefore   [>] Codex  test review\nAfter    [q] Codex  test review\n\nQueue fixture: one future input\nMessage: \"Summarize the test results.\"\nSubmission state: still queued\nCurrent activity: Idle at prompt\n\nThe message is explanatory synthetic queue content, not text typed into the pane or shown as a newly submitted prompt.",
+    "states": "Two marker assignments for the same queued item. The queue, message, current activity, objective, and identity remain unchanged.",
+    "motion": "None; keep the sequence before dispatch.",
+    "caveat": "Scheduling mechanism, timing guarantees, and dispatch conditions are not supplied. Do not invent a countdown, submit the example, or update the last-prompt banner as a side effect of the preview.\n\nReusable visual grammars: Shared footer comparisons; read-only drag and action-availability sequences; Normal-versus-Attention tree comparisons; fixed-output detection timelines; a simulated classification editor; and single-glyph swaps paired with status-specific evidence. Task, monitor, parked, and queued-input examples should enlarge existing tree signals—not create additional permanent status slots.",
+    "frames": [
+      "Enlarge the existing marker in its actual position while leaving the rest of the row unchanged.\n\nScheduled-input marker, enlarged:\nBefore   [>] Codex  test review\nAfter    [q] Codex  test review\n\nQueue fixture: one future input\nMessage: \"Summarize the test results.\"\nSubmission state: still queued\nCurrent activity: Idle at prompt\n\nThe message is explanatory synthetic queue content, not text typed into the pane or shown as a newly submitted prompt."
+    ]
+  },
+  {
+    "id": "AP-01",
+    "title": "Left panel sizing mode",
+    "explanation": "“Choose whether the left panel keeps one width, changes with focus, or changes with focus only on narrower terminals.”",
+    "specimen": "Use a miniature multiplexer with three tree rows and a terminal pane. Above it, show the selected policy, simulated terminal width, and whether the tree has pointer or keyboard focus. Step through the policies using this example:\n\nExample: fixed 20 / unfocused 14 / focused 24\nWidth threshold: 100 terminal columns\n\nPolicy                  Tree active   Elsewhere\nFixed                        20           20\nFocus-dependent              24           14\nWidth-dependent, width 99    24           14\nWidth-dependent, width 100   24           24\n\nEach selected comparison renders the actual tree–terminal boundary beneath the table; the tree contents remain identical.",
+    "states": "All three policies, both focus conditions, and both sides of the Width-dependent threshold.",
+    "motion": "A single focus transition can demonstrate easing under Full. Reduced and Off show the target width immediately; provide still comparisons when playback is disabled.",
+    "caveat": "The simulated terminal width is not the width of the help dialog’s right half. Label it explicitly, and show a cropped terminal specimen rather than falsely compressing terminal cells.",
+    "frames": [
+      "POLICY: WIDTH-DEPENDENT\nTree focused:   [TREE 24] | Terminal\n",
+      "POLICY: WIDTH-DEPENDENT\nFocus elsewhere:[TREE 14] | Terminal\n"
+    ]
+  },
+  {
+    "id": "AP-02",
+    "title": "Fixed panel width",
+    "explanation": "“Set the left panel’s width when Fixed sizing is selected, regardless of where focus is.”",
+    "specimen": "Show the same tree beside the same terminal, first with a smaller fixed width and then a larger one. Move an explanatory focus marker between the tree and terminal without moving the divider within either example.\n\nFixed width: 20\n┌─ Tree ────────────┬─ Terminal ──────────────┐\n│ project          │ $ echo ready           │\n│   build          │ ready                  │\n│   notes          │                        │\n└──────────────────┴────────────────────────┘\nTree active: 20       Focus elsewhere: 20\n\nA second selectable still uses a different fixed width and exposes more of a long tree title.",
+    "states": "Two fixed-width values, each with tree focus and focus elsewhere. Only changing the width value changes the divider.",
+    "motion": "None required; static comparisons make focus independence clearest.",
+    "caveat": "Mark Fixed as the specimen’s active policy. Do not suggest that this value overrides the other sizing modes or that an inactive setting is necessarily disabled in the real Settings UI.",
+    "frames": [
+      "Show the same tree beside the same terminal, first with a smaller fixed width and then a larger one. Move an explanatory focus marker between the tree and terminal without moving the divider within either example.\n\nFixed width: 20\n┌─ Tree ────────────┬─ Terminal ──────────────┐\n│ project          │ $ echo ready           │\n│   build          │ ready                  │\n│   notes          │                        │\n└──────────────────┴────────────────────────┘\nTree active: 20       Focus elsewhere: 20\n\nA second selectable still uses a different fixed width and exposes more of a long tree title."
+    ]
+  },
+  {
+    "id": "AP-03",
+    "title": "Unfocused panel width",
+    "explanation": "“Set the compact panel width used when neither pointer nor keyboard focus is in the tree and the sizing policy permits it to shrink.”",
+    "specimen": "Reuse the split-screen specimen, with Focus-dependent selected. Put the pointer and keyboard-focus indicators inside the terminal. Compare unfocused widths of 14 and 18 columns: the divider changes, while the terminal content and selected tree item remain the same.\n\nAdd a third still with tree focus restored: the panel returns to the example focused width of 24 in both configurations.",
+    "states": "Unfocused width 14 versus 18 while inactive; the unchanged focused target while active.",
+    "motion": "None required. A stepped comparison avoids confusing a width preference with an ongoing hover effect.",
+    "caveat": "Terminal keyboard focus alone must not demonstrate “unfocused” while the pointer remains over the tree. Also identify that Fixed mode and roomy Width-dependent mode do not use this compact target.",
+    "frames": [
+      "Reuse the split-screen specimen, with Focus-dependent selected. Put the pointer and keyboard-focus indicators inside the terminal. Compare unfocused widths of 14 and 18 columns: the divider changes, while the terminal content and selected tree item remain the same.\n\nAdd a third still with tree focus restored: the panel returns to the example focused width of 24 in both configurations."
+    ]
+  },
+  {
+    "id": "AP-04",
+    "title": "Focused panel width",
+    "explanation": "“Set the panel’s expanded width, which is also its steady width on roomy terminals in Width-dependent mode.”",
+    "specimen": "Show two labeled situations using the same project tree:\n\nFocus-dependent                 Width-dependent\nTree active                     Roomy terminal\n                                Focus elsewhere\n\nExpanded target: 24             Expanded target: 24\n\nUnder each caption, render the tree–terminal boundary at the same target. Compare a smaller and larger focused-width value; long tree titles gain visible space in both situations.\n\nInclude an inactive Focus-dependent specimen showing that its separate unfocused width is unchanged.",
+    "states": "Two focused-width values; active-tree use; roomy-terminal use without tree focus; an unaffected compact state.",
+    "motion": "None required. The paired situations explain the setting’s two roles.",
+    "caveat": "“Expanded width” is a configured target, not a promise that every cramped terminal can accommodate it. Any constrained geometry must follow the existing layout behavior; no new clamping rule is assumed.",
+    "frames": [
+      "Show two labeled situations using the same project tree:\n\nFocus-dependent                 Width-dependent\nTree active                     Roomy terminal\n                                Focus elsewhere\n\nExpanded target: 24             Expanded target: 24\n\nUnder each caption, render the tree–terminal boundary at the same target. Compare a smaller and larger focused-width value; long tree titles gain visible space in both situations.\n\nInclude an inactive Focus-dependent specimen showing that its separate unfocused width is unchanged."
+    ]
+  },
+  {
+    "id": "AP-05",
+    "title": "Minimum terminal width",
+    "explanation": "“Set the terminal-width threshold at which Width-dependent sizing stops shrinking the panel when focus moves elsewhere.”",
+    "specimen": "Keep Width-dependent selected and focus outside the tree. Use three selectable terminal-width specimens:\n\nThreshold: 100 columns\n\nTerminal 99    -> compact panel: 14\nTerminal 100   -> expanded panel: 24\nTerminal 101   -> expanded panel: 24\n\nEach specimen includes the same tree and terminal excerpt. A fourth comparison keeps terminal width at 100 but raises the threshold to 101, returning the inactive panel to 14.",
+    "states": "Below, exactly at, and above the threshold; then changing the threshold while terminal width remains constant. Tree focus still uses the expanded target in every case.",
+    "motion": "None required; explicit boundary comparisons are more useful than a continuously resizing terminal.",
+    "caveat": "Equality belongs to the expanded-width case. Call this a terminal-width threshold, not a minimum permitted window size or a minimum sidebar width.",
+    "frames": [
+      "Keep Width-dependent selected and focus outside the tree. Use three selectable terminal-width specimens:\n\nThreshold: 100 columns\n\nTerminal 99    -> compact panel: 14\nTerminal 100   -> expanded panel: 24\nTerminal 101   -> expanded panel: 24\n\nEach specimen includes the same tree and terminal excerpt. A fourth comparison keeps terminal width at 100 but raises the threshold to 101, returning the inactive panel to 14."
+    ]
+  },
+  {
+    "id": "AP-06",
+    "title": "Tree order",
+    "explanation": "“Choose how normal children are displayed within each parent—by manual order, type, age, or name—without changing stored manual order or structural split placement.”",
+    "specimen": "Use six manually selectable frames with identical synthetic nodes. Render three separately labeled excerpts: two parents’ normal children and one split view’s structural children. The age and type columns are explanatory annotations, not proposed additions to ordinary tree rows.\n\n```text\nOrder: Manual                     Synthetic ages\n\nParent A — normal children\n├─ zebra       Terminal                 2 h\n├─ beta        Editor                   4 h\n├─ Alpha       Terminal                 3 h\n└─ delta       Editor                   1 h\n\nParent B — normal children\n├─ omega       Terminal                 4 h\n└─ gamma       Editor                   1 h\n\nSplit view — structural positions\n├─ slot 1: shell\n└─ slot 2: notes\n```\n\nKeep the same selected node highlighted as its displayed position changes. Each frame shows the following sibling order:\n\n| Selected value              | Parent A                                              | Parent B                     |\n| --------------------------- | ----------------------------------------------------- | ---------------------------- |\n| **Manual**                  | zebra → beta → Alpha → delta                          | omega → gamma                |\n| **Type**                    | Actual class/rank blocks, then name within each block | Actual class/rank, then name |\n| **Age up — newest first**   | delta → zebra → Alpha → beta                          | gamma → omega                |\n| **Age down — oldest first** | beta → Alpha → zebra → delta                          | omega → gamma                |\n| **Name A-Z**                | Alpha → beta → delta → zebra                          | gamma → omega                |\n| **Name Z-A**                | zebra → delta → beta → Alpha                          | omega → gamma                |\n\nFor **Type**, Parent A visibly groups the Terminal entries **Alpha, zebra** and the Editor entries **beta, delta**. Determine the order of those blocks from the actual node-class ranks; do not substitute an assumed “editors first” or “terminals first” rule.\n\nFor both **Name** frames, add the caption: **“Case-insensitive name ordering; original name, then node ID, break ties.”** Use the existing comparator for any additional tied-name fixture.",
+    "states": "Cover all six selector values. Normal children reorder independently within each parent; entries never migrate between parents. The split view’s structural slots and corresponding pane placement remain unchanged in every frame. Finish by returning to **Manual**, restoring the exact original displayed sequence to demonstrate that selecting another sort order did not rewrite it.",
+    "motion": "None required. Switch directly between labeled stills; avoid animated row movement that could imply a drag-and-drop edit or mutation of stored manual order.",
+    "caveat": "Show one mode at a time rather than six side-by-side trees. Remove the explanatory type/age columns before sacrificing indentation, parent boundaries, or structural-slot labels; keep the active mode and age direction explicit.",
+    "frames": [
+      "Use six manually selectable frames with identical synthetic nodes. Render three separately labeled excerpts: two parents’ normal children and one split view’s structural children. The age and type columns are explanatory annotations, not proposed additions to ordinary tree rows.\n\n```text\nOrder: Manual                     Synthetic ages\n\nParent A — normal children\n├─ zebra       Terminal                 2 h\n├─ beta        Editor                   4 h\n├─ Alpha       Terminal                 3 h\n└─ delta       Editor                   1 h\n\nParent B — normal children\n├─ omega       Terminal                 4 h\n└─ gamma       Editor                   1 h\n\nSplit view — structural positions\n├─ slot 1: shell\n└─ slot 2: notes\n```\n\nKeep the same selected node highlighted as its displayed position changes. Each frame shows the following sibling order:\n\n| Selected value              | Parent A                                              | Parent B                     |\n| --------------------------- | ----------------------------------------------------- | ---------------------------- |\n| **Manual**                  | zebra → beta → Alpha → delta                          | omega → gamma                |\n| **Type**                    | Actual class/rank blocks, then name within each block | Actual class/rank, then name |\n| **Age up — newest first**   | delta → zebra → Alpha → beta                          | gamma → omega                |\n| **Age down — oldest first** | beta → Alpha → zebra → delta                          | omega → gamma                |\n| **Name A-Z**                | Alpha → beta → delta → zebra                          | gamma → omega                |\n| **Name Z-A**                | zebra → delta → beta → Alpha                          | omega → gamma                |\n\nFor **Type**, Parent A visibly groups the Terminal entries **Alpha, zebra** and the Editor entries **beta, delta**. Determine the order of those blocks from the actual node-class ranks; do not substitute an assumed “editors first” or “terminals first” rule.\n\nFor both **Name** frames, add the caption: **“Case-insensitive name ordering; original name, then node ID, break ties.”** Use the existing comparator for any additional tied-name fixture."
+    ]
+  },
+  {
+    "id": "AP-07",
+    "title": "Tree row management buttons",
+    "explanation": "“Show Rename and Move up/down controls when you hover a tree row.”",
+    "specimen": "Freeze the pointer over a middle sibling so both move directions are meaningful. Compare the same row with the setting off and on:\n\nOFF — hovered row\n  project\n    alpha\n>   build\n    notes\n\nON — same hovered row\n  project\n    alpha\n>   build                     [r] [^] [v]\n    notes\n\nr = Rename     ^ = Move up     v = Move down\n\nThe letters are illustrative button glyphs, not keyboard shortcuts.",
+    "states": "Off versus on while hovered; one additional non-hovered still shows the management controls absent.",
+    "motion": "None. Keep hover frozen instead of moving a simulated pointer repeatedly.",
+    "caveat": "Preserve any other row affordances in both specimens. This switch must not appear to control unrelated Close, status, bookmark, or lock indicators.",
+    "frames": [
+      "HOVER: OFF\n  build\n",
+      "HOVER: ON\n> build   [Rename] [Move up] [Move down]\n"
+    ]
+  },
+  {
+    "id": "AP-08",
+    "title": "Agent identifier",
+    "explanation": "“Choose whether an agent’s identity appears as its full name, one letter, its configured icon, or no identifier.”",
+    "specimen": "Use four stacked close-ups of the same detected-agent tree row, labeled:\n\nFull name\nOne letter\nChosen icon\nNothing\n\nEach close-up retains the same indentation, status indicator, selection, and inferred or explicit title. Only the identity portion changes. Use the real formatter for the full-name and one-letter forms and the current icon assignment for the icon form.\n\nA small explanatory header can identify the three independent regions: status | agent identity | title.",
+    "states": "All four identifier choices. “Nothing” removes only the identity portion; the row remains a detected agent and retains its other indicators.",
+    "motion": "None; the four-row comparison is sufficient.",
+    "caveat": "Do not invent the one-letter mapping, especially for agent names sharing an initial. Likewise, do not substitute a status glyph for the configured agent-identity icon.",
+    "frames": [
+      "Use four stacked close-ups of the same detected-agent tree row, labeled:\n\nFull name\nOne letter\nChosen icon\nNothing\n\nEach close-up retains the same indentation, status indicator, selection, and inferred or explicit title. Only the identity portion changes. Use the real formatter for the full-name and one-letter forms and the current icon assignment for the icon form.\n\nA small explanatory header can identify the three independent regions: status | agent identity | title."
+    ]
+  },
+  {
+    "id": "AP-09",
+    "title": "Color theme",
+    "explanation": "“Change Ilium’s built-in interface color preset without changing the content or meaning of its controls.”",
+    "specimen": "Render a small, fixed specimen containing a selected tree row, an unselected row, a pane border/title, and a settings control or menu. Keep all text, focus, and geometry constant.\n\nProvide a source-derived preset selector above the specimen. Selecting another example changes the actual foreground, background, and emphasis styles used by those widgets. A pair of manually selected comparison stills can sit one above the other.",
+    "states": "Every actual built-in preset, using its real name. Differences must be demonstrated with terminal styles, not explained solely by naming the colors.",
+    "motion": "None; no fades or cycling palette animation.",
+    "caveat": "Preset names and their exact scope are not provided. Do not invent a light/dark list or imply that choosing an Ilium theme necessarily recolors ANSI output produced by a shell application.",
+    "frames": [
+      "Render a small, fixed specimen containing a selected tree row, an unselected row, a pane border/title, and a settings control or menu. Keep all text, focus, and geometry constant.\n\nProvide a source-derived preset selector above the specimen. Selecting another example changes the actual foreground, background, and emphasis styles used by those widgets. A pair of manually selected comparison stills can sit one above the other."
+    ]
+  },
+  {
+    "id": "AP-10",
+    "title": "Motion level",
+    "explanation": "“Choose how much the interface animates; Off also freezes activity animation without stopping agent work.”",
+    "specimen": "Use one scene containing an expanding tree sidebar and a detected agent whose status remains Working. Present three labeled versions:\n\nFull       Divider eases to its new target.\nReduced    Divider snaps to its new target.\nOff        Divider snaps; activity glyph is frozen.\n\nAll three: agent state remains Working.\n\nThe actual scene, not just the caption, should show the boundary transition and the activity indicator.",
+    "states": "Full, Reduced, and Off, with identical start and end layouts and identical agent state.",
+    "motion": "This is a setting where motion teaches the distinction. Under an actual Full policy, play one transition and offer replay. Under Reduced or Off, show numbered stills rather than overriding the user’s motion preference.",
+    "caveat": "The packet does not fully specify activity-animation behavior under Reduced. Use its actual renderer policy; do not describe Reduced as identical to Off.",
+    "frames": [
+      "Use one scene containing an expanding tree sidebar and a detected agent whose status remains Working. Present three labeled versions:\n\nFull       Divider eases to its new target.\nReduced    Divider snaps to its new target.\nOff        Divider snaps; activity glyph is frozen.\n\nAll three: agent state remains Working.\n\nThe actual scene, not just the caption, should show the boundary transition and the activity indicator."
+    ]
+  },
+  {
+    "id": "AP-11",
+    "title": "Sidebar density",
+    "explanation": "“Adjust the vertical spacing between items in the tree sidebar.”",
+    "specimen": "Use a fixed-height tree viewport with enough synthetic entries to make spacing differences visible. Keep the same selected item, hierarchy, labels, icons, and viewport height.\n\nShow the most compact and most spacious supported values as separate specimens, with any intermediate choices available through their actual labels. The difference should be visible in row spacing and how many entries fit—not in text size.\n\nAn explanatory caption below each specimen can report the number of visible logical entries.",
+    "states": "The supported density choices, with particular emphasis on the two endpoints.",
+    "motion": "None. Avoid animated row stretching, which could suggest behavior not present in the interface.",
+    "caveat": "Neither density labels nor exact spacing increments are supplied. Do not invent “Compact/Comfortable” presets or assume the spacious form adds exactly one blank line per item.",
+    "frames": [
+      "Use a fixed-height tree viewport with enough synthetic entries to make spacing differences visible. Keep the same selected item, hierarchy, labels, icons, and viewport height.\n\nShow the most compact and most spacious supported values as separate specimens, with any intermediate choices available through their actual labels. The difference should be visible in row spacing and how many entries fit—not in text size.\n\nAn explanatory caption below each specimen can report the number of visible logical entries."
+    ]
+  },
+  {
+    "id": "AP-12",
+    "title": "Stable glyphs",
+    "explanation": "“Use plain one-cell symbols for hover actions while leaving ordinary configured UTF-8 icons elsewhere unchanged.”",
+    "specimen": "Show the same hovered tree row twice, including its content icon, agent identity if applicable, status indicator, and hover-action area.\n\nIn the Off specimen, use the normal action glyphs. In On, replace only the hover-action glyphs with the existing stable fallbacks. Draw a thin explanatory ruler beneath the action area to make consistent cell occupation visible.\n\nKeep the surrounding content and identity icons visibly identical.",
+    "states": "Stable glyphs off and on. The affected region is explicitly labeled hover actions only.",
+    "motion": "None.",
+    "caveat": "Use the implementation’s actual one-cell fallbacks. Do not imply that every non-ASCII character is unreliable, that emoji always occupy a particular width, or that this setting converts the entire interface to ASCII.",
+    "frames": [
+      "Show the same hovered tree row twice, including its content icon, agent identity if applicable, status indicator, and hover-action area.\n\nIn the Off specimen, use the normal action glyphs. In On, replace only the hover-action glyphs with the existing stable fallbacks. Draw a thin explanatory ruler beneath the action area to make consistent cell occupation visible.\n\nKeep the surrounding content and identity icons visibly identical."
+    ]
+  },
+  {
+    "id": "AP-13",
+    "title": "Inferred-title icons",
+    "explanation": "“Show an LLM-provided icon before an inferred title in the left panel.”",
+    "specimen": "Use separate labeled close-ups of the short-title and long-title presentations. The synthetic inferred icon here is *:\n\nShort-title specimen\nOFF    Fix parser\nON   * Fix parser\n\nLong-title specimen\nOFF    Fix the parser's error reporting\nON   * Fix the parser's error reporting\n\nPlace these title regions inside the same miniature tree context. Preserve any independent agent identity and status regions. Include an unrelated manually named row without an inferred icon as an unchanged reference.",
+    "states": "Off and on for both short and long inferred titles.",
+    "motion": "None.",
+    "caveat": "The packet does not say what selects the short versus long presentation. Show separately captioned specimens rather than inventing a hover or resize trigger, and do not promise a fallback icon when none was inferred.",
+    "frames": [
+      "Use separate labeled close-ups of the short-title and long-title presentations. The synthetic inferred icon here is *:\n\nShort-title specimen\nOFF    Fix parser\nON   * Fix parser\n\nLong-title specimen\nOFF    Fix the parser's error reporting\nON   * Fix the parser's error reporting\n\nPlace these title regions inside the same miniature tree context. Preserve any independent agent identity and status regions. Include an unrelated manually named row without an inferred icon as an unchanged reference."
+    ]
+  },
+  {
+    "id": "AP-14",
+    "title": "Agent debug menu",
+    "explanation": "“Enable investigation-only agent history and detailed project-private snapshots at the cost of extra CPU, memory, and disk use.”",
+    "specimen": "First compare the actual agent-related menu with the debug affordance absent and present. A second still opens a synthetic history specimen containing these clearly labeled categories:\n\n┌─ Agent investigation example ──────────────┐\n│ Prompt: synthetic example                 │\n│ Detection evidence                        │\n│ Session phases                            │\n│ LLM work                                  │\n│ Errors                                    │\n└───────────────────────────────────────────┘\nRecorded in this project's private snapshot\nFresh detection snapshots; extra CPU/RAM/disk\n\nThe box title is explanatory, not an assumed literal UI title.",
+    "states": "Off retains the ordinary interface; on exposes investigation history and the additional capture behavior.",
+    "motion": "None. A fake live trace adds distraction and could obscure the cost warning.",
+    "caveat": "Use synthetic records only. “Private” must not be illustrated as encryption or automatic redaction, and turning the setting off must not appear to erase previously recorded evidence.",
+    "frames": [
+      "First compare the actual agent-related menu with the debug affordance absent and present. A second still opens a synthetic history specimen containing these clearly labeled categories:\n\n┌─ Agent investigation example ──────────────┐\n│ Prompt: synthetic example                 │\n│ Detection evidence                        │\n│ Session phases                            │\n│ LLM work                                  │\n│ Errors                                    │\n└───────────────────────────────────────────┘\nRecorded in this project's private snapshot\nFresh detection snapshots; extra CPU/RAM/disk\n\nThe box title is explanatory, not an assumed literal UI title."
+    ]
+  },
+  {
+    "id": "AP-15",
+    "title": "Context-menu icons",
+    "explanation": "“Show configurable semantic icons beside actions in tree, terminal, editor-line, and file context menus.”",
+    "specimen": "Put a four-context selector above paired menu specimens:\n\nTree | Terminal | Editor line | File\n\nIcons OFF                 Icons ON\n┌──────────────────┐      ┌──────────────────┐\n│ action label     │      │ glyph action    │\n│ action label     │      │ glyph action    │\n└──────────────────┘      └──────────────────┘\n\nFor each context, populate both menus from the same real action set, preserving labels, availability, shortcuts, separators, and selection. The on specimen adds each action’s actual configured semantic icon.",
+    "states": "Off and on for all four menu contexts; manually switch contexts rather than displaying eight tiny menus simultaneously.",
+    "motion": "None.",
+    "caveat": "The toggle concerns icons, not action availability. Use actual menu content rather than assigning plausible but unsupported actions to a particular context.",
+    "frames": [
+      "Put a four-context selector above paired menu specimens:\n\nTree | Terminal | Editor line | File\n\nIcons OFF                 Icons ON\n┌──────────────────┐      ┌──────────────────┐\n│ action label     │      │ glyph action    │\n│ action label     │      │ glyph action    │\n└──────────────────┘      └──────────────────┘\n\nFor each context, populate both menus from the same real action set, preserving labels, availability, shortcuts, separators, and selection. The on specimen adds each action’s actual configured semantic icon."
+    ]
+  },
+  {
+    "id": "AP-16",
+    "title": "Agent toolbar",
+    "explanation": "“Show action toolbars above detected-agent panes, with access to reopening them through the pane icon or right-click menu.”",
+    "specimen": "Use two stacked detected-agent mini-panes and a small ordinary-shell reference pane.\n\nWith the setting On, show the actual agent toolbars above both detected-agent outputs. Identify Compact, Clear, Model, Effort, Stop, and Exit through an explanatory legend while holding toolbar-label mode constant.\n\nWith it Off, show the same panes without the toolbars. A follow-up still highlights the existing pane-icon route and right-click action used to reopen a toolbar.",
+    "states": "On versus off across multiple detected-agent panes; ordinary shell unchanged; both reopening entry points.",
+    "motion": "None. Disappearance and rediscovery are clearer as separate stills.",
+    "caveat": "Per-agent action availability and the persistence scope of reopening are not specified. Use actual capability-specific controls, and do not imply that reopening one pane necessarily changes every pane or the global preference.",
+    "frames": [
+      "Use two stacked detected-agent mini-panes and a small ordinary-shell reference pane.\n\nWith the setting On, show the actual agent toolbars above both detected-agent outputs. Identify Compact, Clear, Model, Effort, Stop, and Exit through an explanatory legend while holding toolbar-label mode constant.\n\nWith it Off, show the same panes without the toolbars. A follow-up still highlights the existing pane-icon route and right-click action used to reopen a toolbar."
+    ]
+  },
+  {
+    "id": "AP-17",
+    "title": "Agent toolbar labels",
+    "explanation": "“Add text labels after toolbar icons to make agent actions easier to recognize.”",
+    "specimen": "Keep the toolbar enabled and show the same actions in both specimens. These are synthetic one-cell icon assignments, not shortcut keys:\n\nLabels OFF\n[c] [x] [m] [e] [s] [q]\n\nLabels ON\n[c Compact] [x Clear] [m Model] [e Effort] [s Stop] [q Exit]\n\nPut both rows above identical detected-agent terminal content. Use the real toolbar’s button boundaries, spacing, labels, and enabled states in the finished illustration.",
+    "states": "Labels off and on. The icons, action set, and actions’ meanings remain the same; only explanatory text is added.",
+    "motion": "None.",
+    "caveat": "The expanded example approaches the column budget. At narrower widths, reproduce the existing toolbar’s overflow behavior rather than inventing wrapping, a second toolbar row, or additional hidden actions.",
+    "frames": [
+      "Keep the toolbar enabled and show the same actions in both specimens. These are synthetic one-cell icon assignments, not shortcut keys:\n\nLabels OFF\n[c] [x] [m] [e] [s] [q]\n\nLabels ON\n[c Compact] [x Clear] [m Model] [e Effort] [s Stop] [q Exit]\n\nPut both rows above identical detected-agent terminal content. Use the real toolbar’s button boundaries, spacing, labels, and enabled states in the finished illustration."
+    ]
+  },
+  {
+    "id": "AP-18",
+    "title": "Last prompt banner",
+    "explanation": "“Show the last exactly reconstructed prompt successfully submitted to a detected agent, retaining it when later input cannot be recognized.”",
+    "specimen": "Use a detected-agent pane with a banner above its transcript. Provide a manually stepped sequence:\n\nThe banner contains “Explain this test”; a new draft is being entered, but the banner remains unchanged.\n\n“Summarize this log” is successfully submitted and exactly reconstructed; the banner updates.\n\nLater input is not reconstructable; the transcript may change, but the banner still says “Summarize this log.”\n\nWith the setting off, the same transcript appears without the banner.\n\nRepeat the recognized-submission specimen with typed and pasted sample input.",
+    "states": "Off/on, unsubmitted draft, recognized submission, and unrecognized input after a previously captured prompt.",
+    "motion": "Manual frame advancement is sufficient. Do not animate banner updates merely as characters are typed.",
+    "caveat": "The banner is the last captured submission, which may not be the most recent actual submission after unrecognized input. Never “helpfully” infer replacement text or clear the previous banner.",
+    "frames": [
+      "Use a detected-agent pane with a banner above its transcript. Provide a manually stepped sequence:\n\nThe banner contains “Explain this test”; a new draft is being entered, but the banner remains unchanged.\n\n“Summarize this log” is successfully submitted and exactly reconstructed; the banner updates.\n\nLater input is not reconstructable; the transcript may change, but the banner still says “Summarize this log.”\n\nWith the setting off, the same transcript appears without the banner.\n\nRepeat the recognized-submission specimen with typed and pasted sample input."
+    ]
+  },
+  {
+    "id": "AP-19",
+    "title": "Last prompt banner lines",
+    "explanation": "“Limit wrapped prompt text to a maximum number of rows, keeping short prompts compact and preserving the beginning and end of longer ones.”",
+    "specimen": "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture.",
+    "states": "A short prompt using fewer rows than the ceiling; a long prompt middle-truncated at the ceiling; that same prompt with a higher ceiling.",
+    "motion": "None.",
+    "caveat": "Wrap at the actual specimen width before calculating truncation. Do not assume a fixed source-text line count or invent behavior for unusually small limits not established by the source.",
+    "frames": [
+      "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture."
+    ]
+  },
+  {
+    "id": "AP-20",
+    "title": "Progress monitor",
+    "explanation": "“Let Ilium supervise registered long-running tasks for unattended execution; turning this off stops observation and new monitor registrations, not shell access or preserved final task results.”",
+    "specimen": "Use selectable task-footer specimens, with task evidence and monitor health visibly separate:\n\nON — observation active\n┌─ Task footer ─────────────────────────────┐\n│ build | Task: pending | Monitor: observing│\n└───────────────────────────────────────────┘\nSole recurring poller: Ilium\n\nObservation-failure specimen\nTask: last-known pending | Monitor: failed\n\nOFF\nNew monitors: rejected\nActive observation loops: cancelled\nRecorded terminal results: retained\nShell access: unchanged\n\nThese labels describe the concepts; the finished specimen should use the real footer layout.\n\nAdd separate DONE and ERROR specimens. Keep their final task result visible while explanatory captions advance through result delivery and monitor-owned goal resume; neither stage resets the result to pending.",
+    "states": "On with active observation; final success; final task error; monitor failure without an invented task failure; off with cancelled observation and retained evidence.",
+    "motion": "An optional Full-motion polling tick may originate only from Ilium. It stops in the off specimen while recorded results remain. Its pace must not claim to represent the configured poll interval.",
+    "caveat": "Never conflate lost observation with task failure, or portray disabling monitoring as killing a shell process. Even in a narrow footer, preserve the distinction through explicit labels or accompanying captions.\n\nShared design rules\n\nReuse a scene, not an ambiguous explanation. AP-01–AP-05 share one tree-and-terminal sizing specimen; tree-decoration settings share a row-comparison grammar; menu and toolbar settings share action-strip comparisons; AP-18–AP-19 share one banner renderer. Every illustration still names its own setting and holds unrelated preferences constant.\n\nUse evidence-bound, read-only fixtures. Keep storyboard definitions and synthetic data in the dedicated help area, reusing existing UI rendering and geometry where practical. Examples must not submit prompts, enable debugging, start monitoring, or write settings. Help dismissal is not Save/Cancel; real Settings remain immediate and persistent.\n\nMake every comparison explicit. Label Off/On, alternatives, focus location, simulated terminal width, and relevant prerequisites outside the specimen. Preserve the same content and selected item across comparisons. Never rely on color or a moving glyph alone to communicate the difference.\n\nRespect real cells and the available viewport. Target one 45–65-column, 14–20-row specimen at a time. Use measured glyph widths and actual wrapping; crop and label wider virtual terminals instead of shrinking characters. Switch between frames when a comparison would otherwise become illegible.\n\nAnimate only a causal transition, and honor Motion. Prefer stable comparisons for appearance settings. Use motion principally for sizing transitions, the Motion setting itself, and optional polling explanation. Always provide still equivalents, and never let frozen visual activity imply stopped agent work.",
+    "frames": [
+      "PROGRESS: 0%\n[----------] pending\n",
+      "PROGRESS: 60%\n[██████----] running\n"
+    ]
+  },
+  {
+    "id": "AP-21",
+    "title": "Progress footer lines",
+    "explanation": "“Limit the number of task-detail rows displayed below the footer’s status and percentage line.”",
+    "specimen": "Render the same recorded task data twice, using a fixture that produces three genuine detail rows. Illustrative ceilings are one and three:\n\nProgress footer lines: 1\npending                                      40%\n  compiling parser\n\nProgress footer lines: 3\npending                                      40%\n  compiling parser\n  checking fixtures\n  preparing report\n\nThe detail text represents synthetic content passed through the actual footer formatter. Keep the status, percentage, task records, and monitor health identical.",
+    "states": "Compare a smaller and larger supported ceiling. Only the permitted number of displayed detail rows changes; the status/percentage line is not one of those detail rows. Include a shorter-content specimen to demonstrate that a higher ceiling does not create additional task information.",
+    "motion": "None.",
+    "caveat": "Supported limits, wrapping, and overflow presentation are not supplied. Use locally supported values and existing clipping behavior; do not invent scrolling controls or imply that hidden details have been deleted.",
+    "frames": [
+      "Render the same recorded task data twice, using a fixture that produces three genuine detail rows. Illustrative ceilings are one and three:\n\nProgress footer lines: 1\npending                                      40%\n  compiling parser\n\nProgress footer lines: 3\npending                                      40%\n  compiling parser\n  checking fixtures\n  preparing report\n\nThe detail text represents synthetic content passed through the actual footer formatter. Keep the status, percentage, task records, and monitor health identical."
+    ]
+  },
+  {
+    "id": "AP-22",
+    "title": "Progress fill style",
+    "explanation": "“Choose the character family used to draw task-progress frames without changing the task’s status or progress.”",
+    "specimen": "Place the real style selector above a fixed task footer. Show the named choices—Braille, blocks, moons, quarter blocks, and custom—through their actual frame renderers.\n\nFor each selected family, hold the task status, percentage, detail text, and sampled animation phase constant. Beneath the footer, enlarge several successive frames in equal-width cells.\n\nProgress fill style: [selected family]\n\n[actual rendered frame]  build / pending / 40%\n  checking parser fixtures\n\nFrame samples: [1] [2] [3] [4]\nSame task data; different drawing characters\n\nFor Custom, a synthetic list can contain the individual characters ., o, and O; display them as separate entries rather than inventing an input delimiter.",
+    "states": "Every named family, including a valid equal-width custom list. Only frame appearance changes.",
+    "motion": "One replay of the actual frame sequence can teach the distinction, subject to the current Motion policy; Off uses stills.",
+    "caveat": "Equal width means terminal-cell width, not byte count. Use the actual family definitions and custom-input validation; do not substitute invented moon glyphs or frame timing.",
+    "frames": [
+      "Place the real style selector above a fixed task footer. Show the named choices—Braille, blocks, moons, quarter blocks, and custom—through their actual frame renderers.\n\nFor each selected family, hold the task status, percentage, detail text, and sampled animation phase constant. Beneath the footer, enlarge several successive frames in equal-width cells.\n\nProgress fill style: [selected family]\n\n[actual rendered frame]  build / pending / 40%\n  checking parser fixtures\n\nFrame samples: [1] [2] [3] [4]\nSame task data; different drawing characters\n\nFor Custom, a synthetic list can contain the individual characters ., o, and O; display them as separate entries rather than inventing an input delimiter."
+    ]
+  },
+  {
+    "id": "AP-23",
+    "title": "Terminal text selection",
+    "explanation": "“Choose whether a left-button drag selects text locally in Ilium or remains available to the foreground terminal application.”",
+    "specimen": "Use the same synthetic terminal content in two manually stepped gesture sequences:\n\n┌─ Terminal ──────────────────────────────────┐\n│ alpha beta gamma                           │\n│ delta epsilon zeta                         │\n└────────────────────────────────────────────┘\n\nON:  press at \"beta\", drag across the word\n     -> Ilium highlights a local text range\n\nOFF: repeat the same drag\n     -> no Ilium selection from that gesture\n     -> available to the application's mouse handling\n\nRender the selected range with the actual selection style, not inserted brackets that could be mistaken for terminal output.",
+    "states": "On captures that drag for a selectable/copyable local range. Off permits a mouse-aware foreground application to handle it. Terminal text remains identical.",
+    "motion": "A press, drag, and release sequence is useful; three manually advanced stills suffice.",
+    "caveat": "Do not demonstrate automatic clipboard copying or an invented application reaction. The displayed gesture must never be forwarded into a real pane.",
+    "frames": [
+      "Use the same synthetic terminal content in two manually stepped gesture sequences:\n\n┌─ Terminal ──────────────────────────────────┐\n│ alpha beta gamma                           │\n│ delta epsilon zeta                         │\n└────────────────────────────────────────────┘\n\nON:  press at \"beta\", drag across the word\n     -> Ilium highlights a local text range\n\nOFF: repeat the same drag\n     -> no Ilium selection from that gesture\n     -> available to the application's mouse handling\n\nRender the selected range with the actual selection style, not inserted brackets that could be mistaken for terminal output."
+    ]
+  },
+  {
+    "id": "AP-24",
+    "title": "Lock-closed items",
+    "explanation": "“Allow unlocked items to be locked closed while preserving an explicit way to unlock items already locked.”",
+    "specimen": "show the same unlocked `notes` row with **On:** context menu `Toggle | Lock closed`, and **Off:** `Toggle` only; beside it show an already locked `🔒 notes` row with `Unlock` in **both** states. On ignores an ordinary click on the locked row; Off routes that click through ordinary expand/collapse, while persisted lock state still hides children until `Unlock`.",
+    "states": "On hides the Lock closed menu action and suppresses ordinary click toggling for locked rows; Off restores ordinary click routing. Existing locked state continues to hide children, and Unlock remains available in both settings states.",
+    "motion": "static menu and tree comparisons.",
+    "caveat": "Same-row double-click routes to Rename in the supplied mouse handler; it is not a lock gesture. Unlock remains available when this setting is Off.",
+    "frames": [
+      "show the same unlocked `notes` row with **On:** context menu `Toggle | Lock closed`, and **Off:** `Toggle` only; beside it show an already locked `🔒 notes` row with `Unlock` in **both** states. On ignores an ordinary click on the locked row; Off routes that click through ordinary expand/collapse, while persisted lock state still hides children until `Unlock`."
+    ]
+  },
+  {
+    "id": "AP-25",
+    "title": "Project separators",
+    "explanation": "Draw a frame-style line after each project’s full visible tree to make project boundaries easier to scan.",
+    "specimen": "OFF\n▾ Project Alpha\n  └─ build\n▾ Project Beta\n  └─ notes\n▾ Project Gamma\n  └─ shell\n\nON\n▾ Project Alpha\n  └─ build\n────────────\n▾ Project Beta\n  └─ notes\n────────────\n▾ Project Gamma\n  └─ shell",
+    "states": "Off shows the same project subtrees without separator lines. On draws a full-width line after each project subtree except the last; hierarchy and node order stay fixed.",
+    "frames": [
+      "OFF\n▾ Project Alpha\n  └─ build\n▾ Project Beta\n  └─ notes\n▾ Project Gamma\n  └─ shell",
+      "ON\n▾ Project Alpha\n  └─ build\n────────────\n▾ Project Beta\n  └─ notes\n────────────\n▾ Project Gamma\n  └─ shell"
+    ],
+    "motion": "Static before/after stills; no tree reordering or row movement is animated.",
+    "caveat": "A separator is a decorative, non-selectable line after a complete visible subtree, not a tree row. The last project has no separator."
+  },
+  {
+    "id": "API-01",
+    "title": "HTTP API port",
+    "explanation": "“Choose the port for the loopback-only `/create_agent` API on the detached server’s next start.”",
+    "specimen": "`127.0.0.1:<synthetic port A>` → `127.0.0.1:<synthetic port B>` under “next server start.”",
+    "states": "configured future listener address changes.",
+    "motion": "static.",
+    "caveat": "no listener starts now; never depict non-loopback access or a real user port.",
+    "frames": [
+      "`127.0.0.1:<synthetic port A>` → `127.0.0.1:<synthetic port B>` under “next server start.”"
+    ]
+  },
+  {
+    "id": "DEBUG-01",
+    "title": "File logging",
+    "explanation": "“Write instrumented actions, errors, and full text LLM exchanges to a timestamped session debug log while investigation is enabled.”",
+    "specimen": "`Off` versus `On → synthetic session log`, with sample *labels* `action / error / LLM text`.",
+    "states": "logging policy changes.",
+    "motion": "static.",
+    "caveat": "source only specifies credential header/URL-parameter redaction and binary-audio summaries; do not imply all secrets in text are redacted.",
+    "frames": [
+      "`Off` versus `On → synthetic session log`, with sample *labels* `action / error / LLM text`."
+    ]
+  },
+  {
+    "id": "ED-01",
+    "title": "Long lines",
+    "explanation": "“Choose whether long source lines clip at the editor edge or wrap into extra visual rows.”",
+    "specimen": "identical logical line `let message = \"long…\";` under `Clip` and `Wrap`, with one continuation row only in Wrap.",
+    "states": "viewport layout changes, bytes do not.",
+    "motion": "static.",
+    "caveat": "retain line identity and use actual editor cell width.",
+    "frames": [
+      "identical logical line `let message = \"long…\";` under `Clip` and `Wrap`, with one continuation row only in Wrap."
+    ]
+  },
+  {
+    "id": "ED-02",
+    "title": "Line numbers",
+    "explanation": "“Show or hide line numbers in local editor buffers by default.”",
+    "specimen": "same two source lines with gutter `1, 2` → blank gutter.",
+    "states": "presentation only.",
+    "motion": "static.",
+    "caveat": "source text stays identical.",
+    "frames": [
+      "same two source lines with gutter `1, 2` → blank gutter."
+    ]
+  },
+  {
+    "id": "ED-03",
+    "title": "Minimap",
+    "explanation": "“Show or hide the editor’s minimap by default.”",
+    "specimen": "same editor viewport with slim right minimap → no minimap.",
+    "states": "presentation width changes.",
+    "motion": "static.",
+    "caveat": "avoid suggesting the file lost lines.",
+    "frames": [
+      "same editor viewport with slim right minimap → no minimap."
+    ]
+  },
+  {
+    "id": "ED-04",
+    "title": "Autosave",
+    "explanation": "“Save modified local editor files automatically when autosave is enabled.”",
+    "specimen": "`modified • Autosave Off` versus `modified • Autosave On → pending`, with no completion event.",
+    "states": "policy changes.",
+    "motion": "static.",
+    "caveat": "preview must never save a fixture.",
+    "frames": [
+      "`modified • Autosave Off` versus `modified • Autosave On → pending`, with no completion event."
+    ]
+  },
+  {
+    "id": "ED-05",
+    "title": "Autosave delay",
+    "explanation": "“Set the wait after the latest edit before an enabled autosave occurs.”",
+    "specimen": "`edit A … edit B | wait 250 ms` versus `wait 1000 ms`; timer restarts at B.",
+    "states": "delay changes, file unchanged.",
+    "motion": "static timeline.",
+    "caveat": "use supported values and label timing schematic.",
+    "frames": [
+      "EDIT B ── wait 250 ms ── save\n",
+      "EDIT B ───────── wait 1000 ms ───────── save\n"
+    ]
+  },
+  {
+    "id": "ED-06",
+    "title": "Markdown default",
+    "explanation": "“Choose whether newly opened Markdown files start in Source or Rendered view.”",
+    "specimen": "same `# Notes` source on one side and rendered `Notes` heading on the other.",
+    "states": "initial view changes.",
+    "motion": "static.",
+    "caveat": "neither comparison rewrites the `.md` file.",
+    "frames": [
+      "same `# Notes` source on one side and rendered `Notes` heading on the other."
+    ]
+  },
+  {
+    "id": "GIT-01",
+    "title": "Default where",
+    "explanation": "“Choose the default location offered for a newly created agent in a Git workspace.”",
+    "specimen": "`Here | New worktree | Existing worktree`, with a future agent location highlight.",
+    "states": "default choice changes.",
+    "motion": "static.",
+    "caveat": "`Here` preserves ordinary one-click creation; existing agents do not move.",
+    "frames": [
+      "`Here | New worktree | Existing worktree`, with a future agent location highlight."
+    ]
+  },
+  {
+    "id": "GIT-02",
+    "title": "Branch prefix",
+    "explanation": "“Set the prefix used when Ilium suggests names for new worktree branches.”",
+    "specimen": "`agent/` → synthetic `trial/`, yielding *suggested* `agent/task` → `trial/task`.",
+    "states": "future suggestion changes.",
+    "motion": "static.",
+    "caveat": "no branch is created or renamed.",
+    "frames": [
+      "`agent/` → synthetic `trial/`, yielding *suggested* `agent/task` → `trial/task`."
+    ]
+  },
+  {
+    "id": "GIT-03",
+    "title": "Worktree location",
+    "explanation": "“Set the path template used for a new worktree.”",
+    "specimen": "`{repo_parent}/{repo_name}.worktrees/{branch_slug}` → a synthetic resolved path preview.",
+    "states": "future location proposal changes.",
+    "motion": "static.",
+    "caveat": "supported placeholders are `{repo_parent}`, `{repo_name}`, `{project}`, `{branch_slug}`; do not create directories.",
+    "frames": [
+      "`{repo_parent}/{repo_name}.worktrees/{branch_slug}` → a synthetic resolved path preview."
+    ]
+  },
+  {
+    "id": "GIT-04",
+    "title": "Default base",
+    "explanation": "“Choose whether a new branch starts from the current branch or the repository’s default branch.”",
+    "specimen": "`Current branch` versus `Default branch` pointing into a *proposed* worktree branch.",
+    "states": "base selection changes.",
+    "motion": "static.",
+    "caveat": "existing branches remain unchanged.",
+    "frames": [
+      "`Current branch` versus `Default branch` pointing into a *proposed* worktree branch."
+    ]
+  },
+  {
+    "id": "GIT-05",
+    "title": "Branch line",
+    "explanation": "“Show or hide a branch line beneath worktree agent rows.”",
+    "specimen": "`Codex parser / 🌿 agent/task` versus `Codex parser` alone.",
+    "states": "`Worktree agents` versus `Off`; branch remains real.",
+    "motion": "static.",
+    "caveat": "do not imply it applies to every ordinary agent row.",
+    "frames": [
+      "`Codex parser / 🌿 agent/task` versus `Codex parser` alone."
+    ]
+  },
+  {
+    "id": "GIT-06",
+    "title": "Setup command",
+    "explanation": "“Store an optional command to run after a new worktree is created.”",
+    "specimen": "`None` versus synthetic inert text `echo ready` under “future worktree setup.”",
+    "states": "configured text changes.",
+    "motion": "static.",
+    "caveat": "display only; never execute the command.",
+    "frames": [
+      "`None` versus synthetic inert text `echo ready` under “future worktree setup.”"
+    ]
+  },
+  {
+    "id": "GIT-07",
+    "title": "Close policy",
+    "explanation": "“Choose whether worktrees are kept by default or removal is offered when safe during close.”",
+    "specimen": "`Keep` versus `Offer removal when safe` in a future-close decision card.",
+    "states": "default offer changes.",
+    "motion": "static.",
+    "caveat": "no removal, and “offer” must not be drawn as automatic deletion.",
+    "frames": [
+      "`Keep` versus `Offer removal when safe` in a future-close decision card."
+    ]
+  },
+  {
+    "id": "IC-01",
+    "title": "Group",
+    "explanation": "“Choose the icon beside a group in the tree.”",
+    "specimen": "`▾ 📂 Build / └─ shell` → `▾ 📁 Build / └─ shell`.",
+    "states": "same expanded group, changed icon.",
+    "motion": "static.",
+    "caveat": "preserve tree indentation and measured glyph width.",
+    "frames": [
+      "`▾ 📂 Build / └─ shell` → `▾ 📁 Build / └─ shell`."
+    ]
+  },
+  {
+    "id": "IC-02",
+    "title": "Top-level destination",
+    "explanation": "“Choose the icon identifying the top-level destination.”",
+    "specimen": "Project destination:  🏠 Top level  →  ⌂ Top level\nSort action:         🏠 Age down      →  ⌂ Age down",
+    "states": "same destination, changed icon.",
+    "motion": "static.",
+    "caveat": "The TopLevel glyph is used for the top-level destination in project creation and the Age down sort action. Keep both examples inert.",
+    "frames": [
+      "Project destination:  🏠 Top level  →  ⌂ Top level\nSort action:         🏠 Age down      →  ⌂ Age down"
+    ]
+  },
+  {
+    "id": "IC-03",
+    "title": "Project",
+    "explanation": "“Choose the icon beside a project entry.”",
+    "specimen": "`🗂️ atlas` → `📁 atlas`, with its child unchanged.",
+    "states": "project identity and hierarchy stay fixed.",
+    "motion": "static.",
+    "caveat": "do not conflate this icon with the group icon.",
+    "frames": [
+      "`🗂️ atlas` → `📁 atlas`, with its child unchanged."
+    ]
+  },
+  {
+    "id": "IC-04",
+    "title": "Vertical split",
+    "explanation": "“Choose the icon marking a vertical split view.”",
+    "specimen": "tree `▥ Split` → `⊞ Split` beside a fixed side-by-side pane diagram.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "retain the actual split orientation; an icon change does not rotate panes.",
+    "frames": [
+      "tree `▥ Split` → `⊞ Split` beside a fixed side-by-side pane diagram."
+    ]
+  },
+  {
+    "id": "IC-05",
+    "title": "Horizontal split",
+    "explanation": "“Choose the icon marking a horizontal split view.”",
+    "specimen": "`▤ Split` → `▦ Split` beside fixed stacked panes.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "distinguish this from IC-04 through pane geometry.",
+    "frames": [
+      "`▤ Split` → `▦ Split` beside fixed stacked panes."
+    ]
+  },
+  {
+    "id": "IC-06",
+    "title": "Folder",
+    "explanation": "“Choose the icon beside a folder entry.”",
+    "specimen": "`▾ 📂 notes` → `▾ 🧺 notes`; child remains visible.",
+    "states": "same folder and expansion.",
+    "motion": "static.",
+    "caveat": "no implied filesystem change.",
+    "frames": [
+      "`▾ 📂 notes` → `▾ 🧺 notes`; child remains visible."
+    ]
+  },
+  {
+    "id": "IC-07",
+    "title": "Worktree branch",
+    "explanation": "“Choose the icon shown with a worktree branch.”",
+    "specimen": "worktree agent row with `🌿 agent/task` → `⑂ agent/task`.",
+    "states": "branch text and worktree remain fixed.",
+    "motion": "static.",
+    "caveat": "branch-line visibility is separately controlled by GIT-05.",
+    "frames": [
+      "worktree agent row with `🌿 agent/task` → `⑂ agent/task`."
+    ]
+  },
+  {
+    "id": "IC-08",
+    "title": "Terminal",
+    "explanation": "“Choose the icon for a terminal pane in the tree.”",
+    "specimen": "`🖥️ shell` → `▸ shell` next to an unchanged `$ ready` pane.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "do not suggest a new shell starts.",
+    "frames": [
+      "`🖥️ shell` → `▸ shell` next to an unchanged `$ ready` pane."
+    ]
+  },
+  {
+    "id": "IC-09",
+    "title": "Editor",
+    "explanation": "“Choose the icon for an editor pane.”",
+    "specimen": "`📝 notes.md` → `✎ notes.md` beside the same editor text.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no file edit.",
+    "frames": [
+      "`📝 notes.md` → `✎ notes.md` beside the same editor text."
+    ]
+  },
+  {
+    "id": "IC-10",
+    "title": "Board",
+    "explanation": "“Choose the icon for a Kanban board pane.”",
+    "specimen": "`📉 Tasks` → `☷ Tasks` beside the same board columns.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "board cards do not move.",
+    "frames": [
+      "`📉 Tasks` → `☷ Tasks` beside the same board columns."
+    ]
+  },
+  {
+    "id": "IC-11",
+    "title": "Claude agent",
+    "explanation": "“Choose the identity icon for detected Claude agents.”",
+    "specimen": "`🦀 Claude  parser` → `🧠 Claude  parser`, retaining objective/activity slots.",
+    "states": "identity glyph only.",
+    "motion": "static.",
+    "caveat": "this does not change agent detection or status.",
+    "frames": [
+      "`🦀 Claude  parser` → `🧠 Claude  parser`, retaining objective/activity slots."
+    ]
+  },
+  {
+    "id": "IC-12",
+    "title": "Codex agent",
+    "explanation": "“Choose the identity icon for detected Codex agents.”",
+    "specimen": "`🐢 Codex  parser` → `🛠️ Codex  parser`.",
+    "states": "identity glyph only.",
+    "motion": "static.",
+    "caveat": "preserve separate status glyphs.",
+    "frames": [
+      "`🐢 Codex  parser` → `🛠️ Codex  parser`."
+    ]
+  },
+  {
+    "id": "IC-13",
+    "title": "Antigravity agent",
+    "explanation": "“Choose the identity icon for detected Antigravity agents.”",
+    "specimen": "`⚛️ Antigravity  parser` → `✦ Antigravity  parser`.",
+    "states": "identity glyph only.",
+    "motion": "static.",
+    "caveat": "shorten title before dropping status context at narrow widths.",
+    "frames": [
+      "`⚛️ Antigravity  parser` → `✦ Antigravity  parser`."
+    ]
+  },
+  {
+    "id": "IC-14",
+    "title": "Other agent",
+    "explanation": "“Choose the identity icon for agents classified as Other.”",
+    "specimen": "`🤖 toolname  parser` → `◈ toolname  parser`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "retain the actual matched process name; do not present “Other” as a specific provider.",
+    "frames": [
+      "`🤖 toolname  parser` → `◈ toolname  parser`."
+    ]
+  },
+  {
+    "id": "IC-15",
+    "title": "Bookmark indicator",
+    "explanation": "“Choose the marker for a bookmarked tree item.”",
+    "specimen": "`★ notes` → `🔖 notes`, with bookmark state fixed.",
+    "states": "marker only.",
+    "motion": "static.",
+    "caveat": "no bookmark toggle.",
+    "frames": [
+      "`★ notes` → `🔖 notes`, with bookmark state fixed."
+    ]
+  },
+  {
+    "id": "IC-16",
+    "title": "Locked-closed indicator",
+    "explanation": "“Choose the marker for a folder already locked closed.”",
+    "specimen": "`🔒 notes` → `🔐 notes`, children hidden in both stills.",
+    "states": "marker only.",
+    "motion": "static.",
+    "caveat": "changing the marker does not unlock or reveal children.",
+    "frames": [
+      "`🔒 notes` → `🔐 notes`, children hidden in both stills."
+    ]
+  },
+  {
+    "id": "IC-17",
+    "title": "Tree toolbar Search",
+    "explanation": "“Choose the icon for Search in the tree toolbar.”",
+    "specimen": "toolbar `[🔎 Search] [Restructure] [Settings]` → `[⌕ Search] …`.",
+    "states": "Search icon only.",
+    "motion": "static.",
+    "caveat": "the preview does not open search.",
+    "frames": [
+      "toolbar `[🔎 Search] [Restructure] [Settings]` → `[⌕ Search] …`."
+    ]
+  },
+  {
+    "id": "IC-18",
+    "title": "Tree toolbar Restructure",
+    "explanation": "“Choose the icon for Restructure in the tree toolbar.”",
+    "specimen": "`[Search] [♻️ Restructure] [Settings]` → `[Search] [↻ Restructure] …`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no LLM work runs.",
+    "frames": [
+      "`[Search] [♻️ Restructure] [Settings]` → `[Search] [↻ Restructure] …`."
+    ]
+  },
+  {
+    "id": "IC-19",
+    "title": "Tree toolbar Settings",
+    "explanation": "“Choose the icon for Settings in the tree toolbar.”",
+    "specimen": "`[Search] [Restructure] [🎚️ Settings]` → `[…][⚙️ Settings]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "do not open Settings from the specimen.",
+    "frames": [
+      "`[Search] [Restructure] [🎚️ Settings]` → `[…][⚙️ Settings]`."
+    ]
+  },
+  {
+    "id": "IC-20",
+    "title": "Hover-row Rename",
+    "explanation": "“Choose the icon for a hovered row’s Rename control.”",
+    "specimen": "`> build [✏️ Rename] [Move up] [Move down]` → `[✎ Rename]`.",
+    "states": "one icon changes.",
+    "motion": "static.",
+    "caveat": "show controls only in a context where the hovered row exposes them.",
+    "frames": [
+      "`> build [✏️ Rename] [Move up] [Move down]` → `[✎ Rename]`."
+    ]
+  },
+  {
+    "id": "IC-21",
+    "title": "Hover-row Move up",
+    "explanation": "“Choose the icon for moving a hovered row upward.”",
+    "specimen": "middle sibling `> build [Rename] [🔼 Up] [Down]` → `[↑ Up]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "keep siblings in place; no reorder occurs.",
+    "frames": [
+      "middle sibling `> build [Rename] [🔼 Up] [Down]` → `[↑ Up]`."
+    ]
+  },
+  {
+    "id": "IC-22",
+    "title": "Hover-row Move down",
+    "explanation": "“Choose the icon for moving a hovered row downward.”",
+    "specimen": "middle sibling `> build [Rename] [Up] [🔽 Down]` → `[↓ Down]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "use a row with a lower sibling so the control is meaningful.",
+    "frames": [
+      "middle sibling `> build [Rename] [Up] [🔽 Down]` → `[↓ Down]`."
+    ]
+  },
+  {
+    "id": "IC-23",
+    "title": "Hover-row Close",
+    "explanation": "“Choose the icon for a row’s Close control.”",
+    "specimen": "`> shell [🚫 Close]` → `[× Close]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "pane remains present; the preview must not terminate it.",
+    "frames": [
+      "`> shell [🚫 Close]` → `[× Close]`."
+    ]
+  },
+  {
+    "id": "IC-24",
+    "title": "Hover-row Retitle",
+    "explanation": "“Choose the icon for an agent row’s Retitle control.”",
+    "specimen": "`> Codex parser [♻️ Retitle]` → `[⟳ Retitle]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no title inference request runs.",
+    "frames": [
+      "`> Codex parser [♻️ Retitle]` → `[⟳ Retitle]`."
+    ]
+  },
+  {
+    "id": "IC-25",
+    "title": "Project restructure",
+    "explanation": "“Choose the icon for a project row’s Restructure action.”",
+    "specimen": "`> atlas [♻️ Restructure project]` → `[↻ Restructure project]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "do not imply the project tree has been reorganized.",
+    "frames": [
+      "`> atlas [♻️ Restructure project]` → `[↻ Restructure project]`."
+    ]
+  },
+  {
+    "id": "IC-26",
+    "title": "Ask for update",
+    "explanation": "“Choose the icon for the Ask for update row or menu action.”",
+    "specimen": "`> atlas [💭 Ask for update]` → `[🗨️ Ask for update]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no message is sent to an agent.",
+    "frames": [
+      "`> atlas [💭 Ask for update]` → `[🗨️ Ask for update]`."
+    ]
+  },
+  {
+    "id": "IC-27",
+    "title": "Paste left",
+    "explanation": "“Choose the icon for screen transfer toward a left neighbor.”",
+    "specimen": "`[destination] ← [source]`, action chip `← Paste left` → `⇐ Paste left`.",
+    "states": "arrow glyph only.",
+    "motion": "static.",
+    "caveat": "preserve left/right pane positions; availability depends on a valid neighbor.",
+    "frames": [
+      "`[destination] ← [source]`, action chip `← Paste left` → `⇐ Paste left`."
+    ]
+  },
+  {
+    "id": "IC-28",
+    "title": "Paste right",
+    "explanation": "“Choose the icon for screen transfer toward a right neighbor.”",
+    "specimen": "`[source] → [destination]`, chip `→ Paste right` → `⇒ Paste right`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "no text is copied or pasted.",
+    "frames": [
+      "`[source] → [destination]`, chip `→ Paste right` → `⇒ Paste right`."
+    ]
+  },
+  {
+    "id": "IC-29",
+    "title": "Paste up",
+    "explanation": "“Choose the icon for screen transfer toward an upper neighbor.”",
+    "specimen": "stacked `[destination] / ↑ / [source]`, chip `↑ Paste up` → `⇑ Paste up`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "retain vertical layout and use terminal-cell alignment.",
+    "frames": [
+      "stacked `[destination] / ↑ / [source]`, chip `↑ Paste up` → `⇑ Paste up`."
+    ]
+  },
+  {
+    "id": "IC-30",
+    "title": "Paste down",
+    "explanation": "“Choose the icon for screen transfer toward a lower neighbor.”",
+    "specimen": "stacked `[source] / ↓ / [destination]`, chip `↓ Paste down` → `⇓ Paste down`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "no pane input is dispatched.",
+    "frames": [
+      "stacked `[source] / ↓ / [destination]`, chip `↓ Paste down` → `⇓ Paste down`."
+    ]
+  },
+  {
+    "id": "IC-31",
+    "title": "Open in OS",
+    "explanation": "“Choose the icon for opening a browser, file, or folder in the operating system.”",
+    "specimen": "file context menu `🔗 Open in OS` → `↗️ Open in OS`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "show one valid context at a time; never launch an external program.",
+    "frames": [
+      "file context menu `🔗 Open in OS` → `↗️ Open in OS`."
+    ]
+  },
+  {
+    "id": "IC-32",
+    "title": "Close agent toolbar",
+    "explanation": "“Choose the icon that closes the visible agent toolbar.”",
+    "specimen": "`Agent toolbar … [✕ Close toolbar]` → `[× Close toolbar]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "this closes toolbar presentation, not the agent pane.",
+    "frames": [
+      "`Agent toolbar … [✕ Close toolbar]` → `[× Close toolbar]`."
+    ]
+  },
+  {
+    "id": "IC-33",
+    "title": "Compact agent conversation",
+    "explanation": "“Choose the toolbar icon for the agent’s Compact command.”",
+    "specimen": "toolbar `[🗜️ Compact]` → `[📦 Compact]` above the same transcript.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "do not compact the conversation.",
+    "frames": [
+      "toolbar `[🗜️ Compact]` → `[📦 Compact]` above the same transcript."
+    ]
+  },
+  {
+    "id": "IC-34",
+    "title": "Clear agent conversation",
+    "explanation": "“Choose the toolbar icon for Clear.”",
+    "specimen": "`[🧹 Clear]` → `[⌫ Clear]`, transcript unchanged.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no terminal command is sent.",
+    "frames": [
+      "`[🧹 Clear]` → `[⌫ Clear]`, transcript unchanged."
+    ]
+  },
+  {
+    "id": "IC-35",
+    "title": "Configure agent",
+    "explanation": "“Choose the toolbar icon for agent configuration.”",
+    "specimen": "`[🎛️ Config]` → `[⚙️ Config]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "show the control only for a supported detected agent.",
+    "frames": [
+      "`[🎛️ Config]` → `[⚙️ Config]`."
+    ]
+  },
+  {
+    "id": "IC-36",
+    "title": "Stop agent",
+    "explanation": "“Choose the toolbar icon for Stop.”",
+    "specimen": "running agent pane above `[⏹ Stop]` → `[✋ Stop]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "the process continues in both preview stills.",
+    "frames": [
+      "running agent pane above `[⏹ Stop]` → `[✋ Stop]`."
+    ]
+  },
+  {
+    "id": "IC-37",
+    "title": "Copy screen",
+    "explanation": "“Choose the toolbar icon for copying visible screen text.”",
+    "specimen": "`[📋 Copy screen]` → `[📸 Copy screen]` beside an unchanged pane excerpt.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no clipboard write.",
+    "frames": [
+      "`[📋 Copy screen]` → `[📸 Copy screen]` beside an unchanged pane excerpt."
+    ]
+  },
+  {
+    "id": "IC-38",
+    "title": "Smart Copy",
+    "explanation": "“Choose the toolbar icon for Smart Copy.”",
+    "specimen": "`[🧲 Smart Copy]` → `[✨ Smart Copy]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "do not invent what text its extraction algorithm would choose.",
+    "frames": [
+      "`[🧲 Smart Copy]` → `[✨ Smart Copy]`."
+    ]
+  },
+  {
+    "id": "IC-39",
+    "title": "Copy last message",
+    "explanation": "“Choose the toolbar icon for copying the agent’s last message.”",
+    "specimen": "a completed message above `[💬 Copy last message]` → `[✉️ Copy last message]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "clipboard and transcript remain untouched.",
+    "frames": [
+      "a completed message above `[💬 Copy last message]` → `[✉️ Copy last message]`."
+    ]
+  },
+  {
+    "id": "IC-40",
+    "title": "Change effort",
+    "explanation": "“Choose the toolbar icon for the effort selector.”",
+    "specimen": "`[🎚️ Effort: current]` → `[⚖️ Effort: current]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "available effort values depend on the agent; none changes.",
+    "frames": [
+      "`[🎚️ Effort: current]` → `[⚖️ Effort: current]`."
+    ]
+  },
+  {
+    "id": "IC-41",
+    "title": "Change model",
+    "explanation": "“Choose the toolbar icon for the model selector.”",
+    "specimen": "`[🧩 Model: current]` → `[🧠 Model: current]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no model switch or provider request.",
+    "frames": [
+      "`[🧩 Model: current]` → `[🧠 Model: current]`."
+    ]
+  },
+  {
+    "id": "IC-42",
+    "title": "Claude Haiku choice",
+    "explanation": "“Choose the icon beside Haiku in Claude’s model choices.”",
+    "specimen": "Claude model menu `🐁 Haiku` → `🐭 Haiku`, other choices unchanged.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "selecting an icon does not select Haiku.",
+    "frames": [
+      "Claude model menu `🐁 Haiku` → `🐭 Haiku`, other choices unchanged."
+    ]
+  },
+  {
+    "id": "IC-43",
+    "title": "Claude Sonnet choice",
+    "explanation": "“Choose the icon beside Sonnet in Claude’s model choices.”",
+    "specimen": "menu `🐈 Sonnet` → `🐱 Sonnet`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "retain the actual selected-model indicator separately.",
+    "frames": [
+      "menu `🐈 Sonnet` → `🐱 Sonnet`."
+    ]
+  },
+  {
+    "id": "IC-44",
+    "title": "Claude Opus choice",
+    "explanation": "“Choose the icon beside Opus in Claude’s model choices.”",
+    "specimen": "menu `🦁 Opus` → `🐅 Opus`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "no model invocation.",
+    "frames": [
+      "menu `🦁 Opus` → `🐅 Opus`."
+    ]
+  },
+  {
+    "id": "IC-45",
+    "title": "Claude Fable choice",
+    "explanation": "“Choose the icon beside Fable in Claude’s model choices.”",
+    "specimen": "menu `⬤ Fable` → `📖 Fable`.",
+    "states": "glyph only.",
+    "motion": "static.",
+    "caveat": "render only in a Claude context where this choice is available.",
+    "frames": [
+      "menu `⬤ Fable` → `📖 Fable`."
+    ]
+  },
+  {
+    "id": "IC-46",
+    "title": "Exit agent",
+    "explanation": "“Choose the toolbar icon for the agent Exit action.”",
+    "specimen": "`[🚪 Exit]` → `[⏏️ Exit]`, agent pane stays open.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no exit command or process termination.",
+    "frames": [
+      "`[🚪 Exit]` → `[⏏️ Exit]`, agent pane stays open."
+    ]
+  },
+  {
+    "id": "IC-47",
+    "title": "Fast mode",
+    "explanation": "“Choose the toolbar icon beside Fast mode.”",
+    "specimen": "`[⚡ Fast: off]` → `[🚀 Fast: off]`.",
+    "states": "icon only; mode remains off.",
+    "motion": "static.",
+    "caveat": "capability and mode indicator must come from the real toolbar.",
+    "frames": [
+      "`[⚡ Fast: off]` → `[🚀 Fast: off]`."
+    ]
+  },
+  {
+    "id": "IC-48",
+    "title": "Text selection",
+    "explanation": "“Choose the toolbar icon beside the agent text-selection toggle.”",
+    "specimen": "`[🖱️ Select: off]` → `[◫ Select: off]`.",
+    "states": "icon only.",
+    "motion": "static.",
+    "caveat": "no drag or selection is performed.",
+    "frames": [
+      "`[🖱️ Select: off]` → `[◫ Select: off]`."
+    ]
+  },
+  {
+    "id": "INF-01",
+    "title": "Provider",
+    "explanation": "“Choose the backend for background title and organization inference.”",
+    "specimen": "provider selector cycling `Kilo Gateway / Ollama / OpenAI-compatible / Anthropic / OpenRouter`, with only that provider’s fields shown beneath.",
+    "states": "visible field group and selected backend change.",
+    "motion": "static.",
+    "caveat": "selection alone makes no request.",
+    "frames": [
+      "provider selector cycling `Kilo Gateway / Ollama / OpenAI-compatible / Anthropic / OpenRouter`, with only that provider’s fields shown beneath."
+    ]
+  },
+  {
+    "id": "INF-02",
+    "title": "Ollama URL",
+    "explanation": "“Set the Ollama endpoint used for local inference and its model catalog.”",
+    "specimen": "Ollama group `API URL: synthetic local endpoint A → B`; model row unchanged.",
+    "states": "endpoint text changes.",
+    "motion": "static.",
+    "caveat": "use no real local service address and make no GET.",
+    "frames": [
+      "Ollama group `API URL: synthetic local endpoint A → B`; model row unchanged."
+    ]
+  },
+  {
+    "id": "INF-03",
+    "title": "Ollama model",
+    "explanation": "“Choose or type the Ollama model used for inference.”",
+    "specimen": "`Ollama model ‹ model A ›` → `‹ model B ›` beside a static available-model list.",
+    "states": "saved selection changes.",
+    "motion": "static.",
+    "caveat": "the real list comes from discovery; never invent availability.",
+    "frames": [
+      "`Ollama model ‹ model A ›` → `‹ model B ›` beside a static available-model list."
+    ]
+  },
+  {
+    "id": "INF-04",
+    "title": "OpenAI-compatible URL",
+    "explanation": "“Set the endpoint for the OpenAI-compatible inference provider.”",
+    "specimen": "provider heading and `API URL A → B`, with key/model fixed.",
+    "states": "provider-specific URL changes.",
+    "motion": "static.",
+    "caveat": "it does not alter other provider URLs.",
+    "frames": [
+      "provider heading and `API URL A → B`, with key/model fixed."
+    ]
+  },
+  {
+    "id": "INF-05",
+    "title": "OpenAI-compatible key",
+    "explanation": "“Set the credential for the OpenAI-compatible inference provider.”",
+    "specimen": "`Not set` → `••••synthetic`, under that provider only.",
+    "states": "masked indicator changes.",
+    "motion": "static.",
+    "caveat": "never display actual key characters; the real UI masks them.",
+    "frames": [
+      "`Not set` → `••••synthetic`, under that provider only."
+    ]
+  },
+  {
+    "id": "INF-06",
+    "title": "OpenAI-compatible model",
+    "explanation": "“Set the model name sent to the OpenAI-compatible provider.”",
+    "specimen": "`Model A → Model B` with fixed URL/key placeholders.",
+    "states": "name changes.",
+    "motion": "static.",
+    "caveat": "do not claim either synthetic model exists.",
+    "frames": [
+      "`Model A → Model B` with fixed URL/key placeholders."
+    ]
+  },
+  {
+    "id": "INF-07",
+    "title": "Anthropic URL",
+    "explanation": "“Set the endpoint used by the Anthropic inference provider.”",
+    "specimen": "Anthropic group `API URL A → B`.",
+    "states": "Anthropic URL only changes.",
+    "motion": "static.",
+    "caveat": "no connection or validation request.",
+    "frames": [
+      "Anthropic group `API URL A → B`."
+    ]
+  },
+  {
+    "id": "INF-08",
+    "title": "Anthropic key",
+    "explanation": "“Set the credential for Anthropic inference.”",
+    "specimen": "`Not set` → `••••synthetic` in the Anthropic group.",
+    "states": "masked indicator changes.",
+    "motion": "static.",
+    "caveat": "no key contents in the artifact.",
+    "frames": [
+      "`Not set` → `••••synthetic` in the Anthropic group."
+    ]
+  },
+  {
+    "id": "INF-09",
+    "title": "Anthropic model",
+    "explanation": "“Set the Anthropic model name used for title and organization inference.”",
+    "specimen": "`Model A → Model B`.",
+    "states": "Anthropic model only changes.",
+    "motion": "static.",
+    "caveat": "model availability is unverified.",
+    "frames": [
+      "`Model A → Model B`."
+    ]
+  },
+  {
+    "id": "INF-10",
+    "title": "OpenRouter key",
+    "explanation": "“Set the credential for the OpenRouter inference provider.”",
+    "specimen": "OpenRouter group `Not set` → `••••synthetic`.",
+    "states": "masked indicator changes.",
+    "motion": "static.",
+    "caveat": "this provider’s visible group has no URL field in the supplied renderer.",
+    "frames": [
+      "OpenRouter group `Not set` → `••••synthetic`."
+    ]
+  },
+  {
+    "id": "INF-11",
+    "title": "OpenRouter model",
+    "explanation": "“Set the model name used through OpenRouter.”",
+    "specimen": "`OpenRouter model A → B`, key indicator fixed.",
+    "states": "model string changes.",
+    "motion": "static.",
+    "caveat": "no provider call.",
+    "frames": [
+      "`OpenRouter model A → B`, key indicator fixed."
+    ]
+  },
+  {
+    "id": "INF-12",
+    "title": "Kilo Gateway model",
+    "explanation": "“Choose a model from Kilo Gateway’s live catalog.”",
+    "specimen": "Kilo group `Kilo model ‹ A ›` → `‹ B ›`, with catalog rows shown as synthetic placeholders.",
+    "states": "selection changes.",
+    "motion": "static.",
+    "caveat": "the real view warns that requests may be used for training; preserve that warning and make no request.",
+    "frames": [
+      "Kilo group `Kilo model ‹ A ›` → `‹ B ›`, with catalog rows shown as synthetic placeholders."
+    ]
+  },
+  {
+    "id": "INF-13",
+    "title": "Available models",
+    "explanation": "“Load or refresh selectable models where the selected provider exposes a catalog.”",
+    "specimen": "for Ollama or Kilo, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills.",
+    "states": "displayed catalog status changes.",
+    "motion": "static.",
+    "caveat": "the supplied `inference_rows` exposes this control only for Ollama and Kilo Gateway; help performs no fetch.",
+    "frames": [
+      "for Ollama or Kilo, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills."
+    ]
+  },
+  {
+    "id": "INF-14",
+    "title": "Test provider",
+    "explanation": "“Send the real Test control’s harmless title-and-organize request and preview its validated tree result.”",
+    "specimen": "static `[ Test provider ]` and illustrative `Running / Succeeded / Failed` log frames with a tiny synthetic tree.",
+    "states": "operation outcome examples only.",
+    "motion": "static.",
+    "caveat": "help must not call a provider; test results in the illustration are not measurements.",
+    "frames": [
+      "static `[ Test provider ]` and illustrative `Running / Succeeded / Failed` log frames with a tiny synthetic tree."
+    ]
+  },
+  {
+    "id": "KAN-01",
+    "title": "Card preview lines",
+    "explanation": "“Set how many wrapped text lines each board card shows.”",
+    "specimen": "one unchanged card with 1 visible body line versus 4.",
+    "states": "clipped preview height changes.",
+    "motion": "static.",
+    "caveat": "card content is unchanged; supported range is 1–10.",
+    "frames": [
+      "one unchanged card with 1 visible body line versus 4."
+    ]
+  },
+  {
+    "id": "KAN-02",
+    "title": "Minimum column width",
+    "explanation": "“Set the smallest board-column width before the board uses horizontal scrolling.”",
+    "specimen": "same two-column board at one terminal width, first fitting and then showing a horizontal-scroll cue after raising the minimum.",
+    "states": "layout changes.",
+    "motion": "static.",
+    "caveat": "use source-supported width and preserve actual cards.",
+    "frames": [
+      "same two-column board at one terminal width, first fitting and then showing a horizontal-scroll cue after raising the minimum."
+    ]
+  },
+  {
+    "id": "KEY-01",
+    "title": "General leader",
+    "explanation": "“Choose the Ctrl-letter prefix for ordinary Ilium shortcuts.”",
+    "specimen": "`Shortcut base ‹ Ctrl+B ›` → `‹ Ctrl+A ›`, with `New terminal [c]` unchanged.",
+    "states": "prefix changes, action/key assignment does not.",
+    "motion": "static.",
+    "caveat": "this does not replace the separate tree-navigation prefix.",
+    "frames": [
+      "SHORTCUT BASE: Ctrl+B\nCtrl+B, c  →  New terminal\n",
+      "SHORTCUT BASE: Ctrl+A\nCtrl+A, c  →  New terminal\n"
+    ]
+  },
+  {
+    "id": "KEY-02",
+    "title": "Tree-navigation prefix",
+    "explanation": "“Choose the independent prefix for cycle and jump actions.”",
+    "specimen": "`General Ctrl+A; Tree navigation [Ctrl+B]` → `[Ctrl+C]`; `Cycle next [↓]` unchanged.",
+    "states": "navigation prefix only.",
+    "motion": "static.",
+    "caveat": "use a supported Ctrl-letter and show its terminal-key warning where relevant.",
+    "frames": [
+      "`General Ctrl+A; Tree navigation [Ctrl+B]` → `[Ctrl+C]`; `Cycle next [↓]` unchanged."
+    ]
+  },
+  {
+    "id": "KEY-03",
+    "title": "New terminal",
+    "explanation": "“Choose the second key for creating a terminal pane.”",
+    "specimen": "`New terminal [c] → [q]`; action label stays fixed.",
+    "states": "key mapping only.",
+    "motion": "static.",
+    "caveat": "no shell starts.",
+    "frames": [
+      "`New terminal [c] → [q]`; action label stays fixed."
+    ]
+  },
+  {
+    "id": "KEY-04",
+    "title": "New agent worktree",
+    "explanation": "“Choose the second key for opening the new-agent-worktree flow.”",
+    "specimen": "`New agent worktree [W] → [q]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no provider, branch, or location is chosen.",
+    "frames": [
+      "`New agent worktree [W] → [q]`."
+    ]
+  },
+  {
+    "id": "KEY-05",
+    "title": "New editor",
+    "explanation": "“Choose the second key for opening the editor file picker.”",
+    "specimen": "`New editor [e] → [q]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no file opens.",
+    "frames": [
+      "`New editor [e] → [q]`."
+    ]
+  },
+  {
+    "id": "KEY-06",
+    "title": "New board",
+    "explanation": "“Choose the second key for the new-board flow.”",
+    "specimen": "`New board [B] → [q]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no board storage is created.",
+    "frames": [
+      "`New board [B] → [q]`."
+    ]
+  },
+  {
+    "id": "KEY-07",
+    "title": "Close selection",
+    "explanation": "“Choose the second key for closing the selected pane or group.”",
+    "specimen": "`Close selection [x] → [q]` beside a retained selected pane.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "never remove the pane in help.",
+    "frames": [
+      "`Close selection [x] → [q]` beside a retained selected pane."
+    ]
+  },
+  {
+    "id": "KEY-08",
+    "title": "New group",
+    "explanation": "“Choose the second key for the new-group dialog.”",
+    "specimen": "`New group [g] → [q]`, same tree.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no group is added.",
+    "frames": [
+      "`New group [g] → [q]`, same tree."
+    ]
+  },
+  {
+    "id": "KEY-09",
+    "title": "New split view",
+    "explanation": "“Choose the second key for opening the split-view creation flow.”",
+    "specimen": "`New split view [\"] → [q]` beside an unchanged single pane.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "do not create or orient a split.",
+    "frames": [
+      "`New split view [\"] → [q]` beside an unchanged single pane."
+    ]
+  },
+  {
+    "id": "KEY-10",
+    "title": "Open folder",
+    "explanation": "“Choose the second key for opening a folder in the sidebar.”",
+    "specimen": "`Open folder [F] → [q]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no filesystem picker runs.",
+    "frames": [
+      "`Open folder [F] → [q]`."
+    ]
+  },
+  {
+    "id": "KEY-11",
+    "title": "Rename selection",
+    "explanation": "“Choose the second key for renaming the selected node.”",
+    "specimen": "`Rename selection [,] → [q]`, tree title fixed.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no rename.",
+    "frames": [
+      "`Rename selection [,] → [q]`, tree title fixed."
+    ]
+  },
+  {
+    "id": "KEY-12",
+    "title": "Move mode",
+    "explanation": "“Choose the second key for entering or leaving tree move mode.”",
+    "specimen": "`Move mode [m] → [q]` beside a fixed selected row.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no drag, indent, or reorder.",
+    "frames": [
+      "`Move mode [m] → [q]` beside a fixed selected row."
+    ]
+  },
+  {
+    "id": "KEY-13",
+    "title": "Focus tree",
+    "explanation": "“Choose the second key for focusing the tree panel.”",
+    "specimen": "`Focus tree [t] → [q]`; focus marker remains on terminal.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "help must not move live focus.",
+    "frames": [
+      "`Focus tree [t] → [q]`; focus marker remains on terminal."
+    ]
+  },
+  {
+    "id": "KEY-14",
+    "title": "Focus active pane",
+    "explanation": "“Choose the second key for focusing the active pane.”",
+    "specimen": "`Focus active pane [P] → [q]`; same focus marker.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "distinguish active pane from next visible pane.",
+    "frames": [
+      "`Focus active pane [P] → [q]`; same focus marker."
+    ]
+  },
+  {
+    "id": "KEY-15",
+    "title": "Focus next pane",
+    "explanation": "“Choose the second key for focusing the next visible pane.”",
+    "specimen": "`Focus next pane [o] → [q]` beside `pane A | pane B` with a static potential destination marker.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no actual focus cycle.",
+    "frames": [
+      "`Focus next pane [o] → [q]` beside `pane A | pane B` with a static potential destination marker."
+    ]
+  },
+  {
+    "id": "KEY-16",
+    "title": "Focus previous pane",
+    "explanation": "“Choose the second key for focusing the previous visible pane.”",
+    "specimen": "`Focus previous pane [;] → [q]` with the same two-pane fixture.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "mark the reverse traversal direction.",
+    "frames": [
+      "`Focus previous pane [;] → [q]` with the same two-pane fixture."
+    ]
+  },
+  {
+    "id": "KEY-17",
+    "title": "Focus pane left",
+    "explanation": "“Choose the second key for focusing the visible pane to the left.”",
+    "specimen": "`Focus pane left [h] → [q]`; `[left] | [current]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "direction needs an actual left neighbor.",
+    "frames": [
+      "`Focus pane left [h] → [q]`; `[left] | [current]`."
+    ]
+  },
+  {
+    "id": "KEY-18",
+    "title": "Focus pane right",
+    "explanation": "“Choose the second key for focusing the visible pane to the right.”",
+    "specimen": "`Focus pane right [l] → [q]`; `[current] | [right]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no focus event is dispatched.",
+    "frames": [
+      "`Focus pane right [l] → [q]`; `[current] | [right]`."
+    ]
+  },
+  {
+    "id": "KEY-19",
+    "title": "Focus pane above",
+    "explanation": "“Choose the second key for focusing the visible pane above.”",
+    "specimen": "`Focus pane above [k] → [q]`; stacked `[above] / [current]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "retain vertical geometry.",
+    "frames": [
+      "`Focus pane above [k] → [q]`; stacked `[above] / [current]`."
+    ]
+  },
+  {
+    "id": "KEY-20",
+    "title": "Focus pane below",
+    "explanation": "“Choose the second key for focusing the visible pane below.”",
+    "specimen": "`Focus pane below [j] → [q]`; stacked `[current] / [below]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "retain vertical geometry.",
+    "frames": [
+      "`Focus pane below [j] → [q]`; stacked `[current] / [below]`."
+    ]
+  },
+  {
+    "id": "KEY-21",
+    "title": "Cycle next in group",
+    "explanation": "“Choose the second key for cycling to the next pane within the current group.”",
+    "specimen": "`Tree prefix [Ctrl+B] [↓] → [q]`; group `A, B, C` remains fixed.",
+    "states": "second key only.",
+    "motion": "static.",
+    "caveat": "use the navigation prefix, not the general leader.",
+    "frames": [
+      "`Tree prefix [Ctrl+B] [↓] → [q]`; group `A, B, C` remains fixed."
+    ]
+  },
+  {
+    "id": "KEY-22",
+    "title": "Cycle previous in group",
+    "explanation": "“Choose the second key for cycling backward within the current group.”",
+    "specimen": "`Tree prefix [Ctrl+B] [↑] → [q]` beside `A, B, C`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no selected pane changes.",
+    "frames": [
+      "`Tree prefix [Ctrl+B] [↑] → [q]` beside `A, B, C`."
+    ]
+  },
+  {
+    "id": "KEY-23",
+    "title": "Jump next group",
+    "explanation": "“Choose the second key for jumping to the first pane in the next group.”",
+    "specimen": "`Tree prefix [Ctrl+B] [Pg↓] → [q]`; two groups shown.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "retain group boundaries.",
+    "frames": [
+      "`Tree prefix [Ctrl+B] [Pg↓] → [q]`; two groups shown."
+    ]
+  },
+  {
+    "id": "KEY-24",
+    "title": "Jump previous group",
+    "explanation": "“Choose the second key for jumping to the first pane in the previous group.”",
+    "specimen": "`Tree prefix [Ctrl+B] [Pg↑] → [q]`.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "distinguish group jump from within-group cycle.",
+    "frames": [
+      "`Tree prefix [Ctrl+B] [Pg↑] → [q]`."
+    ]
+  },
+  {
+    "id": "KEY-25",
+    "title": "Scrollback up",
+    "explanation": "“Choose the second key for moving one page up in focused terminal history.”",
+    "specimen": "`Scrollback up [[] → [q]` beside static older lines above a live-screen separator.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "help does not scroll a real pane.",
+    "frames": [
+      "`Scrollback up [[] → [q]` beside static older lines above a live-screen separator."
+    ]
+  },
+  {
+    "id": "KEY-26",
+    "title": "Scrollback down",
+    "explanation": "“Choose the second key for moving one page down toward the live terminal screen.”",
+    "specimen": "`Scrollback down []] → [q]` beside the same history fixture.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "retained history and current screen are distinct.",
+    "frames": [
+      "`Scrollback down []] → [q]` beside the same history fixture."
+    ]
+  },
+  {
+    "id": "KEY-27",
+    "title": "Run command",
+    "explanation": "“Choose the second key for the command prompt that runs in a new terminal pane.”",
+    "specimen": "`Run command [!] → [q]` above an empty illustrative prompt.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "never run its example text.",
+    "frames": [
+      "`Run command [!] → [q]` above an empty illustrative prompt."
+    ]
+  },
+  {
+    "id": "KEY-28",
+    "title": "Save editor",
+    "explanation": "“Choose the second key for saving the focused editor.”",
+    "specimen": "`Save editor [s] → [q]` beside `notes.md • modified`.",
+    "states": "key only; modified marker stays.",
+    "motion": "static.",
+    "caveat": "no disk write.",
+    "frames": [
+      "`Save editor [s] → [q]` beside `notes.md • modified`."
+    ]
+  },
+  {
+    "id": "KEY-29",
+    "title": "Workspace search",
+    "explanation": "“Choose the second key for searching terminal history and editor buffers.”",
+    "specimen": "`Workspace search [f] → [q]` beside an unopened search panel outline.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no search executes.",
+    "frames": [
+      "`Workspace search [f] → [q]` beside an unopened search panel outline."
+    ]
+  },
+  {
+    "id": "KEY-30",
+    "title": "Help",
+    "explanation": "“Choose the second key for showing or hiding the main Help screen.”",
+    "specimen": "`Help [?] → [q]`; existing Settings screen remains.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "distinguish this keybinding from each setting’s `?` affordance.",
+    "frames": [
+      "`Help [?] → [q]`; existing Settings screen remains."
+    ]
+  },
+  {
+    "id": "KEY-31",
+    "title": "Detach client",
+    "explanation": "“Choose the second key for disconnecting this client while its session continues.”",
+    "specimen": "`Detach client [d] → [q]` beside a static session/pane diagram.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no client disconnect.",
+    "frames": [
+      "`Detach client [d] → [q]` beside a static session/pane diagram."
+    ]
+  },
+  {
+    "id": "KEY-32",
+    "title": "Kill session",
+    "explanation": "“Choose the second key for ending the project session and disconnecting clients.”",
+    "specimen": "`Kill session [&] → [q]`; session diagram remains intact.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "this is more consequential than Detach and must never execute in help.",
+    "frames": [
+      "`Kill session [&] → [q]`; session diagram remains intact."
+    ]
+  },
+  {
+    "id": "KEY-33",
+    "title": "Toggle editor view",
+    "explanation": "“Choose the second key for switching a focused Markdown editor between Source and Rendered.”",
+    "specimen": "`Toggle editor view [v] → [q]` with unchanged Markdown source.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "applies to Markdown editor panes.",
+    "frames": [
+      "`Toggle editor view [v] → [q]` with unchanged Markdown source."
+    ]
+  },
+  {
+    "id": "KEY-34",
+    "title": "Toggle line numbers",
+    "explanation": "“Choose the second key for showing or hiding editor line numbers.”",
+    "specimen": "`Toggle line numbers [n] → [q]` beside the same editor excerpt.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no content change.",
+    "frames": [
+      "`Toggle line numbers [n] → [q]` beside the same editor excerpt."
+    ]
+  },
+  {
+    "id": "KEY-35",
+    "title": "Toggle minimap",
+    "explanation": "“Choose the second key for showing or hiding the editor minimap.”",
+    "specimen": "`Toggle minimap [b] → [q]` beside a fixed narrow editor.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "preview must not change live pane layout.",
+    "frames": [
+      "`Toggle minimap [b] → [q]` beside a fixed narrow editor."
+    ]
+  },
+  {
+    "id": "KEY-36",
+    "title": "Toggle autosave",
+    "explanation": "“Choose the second key for toggling autosave in the focused editor.”",
+    "specimen": "`Toggle autosave [a] → [q]` with `modified` held fixed.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "no file write.",
+    "frames": [
+      "`Toggle autosave [a] → [q]` with `modified` held fixed."
+    ]
+  },
+  {
+    "id": "KEY-37",
+    "title": "Open settings",
+    "explanation": "“Choose the second key for opening Settings.”",
+    "specimen": "`Open settings [:] → [q]` beside the tree footer gear.",
+    "states": "key only.",
+    "motion": "static.",
+    "caveat": "the footer gear remains a separate entry point.",
+    "frames": [
+      "`Open settings [:] → [q]` beside the tree footer gear."
+    ]
+  },
+  {
+    "id": "KEY-38",
+    "title": "Complete preset",
+    "explanation": "“Load the GNU Screen or tmux complete key map, including its leader and action bindings.”",
+    "specimen": "two static table crops labeled `GNU Screen / Ctrl+A` and `tmux / Ctrl+B`, with several action keycaps visibly different and Ilium-only actions retained.",
+    "states": "entire map changes, not just prefix.",
+    "motion": "static.",
+    "caveat": "derive every shown key from `preset_bindings`; do not invent the rest of either map.",
+    "frames": [
+      "two static table crops labeled `GNU Screen / Ctrl+A` and `tmux / Ctrl+B`, with several action keycaps visibly different and Ilium-only actions retained."
+    ]
+  },
+  {
+    "id": "RESET-01",
+    "title": "Monitor Claude resets",
+    "explanation": "“Check the public Claude reset feed hourly for announced reset history.”",
+    "specimen": "`Off` versus `On · checking…` → `On · history only`.",
+    "states": "monitor status changes.",
+    "motion": "static.",
+    "caveat": "the supplied source says this feed currently provides no future reset time; do not draw a Claude countdown.",
+    "frames": [
+      "`Off` versus `On · checking…` → `On · history only`."
+    ]
+  },
+  {
+    "id": "RESET-02",
+    "title": "Monitor Codex resets",
+    "explanation": "“Check public Codex reset announcements hourly and show a countdown only when an exact time is supplied.”",
+    "specimen": "`Off`, `On · no scheduled reset`, `On · reset announced`, with a conditional `2 h 3 m` synthetic countdown.",
+    "states": "monitoring and announcement status.",
+    "motion": "static.",
+    "caveat": "public resets are separate from account rolling usage windows.",
+    "frames": [
+      "MONITOR ON\nFeed: no scheduled reset\nCountdown: unavailable\n",
+      "MONITOR ON\nFeed: reset announced for 14:00\nCountdown: 2 h 3 m (synthetic)\n"
+    ]
+  },
+  {
+    "id": "RESET-03",
+    "title": "Time display",
+    "explanation": "“Choose exact seconds or rounded human wording for a timed announced reset.”",
+    "specimen": "the same synthetic event shown as `Exact · d h m s` and `Human · tomorrow`.",
+    "states": "formatting changes.",
+    "motion": "exact view may tick once per second; human view updates less often.",
+    "caveat": "no countdown is possible without a supplied scheduled time.",
+    "frames": [
+      "the same synthetic event shown as `Exact · d h m s` and `Human · tomorrow`."
+    ]
+  },
+  {
+    "id": "SES-01",
+    "title": "Recovery policy",
+    "explanation": "“Choose what the detached server does with a prior project-session snapshot on its next start.”",
+    "specimen": "`Restore automatically`, `Ask before restoring`, `Start fresh` cards around one synthetic saved tree.",
+    "states": "startup decision changes.",
+    "motion": "static.",
+    "caveat": "do not restore or discard a real session in help.",
+    "frames": [
+      "`Restore automatically`, `Ask before restoring`, `Start fresh` cards around one synthetic saved tree."
+    ]
+  },
+  {
+    "id": "SES-02",
+    "title": "Automatic backups",
+    "explanation": "“Enable periodic copies of this project’s native session snapshot, with older copies thinned over time.”",
+    "specimen": "`On: snapshot → 30 min copies → daily → weekly → monthly → yearly` versus `Off: no new automatic copies`.",
+    "states": "backup scheduling changes.",
+    "motion": "static timeline.",
+    "caveat": "do not imply indefinite retention or delete existing backups.",
+    "frames": [
+      "`On: snapshot → 30 min copies → daily → weekly → monthly → yearly` versus `Off: no new automatic copies`."
+    ]
+  },
+  {
+    "id": "SETUP-01",
+    "title": "Chatroom targets",
+    "explanation": "“Inspect and refresh Ilium’s Chatroom instructions in global and project instruction targets.”",
+    "specimen": "separate `Global file: default/custom`, `Global target [ON]/[UPDATE]/[NEWER]/[FOUND]/[OFF]`, and `Project target …` rows, with `Enter change/refresh` and `R default` shown as real controls.",
+    "states": "target status and chosen global file.",
+    "motion": "static.",
+    "caveat": "preserve user-authored instructions; help writes no files and uses no invented real path.",
+    "frames": [
+      "separate `Global file: default/custom`, `Global target [ON]/[UPDATE]/[NEWER]/[FOUND]/[OFF]`, and `Project target …` rows, with `Enter change/refresh` and `R default` shown as real controls."
+    ]
+  },
+  {
+    "id": "SETUP-02",
+    "title": "Progress targets",
+    "explanation": "“Inspect and refresh the Progress handoff instructions in global and project targets.”",
+    "specimen": "the same scoped rows under `PROGRESS`, with managed, stale, newer, detected, absent, or error badge as applicable.",
+    "states": "status per target.",
+    "motion": "static.",
+    "caveat": "do not register a progress monitor or alter instruction files.",
+    "frames": [
+      "the same scoped rows under `PROGRESS`, with managed, stale, newer, detected, absent, or error badge as applicable."
+    ]
+  },
+  {
+    "id": "SND-01",
+    "title": "Sound source",
+    "explanation": "“Choose between the operating-system beep and a discovered sound file for enabled events.”",
+    "specimen": "`Sound source ‹ Beep ›` versus `‹ File ›`, both beside the same event timeline.",
+    "states": "playback source changes.",
+    "motion": "static.",
+    "caveat": "never play sound in help.",
+    "frames": [
+      "`Sound source ‹ Beep ›` versus `‹ File ›`, both beside the same event timeline."
+    ]
+  },
+  {
+    "id": "SND-02",
+    "title": "Selected sound file",
+    "explanation": "“Choose a file from sounds Ilium discovered on this system.”",
+    "specimen": "`Selected sound file ‹ collection — name A ›` versus `‹ … B ›` and a matching checked catalog row.",
+    "states": "selection changes.",
+    "motion": "static.",
+    "caveat": "filenames and availability come from discovery; invent no real local path.",
+    "frames": [
+      "`Selected sound file ‹ collection — name A ›` versus `‹ … B ›` and a matching checked catalog row."
+    ]
+  },
+  {
+    "id": "SND-03",
+    "title": "Preview",
+    "explanation": "“Play the selected sound once when the real Preview control is activated.”",
+    "specimen": "static `[ Play ]` button beside `selected source/file`, with caption “would play once.”",
+    "states": "selected choice fixed.",
+    "motion": "static.",
+    "caveat": "help itself must not invoke Preview or audio.",
+    "frames": [
+      "static `[ Play ]` button beside `selected source/file`, with caption “would play once.”"
+    ]
+  },
+  {
+    "id": "SND-04",
+    "title": "Agent finished",
+    "explanation": "“Enable a sound when a busy agent completes its turn and waits for you.”",
+    "specimen": "`Working → Finished unread` with `[ ] Disabled` versus `[x] Enabled` sound marker.",
+    "states": "notification eligibility changes.",
+    "motion": "static.",
+    "caveat": "agent transition occurs in both stills.",
+    "frames": [
+      "`Working → Finished unread` with `[ ] Disabled` versus `[x] Enabled` sound marker."
+    ]
+  },
+  {
+    "id": "SND-05",
+    "title": "Approval required",
+    "explanation": "“Enable a sound when an agent enters an approval prompt.”",
+    "specimen": "`Working → Needs approval`; toggle Off/On.",
+    "states": "sound eligibility only.",
+    "motion": "static.",
+    "caveat": "no approval is requested.",
+    "frames": [
+      "`Working → Needs approval`; toggle Off/On."
+    ]
+  },
+  {
+    "id": "SND-06",
+    "title": "Agent started",
+    "explanation": "“Enable a sound when an idle or finished agent begins a new turn.”",
+    "specimen": "`Idle → Working`; toggle Off/On.",
+    "states": "sound eligibility only.",
+    "motion": "static.",
+    "caveat": "no agent work starts.",
+    "frames": [
+      "`Idle → Working`; toggle Off/On."
+    ]
+  },
+  {
+    "id": "SND-07",
+    "title": "Waiting background",
+    "explanation": "“Enable a sound when an agent waits on background workers it started.”",
+    "specimen": "`Working → Waiting on background`; toggle Off/On.",
+    "states": "sound eligibility only.",
+    "motion": "static.",
+    "caveat": "do not equate this with a finished turn.",
+    "frames": [
+      "`Working → Waiting on background`; toggle Off/On."
+    ]
+  },
+  {
+    "id": "SND-08",
+    "title": "Task succeeded",
+    "explanation": "“Enable a sound when a monitored task reports success.”",
+    "specimen": "`Task pending → Done`; toggle Off/On.",
+    "states": "sound eligibility only.",
+    "motion": "static.",
+    "caveat": "no monitor is registered.",
+    "frames": [
+      "`Task pending → Done`; toggle Off/On."
+    ]
+  },
+  {
+    "id": "SND-09",
+    "title": "Task failed or monitor lost",
+    "explanation": "“Enable a sound for either task failure or lost monitor observation.”",
+    "specimen": "two separate lines, `Task: Error` and `Monitor: Failed`, feeding one shared toggle.",
+    "states": "sound eligibility changes for both events.",
+    "motion": "static.",
+    "caveat": "monitor loss does not prove task failure.",
+    "frames": [
+      "two separate lines, `Task: Error` and `Monitor: Failed`, feeding one shared toggle."
+    ]
+  },
+  {
+    "id": "TERM-01",
+    "title": "Scrollback budget",
+    "explanation": "“Set the amount of terminal output retained per pane for new terminal views.”",
+    "specimen": "`Scrollback budget ‹ 16 MiB ›` → `‹ 32 MiB ›`; same live screen, with a schematic longer retained-history strip.",
+    "states": "capacity for future views changes.",
+    "motion": "static.",
+    "caveat": "do not imply old output reappears or an existing view grows.",
+    "frames": [
+      "`Scrollback budget ‹ 16 MiB ›` → `‹ 32 MiB ›`; same live screen, with a schematic longer retained-history strip."
+    ]
+  },
+  {
+    "id": "TERM-02",
+    "title": "New-pane directory",
+    "explanation": "“Choose how the starting directory is resolved for new terminal panes.”",
+    "specimen": "three labeled stills, `Project root`, `Focused terminal`, `Last used`, each pointing to a synthetic path label in a *future* pane.",
+    "states": "policy changes, no current pane moves.",
+    "motion": "static.",
+    "caveat": "server resolves live directory state; do not promise a particular real path.",
+    "frames": [
+      "three labeled stills, `Project root`, `Focused terminal`, `Last used`, each pointing to a synthetic path label in a *future* pane."
+    ]
+  },
+  {
+    "id": "TEXTTRIGGER-01",
+    "title": "Text triggers",
+    "explanation": "“An enabled regex can match a completed output line and send a configured literal message plus Enter to its selected target.”",
+    "specimen": "Targets: [Agents] [Terminals] [Both]\n^READY$ → would send configured literal text + Enter",
+    "states": "enabled/disabled, match/no match, target and literal output are distinct.",
+    "motion": "static.",
+    "caveat": "Target values come from TextTriggerTarget. Help neither matches live output nor sends text.",
+    "frames": [
+      "OUTPUT LINE: READY\nRegex: ^DONE$\nmatch: no → no message\n",
+      "OUTPUT LINE: DONE\nRegex: ^DONE$\nmatch: yes → would send literal + Enter\n"
+    ]
+  },
+  {
+    "id": "TITLE-01",
+    "title": "Title style",
+    "explanation": "“Choose concise retrieval labels or descriptive summaries for future automatic and requested AI titles.”",
+    "specimen": "same synthetic work shown as `Labeling: CUT PAPER COMPONENT` versus `Summarization: Develop Cut Paper Component`, echoing the existing Titles view.",
+    "states": "title style changes for future inference.",
+    "motion": "static.",
+    "caveat": "model wording is illustrative; user-fixed titles remain user-owned.",
+    "frames": [
+      "same synthetic work shown as `Labeling: CUT PAPER COMPONENT` versus `Summarization: Develop Cut Paper Component`, echoing the existing Titles view."
+    ]
+  },
+  {
+    "id": "TRIGGER-01",
+    "title": "Startup complete",
+    "explanation": "“Choose whether Ilium may restructure all projects after initial tree, pane, transcript, and terminal replay load.”",
+    "specimen": "`Startup complete · GLOBAL` with `[None]` versus `[All projects]`.",
+    "states": "one allowed startup action selected.",
+    "motion": "static.",
+    "caveat": "no originating pane exists, and no LLM call fires in help.",
+    "frames": [
+      "`Startup complete · GLOBAL` with `[None]` versus `[All projects]`."
+    ]
+  },
+  {
+    "id": "TRIGGER-02",
+    "title": "Agent session ready",
+    "explanation": "“Choose automatic title or structure work when an agent and its verified transcript identity are ready.”",
+    "specimen": "event heading plus `[None] [Retitle] [Project] [All projects]`, first unset then `Retitle` selected.",
+    "states": "action selection only.",
+    "motion": "static.",
+    "caveat": "do not claim mere process detection suffices.",
+    "frames": [
+      "event heading plus `[None] [Retitle] [Project] [All projects]`, first unset then `Retitle` selected."
+    ]
+  },
+  {
+    "id": "TRIGGER-03",
+    "title": "Agent receives a prompt",
+    "explanation": "“Choose automatic actions after a prompt submission has succeeded.”",
+    "specimen": "synthetic `Enter succeeded → event` above unset/selected chips.",
+    "states": "configured action changes.",
+    "motion": "static.",
+    "caveat": "includes keyboard, scheduled, queued, and initial-agent submissions; help submits none.",
+    "frames": [
+      "PROMPT EVENT: unset\nEnter submitted successfully\nActions: [None] [Retitle] [Project]\n",
+      "PROMPT EVENT: Retitle\nEnter submitted successfully\nActions: [None] [Retitle] [Project]\n"
+    ]
+  },
+  {
+    "id": "TRIGGER-04",
+    "title": "Agent starts working",
+    "explanation": "“Choose automatic actions on the semantic transition into Working.”",
+    "specimen": "`Idle → Working` and `None` versus `Retitle` chip.",
+    "states": "action selection only.",
+    "motion": "static.",
+    "caveat": "no agent turn starts.",
+    "frames": [
+      "`Idle → Working` and `None` versus `Retitle` chip."
+    ]
+  },
+  {
+    "id": "TRIGGER-05",
+    "title": "Agent waits on background work",
+    "explanation": "“Choose automatic actions when an active agent pauses for background tasks.”",
+    "specimen": "`Working → Waiting on background` beside unset/selected chips.",
+    "states": "action selection only.",
+    "motion": "static.",
+    "caveat": "this is not completed work.",
+    "frames": [
+      "`Working → Waiting on background` beside unset/selected chips."
+    ]
+  },
+  {
+    "id": "TRIGGER-06",
+    "title": "Agent needs approval",
+    "explanation": "“Choose automatic actions when an agent enters an approval prompt.”",
+    "specimen": "`Working → Needs approval` beside `None` versus `Retitle` or one restructure scope.",
+    "states": "action selection only.",
+    "motion": "static.",
+    "caveat": "do not generate an approval request.",
+    "frames": [
+      "`Working → Needs approval` beside `None` versus `Retitle` or one restructure scope."
+    ]
+  },
+  {
+    "id": "TRIGGER-07",
+    "title": "Agent finishes work",
+    "explanation": "“Choose automatic actions on the authoritative finished-work transition.”",
+    "specimen": "`Working → Finished unread` beside `None` versus `Retitle + Project`.",
+    "states": "selected chips change.",
+    "motion": "static.",
+    "caveat": "actual source permits retitling with one restructure scope, not both restructure scopes simultaneously.",
+    "frames": [
+      "`Working → Finished unread` beside `None` versus `Retitle + Project`."
+    ]
+  },
+  {
+    "id": "TRIGGER-08",
+    "title": "Terminal activity checkpoint",
+    "explanation": "“Choose automatic actions at Ilium’s low-noise checkpoint after every second submitted plain-shell command.”",
+    "specimen": "`shell command 1 → command 2 → checkpoint` above unset/selected chips.",
+    "states": "action selection only.",
+    "motion": "static.",
+    "caveat": "no command is submitted; preserve wrapped chips at narrow width.",
+    "frames": [
+      "`shell command 1 → command 2 → checkpoint` above unset/selected chips."
+    ]
+  },
+  {
+    "id": "VOICE-01",
+    "title": "Voice control",
+    "explanation": "“Start or stop Ilium’s owned microphone, Realtime session, and speaker actor.”",
+    "specimen": "`Off` versus inert state ladder `Connecting → Listening → Thinking → Speaking`.",
+    "states": "enabled policy and possible connection states.",
+    "motion": "manually advanced stills.",
+    "caveat": "no microphone or network connection in help.",
+    "frames": [
+      "VOICE OFF\nMicrophone: idle   Session: closed\n",
+      "VOICE ON\nConnecting → Listening → Thinking → Speaking\n"
+    ]
+  },
+  {
+    "id": "VOICE-02",
+    "title": "OpenAI API key",
+    "explanation": "“Provide the credential used by voice control.”",
+    "specimen": "`Not configured` versus `Configured ••••••••`, including `Configured via OPENAI_API_KEY` as a separate possible state.",
+    "states": "configuration indicator only.",
+    "motion": "static.",
+    "caveat": "never read, render, or invent a real key.",
+    "frames": [
+      "`Not configured` versus `Configured ••••••••`, including `Configured via OPENAI_API_KEY` as a separate possible state."
+    ]
+  },
+  {
+    "id": "VOICE-03",
+    "title": "Model",
+    "explanation": "“Choose the Realtime model or its faster mini variant.”",
+    "specimen": "Model ‹ GPT Realtime 2.1 ›  →  ‹ GPT Realtime 2.1 Mini ›\nSame synthetic voice route in both states.",
+    "states": "model selection changes.",
+    "motion": "static.",
+    "caveat": "These are the current model labels from ilium-voice::VoiceModel; no session starts.",
+    "frames": [
+      "Model ‹ GPT Realtime 2.1 ›  →  ‹ GPT Realtime 2.1 Mini ›\nSame synthetic voice route in both states."
+    ]
+  },
+  {
+    "id": "VOICE-04",
+    "title": "Voice",
+    "explanation": "“Choose the voice used for streamed model speech.”",
+    "specimen": "Voice choices: Marin · Cedar · Alloy · Ash · Ballad\n                Coral · Echo · Sage · Shimmer · Verse",
+    "states": "voice choice changes.",
+    "motion": "static.",
+    "caveat": "Names come from the current VoiceName enum. Do not play audio; changing an active voice may require reconnecting after audio has begun.",
+    "frames": [
+      "Voice choices: Marin · Cedar · Alloy · Ash · Ballad\n                Coral · Echo · Sage · Shimmer · Verse"
+    ]
+  },
+  {
+    "id": "VOICE-05",
+    "title": "Reasoning effort",
+    "explanation": "“Choose how much reasoning effort the voice model uses for multi-step tool selection.”",
+    "specimen": "Reasoning effort: Minimal  →  Low  →  Medium\nSame synthetic tool-selection scene.",
+    "states": "effort selection changes.",
+    "motion": "static.",
+    "caveat": "Use the current three supported labels; do not promise a specific quality or latency result.",
+    "frames": [
+      "Reasoning effort: Minimal  →  Low  →  Medium\nSame synthetic tool-selection scene."
+    ]
+  },
+  {
+    "id": "VOICE-06",
+    "title": "Input mode",
+    "explanation": "“Choose hands-free semantic VAD or push to talk.”",
+    "specimen": "`Semantic VAD: speech → detected turn` versus `Push to talk: held key → committed turn`.",
+    "states": "input gating changes.",
+    "motion": "manually advanced stills.",
+    "caveat": "no audio capture or key event.",
+    "frames": [
+      "SEMANTIC VAD\nspeech → detected turn → committed\n",
+      "PUSH TO TALK\nhold key → speak → release to commit\n"
+    ]
+  },
+  {
+    "id": "VOICE-07",
+    "title": "VAD eagerness",
+    "explanation": "“Choose how quickly semantic VAD judges a spoken turn complete.”",
+    "specimen": "VAD eagerness: Auto · Low · Medium · High\nSame synthetic speech/pause strip with different decision markers.",
+    "states": "end-of-turn threshold changes.",
+    "motion": "static timeline.",
+    "caveat": "Labels come from the current VadEagerness enum; timing remains schematic and no audio is captured.",
+    "frames": [
+      "VAD eagerness: Auto · Low · Medium · High\nSame synthetic speech/pause strip with different decision markers."
+    ]
+  },
+  {
+    "id": "VOICE-08",
+    "title": "Input device",
+    "explanation": "“Choose the microphone device or system default.”",
+    "specimen": "`Input device ‹ System default ›` versus `‹ device A ›` feeding an inert capture path.",
+    "states": "route selection changes.",
+    "motion": "static.",
+    "caveat": "device A is a placeholder, not a discovered device.",
+    "frames": [
+      "`Input device ‹ System default ›` versus `‹ device A ›` feeding an inert capture path."
+    ]
+  },
+  {
+    "id": "VOICE-09",
+    "title": "Output device",
+    "explanation": "“Choose the speaker device or system default.”",
+    "specimen": "`Output device ‹ System default ›` versus `‹ device B ›` after a model-audio arrow.",
+    "states": "route selection changes.",
+    "motion": "static.",
+    "caveat": "do not play output or invent installed hardware.",
+    "frames": [
+      "`Output device ‹ System default ›` versus `‹ device B ›` after a model-audio arrow."
+    ]
+  },
+  {
+    "id": "VOICE-10",
+    "title": "Output volume",
+    "explanation": "“Adjust local speaker playback gain without changing microphone input.”",
+    "specimen": "`Output volume ‹ 30% ›` versus `‹ 70% ›`; input meter remains fixed.",
+    "states": "output gain changes.",
+    "motion": "static.",
+    "caveat": "percentages are synthetic and no sound is played.",
+    "frames": [
+      "`Output volume ‹ 30% ›` versus `‹ 70% ›`; input meter remains fixed."
+    ]
+  },
+  {
+    "id": "VOICE-11",
+    "title": "Confirm terminal submissions",
+    "explanation": "“Require a visible confirmation before Enter sends dictated terminal text.”",
+    "specimen": "`On: dictated text → staged → confirm → Enter` versus `Off: explicit request → Enter`.",
+    "states": "submission gate changes.",
+    "motion": "static sequence.",
+    "caveat": "never submit text or imply all speech is a terminal command.",
+    "frames": [
+      "`On: dictated text → staged → confirm → Enter` versus `Off: explicit request → Enter`."
+    ]
+  },
+  {
+    "id": "VOICE-12",
+    "title": "Pause media while active",
+    "explanation": "“Pause external media when voice mode starts and resume it when voice mode stops.”",
+    "specimen": "`Voice starts → media pause signal`; `Voice stops → resume signal`, with Off bypassing the route.",
+    "states": "policy changes.",
+    "motion": "static.",
+    "caveat": "the source names a D-Bus media-key signal; do not claim universal platform behavior.",
+    "frames": [
+      "`Voice starts → media pause signal`; `Voice stops → resume signal`, with Off bypassing the route."
+    ]
+  },
+  {
+    "id": "VOICE-13",
+    "title": "Custom prompt",
+    "explanation": "“Add multiline instructions to the voice system prompt.”",
+    "specimen": "`Default only` versus `Custom · 2 lines`, with two inert synthetic lines in an editor crop.",
+    "states": "additive prompt text changes.",
+    "motion": "static.",
+    "caveat": "never include user-authored prompt contents or send an LLM request.",
+    "frames": [
+      "`Default only` versus `Custom · 2 lines`, with two inert synthetic lines in an editor crop."
+    ]
+  },
+  {
+    "id": "VOICE-14",
+    "title": "Reconnect",
+    "explanation": "“Restart audio and the WebSocket using the persisted voice settings.”",
+    "specimen": "`[ Reconnect now ]` beside an inert `current settings → new connection` diagram.",
+    "states": "illustrative before/after connection only.",
+    "motion": "static.",
+    "caveat": "help must not activate the button.",
+    "frames": [
+      "`[ Reconnect now ]` beside an inert `current settings → new connection` diagram."
+    ]
+  }
+]
