@@ -1894,7 +1894,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 } else if let Some(hit) =
                     crate::settings_ui::icons_table_hit(layout.content_area, state.scroll, position)
                 {
-                    state.selected_row = crate::icon_settings::IconTarget::ALL
+                    state.selected_row = crate::agent_monitoring::general_icon_targets()
                         .iter()
                         .position(|candidate| *candidate == hit.target)
                         .unwrap_or(0);
@@ -1906,6 +1906,50 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             app.settings_cycle_icon(hit.target, 1);
                         }
                     }
+                }
+            } else if state.tab == crate::app::SettingsTab::AgentMonitoring {
+                if let Some(hit) = crate::settings_ui::agent_monitoring_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app,
+                ) {
+                    match hit {
+                        crate::settings_ui::AgentMonitoringContentHit::Mode(mode) => {
+                            state.selected_row = 0;
+                            app.settings_set_agent_monitoring_mode(mode);
+                        }
+                        crate::settings_ui::AgentMonitoringContentHit::Row { row, direction } => {
+                            let rows = crate::settings_ui::agent_monitoring_rows(app);
+                            state.selected_row = rows
+                                .iter()
+                                .position(|candidate| *candidate == row)
+                                .unwrap_or(state.selected_row);
+                            if direction != 0 {
+                                app.settings_adjust_agent_monitoring_row(row, direction);
+                            } else {
+                                match row {
+                                    crate::app::AgentMonitoringRow::ProgressMonitor => {
+                                        app.settings_toggle_progress_monitor();
+                                    }
+                                    crate::app::AgentMonitoringRow::ProgressMonitorMaxLines
+                                    | crate::app::AgentMonitoringRow::ProgressFillStyle => {
+                                        app.settings_adjust_agent_monitoring_row(row, 1);
+                                    }
+                                    crate::app::AgentMonitoringRow::AddCustomSignature => {
+                                        app.settings_begin_custom_agent_signature();
+                                    }
+                                    crate::app::AgentMonitoringRow::StatusIcon(target) => {
+                                        state.icon_picker =
+                                            Some(crate::app::IconPickerState::new(target));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    app.mode = Mode::Settings(state);
+                    return;
                 }
             } else if state.tab == crate::app::SettingsTab::VoiceControl {
                 if let Some((index, direction)) = crate::settings_ui::simple_content_hit(

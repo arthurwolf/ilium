@@ -34,6 +34,7 @@ pub mod agent_debug_ui;
 pub mod agent_feature_setup;
 pub mod agent_from_line;
 pub mod agent_history_path;
+pub mod agent_monitoring;
 pub mod agent_toolbar;
 pub mod app;
 pub mod ascii_chart;

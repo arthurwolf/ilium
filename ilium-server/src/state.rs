@@ -83,6 +83,15 @@ pub struct VersionedTextTriggerSettings {
     pub revision: u64,
 }
 
+/// One coherent runtime snapshot consumed by the detector. Keeping the
+/// interval and registry update under one lock ensures a detection tick never
+/// combines values from two Settings revisions.
+pub struct AgentDetectionRuntimeSettings {
+    pub detection: DetectionConfig,
+    pub custom_signatures: Vec<AgentSignature>,
+    pub revision: u64,
+}
+
 #[derive(Default)]
 struct TerminalSubscriptionCounts {
     all_panes: usize,
@@ -135,18 +144,14 @@ pub struct ServerState {
     pub home_dir: PathBuf,
     pub snapshot_path: PathBuf,
     pub socket_path: PathBuf,
-    pub detection_config: DetectionConfig,
+    pub agent_detection_settings: tokio::sync::RwLock<AgentDetectionRuntimeSettings>,
+    pub agent_detection_settings_transaction: Mutex<()>,
     pub notifications_config: NotificationsConfig,
     pub sound_settings: RwLock<ilium_sound::SoundSettings>,
     /// Last server-accepted Text Trigger configuration. Execution state is
     /// added separately so a rejected candidate never replaces this value.
     pub text_trigger_settings: RwLock<VersionedTextTriggerSettings>,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
-    /// User-configured agent signatures checked alongside `ilium-detect`'s
-    /// built-in registry on every detection-loop tick (see
-    /// `ilium_detect::identify_agent_with_extra`). Never mutated after
-    /// construction -- there is no "reload config" request yet.
-    pub custom_signatures: Vec<AgentSignature>,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
     /// Server-owned, pane-keyed semantic debug history. It is separate from
@@ -330,12 +335,16 @@ impl ServerState {
             home_dir: options.home_dir,
             snapshot_path: options.snapshot_path,
             socket_path: options.socket_path,
-            detection_config: options.detection_config,
+            agent_detection_settings: tokio::sync::RwLock::new(AgentDetectionRuntimeSettings {
+                detection: options.detection_config,
+                custom_signatures: options.custom_signatures,
+                revision: 0,
+            }),
+            agent_detection_settings_transaction: Mutex::new(()),
             notifications_config: options.notifications_config,
             sound_settings: RwLock::new(options.sound_settings),
             text_trigger_settings: RwLock::new(VersionedTextTriggerSettings::default()),
             sound_requests: options.sound_requests,
-            custom_signatures: options.custom_signatures,
             tree: RwLock::new(tree),
             panes: RwLock::new(HashMap::new()),
             agent_debug: AgentDebugRecorder::new(options.agent_debug_menu_enabled),
@@ -446,6 +455,37 @@ impl ServerState {
 
     pub fn watch_session_backups_enabled(&self) -> watch::Receiver<bool> {
         self.session_backups_enabled.subscribe()
+    }
+
+    pub async fn agent_detection_settings_snapshot(
+        &self,
+    ) -> (DetectionConfig, Vec<AgentSignature>) {
+        let (_, detection, custom_signatures) = self.agent_detection_versioned_snapshot().await;
+        (detection, custom_signatures)
+    }
+
+    pub async fn agent_detection_versioned_snapshot(
+        &self,
+    ) -> (u64, DetectionConfig, Vec<AgentSignature>) {
+        let settings = self.agent_detection_settings.read().await;
+        (
+            settings.revision,
+            settings.detection,
+            settings.custom_signatures.clone(),
+        )
+    }
+
+    pub async fn replace_agent_detection_settings(
+        &self,
+        detection: DetectionConfig,
+        custom_signatures: Vec<AgentSignature>,
+    ) {
+        let mut current = self.agent_detection_settings.write().await;
+        *current = AgentDetectionRuntimeSettings {
+            detection,
+            custom_signatures,
+            revision: current.revision.saturating_add(1),
+        };
     }
 
     /// Returns a non-zero, monotonically increasing generation used to fence

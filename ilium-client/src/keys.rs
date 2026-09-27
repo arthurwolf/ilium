@@ -17,6 +17,7 @@ use crate::app::{
     SettingsState, SettingsTab, SoundRow,
 };
 use crate::explorer_overlay::ExplorerOutcome;
+#[cfg(test)]
 use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action};
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
@@ -2045,6 +2046,28 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
 
+    if state.tab == SettingsTab::AgentMonitoring && app.agent_detection_signature_input.is_some() {
+        match key.code {
+            KeyCode::Esc => app.settings_cancel_custom_agent_signature(),
+            KeyCode::Backspace => {
+                if let Some(input) = &mut app.agent_detection_signature_input {
+                    input.pop();
+                }
+            }
+            KeyCode::Enter => app.settings_submit_custom_agent_signature(),
+            KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(input) = &mut app.agent_detection_signature_input {
+                    if input.chars().count() < 128 {
+                        input.push(character);
+                    }
+                }
+            }
+            _ => {}
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
     if let Some(mut picker) = state.icon_picker.take() {
         let entry_count = picker.search_results.entry_count;
         let grid_columns = crate::settings_ui::icon_picker_grid_columns(
@@ -2220,26 +2243,105 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.selected_row = state.selected_row.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Icons => {
-            state.selected_row =
-                (state.selected_row + 1).min(IconTarget::ALL.len().saturating_sub(1));
+            state.selected_row = (state.selected_row + 1).min(
+                crate::agent_monitoring::general_icon_targets()
+                    .len()
+                    .saturating_sub(1),
+            );
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Icons => {
-            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+            if let Some(target) = crate::agent_monitoring::general_icon_targets()
+                .get(state.selected_row)
+                .copied()
+            {
                 app.settings_cycle_icon(target, -1);
             }
         }
         KeyCode::Right | KeyCode::Char('l') if state.tab == SettingsTab::Icons => {
-            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+            if let Some(target) = crate::agent_monitoring::general_icon_targets()
+                .get(state.selected_row)
+                .copied()
+            {
                 app.settings_cycle_icon(target, 1);
             }
         }
         KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Icons => {
-            if let Some(target) = IconTarget::ALL.get(state.selected_row).copied() {
+            if let Some(target) = crate::agent_monitoring::general_icon_targets()
+                .get(state.selected_row)
+                .copied()
+            {
                 state.icon_picker = Some(crate::app::IconPickerState::new(target));
             }
         }
         KeyCode::Char('r') if state.tab == SettingsTab::Icons => {
             state.icons_preview_real = !state.icons_preview_real
+        }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::AgentMonitoring => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::AgentMonitoring => {
+            let rows = crate::settings_ui::agent_monitoring_rows(app);
+            state.selected_row = (state.selected_row + 1).min(rows.len().saturating_sub(1));
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::AgentMonitoring => {
+            if let Some(row) = crate::settings_ui::agent_monitoring_rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                if let Some(target) = row.icon_target() {
+                    app.settings_cycle_icon(target, -1);
+                } else {
+                    app.settings_adjust_agent_monitoring_row(row, -1);
+                }
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') if state.tab == SettingsTab::AgentMonitoring => {
+            if let Some(row) = crate::settings_ui::agent_monitoring_rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                if let Some(target) = row.icon_target() {
+                    app.settings_cycle_icon(target, 1);
+                } else {
+                    app.settings_adjust_agent_monitoring_row(row, 1);
+                }
+            }
+        }
+        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::AgentMonitoring => {
+            use crate::app::AgentMonitoringRow as Row;
+            if let Some(row) = crate::settings_ui::agent_monitoring_rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                match row {
+                    Row::AddCustomSignature => app.settings_begin_custom_agent_signature(),
+                    Row::StatusIcon(target) => {
+                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                    }
+                    Row::Mode => {
+                        let mode = match app.ui_settings.agent_monitoring_mode {
+                            crate::agent_monitoring::AgentMonitoringMode::Normal => {
+                                crate::agent_monitoring::AgentMonitoringMode::Attention
+                            }
+                            crate::agent_monitoring::AgentMonitoringMode::Attention => {
+                                crate::agent_monitoring::AgentMonitoringMode::Normal
+                            }
+                        };
+                        app.settings_set_agent_monitoring_mode(mode);
+                    }
+                    _ => app.settings_adjust_agent_monitoring_row(row, 1),
+                }
+            }
+        }
+        KeyCode::Delete | KeyCode::Backspace if state.tab == SettingsTab::AgentMonitoring => {
+            if let Some(crate::app::AgentMonitoringRow::CustomSignature(index)) =
+                crate::settings_ui::agent_monitoring_rows(app)
+                    .get(state.selected_row)
+                    .copied()
+            {
+                app.settings_remove_custom_agent_signature(index);
+                state.selected_row = state.selected_row.saturating_sub(1);
+            }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Titles => {
             state.selected_row = state.selected_row.saturating_sub(1);

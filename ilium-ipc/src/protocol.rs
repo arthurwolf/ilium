@@ -10,12 +10,37 @@ use std::path::PathBuf;
 
 use ilium_agent_debug::{AgentDebugEntry, AgentDebugEventDraft, PaneResizeCause};
 use ilium_core::{
-    BoardStorage, BuiltinAgentProvider, NodeActivityRevision, NodeId, PaneProgress, PaneStatus,
-    PaneTitleSource, ProgressTaskReport, PromptQueueDelivery, RestructurePlan, SplitOrientation,
-    Tree, TreeMoveDirection,
+    AgentClass, BoardStorage, BuiltinAgentProvider, NodeActivityRevision, NodeId, PaneProgress,
+    PaneStatus, PaneTitleSource, ProgressTaskReport, PromptQueueDelivery, RestructurePlan,
+    SplitOrientation, Tree, TreeMoveDirection,
 };
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
+
+/// Live server-owned settings that control agent identification and polling.
+/// A zero `*_poll_seconds` value is the explicit wire sentinel for the
+/// detector's effective 500 ms minimum, preserving a configured zero across
+/// attach, edits, and persistence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDetectionSettings {
+    pub working_poll_seconds: u64,
+    pub idle_poll_seconds: u64,
+    pub custom_signatures: Vec<CustomAgentSignature>,
+}
+
+/// One process-name substring and the agent class assigned when it matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomAgentSignature {
+    pub name_substring: String,
+    pub class: AgentClass,
+}
+
+/// A rejected live settings update, returned without changing the accepted
+/// server configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDetectionSettingsError {
+    pub message: String,
+}
 
 /// What kind of pane to create for a [`ClientRequest::NewPane`]. Kept
 /// separate from `ilium_core::PaneContentKind`/`PaneStatus` because those
@@ -822,6 +847,11 @@ pub enum ClientRequest {
         request_id: u64,
         pane_id: NodeId,
     },
+    /// Replaces the server-owned agent detection intervals and custom
+    /// signatures. Appended to keep all earlier bincode discriminants stable.
+    UpdateAgentDetectionSettings {
+        settings: AgentDetectionSettings,
+    },
 }
 
 impl ClientRequest {
@@ -885,6 +915,7 @@ impl ClientRequest {
             Self::QueryWorkspaceInventory { .. } => "query_workspace_inventory",
             Self::PruneWorkspace { .. } => "prune_workspace",
             Self::QueryWorkspaceCloseOffer { .. } => "query_workspace_close_offer",
+            Self::UpdateAgentDetectionSettings { .. } => "update_agent_detection_settings",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
@@ -1229,5 +1260,12 @@ pub enum ServerEvent {
         pane_id: NodeId,
         status: PaneStatus,
         evidence: PaneDetectionEvidence,
+    },
+    /// Current authoritative detection settings on attach, and the accepted
+    /// settings after any client updates. Rejections are sent only to the
+    /// requesting connection; successful values are broadcast to all clients.
+    /// Appended to preserve existing bincode discriminants.
+    AgentDetectionSettingsChanged {
+        result: Result<AgentDetectionSettings, AgentDetectionSettingsError>,
     },
 }

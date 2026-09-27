@@ -958,6 +958,8 @@ pub struct UiSettings {
     /// size the PTY only needs resizing for when this setting itself
     /// changes.
     pub last_prompt_max_lines: u8,
+    /// Client-side presentation policy for pane activity and goal signals.
+    pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     /// Live mirror of the server's `progress_monitor_enabled` setting (see
     /// `ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled`) -- whether
     /// the server accepts `ilium progress set` requests at all. Toggling
@@ -1006,6 +1008,7 @@ impl Default for UiSettings {
             show_toolbar_labels: true,
             last_prompt_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
+            agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             progress_monitor_enabled: true,
             progress_max_lines: DEFAULT_PROGRESS_MAX_LINES,
             terminal_text_selection_enabled: true,
@@ -1107,6 +1110,7 @@ struct RawUiConfig {
     show_toolbar_labels: Option<bool>,
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
+    agent_monitoring_mode: Option<String>,
     progress_monitor_enabled: Option<bool>,
     progress_max_lines: Option<u8>,
     terminal_text_selection_enabled: Option<bool>,
@@ -1206,6 +1210,9 @@ pub enum ConfigLoadError {
         "ui.agent_identifier_mode = {0:?} must be \"full_name\", \"letter\", \"icon\", or \"hidden\""
     )]
     InvalidAgentIdentifierMode(String),
+    /// `ui.agent_monitoring_mode` is outside the closed display-mode set.
+    #[error("ui.agent_monitoring_mode = {0:?} must be \"normal\" or \"attention\"")]
+    InvalidAgentMonitoringMode(String),
     /// `ui.claude_agent_icon` is not one of the curated Claude choices.
     #[error("ui.claude_agent_icon = {0:?} is not a supported Claude icon")]
     InvalidClaudeAgentIcon(String),
@@ -1486,6 +1493,11 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         Some(value) => parse_tree_order(&value)?,
         None => defaults.tree_order,
     };
+    let agent_monitoring_mode = match raw.agent_monitoring_mode {
+        Some(value) => crate::agent_monitoring::AgentMonitoringMode::parse(&value)
+            .ok_or(ConfigLoadError::InvalidAgentMonitoringMode(value))?,
+        None => defaults.agent_monitoring_mode,
+    };
     let motion_level = raw
         .motion_level
         .as_deref()
@@ -1570,6 +1582,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             Some(lines) => return Err(ConfigLoadError::InvalidLastPromptMaxLines(lines)),
             None => defaults.last_prompt_max_lines,
         },
+        agent_monitoring_mode,
         progress_monitor_enabled: raw
             .progress_monitor_enabled
             .unwrap_or(defaults.progress_monitor_enabled),
@@ -2502,6 +2515,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "last_prompt_max_lines".to_string(),
         toml::Value::Integer(i64::from(ui.last_prompt_max_lines)),
+    );
+    table.insert(
+        "agent_monitoring_mode".to_string(),
+        toml::Value::String(ui.agent_monitoring_mode.key().to_string()),
     );
     table.insert(
         "progress_monitor_enabled".to_string(),
@@ -3513,6 +3530,43 @@ mod tests {
     }
 
     #[test]
+    fn agent_monitoring_mode_defaults_to_normal_and_round_trips() {
+        let dir = scratch_dir();
+        assert_eq!(
+            load(&dir).unwrap().ui.agent_monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Normal
+        );
+
+        let settings = UiSettings {
+            agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &settings).unwrap();
+        assert_eq!(
+            load(&dir).unwrap().ui.agent_monitoring_mode,
+            settings.agent_monitoring_mode
+        );
+    }
+
+    #[test]
+    fn an_unknown_agent_monitoring_mode_is_a_clear_config_error() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nagent_monitoring_mode = \"silent\"\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidAgentMonitoringMode(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn save_ui_settings_round_trips_through_load() {
         let dir = scratch_dir();
         let mut icons = IconSettings::default();
@@ -3543,6 +3597,7 @@ mod tests {
             show_toolbar_labels: false,
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
+            agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
             progress_monitor_enabled: false,
             progress_max_lines: 9,
             terminal_text_selection_enabled: false,

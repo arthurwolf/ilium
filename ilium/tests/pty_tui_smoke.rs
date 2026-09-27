@@ -1091,10 +1091,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
-    // Settings opens on User Interface. Nine real Tab key events reach the
+    // Settings opens on User Interface. Ten real Tab key events reach the
     // Voice control tab in the registry order, proving the feature is wired
     // into the same navigable settings surface as every established tab.
-    tui.write(b"\t\t\t\t\t\t\t\t\t")
+    tui.write(b"\t\t\t\t\t\t\t\t\t\t")
         .expect("navigating to Voice control settings");
     let voice_settings_shown = wait_until(
         || {
@@ -1563,7 +1563,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"j\r")
         .expect("selecting a catalogue icon for the group");
-    tui.write(b"\t")
+    tui.write(b"\t\t")
         .expect("switching to the Keyboard settings tab");
     let keyboard_tab_shown = wait_until(
         || {
@@ -1679,7 +1679,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 
     // Titles follows Voice control and Inference. Exercise both its keyboard
     // and mouse radio paths through the real rendered Settings screen.
-    tui.write(b"\t\t\t")
+    tui.write(b"\t\t\t\t")
         .expect("switching to the Titles settings tab");
     assert!(
         wait_until(

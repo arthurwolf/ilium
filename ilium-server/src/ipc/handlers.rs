@@ -112,6 +112,10 @@ pub async fn handle_request(
             state.broadcast(ServerEvent::TextTriggersChanged { settings });
             false
         }
+        ClientRequest::UpdateAgentDetectionSettings { settings } => {
+            handle_update_agent_detection_settings(state, settings, direct_tx).await;
+            false
+        }
         ClientRequest::ResolveSessionRecovery { restore } => {
             handle_session_recovery_resolution(state, restore, direct_tx).await;
             false
@@ -1106,6 +1110,17 @@ async fn handle_attach(
             },
         )
         .await;
+        let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
+        send_direct(
+            direct_tx,
+            ServerEvent::AgentDetectionSettingsChanged {
+                result: Ok(crate::config::agent_detection_settings(
+                    &detection,
+                    &custom_signatures,
+                )),
+            },
+        )
+        .await;
         send_direct(
             direct_tx,
             ServerEvent::SessionRecoveryAvailable { pane_count },
@@ -1290,6 +1305,13 @@ async fn state_synchronization_events(
     events.extend(status_replays);
     drop(statuses);
     if include_initial_sync_complete {
+        let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
+        events.push(ServerEvent::AgentDetectionSettingsChanged {
+            result: Ok(crate::config::agent_detection_settings(
+                &detection,
+                &custom_signatures,
+            )),
+        });
         events.push(ServerEvent::InitialStateSyncComplete);
     }
     events
@@ -2571,6 +2593,82 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
     state.request_snapshot_save();
 }
 
+async fn handle_update_agent_detection_settings(
+    state: &Arc<ServerState>,
+    settings: ilium_ipc::AgentDetectionSettings,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let config_dir = match crate::paths::config_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            send_direct(
+                direct_tx,
+                ServerEvent::AgentDetectionSettingsChanged {
+                    result: Err(ilium_ipc::AgentDetectionSettingsError {
+                        message: error.to_string(),
+                    }),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    match apply_agent_detection_settings(state, settings, config_dir).await {
+        Ok(settings) => state.broadcast(ServerEvent::AgentDetectionSettingsChanged {
+            result: Ok(settings),
+        }),
+        Err(error) => {
+            send_direct(
+                direct_tx,
+                ServerEvent::AgentDetectionSettingsChanged { result: Err(error) },
+            )
+            .await;
+        }
+    }
+}
+
+async fn apply_agent_detection_settings(
+    state: &Arc<ServerState>,
+    settings: ilium_ipc::AgentDetectionSettings,
+    config_dir: std::path::PathBuf,
+) -> Result<ilium_ipc::AgentDetectionSettings, ilium_ipc::AgentDetectionSettingsError> {
+    let mut validated = crate::config::validate_agent_detection_settings(&settings)?;
+
+    // Serialize accepted writes, then preserve the server-only automation
+    // switch while replacing observation settings. Persistence precedes live
+    // application so a failed write never leaves a success-shaped runtime
+    // state that disappears on restart.
+    let _transaction = state.agent_detection_settings_transaction.lock().await;
+    let (current_detection, _) = state.agent_detection_settings_snapshot().await;
+    validated.detection.auto_answer_interstitial_prompts =
+        current_detection.auto_answer_interstitial_prompts;
+    let accepted_settings =
+        crate::config::agent_detection_settings(&validated.detection, &validated.custom_signatures);
+    let persisted_settings = accepted_settings.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::config::save_agent_detection_settings(&config_dir, &persisted_settings)
+    })
+    .await
+    .map_err(|error| ilium_ipc::AgentDetectionSettingsError {
+        message: format!("settings persistence task failed: {error}"),
+    })??;
+
+    state
+        .replace_agent_detection_settings(validated.detection, validated.custom_signatures)
+        .await;
+    {
+        let now = std::time::Instant::now();
+        let mut panes = state.panes.write().await;
+        for resource in panes.values_mut() {
+            if let PaneResource::Terminal(runtime) = resource {
+                runtime.detection_schedule.next_due = now;
+            }
+        }
+    }
+    state.detection_schedule_changed.notify_one();
+    Ok(accepted_settings)
+}
+
 /// Records whether the attached client currently has `pane_id` as its active
 /// view and forces an immediate (debounced) recheck on every focus transition.
 /// Entering a pane also acknowledges its completed turn: the bell is an
@@ -3069,6 +3167,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     cwd: &std::path::Path,
     deferred_workspace: Option<(TerminalOrigin, String)>,
 ) -> Result<(), RegisterPaneError> {
+    let (detection_config, _) = state.agent_detection_settings_snapshot().await;
     let before_admission = ilium_platform::secure_fs::spawn_directory_generation(cwd);
     let is_terminal = matches!(&kind, PaneSnapshotKind::Terminal(_));
     let repository_admission =
@@ -3162,7 +3261,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                 session,
                 origin,
                 pending_generated_session_id,
-                state.detection_config.idle_poll_interval,
+                detection_config.idle_poll_interval,
             );
             runtime.custody_ticket = custody_ticket;
             if let Some((original_origin, reason)) = deferred_workspace {
@@ -5351,6 +5450,123 @@ mod tests {
         .await
         .expect("spawn progress monitor fixture pane");
         (state, pane_id, directory)
+    }
+
+    #[tokio::test]
+    async fn initial_attach_includes_authoritative_agent_detection_settings_before_sync_complete() {
+        let (state, _pane_id, _directory) =
+            state_with_one_terminal_pane("agent-detection-attach-settings").await;
+
+        let events = initial_state_events(&state, true, false).await;
+        let settings_index = events
+            .iter()
+            .position(|event| matches!(event, ServerEvent::AgentDetectionSettingsChanged { .. }))
+            .expect("attach sends detection settings");
+        let sync_index = events
+            .iter()
+            .position(|event| matches!(event, ServerEvent::InitialStateSyncComplete))
+            .expect("attach sends sync boundary");
+        let ServerEvent::AgentDetectionSettingsChanged {
+            result: Ok(settings),
+        } = &events[settings_index]
+        else {
+            panic!("initial settings must be authoritative success");
+        };
+
+        assert_eq!(settings.working_poll_seconds, 10);
+        assert_eq!(settings.idle_poll_seconds, 45);
+        assert!(settings.custom_signatures.is_empty());
+        assert!(settings_index < sync_index);
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn invalid_agent_detection_update_is_rejected_without_changing_live_settings() {
+        let (state, _pane_id, _directory) =
+            state_with_one_terminal_pane("agent-detection-invalid-settings").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let before = state.agent_detection_settings_snapshot().await;
+        let before_wire = crate::config::agent_detection_settings(&before.0, &before.1);
+
+        handle_request(
+            &state,
+            ClientRequest::UpdateAgentDetectionSettings {
+                settings: ilium_ipc::AgentDetectionSettings {
+                    working_poll_seconds: 10,
+                    idle_poll_seconds: 45,
+                    custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                        name_substring: "  ".to_string(),
+                        class: ilium_core::AgentClass::Claude,
+                    }],
+                },
+            },
+            &direct_tx,
+        )
+        .await;
+
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::AgentDetectionSettingsChanged { result: Err(_) })
+        ));
+        let after = state.agent_detection_settings_snapshot().await;
+        let after_wire = crate::config::agent_detection_settings(&after.0, &after.1);
+        assert_eq!(before_wire, after_wire);
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn accepted_agent_detection_update_persists_and_replaces_the_live_detector_snapshot() {
+        let (state, _pane_id, _directory) =
+            state_with_one_terminal_pane("agent-detection-update-settings").await;
+        let config_directory = tempfile::tempdir().expect("create isolated config directory");
+        std::fs::write(
+            config_directory.path().join("config.toml"),
+            "[detection]\nauto_answer_interstitial_prompts = false\n",
+        )
+        .expect("seed the existing server-only setting");
+        state
+            .agent_detection_settings
+            .write()
+            .await
+            .detection
+            .auto_answer_interstitial_prompts = false;
+        let desired = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 2,
+            idle_poll_seconds: 17,
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "  MY-AGENT  ".to_string(),
+                class: ilium_core::AgentClass::Codex,
+            }],
+        };
+
+        let accepted =
+            apply_agent_detection_settings(&state, desired, config_directory.path().to_path_buf())
+                .await
+                .expect("valid settings apply");
+
+        assert_eq!(accepted.working_poll_seconds, 2);
+        assert_eq!(accepted.idle_poll_seconds, 17);
+        assert_eq!(accepted.custom_signatures[0].name_substring, "my-agent");
+        let (detection, signatures) = state.agent_detection_settings_snapshot().await;
+        assert_eq!(detection.working_poll_interval, Duration::from_secs(2));
+        assert_eq!(detection.idle_poll_interval, Duration::from_secs(17));
+        assert!(!detection.auto_answer_interstitial_prompts);
+        assert_eq!(signatures[0].name_substring, "my-agent");
+
+        let persisted =
+            crate::config::load(config_directory.path()).expect("new config file reloads");
+        assert_eq!(
+            persisted.detection.working_poll_interval,
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            persisted.detection.idle_poll_interval,
+            Duration::from_secs(17)
+        );
+        assert!(!persisted.detection.auto_answer_interstitial_prompts);
+        assert_eq!(persisted.custom_signatures.len(), 1);
+        assert_eq!(persisted.custom_signatures[0].name_substring, "my-agent");
+        teardown_state_panes(&state);
     }
 
     fn teardown_state_panes(state: &Arc<ServerState>) {

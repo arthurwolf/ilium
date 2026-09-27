@@ -25,7 +25,8 @@ pub use ilium_agent_debug::{
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
 pub use protocol::{
-    ClientRequest, DetectionReason, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
+    AgentDetectionSettings, AgentDetectionSettingsError, ClientRequest, CustomAgentSignature,
+    DetectionReason, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
     NewPaneWorkingDirectory, PaneDetectionEvidence, ProgressMonitorAccepted,
     ProgressMonitorPreflight, ProgressMonitorRejection, ProgressMonitorRejectionCode,
     ProgressMonitorStatus, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,

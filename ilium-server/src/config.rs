@@ -8,6 +8,7 @@
 //! crate never touches rendering or input dispatch.
 
 use std::borrow::Cow;
+use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
@@ -282,6 +283,214 @@ impl RawCustomSignature {
 /// The smallest interval a misconfigured `config.toml` is allowed to
 /// request -- see [`DetectionConfig`]'s doc comment.
 const MINIMUM_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Fully validated live settings that can be installed into the detector.
+#[derive(Debug)]
+pub struct ValidatedAgentDetectionSettings {
+    pub detection: DetectionConfig,
+    pub custom_signatures: Vec<AgentSignature>,
+}
+
+/// Converts the current effective detector values into the stable IPC form.
+/// The minimum interval is represented as zero seconds because the config
+/// format itself uses integer seconds and the loader clamps zero to 500 ms.
+pub fn agent_detection_settings(
+    detection: &DetectionConfig,
+    custom_signatures: &[AgentSignature],
+) -> ilium_ipc::AgentDetectionSettings {
+    ilium_ipc::AgentDetectionSettings {
+        working_poll_seconds: detection.working_poll_interval.as_secs(),
+        idle_poll_seconds: detection.idle_poll_interval.as_secs(),
+        custom_signatures: custom_signatures
+            .iter()
+            .map(|signature| ilium_ipc::CustomAgentSignature {
+                name_substring: signature.name_substring.to_string(),
+                class: (signature.class_of)(&signature.name_substring),
+            })
+            .collect(),
+    }
+}
+
+/// Validates an IPC settings value and builds the exact runtime representation.
+/// A zero poll interval is accepted as the round-trip sentinel for 500 ms.
+pub fn validate_agent_detection_settings(
+    settings: &ilium_ipc::AgentDetectionSettings,
+) -> Result<ValidatedAgentDetectionSettings, ilium_ipc::AgentDetectionSettingsError> {
+    let working_poll_interval = validate_live_poll_interval(settings.working_poll_seconds)?;
+    let idle_poll_interval = validate_live_poll_interval(settings.idle_poll_seconds)?;
+    let mut custom_signatures = Vec::with_capacity(settings.custom_signatures.len());
+
+    for signature in &settings.custom_signatures {
+        let name_substring = signature.name_substring.trim().to_lowercase();
+        if name_substring.is_empty() {
+            return Err(ilium_ipc::AgentDetectionSettingsError {
+                message: "custom signature name_substring must not be empty".to_string(),
+            });
+        }
+        let class_of: fn(&str) -> AgentClass = match &signature.class {
+            AgentClass::Claude => |_matched_name: &str| AgentClass::Claude,
+            AgentClass::Codex => |_matched_name: &str| AgentClass::Codex,
+            AgentClass::Antigravity => |_matched_name: &str| AgentClass::Antigravity,
+            AgentClass::Other(_) => {
+                |matched_name: &str| AgentClass::Other(matched_name.to_string())
+            }
+        };
+        custom_signatures.push(AgentSignature {
+            name_substring: Cow::Owned(name_substring),
+            class_of,
+        });
+    }
+
+    Ok(ValidatedAgentDetectionSettings {
+        detection: DetectionConfig {
+            working_poll_interval,
+            idle_poll_interval,
+            // The settings UI intentionally does not own this input-automation
+            // behavior, so preserve its server-configured value on live edits.
+            auto_answer_interstitial_prompts: DetectionConfig::default()
+                .auto_answer_interstitial_prompts,
+        },
+        custom_signatures,
+    })
+}
+
+fn validate_live_poll_interval(
+    seconds: u64,
+) -> Result<Duration, ilium_ipc::AgentDetectionSettingsError> {
+    let interval = Duration::from_secs(seconds).max(MINIMUM_POLL_INTERVAL);
+    if std::time::Instant::now().checked_add(interval).is_none() {
+        return Err(ilium_ipc::AgentDetectionSettingsError {
+            message: "poll interval is too large for the platform timer".to_string(),
+        });
+    }
+    Ok(interval)
+}
+
+/// Merges only detector-owned keys into `config.toml` and atomically publishes
+/// the result. The lock covers read, merge, and rename so concurrent detector
+/// settings writes cannot replace one another with stale values.
+pub fn save_agent_detection_settings(
+    config_dir: &Path,
+    settings: &ilium_ipc::AgentDetectionSettings,
+) -> Result<(), ilium_ipc::AgentDetectionSettingsError> {
+    use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
+
+    let path = config_dir.join("config.toml");
+    let lock_path = config_dir.join(".agent-detection-settings.lock");
+    let _lock = ExclusiveFileLock::acquire(&lock_path).map_err(|error| {
+        ilium_ipc::AgentDetectionSettingsError {
+            message: format!("could not lock config file: {error}"),
+        }
+    })?;
+    let mut document = match std::fs::read_to_string(&path) {
+        Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|error| {
+            ilium_ipc::AgentDetectionSettingsError {
+                message: format!("could not parse config.toml: {error}"),
+            }
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            toml::Value::Table(toml::value::Table::new())
+        }
+        Err(error) => {
+            return Err(ilium_ipc::AgentDetectionSettingsError {
+                message: format!("could not read config.toml: {error}"),
+            });
+        }
+    };
+    let root = document
+        .as_table_mut()
+        .ok_or_else(|| ilium_ipc::AgentDetectionSettingsError {
+            message: "config.toml root must be a table".to_string(),
+        })?;
+    let detection = root
+        .entry("detection".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| ilium_ipc::AgentDetectionSettingsError {
+            message: "config.toml [detection] entry must be a table".to_string(),
+        })?;
+    let working_poll_seconds = i64::try_from(settings.working_poll_seconds).map_err(|_| {
+        ilium_ipc::AgentDetectionSettingsError {
+            message: "working_poll_seconds exceeds the supported TOML integer range".to_string(),
+        }
+    })?;
+    let idle_poll_seconds = i64::try_from(settings.idle_poll_seconds).map_err(|_| {
+        ilium_ipc::AgentDetectionSettingsError {
+            message: "idle_poll_seconds exceeds the supported TOML integer range".to_string(),
+        }
+    })?;
+    detection.insert(
+        "working_poll_seconds".to_string(),
+        toml::Value::Integer(working_poll_seconds),
+    );
+    detection.insert(
+        "idle_poll_seconds".to_string(),
+        toml::Value::Integer(idle_poll_seconds),
+    );
+    detection.insert(
+        "custom_signatures".to_string(),
+        toml::Value::Array(
+            settings
+                .custom_signatures
+                .iter()
+                .map(|signature| {
+                    let mut table = toml::value::Table::new();
+                    table.insert(
+                        "process_name".to_string(),
+                        toml::Value::String(signature.name_substring.trim().to_lowercase()),
+                    );
+                    table.insert(
+                        "agent_class".to_string(),
+                        toml::Value::String(match &signature.class {
+                            AgentClass::Claude => "claude".to_string(),
+                            AgentClass::Codex => "codex".to_string(),
+                            AgentClass::Antigravity => "antigravity".to_string(),
+                            AgentClass::Other(_) => "other".to_string(),
+                        }),
+                    );
+                    toml::Value::Table(table)
+                })
+                .collect(),
+        ),
+    );
+
+    let serialized = toml::to_string_pretty(&document).map_err(|error| {
+        ilium_ipc::AgentDetectionSettingsError {
+            message: format!("could not serialize config.toml: {error}"),
+        }
+    })?;
+    secure_fs::create_private_directory(config_dir).map_err(|error| {
+        ilium_ipc::AgentDetectionSettingsError {
+            message: format!("could not prepare config directory: {error}"),
+        }
+    })?;
+    let temporary_path = config_dir.join(format!(
+        ".config.toml.agent-detection-{}.tmp",
+        std::process::id()
+    ));
+    let mut temporary_file_created = false;
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = secure_fs::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)?;
+        temporary_file_created = true;
+        file.write_all(serialized.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary_path, &path)?;
+        secure_fs::restrict_file_to_owner(&path)?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        if temporary_file_created {
+            let _ = std::fs::remove_file(&temporary_path);
+        }
+        return Err(ilium_ipc::AgentDetectionSettingsError {
+            message: format!("could not publish config.toml: {error}"),
+        });
+    }
+    Ok(())
+}
 
 impl DetectionConfig {
     /// Borrows rather than consumes `raw` -- `load` still needs
@@ -655,6 +864,101 @@ mod tests {
             (config.custom_signatures[1].class_of)("myclaudefork"),
             AgentClass::Claude
         );
+    }
+
+    #[test]
+    fn detection_settings_round_trip_keeps_the_minimum_interval_sentinel_and_other_tables() {
+        let dir = scratch_dir();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[detection]\nworking_poll_seconds = 10\nidle_poll_seconds = 45\nauto_answer_interstitial_prompts = false\n\n[voice]\nlocale = \"en\"\n",
+        )
+        .expect("write starting config");
+        let settings = ilium_ipc::AgentDetectionSettings {
+            // Zero is the stable wire/config sentinel for the effective
+            // 500 ms minimum. The UI can label this value explicitly.
+            working_poll_seconds: 0,
+            idle_poll_seconds: 23,
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "my-agent".to_string(),
+                class: AgentClass::Codex,
+            }],
+        };
+
+        save_agent_detection_settings(&dir, &settings).expect("save detection settings");
+
+        let contents = std::fs::read_to_string(&path).expect("read saved config");
+        let document: toml::Value = toml::from_str(&contents).expect("parse saved config");
+        assert_eq!(document["voice"]["locale"].as_str(), Some("en"));
+        assert_eq!(
+            document["detection"]["auto_answer_interstitial_prompts"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            document["detection"]["working_poll_seconds"].as_integer(),
+            Some(0)
+        );
+        assert_eq!(
+            document["detection"]["idle_poll_seconds"].as_integer(),
+            Some(23)
+        );
+        assert_eq!(
+            document["detection"]["custom_signatures"][0]["process_name"].as_str(),
+            Some("my-agent")
+        );
+        assert_eq!(
+            document["detection"]["custom_signatures"][0]["agent_class"].as_str(),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn detection_settings_reject_empty_custom_signature_names() {
+        let settings = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 10,
+            idle_poll_seconds: 45,
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "  ".to_string(),
+                class: AgentClass::Claude,
+            }],
+        };
+
+        let error = validate_agent_detection_settings(&settings).expect_err("empty name rejected");
+
+        assert!(error.message.contains("name_substring"));
+    }
+
+    #[test]
+    fn detection_settings_zero_sentinel_maps_to_the_500_ms_minimum() {
+        let settings = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 0,
+            idle_poll_seconds: 0,
+            custom_signatures: Vec::new(),
+        };
+
+        let accepted = validate_agent_detection_settings(&settings)
+            .expect("zero is the explicit 500 ms minimum sentinel");
+
+        assert_eq!(
+            accepted.detection.working_poll_interval,
+            MINIMUM_POLL_INTERVAL
+        );
+        assert_eq!(accepted.detection.idle_poll_interval, MINIMUM_POLL_INTERVAL);
+    }
+
+    #[test]
+    fn detection_settings_reject_intervals_that_overflow_platform_timers() {
+        let settings = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: u64::MAX,
+            idle_poll_seconds: 45,
+            custom_signatures: Vec::new(),
+        };
+
+        let error = validate_agent_detection_settings(&settings)
+            .expect_err("unrepresentable timer deadline rejected");
+
+        assert!(error.message.contains("platform timer"));
     }
 
     #[test]

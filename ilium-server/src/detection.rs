@@ -419,6 +419,12 @@ async fn run_due_panes(
         return Ok(());
     }
 
+    // Capture one coherent Settings revision for the whole detection batch.
+    // A concurrent Settings update becomes visible on the next batch rather
+    // than mixing intervals and custom signatures halfway through this one.
+    let (detection_settings_revision, detection_config, custom_signatures) =
+        state.agent_detection_versioned_snapshot().await;
+
     // Phase 2a: identify process trees with no lock held. Screen contents
     // are not captured until identity succeeds, so ordinary shell panes do
     // not allocate a full vt100 text snapshot on every slow-tier check.
@@ -441,7 +447,7 @@ async fn run_due_panes(
                         system,
                         Pid::from_u32(shell_pid),
                         children_index,
-                        &state.custom_signatures,
+                        &custom_signatures,
                     )
                 })
             });
@@ -778,6 +784,14 @@ async fn run_due_panes(
     }
 
     // Phase 3: brief write-locked critical section applying results.
+    // Hold the settings read lock through the tree/pane update. If an update
+    // landed while this batch was classifying, discard this stale batch; if
+    // one arrives afterward, its forced-due reschedule wins after this lock
+    // is released.
+    let current_detection_settings = state.agent_detection_settings.read().await;
+    if current_detection_settings.revision != detection_settings_revision {
+        return Ok(());
+    }
     let sound_settings = state.sound_settings.read().await.clone();
     let mut pending_notifications = Vec::new();
     let mut pending_sounds = Vec::new();
@@ -909,7 +923,7 @@ async fn run_due_panes(
             runtime.detection_schedule.current_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
-                &state.detection_config,
+                &detection_config,
             );
             runtime.detection_schedule.next_due =
                 if screen_changed_after_snapshot || runtime.pending_idle_confirmation {
@@ -943,7 +957,7 @@ async fn run_due_panes(
             {
                 runtime.auto_answered_interstitial_prompt_for_pid = None;
             }
-            if state.detection_config.auto_answer_interstitial_prompts {
+            if detection_config.auto_answer_interstitial_prompts {
                 if let (Some(key_to_send), Some(agent_pid)) = (
                     classified_pane.interstitial_prompt_response,
                     runtime.detected_agent_process_id,
@@ -1462,6 +1476,7 @@ async fn run_due_panes(
             });
         }
     }
+    drop(current_detection_settings);
 
     for (pane_id, update) in pending_activity_updates {
         crate::ipc::handlers::publish_node_activity_update(state, pane_id, update);

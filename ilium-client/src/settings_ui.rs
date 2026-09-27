@@ -122,7 +122,7 @@ struct IconTableGeometry {
 impl IconTableGeometry {
     fn for_outer_width(table_outer_width: u16) -> Self {
         let column_gap = icon_table_column_gap(table_outer_width);
-        let widest_label = IconTarget::ALL
+        let widest_label = crate::agent_monitoring::general_icon_targets()
             .into_iter()
             .map(|target| UnicodeWidthStr::width(target.label()))
             .max()
@@ -359,6 +359,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             frame,
             layout.content_area,
             reset_planning_lines(app, state.selected_row),
+            state.scroll,
+        ),
+        SettingsTab::AgentMonitoring => render_scrollable(
+            frame,
+            layout.content_area,
+            agent_monitoring_view(app, state.selected_row, layout.content_area.width).lines,
             state.scroll,
         ),
         SettingsTab::Debug => render_scrollable(
@@ -621,7 +627,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
                 .len() as u16
         }
         SettingsTab::Icons => {
-            // The icon table's `scroll` is an entry offset into `IconTarget::ALL`
+            // The icon table's `scroll` is an entry offset into the non-status icon set
             // (see `render_icons_tab`), not a line count like every other tab --
             // reproduce its exact visible-row arithmetic here so scrolling (mouse
             // wheel or keyboard) is never clamped back to 0 while entries remain
@@ -629,7 +635,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             let (left, _) = icon_tab_columns(content_area);
             let table_height = usize::from(left.height.saturating_sub(2));
             let visible_rows = table_height.saturating_sub(1) / 2;
-            return IconTarget::ALL.len().saturating_sub(visible_rows) as u16;
+            return crate::agent_monitoring::general_icon_targets()
+                .len()
+                .saturating_sub(visible_rows) as u16;
         }
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
@@ -651,6 +659,11 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
         SettingsTab::ResetPlanning => reset_planning_lines(app, selected_row).len() as u16,
+        SettingsTab::AgentMonitoring => {
+            agent_monitoring_view(app, selected_row, content_area.width)
+                .lines
+                .len() as u16
+        }
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
@@ -837,12 +850,13 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
     let (left, right) = icon_tab_columns(area);
     let table_height = left.height.saturating_sub(2) as usize;
     let table_geometry = IconTableGeometry::for_outer_width(left.width);
-    let start = usize::from(state.scroll).min(IconTarget::ALL.len());
+    let targets = crate::agent_monitoring::general_icon_targets();
+    let start = usize::from(state.scroll).min(targets.len());
     let mut lines = vec![Line::from(Span::styled(
         format_icon_table_header(table_geometry),
         Style::new().add_modifier(Modifier::BOLD),
     ))];
-    for (index, target) in IconTarget::ALL
+    for (index, target) in targets
         .into_iter()
         .enumerate()
         .skip(start)
@@ -929,6 +943,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 tree_order: app.ui_settings.tree_order,
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+                agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
                 show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
                 hover: crate::tree_ui::TreeHoverState::default(),
                 panes: &app.panes,
@@ -1508,7 +1523,9 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
         return None;
     }
     let target_index = row_offset / 2 + usize::from(scroll);
-    let target = IconTarget::ALL.get(target_index).copied()?;
+    let target = crate::agent_monitoring::general_icon_targets()
+        .get(target_index)
+        .copied()?;
     let picker_start = table_inner
         .x
         .saturating_add(table_geometry.picker_column() as u16);
@@ -3715,6 +3732,377 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AgentMonitoringCardHit {
+    mode: crate::agent_monitoring::AgentMonitoringMode,
+    start_x: u16,
+    end_x: u16,
+    start_line: u16,
+    end_line: u16,
+}
+
+struct AgentMonitoringView {
+    lines: Vec<Line<'static>>,
+    card_hits: Vec<AgentMonitoringCardHit>,
+    row_lines: Vec<(crate::app::AgentMonitoringRow, u16)>,
+}
+
+pub(crate) fn agent_monitoring_rows(app: &App) -> Vec<crate::app::AgentMonitoringRow> {
+    crate::app::AgentMonitoringRow::all(
+        app.agent_detection_settings
+            .as_ref()
+            .map_or(0, |settings| settings.custom_signatures.len()),
+    )
+}
+
+fn wrap_monitoring_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if !line.is_empty() && UnicodeWidthStr::width(candidate.as_str()) > width {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(word);
+        } else {
+            line = candidate;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+fn monitoring_card_lines(
+    mode: crate::agent_monitoring::AgentMonitoringMode,
+    ui: &UiSettings,
+    width: u16,
+) -> Vec<String> {
+    let inner_width = usize::from(width.saturating_sub(2)).max(1);
+    let description = match mode {
+        crate::agent_monitoring::AgentMonitoringMode::Normal => {
+            "Show the long-term objective and current activity in separate positions. Healthy work, goals, and monitored tasks stay visible."
+        }
+        crate::agent_monitoring::AgentMonitoringMode::Attention => {
+            "Show at most one status icon, and only when you need to act or inspect: approval, stopped goals, errors, failed monitoring, or unread results."
+        }
+    };
+    let demo = crate::tree_ui::agent_monitoring_demo_rows(mode, ui);
+    let mut body = vec![format!("{} mode", mode.label())];
+    body.extend(wrap_monitoring_text(description, inner_width));
+    body.push("Example".to_string());
+    body.extend(demo.into_iter().map(|line| line.to_string()));
+    let mut lines = vec![bordered_card_line("", width, true)];
+    lines.extend(
+        body.into_iter()
+            .map(|content| bordered_card_line(&content, width, false)),
+    );
+    lines.push(bottom_card_line(width));
+    lines
+}
+
+fn monitoring_row_label(row: crate::app::AgentMonitoringRow) -> String {
+    use crate::app::AgentMonitoringRow as Row;
+    match row {
+        Row::Mode => "Display mode".to_string(),
+        Row::ProgressMonitor => "Progress monitoring".to_string(),
+        Row::ProgressMonitorMaxLines => "Progress footer lines".to_string(),
+        Row::ProgressFillStyle => "Progress fill style".to_string(),
+        Row::WorkingPollSeconds => "Working poll interval".to_string(),
+        Row::IdlePollSeconds => "Idle poll interval".to_string(),
+        Row::CustomSignaturesHeading => "Custom agent signatures".to_string(),
+        Row::CustomSignature(index) => format!("Signature {}", index + 1),
+        Row::AddCustomSignature => "Add custom signature".to_string(),
+        Row::StatusIcon(target) => format!("{} icon", target.label()),
+    }
+}
+
+fn poll_interval_label(seconds: u64) -> String {
+    if seconds == 0 {
+        "500 ms minimum".to_string()
+    } else {
+        format!("{seconds} s")
+    }
+}
+
+fn monitoring_row_value(row: crate::app::AgentMonitoringRow, app: &App) -> String {
+    use crate::app::AgentMonitoringRow as Row;
+    match row {
+        Row::Mode => app.ui_settings.agent_monitoring_mode.label().to_string(),
+        Row::ProgressMonitor => on_off(app.ui_settings.progress_monitor_enabled),
+        Row::ProgressMonitorMaxLines => format!("{} lines", app.ui_settings.progress_max_lines),
+        Row::ProgressFillStyle => crate::icon_settings::task_progress_preset_index(
+            &app.ui_settings.icons.task_progress_frames,
+        )
+        .map_or_else(
+            || "Custom frames".to_string(),
+            |index| crate::icon_settings::TASK_PROGRESS_STYLE_NAMES[index].to_string(),
+        ),
+        Row::WorkingPollSeconds => app.agent_detection_settings.as_ref().map_or_else(
+            || "Loading".to_string(),
+            |settings| poll_interval_label(settings.working_poll_seconds),
+        ),
+        Row::IdlePollSeconds => app.agent_detection_settings.as_ref().map_or_else(
+            || "Loading".to_string(),
+            |settings| poll_interval_label(settings.idle_poll_seconds),
+        ),
+        Row::CustomSignaturesHeading => app.agent_detection_settings.as_ref().map_or_else(
+            || "Loading server settings".to_string(),
+            |settings| format!("{} configured", settings.custom_signatures.len()),
+        ),
+        Row::CustomSignature(index) => app
+            .agent_detection_settings
+            .as_ref()
+            .and_then(|settings| settings.custom_signatures.get(index))
+            .map_or_else(String::new, |signature| {
+                let class = match &signature.class {
+                    ilium_core::AgentClass::Claude => "Claude".to_string(),
+                    ilium_core::AgentClass::Codex => "Codex".to_string(),
+                    ilium_core::AgentClass::Antigravity => "Antigravity".to_string(),
+                    ilium_core::AgentClass::Other(name) => format!("Other · {name}"),
+                };
+                format!("{} · {class} · Delete removes", signature.name_substring)
+            }),
+        Row::AddCustomSignature => "Enter process[:class]".to_string(),
+        Row::StatusIcon(target) => format!("{}  ›", app.ui_settings.icons.glyph(target)),
+    }
+}
+
+fn monitoring_setting_line(
+    row: crate::app::AgentMonitoringRow,
+    app: &App,
+    selected: bool,
+    content_width: u16,
+) -> Line<'static> {
+    let label = monitoring_row_label(row);
+    let value = monitoring_row_value(row, app);
+    let label_width = UnicodeWidthStr::width(label.as_str()) as u16;
+    let content_width = content_width.saturating_sub(ROW_LEFT_INSET + 4);
+    let control_start = (content_width / 2).max(label_width + 2);
+    let padding = usize::from(control_start.saturating_sub(label_width));
+    let style = if selected {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    Line::from(vec![
+        Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
+        Span::styled(label, style),
+        Span::raw(" ".repeat(padding)),
+        Span::styled(format!("‹ {value} ›"), style),
+    ])
+}
+
+fn agent_monitoring_view(
+    app: &App,
+    selected_row: usize,
+    content_width: u16,
+) -> AgentMonitoringView {
+    use crate::agent_monitoring::AgentMonitoringMode as Mode;
+    let mut view =
+        AgentMonitoringView {
+            lines: vec![
+            Line::from(""),
+            Line::from(Span::styled("Agent Monitoring", Style::new().add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "Choose how agent state appears; detector facts and acknowledgements stay shared.",
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+            Line::from(""),
+        ],
+            card_hits: Vec::new(),
+            row_lines: Vec::new(),
+        };
+    let wide_card_width = content_width.saturating_sub(APPEARANCE_CARD_GAP) / 2;
+    let side_by_side = wide_card_width >= 34;
+    if side_by_side {
+        let normal = monitoring_card_lines(Mode::Normal, &app.ui_settings, wide_card_width);
+        let attention = monitoring_card_lines(Mode::Attention, &app.ui_settings, wide_card_width);
+        let height = normal.len().max(attention.len());
+        let start_line = view.lines.len() as u16;
+        let start_x = [0, wide_card_width + APPEARANCE_CARD_GAP];
+        for line_index in 0..height {
+            let left = normal.get(line_index).map(String::as_str).unwrap_or("");
+            let right = attention.get(line_index).map(String::as_str).unwrap_or("");
+            view.lines.push(Line::from(vec![
+                Span::styled(
+                    left.to_string(),
+                    monitoring_card_style(Mode::Normal, app, selected_row),
+                ),
+                Span::raw(" ".repeat(usize::from(APPEARANCE_CARD_GAP))),
+                Span::styled(
+                    right.to_string(),
+                    monitoring_card_style(Mode::Attention, app, selected_row),
+                ),
+            ]));
+        }
+        for (index, mode) in [Mode::Normal, Mode::Attention].into_iter().enumerate() {
+            view.card_hits.push(AgentMonitoringCardHit {
+                mode,
+                start_x: start_x[index],
+                end_x: start_x[index] + wide_card_width,
+                start_line,
+                end_line: start_line + height as u16,
+            });
+        }
+    } else {
+        for mode in [Mode::Normal, Mode::Attention] {
+            let start_line = view.lines.len() as u16;
+            for line in monitoring_card_lines(mode, &app.ui_settings, content_width) {
+                view.lines.push(Line::from(Span::styled(
+                    line,
+                    monitoring_card_style(mode, app, selected_row),
+                )));
+            }
+            view.card_hits.push(AgentMonitoringCardHit {
+                mode,
+                start_x: 0,
+                end_x: content_width,
+                start_line,
+                end_line: view.lines.len() as u16,
+            });
+            view.lines.push(Line::from(""));
+        }
+    }
+    view.lines.extend([
+        Line::from(""),
+        Line::from(Span::styled("What the two status positions mean", Style::new().add_modifier(Modifier::BOLD))),
+        Line::from(" Agent identity │ objective / long-term │ current activity / right now │ pane title"),
+        Line::from("                  committed goal or task     what the agent is doing"),
+        Line::from(""),
+        Line::from("Objective position: blank; goal active, paused, blocked, usage-limited, reached;"),
+        Line::from("  task pending, running progress, degraded observation, done, failed, monitor failed; scheduled input."),
+        Line::from("Current activity position: blank; needs approval, working, waiting on subagents, settling,"),
+        Line::from("  parked on a monitored task, finished unread, idle; plain-shell fast/slow recent output."),
+        Line::from("Unread task success/error and acknowledged outcomes share their state glyph; bold marks unread."),
+        Line::from(""),
+        Line::from(Span::styled("Attention mode priority", Style::new().add_modifier(Modifier::BOLD))),
+        Line::from("Approval → monitor failed → task error → blocked → usage limited → paused → reached"),
+        Line::from("→ unread task success → unread agent turn. Only the highest-priority status glyph is shown."),
+        Line::from("A goal remains until its provider changes or clears it; opening the pane acknowledges results, not goals."),
+        Line::from(""),
+        Line::from(Span::styled("Monitoring settings", Style::new().add_modifier(Modifier::BOLD))),
+    ]);
+
+    if let Some(input) = &app.agent_detection_signature_input {
+        view.lines.push(Line::from(Span::styled(
+            format!("New process substring[:claude|codex|antigravity|other]: {input}"),
+            theme::selected_style(),
+        )));
+        view.lines.push(Line::from(Span::styled(
+            "Enter saves · Esc cancels · empty class defaults to other",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
+    if app.agent_detection_settings_pending {
+        view.lines.push(Line::from(Span::styled(
+            "Saving server detection settings…",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
+    if let Some(error) = &app.agent_detection_settings_error {
+        view.lines.push(Line::from(Span::styled(
+            format!("Settings error: {error}"),
+            Style::new().fg(Color::Yellow),
+        )));
+    }
+    let rows = agent_monitoring_rows(app);
+    for (index, row) in rows.into_iter().enumerate() {
+        if row == crate::app::AgentMonitoringRow::CustomSignaturesHeading {
+            view.lines.push(Line::from(""));
+        }
+        let line = view.lines.len() as u16;
+        view.row_lines.push((row, line));
+        view.lines.push(monitoring_setting_line(
+            row,
+            app,
+            index == selected_row,
+            content_width,
+        ));
+    }
+    view.lines.push(Line::from(Span::styled(
+        "Arrows change values; Enter opens glyphs or adds a signature; Delete removes a selected signature.",
+        Style::new().add_modifier(Modifier::DIM),
+    )));
+    view
+}
+
+fn monitoring_card_style(
+    mode: crate::agent_monitoring::AgentMonitoringMode,
+    app: &App,
+    selected_row: usize,
+) -> Style {
+    if mode == app.ui_settings.agent_monitoring_mode {
+        let selected = theme::selected_style();
+        if selected_row == 0 {
+            selected.add_modifier(Modifier::BOLD)
+        } else {
+            selected
+        }
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentMonitoringContentHit {
+    Mode(crate::agent_monitoring::AgentMonitoringMode),
+    Row {
+        row: crate::app::AgentMonitoringRow,
+        direction: i32,
+    },
+}
+
+pub fn agent_monitoring_content_hit(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    app: &App,
+) -> Option<AgentMonitoringContentHit> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let view = agent_monitoring_view(app, 0, content_area.width);
+    let virtual_line = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    let virtual_x = position.x.saturating_sub(content_area.x);
+    if let Some(hit) = view.card_hits.into_iter().find(|hit| {
+        virtual_line >= hit.start_line
+            && virtual_line < hit.end_line
+            && virtual_x >= hit.start_x
+            && virtual_x < hit.end_x
+    }) {
+        return Some(AgentMonitoringContentHit::Mode(hit.mode));
+    }
+    let row = view
+        .row_lines
+        .into_iter()
+        .find_map(|(row, line)| (line == virtual_line).then_some(row))?;
+    let label_width = UnicodeWidthStr::width(monitoring_row_label(row).as_str()) as u16;
+    let control_start_x = content_area
+        .x
+        .saturating_add(ROW_LEFT_INSET)
+        .saturating_add(label_width.max(content_area.width / 2));
+    if position.x < control_start_x {
+        return Some(AgentMonitoringContentHit::Row { row, direction: 0 });
+    }
+    Some(AgentMonitoringContentHit::Row {
+        row,
+        direction: if position.x < control_start_x + DECREMENT_ZONE_WIDTH {
+            -1
+        } else {
+            1
+        },
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceContentHit {
     Mode(LeftPanelSizingMode),
     Row { row: AppearanceRow, direction: i32 },
@@ -3867,88 +4255,25 @@ mod tests {
     #[test]
     fn tab_at_maps_each_row_to_its_tab() {
         let area = Rect::new(0, 0, 30, 22);
-        assert_eq!(
-            tab_at(area, Position::new(2, 1)),
-            Some(SettingsTab::Appearance)
-        );
-        assert_eq!(tab_at(area, Position::new(2, 2)), Some(SettingsTab::Icons));
-        assert_eq!(
-            tab_at(area, Position::new(2, 3)),
-            Some(SettingsTab::Keyboard)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 4)),
-            Some(SettingsTab::Terminal)
-        );
-        assert_eq!(tab_at(area, Position::new(2, 5)), Some(SettingsTab::Editor));
-        assert_eq!(
-            tab_at(area, Position::new(2, 6)),
-            Some(SettingsTab::Session)
-        );
-        assert_eq!(tab_at(area, Position::new(2, 7)), Some(SettingsTab::Git));
-        assert_eq!(
-            tab_at(area, Position::new(2, 8)),
-            Some(SettingsTab::KanbanBoard)
-        );
-        assert_eq!(tab_at(area, Position::new(2, 9)), Some(SettingsTab::Sound));
-        assert_eq!(
-            tab_at(area, Position::new(2, 10)),
-            Some(SettingsTab::VoiceControl)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 11)),
-            Some(SettingsTab::ResetPlanning)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 12)),
-            Some(SettingsTab::Inference)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 13)),
-            Some(SettingsTab::Titles)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 14)),
-            Some(SettingsTab::Triggers)
-        );
-        assert_eq!(
-            tab_at(area, Position::new(2, 15)),
-            Some(SettingsTab::TextTriggers)
-        );
-        assert_eq!(tab_at(area, Position::new(2, 16)), Some(SettingsTab::Debug));
-        assert_eq!(tab_at(area, Position::new(2, 17)), Some(SettingsTab::Api));
-        assert_eq!(tab_at(area, Position::new(2, 18)), Some(SettingsTab::About));
-        assert_eq!(tab_at(area, Position::new(2, 19)), Some(SettingsTab::Setup));
+        for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
+            assert_eq!(tab_at(area, Position::new(2, index as u16 + 1)), Some(tab));
+        }
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
-        let spacious = Rect::new(0, 0, 30, 40);
+        let spacious = Rect::new(0, 0, 30, 50);
         // Spacious layouts retain the blank row after each tab.
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 27)),
-            Some(SettingsTab::Triggers)
-        );
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 29)),
-            Some(SettingsTab::TextTriggers)
-        );
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 31)),
-            Some(SettingsTab::Debug)
-        );
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 33)),
-            Some(SettingsTab::Api)
-        );
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 35)),
-            Some(SettingsTab::About)
-        );
-        assert_eq!(
-            tab_at(spacious, Position::new(2, 37)),
-            Some(SettingsTab::Setup)
-        );
+        for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
+            assert_eq!(
+                tab_at(spacious, Position::new(2, index as u16 * 2 + 1)),
+                Some(tab)
+            );
+            assert_eq!(
+                tab_at(spacious, Position::new(2, index as u16 * 2 + 2)),
+                None
+            );
+        }
 
         let short = Rect::new(0, 0, 30, 8);
         assert_eq!(
@@ -4162,7 +4487,7 @@ mod tests {
 
     #[test]
     fn icon_choices_keep_fixed_terminal_cell_width_when_selected() {
-        for target in IconTarget::ALL {
+        for target in crate::agent_monitoring::general_icon_targets() {
             for glyph in target.suggestions() {
                 let unselected_slot = icon_choice_slot(glyph, false);
                 let selected_slot = icon_choice_slot(glyph, true);
@@ -4193,7 +4518,7 @@ mod tests {
 
     #[test]
     fn icon_table_expands_the_title_column_only_when_every_title_fits() {
-        let widest_label = IconTarget::ALL
+        let widest_label = crate::agent_monitoring::general_icon_targets()
             .into_iter()
             .map(|target| UnicodeWidthStr::width(target.label()))
             .max()
@@ -4954,7 +5279,7 @@ mod tests {
         let short_area = Rect::new(0, 0, 60, 10);
         assert!(
             max_scroll(SettingsTab::Icons, &app, 0, short_area) > 0,
-            "IconTarget::ALL has far more entries than a 10-row viewport can show"
+            "the general icon set has far more entries than a 10-row viewport can show"
         );
         let tall_area = Rect::new(0, 0, 60, 500);
         assert_eq!(

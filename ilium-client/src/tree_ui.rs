@@ -421,6 +421,7 @@ pub struct TreeRenderOptions<'a> {
     /// An explicit opt-in for stable text symbols on default status and row
     /// action icons. Custom configured glyphs are never replaced.
     pub use_stable_glyphs: bool,
+    pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     /// Whether persisted LLM-suggested title icons should be rendered.
     pub show_inferred_title_icons: bool,
     pub hover: TreeHoverState,
@@ -456,6 +457,7 @@ struct TreeItemBuildContext<'a> {
     tree_order: TreeOrder,
     sidebar_density: SidebarDensity,
     use_stable_glyphs: bool,
+    agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     show_inferred_title_icons: bool,
     panel_width: u16,
     /// Full widget identifier paths that users have expanded. Folder nodes
@@ -686,6 +688,7 @@ fn build_item(
                     progress: progress.as_deref(),
                     has_scheduled_input: scheduled_input.is_some(),
                     use_stable_glyphs: context.use_stable_glyphs,
+                    agent_monitoring_mode: context.agent_monitoring_mode,
                 },
             );
             let label = apply_unread_title_bold(
@@ -1137,6 +1140,7 @@ struct PaneLabelContext<'a> {
     /// of the title text; the long-term slot may show its marker).
     has_scheduled_input: bool,
     use_stable_glyphs: bool,
+    agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
 }
 
 /// Maps the client-local output tracker onto the domain's shell phase.
@@ -1166,6 +1170,7 @@ fn pane_label_with_icons(
         progress,
         has_scheduled_input,
         use_stable_glyphs,
+        agent_monitoring_mode,
     } = context;
 
     // Keep the last known name visible while inference is pending. Replacing
@@ -1249,12 +1254,69 @@ fn pane_label_with_icons(
             Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
         ),
     };
+    let (objective_signal, now_signal) = match agent_monitoring_mode {
+        crate::agent_monitoring::AgentMonitoringMode::Normal => (signals.objective, signals.now),
+        crate::agent_monitoring::AgentMonitoringMode::Attention => {
+            crate::agent_monitoring::attention_status_signals(status, progress)
+        }
+    };
     status_row_label(
         identity,
-        crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs),
-        crate::status_icons::now_span(signals.now, icons, elapsed_ms, use_stable_glyphs),
+        crate::status_icons::objective_span(objective_signal, icons, use_stable_glyphs),
+        crate::status_icons::now_span(now_signal, icons, elapsed_ms, use_stable_glyphs),
         text,
     )
+}
+
+pub(crate) fn agent_monitoring_demo_rows(
+    mode: crate::agent_monitoring::AgentMonitoringMode,
+    settings: &crate::config::UiSettings,
+) -> Vec<Line<'static>> {
+    let examples = [
+        (
+            "service",
+            PaneStatus::from_activity(
+                AgentClass::Codex,
+                AgentActivity::Working,
+                Some(ilium_core::GoalState::Active),
+            ),
+        ),
+        (
+            "blocked review",
+            PaneStatus::from_activity(
+                AgentClass::Claude,
+                AgentActivity::Idle,
+                Some(ilium_core::GoalState::Blocked),
+            ),
+        ),
+        (
+            "finished task",
+            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
+        ),
+    ];
+    let mut rows = vec![Line::from("  ▾ demo project")];
+    for (name, status) in examples {
+        let line = pane_label_with_icons(
+            &status,
+            name,
+            PaneLabelContext {
+                elapsed_ms: 0,
+                is_title_loading: false,
+                terminal_activity_phase: None,
+                agent_identifiers: &settings.agent_identifiers,
+                icons: &settings.icons,
+                editor_filename: None,
+                progress: None,
+                has_scheduled_input: false,
+                use_stable_glyphs: settings.use_stable_glyphs,
+                agent_monitoring_mode: mode,
+            },
+        );
+        let mut spans = vec![Span::raw("    ├ ")];
+        spans.extend(line.spans);
+        rows.push(Line::from(spans));
+    }
+    rows
 }
 
 /// Default-icon wrapper retained for focused unit tests and callers that do
@@ -1295,6 +1357,7 @@ fn pane_label(
             progress: None,
             has_scheduled_input: false,
             use_stable_glyphs: false,
+            agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
         },
     )
 }
@@ -1812,6 +1875,7 @@ impl TreeItemCache {
                     tree_order,
                     sidebar_density: SidebarDensity::default(),
                     use_stable_glyphs: false,
+                    agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                     show_inferred_title_icons: false,
                     panel_width: 0,
                     opened_paths,
@@ -1865,6 +1929,7 @@ pub fn render(
             tree_order: options.tree_order,
             sidebar_density: options.sidebar_density,
             use_stable_glyphs: options.use_stable_glyphs,
+            agent_monitoring_mode: options.agent_monitoring_mode,
             show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: area.width,
             opened_paths: state.opened(),
@@ -1908,6 +1973,7 @@ pub fn render(
                 tree_order: options.tree_order,
                 sidebar_density: options.sidebar_density,
                 use_stable_glyphs: options.use_stable_glyphs,
+                agent_monitoring_mode: options.agent_monitoring_mode,
                 show_inferred_title_icons: options.show_inferred_title_icons,
                 panel_width: area.width,
                 opened_paths: state.opened(),
@@ -2385,6 +2451,7 @@ mod tests {
                     progress: None,
                     has_scheduled_input: false,
                     use_stable_glyphs,
+                    agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 },
             ));
 
@@ -2493,6 +2560,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
@@ -2960,6 +3028,7 @@ mod tests {
                         progress: None,
                         has_scheduled_input: false,
                         use_stable_glyphs: false,
+                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                     },
                 );
 
@@ -2980,6 +3049,7 @@ mod tests {
                 progress: None,
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             },
         );
         assert!(inactive.spans[1].content.trim().is_empty());
@@ -3161,6 +3231,7 @@ mod tests {
                 progress: None,
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             },
         );
 
@@ -3260,6 +3331,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
@@ -3304,6 +3376,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         show_inferred_title_icons: false,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
@@ -3368,6 +3441,7 @@ mod tests {
                         tree_order: TreeOrder::Manual,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
+                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         show_inferred_title_icons: false,
                         hover: TreeHoverState::default(),
                         panes: &HashMap::new(),
@@ -3720,6 +3794,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::Standard,
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: area.width,
                 opened_paths: state.opened(),
@@ -3841,6 +3916,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3867,6 +3943,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3896,6 +3973,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -3944,6 +4022,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -4067,6 +4146,7 @@ mod tests {
                 progress: None,
                 has_scheduled_input: true,
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             },
         );
         assert_eq!(line.spans[1].content.trim_end(), "⏰");
@@ -4179,6 +4259,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
@@ -4449,6 +4530,7 @@ mod tests {
                 tree_order: TreeOrder::Manual,
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,

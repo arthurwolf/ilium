@@ -413,6 +413,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             tree_order: app.ui_settings.tree_order,
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
+            agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,

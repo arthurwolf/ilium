@@ -35,6 +35,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
             None
         }
+        ServerEvent::AgentDetectionSettingsChanged { result } => {
+            app.apply_agent_detection_settings_result(result);
+            None
+        }
         ServerEvent::TreeSnapshot(tree) => {
             apply_tree_snapshot(app, tree);
             None
@@ -903,6 +907,40 @@ mod tests {
 
     fn app() -> App {
         App::new("test".to_string(), std::env::temp_dir())
+    }
+
+    #[test]
+    fn agent_detection_settings_events_apply_success_and_preserve_rejected_state() {
+        let mut app = app();
+        let accepted = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 7,
+            idle_poll_seconds: 0,
+            custom_signatures: Vec::new(),
+        };
+        apply(
+            &mut app,
+            ServerEvent::AgentDetectionSettingsChanged {
+                result: Ok(accepted.clone()),
+            },
+        );
+        assert_eq!(app.agent_detection_settings, Some(accepted.clone()));
+        assert!(!app.agent_detection_settings_pending);
+
+        app.agent_detection_settings_pending = true;
+        apply(
+            &mut app,
+            ServerEvent::AgentDetectionSettingsChanged {
+                result: Err(ilium_ipc::AgentDetectionSettingsError {
+                    message: "poll interval rejected".to_string(),
+                }),
+            },
+        );
+        assert_eq!(app.agent_detection_settings, Some(accepted));
+        assert_eq!(
+            app.agent_detection_settings_error.as_deref(),
+            Some("poll interval rejected")
+        );
+        assert!(!app.agent_detection_settings_pending);
     }
 
     #[test]

@@ -397,6 +397,7 @@ pub enum SettingsTab {
     Sound,
     VoiceControl,
     ResetPlanning,
+    AgentMonitoring,
     Debug,
     Api,
     About,
@@ -556,9 +557,10 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 19] = [
+    pub const ALL: [SettingsTab; 20] = [
         Self::Appearance,
         Self::Icons,
+        Self::AgentMonitoring,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -596,6 +598,7 @@ impl SettingsTab {
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
             Self::ResetPlanning => "Reset planning",
+            Self::AgentMonitoring => "Agent Monitoring",
             Self::Debug => "Debug",
             Self::Api => "API",
             Self::About => "About",
@@ -654,7 +657,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 19] = [
+    const GENERAL: [AppearanceRow; 16] = [
         Self::TreeOrder,
         Self::TreeRowManagementControls,
         Self::AgentIdentifierMode,
@@ -669,9 +672,6 @@ impl AppearanceRow {
         Self::ShowToolbarLabels,
         Self::LastPrompt,
         Self::LastPromptMaxLines,
-        Self::ProgressMonitor,
-        Self::ProgressMonitorMaxLines,
-        Self::ProgressFillStyle,
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
     ];
@@ -694,6 +694,51 @@ impl AppearanceRow {
         }
         rows.extend(Self::GENERAL);
         rows
+    }
+}
+
+/// Navigation rows in Agent Monitoring. Signature entries are generated
+/// from the latest server-authoritative settings snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentMonitoringRow {
+    Mode,
+    ProgressMonitor,
+    ProgressMonitorMaxLines,
+    ProgressFillStyle,
+    WorkingPollSeconds,
+    IdlePollSeconds,
+    CustomSignaturesHeading,
+    CustomSignature(usize),
+    AddCustomSignature,
+    StatusIcon(crate::icon_settings::IconTarget),
+}
+
+impl AgentMonitoringRow {
+    pub fn all(custom_signature_count: usize) -> Vec<Self> {
+        let mut rows = vec![
+            Self::Mode,
+            Self::ProgressMonitor,
+            Self::ProgressMonitorMaxLines,
+            Self::ProgressFillStyle,
+            Self::WorkingPollSeconds,
+            Self::IdlePollSeconds,
+            Self::CustomSignaturesHeading,
+        ];
+        rows.extend((0..custom_signature_count).map(Self::CustomSignature));
+        rows.push(Self::AddCustomSignature);
+        rows.extend(
+            crate::agent_monitoring::STATUS_ICON_TARGETS
+                .into_iter()
+                .map(Self::StatusIcon),
+        );
+        rows
+    }
+
+    pub const fn icon_target(self) -> Option<crate::icon_settings::IconTarget> {
+        match self {
+            Self::StatusIcon(target) => Some(target),
+            _ => None,
+        }
     }
 }
 
@@ -1703,6 +1748,12 @@ pub struct App {
     pub voice_settings: VoiceSettings,
     pub reset_planning_settings: ResetPlanningSettings,
     pub reset_monitor_state: ResetMonitorState,
+    /// Server-authoritative adaptive detection settings. None until the
+    /// attach handshake sends its initial settings event.
+    pub agent_detection_settings: Option<ilium_ipc::AgentDetectionSettings>,
+    pub agent_detection_settings_error: Option<String>,
+    pub agent_detection_settings_pending: bool,
+    pub agent_detection_signature_input: Option<String>,
     pub debug_settings: DebugSettings,
     pub api_settings: ApiSettings,
     pub voice_connection_state: ilium_voice::VoiceConnectionState,
@@ -2085,6 +2136,10 @@ impl App {
             voice_settings: VoiceSettings::default(),
             reset_planning_settings: ResetPlanningSettings::default(),
             reset_monitor_state: ResetMonitorState::default(),
+            agent_detection_settings: None,
+            agent_detection_settings_error: None,
+            agent_detection_settings_pending: false,
+            agent_detection_signature_input: None,
             debug_settings: DebugSettings::default(),
             api_settings: ApiSettings::default(),
             voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
@@ -3980,6 +4035,151 @@ impl App {
             if let Err(error) = crate::config::save_ui_settings(&config_dir, &self.ui_settings) {
                 self.status_message = Some(format!("Could not save settings: {error}"));
             }
+        }
+    }
+
+    pub fn settings_set_agent_monitoring_mode(
+        &mut self,
+        mode: crate::agent_monitoring::AgentMonitoringMode,
+    ) {
+        if self.ui_settings.agent_monitoring_mode == mode {
+            return;
+        }
+        let mut ui = self.ui_settings.clone();
+        ui.agent_monitoring_mode = mode;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    pub fn settings_adjust_agent_monitoring_mode(&mut self, direction: i32) {
+        let mode = if direction < 0 {
+            crate::agent_monitoring::AgentMonitoringMode::Normal
+        } else {
+            crate::agent_monitoring::AgentMonitoringMode::Attention
+        };
+        self.settings_set_agent_monitoring_mode(mode);
+    }
+
+    pub fn settings_adjust_agent_monitoring_row(
+        &mut self,
+        row: AgentMonitoringRow,
+        direction: i32,
+    ) {
+        match row {
+            AgentMonitoringRow::Mode => self.settings_adjust_agent_monitoring_mode(direction),
+            AgentMonitoringRow::ProgressMonitor => self.settings_toggle_progress_monitor(),
+            AgentMonitoringRow::ProgressMonitorMaxLines => {
+                self.settings_adjust_progress_max_lines(direction)
+            }
+            AgentMonitoringRow::ProgressFillStyle => {
+                self.settings_adjust_progress_fill_style(direction)
+            }
+            AgentMonitoringRow::WorkingPollSeconds | AgentMonitoringRow::IdlePollSeconds => {
+                let Some(mut settings) = self.agent_detection_settings.clone() else {
+                    return;
+                };
+                let interval = match row {
+                    AgentMonitoringRow::WorkingPollSeconds => &mut settings.working_poll_seconds,
+                    AgentMonitoringRow::IdlePollSeconds => &mut settings.idle_poll_seconds,
+                    _ => return,
+                };
+                *interval = if direction < 0 {
+                    interval.saturating_sub(1)
+                } else {
+                    interval.saturating_add(1)
+                };
+                self.settings_update_agent_detection(settings);
+            }
+            AgentMonitoringRow::StatusIcon(target) => self.settings_cycle_icon(target, direction),
+            AgentMonitoringRow::CustomSignaturesHeading
+            | AgentMonitoringRow::CustomSignature(_)
+            | AgentMonitoringRow::AddCustomSignature => {}
+        }
+    }
+
+    pub fn settings_remove_custom_agent_signature(&mut self, index: usize) {
+        let Some(mut settings) = self.agent_detection_settings.clone() else {
+            return;
+        };
+        if index >= settings.custom_signatures.len() {
+            return;
+        }
+        settings.custom_signatures.remove(index);
+        self.settings_update_agent_detection(settings);
+    }
+
+    pub fn settings_begin_custom_agent_signature(&mut self) {
+        if self.agent_detection_settings.is_some() {
+            self.agent_detection_signature_input = Some(String::new());
+            self.agent_detection_settings_error = None;
+        }
+    }
+
+    pub fn settings_update_custom_agent_signature_input(&mut self, input: String) {
+        if self.agent_detection_signature_input.is_some() {
+            self.agent_detection_signature_input = Some(input);
+        }
+    }
+
+    pub fn settings_cancel_custom_agent_signature(&mut self) {
+        self.agent_detection_signature_input = None;
+    }
+
+    pub fn settings_submit_custom_agent_signature(&mut self) {
+        let Some(input) = self.agent_detection_signature_input.take() else {
+            return;
+        };
+        let Some(mut settings) = self.agent_detection_settings.clone() else {
+            return;
+        };
+        let (name, class_name) = input
+            .split_once(':')
+            .map_or((input.trim(), "other"), |(name, class_name)| {
+                (name.trim(), class_name.trim())
+            });
+        if name.is_empty() {
+            self.agent_detection_settings_error =
+                Some("Enter a process-name substring.".to_string());
+            return;
+        }
+        let class = match class_name.to_ascii_lowercase().as_str() {
+            "claude" => ilium_core::AgentClass::Claude,
+            "codex" => ilium_core::AgentClass::Codex,
+            "antigravity" => ilium_core::AgentClass::Antigravity,
+            "other" => ilium_core::AgentClass::Other(name.to_string()),
+            _ => {
+                self.agent_detection_settings_error =
+                    Some("Class must be claude, codex, antigravity, or other.".to_string());
+                return;
+            }
+        };
+        settings
+            .custom_signatures
+            .push(ilium_ipc::CustomAgentSignature {
+                name_substring: name.to_ascii_lowercase(),
+                class,
+            });
+        self.settings_update_agent_detection(settings);
+    }
+
+    /// Submits a complete detection-settings replacement. The displayed
+    /// settings remain server-authoritative until the server accepts it.
+    pub fn settings_update_agent_detection(&mut self, settings: ilium_ipc::AgentDetectionSettings) {
+        self.agent_detection_settings_pending = true;
+        self.agent_detection_settings_error = None;
+        self.queue_request(ClientRequest::UpdateAgentDetectionSettings { settings });
+    }
+
+    pub fn apply_agent_detection_settings_result(
+        &mut self,
+        result: Result<ilium_ipc::AgentDetectionSettings, ilium_ipc::AgentDetectionSettingsError>,
+    ) {
+        self.agent_detection_settings_pending = false;
+        match result {
+            Ok(settings) => {
+                self.agent_detection_settings = Some(settings);
+                self.agent_detection_settings_error = None;
+            }
+            Err(error) => self.agent_detection_settings_error = Some(error.message),
         }
     }
 
@@ -16165,7 +16365,8 @@ mod tests {
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
-        assert_eq!(SettingsTab::Icons.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
+        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Keyboard);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
