@@ -288,7 +288,8 @@ pub struct TerminalView {
     /// Fingerprint of `parser`'s visible character cells after the most recent
     /// replay, resize, feed, or accepted live output. This baseline turns a
     /// live PTY event into an O(screen cells), allocation-free text-change
-    /// decision without any timer-driven screen scan.
+    /// decision without any timer-driven screen scan. Changed updates also
+    /// retain bounded row samples for the plain-terminal WHY tooltip.
     visible_text_fingerprint: u64,
     /// Per-row fingerprints from the same baseline as `visible_text_fingerprint`.
     visible_row_fingerprints: Vec<u64>,
@@ -394,8 +395,9 @@ impl TerminalView {
     /// the attach replay. Output sequence numbers are pane-local and
     /// monotonic for one server lifetime. Returns `true` only when the
     /// accepted bytes changed at least one visible character cell and the
-    /// caller requested ordinary-terminal activity tracking. Known agent
-    /// panes skip the O(visible cells) fingerprint entirely.
+    /// caller requested ordinary-terminal activity tracking. The fingerprint
+    /// check is allocation-free; changed updates capture bounded row evidence.
+    /// Known agent panes skip the O(visible cells) fingerprint entirely.
     pub fn apply_live_output(
         &mut self,
         first_sequence: u64,

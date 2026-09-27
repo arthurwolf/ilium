@@ -285,7 +285,15 @@ Ilium keeps your terminals alive when you detach, arranges panes in a tree you c
 </a>
 </p>
 </td>
-<td width="50%">
+<td width="50%" valign="top">
+<p>
+<strong>Agents survive reboots</strong>
+</p>
+<p>
+<a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/24-agents-survive-reboots.gif" alt="A staged reboot and vintage boot sequence leads to retained footage of Ilium restoring the pane layout and resuming real Claude and Codex sessions; this is a composite, not a live machine reboot capture" width="100%">
+</a>
+</p>
 </td>
 </tr>
 </tbody>

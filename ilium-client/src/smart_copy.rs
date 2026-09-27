@@ -441,15 +441,52 @@ fn fence_closes(text: &str, marker: char, width: usize) -> bool {
     count >= width && trimmed.chars().skip(count).all(char::is_whitespace)
 }
 
+fn is_escaped(chars: &[char], index: usize) -> bool {
+    chars[..index]
+        .iter()
+        .rev()
+        .take_while(|character| **character == '\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn closing_backtick_run(chars: &[char], start: usize, width: usize) -> Option<usize> {
+    let mut index = start;
+    while index < chars.len() {
+        let run_width = chars[index..]
+            .iter()
+            .take_while(|character| **character == '`')
+            .count();
+        if run_width == width {
+            return Some(index);
+        }
+        // Do not treat a suffix of a longer delimiter run as an exact match.
+        index += run_width.max(1);
+    }
+    None
+}
+
 fn table_cells(line: &ScanLine) -> Vec<(usize, usize)> {
     let mut pipes = Vec::new();
-    let mut in_code = false;
-    for (index, character) in line.chars.iter().enumerate() {
-        if *character == '`' && (index == 0 || line.chars[index - 1] != '\\') {
-            in_code = !in_code;
-        } else if *character == '|' && !in_code && (index == 0 || line.chars[index - 1] != '\\') {
+    let mut index = 0;
+    while index < line.chars.len() {
+        if line.chars[index] == '`' && !is_escaped(&line.chars, index) {
+            let width = line.chars[index..]
+                .iter()
+                .take_while(|character| **character == '`')
+                .count();
+            if let Some(close) = closing_backtick_run(&line.chars, index + width, width) {
+                index = close + width;
+                continue;
+            }
+            index += width;
+            continue;
+        }
+        if line.chars[index] == '|' && !is_escaped(&line.chars, index) {
             pipes.push(index);
         }
+        index += 1;
     }
     if pipes.is_empty() {
         return Vec::new();
@@ -578,7 +615,7 @@ fn is_list(text: &str) -> bool {
 
 fn is_command(text: &str) -> bool {
     let text = text.trim_start();
-    ["$ ", "❯ ", "PS> ", "C:\\> "]
+    ["$ ", "❯ ", "› ", "PS> ", "C:\\> "]
         .iter()
         .any(|prefix| text.starts_with(prefix))
         || text.split_once("$ ").is_some_and(|(prompt, _)| {
@@ -635,6 +672,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             if close.is_none()
                 && row > 0
                 && !lines[row - 1].trimmed().is_empty()
+                && heading_level(&lines[row - 1].text).is_none()
+                && !(row >= 2
+                    && setext_level(&lines[row - 1].text).is_some()
+                    && !lines[row - 2].trimmed().is_empty())
                 && lines[row]
                     .text
                     .trim_start()
@@ -1056,7 +1097,7 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
         }
         let mut index = 0;
         while index < line.chars.len() {
-            if line.chars[index] != '`' || (index > 0 && line.chars[index - 1] == '\\') {
+            if line.chars[index] != '`' || is_escaped(&line.chars, index) {
                 index += 1;
                 continue;
             }
@@ -1064,19 +1105,7 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 .iter()
                 .take_while(|ch| **ch == '`')
                 .count();
-            let mut close = index + width;
-            while close < line.chars.len() {
-                if line.chars[close..]
-                    .iter()
-                    .take_while(|ch| **ch == '`')
-                    .count()
-                    == width
-                {
-                    break;
-                }
-                close += 1;
-            }
-            if close < line.chars.len() {
+            if let Some(close) = closing_backtick_run(&line.chars, index + width, width) {
                 if let Some(span) = line.content_span(line_row, index + width, close) {
                     draft(
                         &mut details,
@@ -1680,6 +1709,78 @@ mod tests {
     }
 
     #[test]
+    fn bare_fences_after_markdown_headings_keep_visible_code() {
+        for lines in [
+            &["# Heading", "```", "body"][..],
+            &["Heading", "---", "~~~", "body"][..],
+        ] {
+            let session = SmartCopySession::new(1, NodeId(1), snapshot(lines));
+            assert!(session
+                .candidates
+                .iter()
+                .any(|candidate| candidate.kind == "code" && candidate.text == "body"));
+            assert!(session.candidates.iter().any(|candidate| {
+                candidate.kind == "fenced-code" && !candidate.text.contains("Heading")
+            }));
+        }
+    }
+
+    #[test]
+    fn inline_code_requires_an_exact_backtick_run() {
+        let session = SmartCopySession::new(1, NodeId(1), snapshot(&["see ``a```b`` here"]));
+        let code = session
+            .candidates
+            .iter()
+            .find(|candidate| candidate.kind == "inline-code")
+            .unwrap();
+        assert_eq!(code.text, "a```b");
+        assert_eq!(code.spans[0].start_column, 6);
+        assert_eq!(code.spans[0].end_column, 10);
+    }
+
+    #[test]
+    fn table_cells_respect_backtick_runs_and_backslash_parity() {
+        let session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&[
+                "| Name | Value |",
+                "| --- | --- |",
+                "| ``a`b|c`` | right |",
+                r"| left\\| right |",
+                r"| left\|inside | right |",
+                "| unmatched ` code | right |",
+            ]),
+        );
+        for text in ["``a`b|c``", r"left\\", r"left\|inside"] {
+            assert!(session
+                .candidates
+                .iter()
+                .any(|candidate| { candidate.kind == "table-cell" && candidate.text == text }));
+        }
+        assert_eq!(
+            session
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.kind == "table-cell" && candidate.text == "right")
+                .count(),
+            4
+        );
+    }
+
+    #[test]
+    fn claude_prompt_rows_are_isolated_from_following_prose() {
+        let session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&["› explain this code", "model status footer"]),
+        );
+        assert!(session.candidates.iter().any(|candidate| {
+            candidate.kind == "command" && candidate.text == "› explain this code"
+        }));
+    }
+
+    #[test]
     fn partial_fences_and_candidate_volume_are_bounded() {
         let unfinished_snapshot = snapshot(&["```", "unfinished body"]);
         let session = SmartCopySession::new(1, NodeId(1), unfinished_snapshot);
@@ -1697,16 +1798,28 @@ mod tests {
             .candidates
             .iter()
             .any(|candidate| candidate.kind == "fenced-code"));
-        let many_lines = (0..600)
-            .map(|index| format!("item {index}"))
-            .collect::<Vec<_>>();
+        let mut many_lines = Vec::new();
+        for index in 0..600 {
+            many_lines.push(format!("$ item {index}"));
+            many_lines.push(String::new());
+        }
         let borrowed = many_lines.iter().map(String::as_str).collect::<Vec<_>>();
         let many_line_snapshot = snapshot(&borrowed);
         let mut session = SmartCopySession::new(2, NodeId(1), many_line_snapshot);
-        assert!(session.candidates.len() <= MAXIMUM_DETECTED_CANDIDATES);
-        assert!(session
+        assert_eq!(session.candidates.len(), MAXIMUM_DETECTED_CANDIDATES);
+        for item in 0..MAXIMUM_DETECTED_CANDIDATES {
+            let line = item * 2 + 1;
+            let record = serde_json::json!({
+                "label": "additional word",
+                "kind": "word",
+                "parts": [{"line": line, "from": "w2", "through": "w2"}],
+            });
+            assert!(session.apply_json_line(&record.to_string()).unwrap());
+        }
+        assert_eq!(session.candidates.len(), MAXIMUM_CANDIDATES);
+        assert!(!session
             .apply_json_line(
-                r#"{"label":"word","kind":"word","parts":[{"line":1,"from":"w2","through":"w2"}]}"#
+                r#"{"label":"overflow","kind":"word","parts":[{"line":1,"from":"w2","through":"w2"}]}"#
             )
             .unwrap());
     }

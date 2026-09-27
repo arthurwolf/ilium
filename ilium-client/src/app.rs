@@ -2514,7 +2514,8 @@ impl App {
     }
 
     /// Records a live-output edge only when parsed visible text actually
-    /// changed. `TerminalView` owns that allocation-free comparison.
+    /// changed. `TerminalView` owns the allocation-free fingerprint check and
+    /// captures bounded row evidence only for changed screens.
     pub(crate) fn record_terminal_screen_change(
         &mut self,
         pane_id: NodeId,

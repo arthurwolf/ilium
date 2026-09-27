@@ -78,7 +78,11 @@ impl TerminalActivityTracker {
     /// Starts or refreshes a timing-only test entry.
     #[cfg(test)]
     pub(crate) fn record(&mut self, pane_id: NodeId, elapsed_ms: u128) {
-        self.record_with_cause(pane_id, elapsed_ms, TerminalActivityCause::TerminalTextQueued);
+        self.record_with_cause(
+            pane_id,
+            elapsed_ms,
+            TerminalActivityCause::TerminalTextQueued,
+        );
     }
 
     /// Starts or refreshes one pane's window and replaces its prior cause.

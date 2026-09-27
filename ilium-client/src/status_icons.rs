@@ -988,8 +988,7 @@ mod tests {
     #[test]
     fn shell_activity_reason_sanitizes_and_bounds_observed_terminal_text() {
         use crate::terminal_activity::{
-            TerminalActivityCause, TerminalActivityTracker, VisibleRowEvidence,
-            VisibleTextEvidence,
+            TerminalActivityCause, TerminalActivityTracker, VisibleRowEvidence, VisibleTextEvidence,
         };
 
         let pane_id = ilium_core::NodeId(44);
