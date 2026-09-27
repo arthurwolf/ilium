@@ -4,24 +4,24 @@
 //!
 //! # Identity model
 //!
-//! A trigger fires once per *instance* of matching text, however that text
-//! later moves. Row positions are deliberately not part of an instance's
-//! identity: terminal programs move text without re-sending it (scrolling,
-//! scroll regions, insert/delete line) and re-send unchanged text at other
-//! positions (repaints, resizes). Instead the tracker keeps its own `vt100`
-//! screen, fed by the pane's bytes, and after every slice of output counts how
-//! many times each *matched text* is visible. Per rule and matched text it
-//! remembers how many instances were already admitted:
+//! Instance identity is approximated by visible match counts, not row positions:
+//! terminal programs move text without re-sending it and repaint unchanged text
+//! elsewhere. The tracker maintains its own `vt100` screen from the pane's bytes
+//! and counts each normalized matched text after every output slice.
 //!
 //! * more visible than admitted: the surplus are new instances and fire;
-//! * fewer visible than admitted: the instances stay admitted until the
-//!   shortfall has lasted [`SETTLE_WINDOW`], so an erase-then-repaint never
-//!   re-arms a rule, while text that really went away can trigger again.
+//! * fewer visible than admitted: each additional missing cohort starts its own
+//!   [`SETTLE_WINDOW`] at the scan that first observes that loss. Earlier idle
+//!   time while text was visible does not count as absence.
 //!
-//! Output is fed in slices small enough that no line can scroll out of the
-//! screen unobserved, so fast log output is still seen.
+//! This is not perfect semantic identity: a repaint that temporarily duplicates
+//! text is indistinguishable from a new identical instance at that scan, and an
+//! absence lasting the grace window re-arms even if old text later returns.
+//!
+//! Newline and byte limits improve sampling of fast output; they do not guarantee
+//! observation of every transient screen state (for example cursor-only redraws).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use ilium_core::{NodeId, NodeKind, PaneStatus};
@@ -33,10 +33,8 @@ use crate::ipc::handlers::submit_text_trigger_if_current;
 use crate::pane::PaneResource;
 use crate::state::ServerState;
 
-/// How long matched text must stay missing before its admitted instances are
-/// released and the same text may trigger again. Longer than any repaint gap
-/// (an erase and its rewrite are adjacent in the byte stream), shorter than
-/// the time an agent needs to react to a reply and show the same text again.
+/// Grace period measured from the first scan observing an admission missing.
+/// This is a repaint heuristic, not a bound on how long real redraws can take.
 const SETTLE_WINDOW: Duration = Duration::from_millis(1500);
 
 /// After the pane is resized the program repaints its whole view, sometimes
@@ -78,15 +76,78 @@ pub async fn run_deliveries(
     }
 }
 
+/// Admissions first observed missing at the same scan.
+struct MissingAdmissions {
+    count: usize,
+    since: Instant,
+}
+
 /// Admission state of one distinct matched text under one rule.
 struct KeyState {
     /// Instances already answered (or deliberately adopted without an answer).
     admitted: usize,
-    /// Last moment at least `admitted` instances were visible.
-    full_since: Instant,
-    /// Instances visible at the previous scan. The screen cannot change
-    /// between scans, so this is also what stayed visible until now.
-    visible: usize,
+    /// Oldest first. After reconciliation, their sum is
+    /// `admitted.saturating_sub(visible_count)`.
+    missing: VecDeque<MissingAdmissions>,
+}
+
+impl KeyState {
+    fn new(admitted: usize) -> Self {
+        Self {
+            admitted,
+            missing: VecDeque::new(),
+        }
+    }
+
+    /// Expire only losses already observed before the current scan. In
+    /// particular, a current erase must not inherit an earlier idle interval.
+    fn expire_missing(&mut self, now: Instant) {
+        while self
+            .missing
+            .front()
+            .is_some_and(|loss| now.saturating_duration_since(loss.since) >= SETTLE_WINDOW)
+        {
+            let Some(loss) = self.missing.pop_front() else {
+                break;
+            };
+            self.admitted -= loss.count;
+        }
+    }
+
+    /// Reconcile after all surplus admissions and prefix-key transfers.
+    fn observe_visible(&mut self, visible: usize, now: Instant) {
+        let required = self.admitted.saturating_sub(visible);
+        let tracked: usize = self.missing.iter().map(|loss| loss.count).sum();
+        if required > tracked {
+            let count = required - tracked;
+            if let Some(last) = self.missing.back_mut().filter(|loss| loss.since == now) {
+                last.count += count;
+            } else {
+                self.missing
+                    .push_back(MissingAdmissions { count, since: now });
+            }
+        } else {
+            // Counts cannot identify which missing instance returned or was
+            // transferred. Retire the oldest loss first, conservatively keeping
+            // the younger deadlines for any admissions that remain missing.
+            let mut returned = tracked - required;
+            while returned > 0 {
+                let Some(first) = self.missing.front_mut() else {
+                    break;
+                };
+                let count = returned.min(first.count);
+                first.count -= count;
+                returned -= count;
+                if first.count == 0 {
+                    self.missing.pop_front();
+                }
+            }
+        }
+        debug_assert_eq!(
+            self.missing.iter().map(|loss| loss.count).sum::<usize>(),
+            required
+        );
+    }
 }
 
 /// Per-rule instance bookkeeping plus the rule's compiled expression, so the
@@ -120,16 +181,9 @@ impl RuleTable {
     }
 
     /// Adopts what is visible now as already answered.
-    fn seed(&mut self, counts: &HashMap<String, usize>, now: Instant) {
+    fn seed(&mut self, counts: &HashMap<String, usize>) {
         for (key, &count) in counts {
-            self.keys.insert(
-                key.clone(),
-                KeyState {
-                    admitted: count,
-                    full_since: now,
-                    visible: count,
-                },
-            );
+            self.keys.insert(key.clone(), KeyState::new(count));
         }
     }
 
@@ -141,15 +195,10 @@ impl RuleTable {
         is_eligible: bool,
         is_quiet: bool,
     ) -> usize {
-        // A shortfall that lasted through the quiet time before this output
-        // means those instances are really gone.
+        // Use only previously observed losses here. New losses are timestamped
+        // below, after applying this scan's admissions and key transfers.
         for state in self.keys.values_mut() {
-            if state.visible < state.admitted
-                && now.saturating_duration_since(state.full_since) >= SETTLE_WINDOW
-            {
-                state.admitted = state.visible;
-                state.full_since = now;
-            }
+            state.expire_missing(now);
         }
         let mut fires = 0;
         for (key, &count) in counts {
@@ -187,19 +236,15 @@ impl RuleTable {
                 fires += surplus;
             }
             if adopted + admitted_now > 0 {
-                let state = self.keys.entry(key.clone()).or_insert(KeyState {
-                    admitted: 0,
-                    full_since: now,
-                    visible: 0,
-                });
+                let state = self
+                    .keys
+                    .entry(key.clone())
+                    .or_insert_with(|| KeyState::new(0));
                 state.admitted += adopted + admitted_now;
             }
         }
         for (key, state) in &mut self.keys {
-            state.visible = counts.get(key).copied().unwrap_or(0);
-            if state.visible >= state.admitted {
-                state.full_since = now;
-            }
+            state.observe_visible(counts.get(key).copied().unwrap_or(0), now);
         }
         self.keys.retain(|_, state| state.admitted > 0);
         fires
@@ -207,7 +252,11 @@ impl RuleTable {
 
     fn touch(&mut self, now: Instant) {
         for state in self.keys.values_mut() {
-            state.full_since = now;
+            // Preserve the existing main-screen restoration policy: time spent
+            // on the alternate screen does not expire main-screen admissions.
+            for loss in &mut state.missing {
+                loss.since = now;
+            }
         }
     }
 }
@@ -394,7 +443,7 @@ impl TriggerTracker {
             };
             let counts = rule.count_matches(&lines);
             if is_new_rule && seeds_new_rules {
-                rule.seed(&counts, now);
+                rule.seed(&counts);
                 continue;
             }
             let fires = rule.observe(
@@ -558,11 +607,9 @@ pub(crate) fn target_matches(target: TextTriggerTarget, status: &PaneStatus) -> 
         (target, status),
         (
             TextTriggerTarget::Both,
-            PaneStatus::PlainShell | PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..),
-        ) | (
-            TextTriggerTarget::Agents,
-            PaneStatus::Agent(..) | PaneStatus::AgentWithGoal(..)
-        ) | (TextTriggerTarget::Terminals, PaneStatus::PlainShell)
+            PaneStatus::PlainShell | PaneStatus::Agent(..),
+        ) | (TextTriggerTarget::Agents, PaneStatus::Agent(..))
+            | (TextTriggerTarget::Terminals, PaneStatus::PlainShell)
     )
 }
 
@@ -875,16 +922,18 @@ mod tests {
         let mut harness = Harness::new("ready", 6, 40);
         harness.triggers[0].target = TextTriggerTarget::Agents;
         assert_eq!(harness.feed(b"ready\r\n"), 0);
-        harness.status = PaneStatus::Agent(
+        harness.status = PaneStatus::from_activity(
             ilium_core::AgentClass::Codex,
             ilium_core::AgentActivity::Working,
+            None,
         );
         assert_eq!(harness.rescan(), 1);
         harness.status = PaneStatus::PlainShell;
         assert_eq!(harness.rescan(), 0);
-        harness.status = PaneStatus::Agent(
+        harness.status = PaneStatus::from_activity(
             ilium_core::AgentClass::Codex,
             ilium_core::AgentActivity::Idle,
+            None,
         );
         assert_eq!(harness.rescan(), 0);
     }
@@ -908,6 +957,155 @@ mod tests {
     fn empty_and_whitespace_matches_never_create_instances() {
         let mut harness = Harness::new(r"\s*", 4, 40);
         assert_eq!(harness.feed(b"text   more\r\n"), 0);
+    }
+
+    #[test]
+    fn relocating_one_occurrence_after_idle_does_not_refire() {
+        let mut harness = Harness::new("abracrabdara", 6, 60);
+        assert_eq!(harness.feed(b"\x1b[5;1Habracrabdara, may I proceed?"), 1);
+        let mut previous_row = 5;
+        for row in [4, 3, 2] {
+            harness.wait(SETTLE_WINDOW * 4);
+            let erase = format!("\x1b[{previous_row};1H\x1b[2K");
+            assert_eq!(harness.feed(erase.as_bytes()), 0);
+            let repaint = format!("\x1b[{row};1Habracrabdara, may I proceed?");
+            // Both feeds use the same Instant; the observed absence is zero.
+            assert_eq!(harness.feed(repaint.as_bytes()), 0, "row {row}");
+            previous_row = row;
+        }
+        assert_eq!(harness.fired, 1);
+    }
+
+    #[test]
+    fn one_feed_split_after_newlines_does_not_expire_a_fresh_loss() {
+        let mut harness = Harness::new("abracrabdara", 6, 60);
+        assert_eq!(harness.feed(b"\x1b[3;1Habracrabdara, may I proceed?"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        let erase = b"\x1b[3;1H\x1b[2K\r\n\r\n\r\n";
+        let mut repaint = erase.to_vec();
+        repaint.extend_from_slice(b"\x1b[2;1Habracrabdara, may I proceed?");
+        assert_eq!(slice_end(&repaint, 0, 3), erase.len());
+        assert_eq!(harness.feed(&repaint), 0);
+        assert_eq!(harness.fired, 1);
+    }
+
+    #[test]
+    fn one_feed_split_at_byte_budget_does_not_expire_a_fresh_loss() {
+        let mut harness = Harness::new("abracrabdara", 6, 60);
+        assert_eq!(harness.feed(b"\x1b[3;1Habracrabdara, may I proceed?"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        let mut repaint = b"\x1b[3;1H\x1b[2K".to_vec();
+        // NUL padding is inert screen output, and creates an exact byte boundary.
+        repaint.resize(MAX_SLICE_BYTES, 0);
+        repaint.extend_from_slice(b"\x1b[2;1Habracrabdara, may I proceed?");
+        assert_eq!(slice_end(&repaint, 0, 3), MAX_SLICE_BYTES);
+        assert_eq!(harness.feed(&repaint), 0);
+        assert_eq!(harness.fired, 1);
+    }
+
+    #[test]
+    fn idle_before_erasure_is_not_part_of_the_missing_window() {
+        let mut harness = Harness::new("^trigger-ready$", 4, 40);
+        assert_eq!(harness.feed(b"trigger-ready"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        assert_eq!(harness.feed(b"\x1b[H\x1b[2Jwaiting"), 0);
+        harness.wait(SETTLE_WINDOW - Duration::from_millis(1));
+        assert_eq!(harness.feed(b"\x1b[H\x1b[2Jtrigger-ready"), 0);
+        assert_eq!(harness.fired, 1);
+    }
+
+    #[test]
+    fn a_full_observed_absence_rearms_without_an_intermediate_rescan() {
+        let mut harness = Harness::new("^trigger-ready$", 4, 40);
+        assert_eq!(harness.feed(b"trigger-ready"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        assert_eq!(harness.feed(b"\x1b[H\x1b[2Jwaiting"), 0);
+        harness.wait(SETTLE_WINDOW);
+        assert_eq!(harness.feed(b"\x1b[H\x1b[2Jtrigger-ready"), 1);
+        assert_eq!(harness.fired, 2);
+    }
+
+    #[test]
+    fn independent_identical_lines_still_each_fire_without_a_cooldown() {
+        let mut harness = Harness::new("abracrabdara", 10, 60);
+        assert_eq!(harness.feed(b"abracrabdara\r\nabracrabdara\r\n"), 2);
+        assert_eq!(harness.feed(b"abracrabdara\r\n"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        assert_eq!(harness.feed(b"abracrabdara\r\n"), 1);
+        assert_eq!(harness.fired, 4);
+    }
+
+    #[test]
+    fn a_return_cancels_its_loss_before_another_erase() {
+        let mut harness = Harness::new("abracrabdara", 4, 60);
+        assert_eq!(harness.feed(b"abracrabdara"), 1);
+        for _ in 0..3 {
+            harness.wait(SETTLE_WINDOW * 4);
+            assert_eq!(harness.feed(b"\x1b[H\x1b[2J"), 0);
+            harness.wait(SETTLE_WINDOW / 2);
+            assert_eq!(harness.feed(b"abracrabdara"), 0);
+        }
+        assert_eq!(harness.fired, 1);
+    }
+
+    #[test]
+    fn later_losses_do_not_inherit_the_first_loss_deadline() {
+        let mut harness = Harness::new("abracrabdara", 6, 60);
+        assert_eq!(
+            harness.feed(b"\x1b[2;1Habracrabdara\x1b[4;1Habracrabdara"),
+            2
+        );
+        assert_eq!(harness.feed(b"\x1b[2;1H\x1b[2K"), 0);
+        harness.wait(SETTLE_WINDOW / 2);
+        assert_eq!(harness.feed(b"\x1b[4;1H\x1b[2K"), 0);
+        harness.wait(SETTLE_WINDOW / 2);
+        assert_eq!(harness.rescan(), 0);
+        let state = &harness.tracker.tables[0]["rule"].keys["abracrabdara"];
+        assert_eq!(state.admitted, 1);
+        assert_eq!(harness.feed(b"\x1b[2;1Habracrabdara"), 0);
+        assert_eq!(harness.feed(b"\x1b[4;1Habracrabdara"), 1);
+        assert_eq!(harness.fired, 3);
+    }
+
+    #[test]
+    fn an_ambiguous_return_retires_the_oldest_loss_first() {
+        let now = Instant::now();
+        let mut state = KeyState::new(2);
+        state.observe_visible(1, now);
+        state.observe_visible(0, now + SETTLE_WINDOW / 2);
+        state.observe_visible(1, now + SETTLE_WINDOW * 3 / 4);
+        state.expire_missing(now + SETTLE_WINDOW);
+        assert_eq!(state.admitted, 2);
+        assert_eq!(state.missing.len(), 1);
+        assert_eq!(
+            state.missing.front().unwrap().since,
+            now + SETTLE_WINDOW / 2
+        );
+        state.observe_visible(2, now + SETTLE_WINDOW);
+        assert!(state.missing.is_empty());
+    }
+
+    #[test]
+    fn a_greedy_key_can_still_adopt_a_fresh_loss_after_idle() {
+        let mut harness = Harness::new("proceed.*", 6, 60);
+        assert_eq!(harness.feed(b"proceed"), 1);
+        harness.wait(SETTLE_WINDOW * 4);
+        assert_eq!(harness.feed(b"\x1b[2K\x1b[G"), 0);
+        assert_eq!(harness.feed(b"proceed with the change?"), 0);
+        assert_eq!(harness.feed(b"\r\nproceed with the change?"), 1);
+        assert_eq!(harness.fired, 2);
+    }
+
+    #[test]
+    fn main_screen_missing_admissions_do_not_age_on_the_alternate_screen() {
+        let mut harness = Harness::new("abracrabdara", 6, 60);
+        assert_eq!(harness.feed(b"abracrabdara"), 1);
+        assert_eq!(harness.feed(b"\x1b[H\x1b[2J"), 0);
+        assert_eq!(harness.feed(b"\x1b[?1049halternate"), 0);
+        harness.wait(SETTLE_WINDOW * 4);
+        assert_eq!(harness.feed(b"\x1b[?1049l"), 0);
+        assert_eq!(harness.feed(b"\x1b[Habracrabdara"), 0);
+        assert_eq!(harness.fired, 1);
     }
 
     #[test]
@@ -965,9 +1163,10 @@ mod tests {
             TextTriggerTarget::Agents,
             &PaneStatus::PlainShell
         ));
-        let agent = PaneStatus::Agent(
+        let agent = PaneStatus::from_activity(
             ilium_core::AgentClass::Codex,
             ilium_core::AgentActivity::Working,
+            None,
         );
         assert!(target_matches(TextTriggerTarget::Agents, &agent));
         assert!(!target_matches(TextTriggerTarget::Terminals, &agent));
