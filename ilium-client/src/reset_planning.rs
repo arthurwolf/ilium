@@ -3,7 +3,9 @@
 //! These unauthenticated feeds describe discretionary, provider-wide resets.
 //! They do not expose a user's own rolling quota window. In particular the
 //! Claude feed currently has no scheduled-reset contract, and a Codex
-//! announcement may be scheduled without an exact `scheduled_for` time.
+//! announcement may be scheduled without an exact `scheduled_for` time, or
+//! may expose a possible-reset watch whose expiry is only the end of the
+//! forecast window.
 
 use std::io::Read;
 use std::time::{Duration, SystemTime};
@@ -78,11 +80,27 @@ pub struct ScheduledReset {
     pub is_banked: bool,
 }
 
+/// A provider's forecast window for a possible reset.
+///
+/// `expires_at` marks when the watch window ends; it is not a promised reset
+/// time and must not be presented as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveResetWatch {
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParsedProviderResetData {
+    pub scheduled: Option<ScheduledReset>,
+    pub active_watch: Option<ActiveResetWatch>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProviderStatus {
     pub last_checked: Option<SystemTime>,
     pub last_error: Option<String>,
     pub scheduled: Option<ScheduledReset>,
+    pub active_watch: Option<ActiveResetWatch>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -109,12 +127,12 @@ impl ResetMonitorState {
         };
         state.last_checked = Some(SystemTime::now());
         match event.result {
-            Ok(scheduled) => {
+            Ok(observation) => {
                 if let Some(warning) = event.source_warning {
                     // Legacy has no upstream-freshness contract. It may add a
                     // newer announcement, but cannot retract or roll back one
                     // already obtained from the versioned status endpoint.
-                    if let Some(candidate) = scheduled {
+                    if let Some(candidate) = observation.scheduled {
                         let is_newer = state
                             .scheduled
                             .as_ref()
@@ -125,7 +143,8 @@ impl ResetMonitorState {
                     }
                     state.last_error = Some(warning);
                 } else {
-                    state.scheduled = scheduled;
+                    state.scheduled = observation.scheduled;
+                    state.active_watch = observation.active_watch;
                     state.last_error = None;
                 }
             }
@@ -147,6 +166,12 @@ impl ResetMonitorState {
                         .scheduled
                         .as_ref()
                         .is_some_and(|reset| reset.scheduled_for.is_some())
+                    || provider.enabled(settings)
+                        && self
+                            .provider(provider)
+                            .active_watch
+                            .as_ref()
+                            .is_some_and(|watch| watch.expires_at > Utc::now())
             });
         has_timed_reset.then_some(match settings.time_style {
             ResetTimeStyle::Exact => Duration::from_secs(1),
@@ -158,14 +183,14 @@ impl ResetMonitorState {
 #[derive(Debug)]
 pub struct MonitorEvent {
     pub provider: ResetProvider,
-    pub result: Result<Option<ScheduledReset>, String>,
+    pub result: Result<ParsedProviderResetData, String>,
     /// A usable legacy observation arrived after the primary source failed.
     pub source_warning: Option<String>,
 }
 
 #[derive(Debug)]
 struct FetchOutcome {
-    result: Result<Option<ScheduledReset>, String>,
+    result: Result<ParsedProviderResetData, String>,
     source_warning: Option<String>,
     retry_after: Option<Duration>,
 }
@@ -366,7 +391,10 @@ where
             });
             match result {
                 Ok(scheduled) => FetchOutcome {
-                    result: Ok(scheduled),
+                    result: Ok(ParsedProviderResetData {
+                        scheduled,
+                        active_watch: None,
+                    }),
                     source_warning: None,
                     retry_after: None,
                 },
@@ -379,8 +407,8 @@ where
                     .map_err(FetchFailure::malformed)
             });
             match primary {
-                Ok(scheduled) => FetchOutcome {
-                    result: Ok(scheduled),
+                Ok(observation) => FetchOutcome {
+                    result: Ok(observation),
                     source_warning: None,
                     retry_after: None,
                 },
@@ -392,7 +420,10 @@ where
                     });
                     match legacy {
                         Ok(scheduled) => FetchOutcome {
-                            result: Ok(scheduled),
+                            result: Ok(ParsedProviderResetData {
+                                scheduled,
+                                active_watch: None,
+                            }),
                             source_warning: Some(format!(
                                 "Codex v1 failed ({}); using legacy feed with unknown upstream freshness",
                                 primary_failure.message
@@ -486,7 +517,7 @@ fn parse_codex_status(
     body: &str,
     now: DateTime<Utc>,
     age: Duration,
-) -> Result<Option<ScheduledReset>, String> {
+) -> Result<ParsedProviderResetData, String> {
     validate_http_age(age)?;
     let json: serde_json::Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
     let meta = json
@@ -502,31 +533,43 @@ fn parse_codex_status(
     let scheduled = data
         .get("scheduled_reset")
         .ok_or("Codex reset feed has no scheduled_reset field")?;
-    if scheduled.is_null() {
-        return Ok(None);
-    }
-    if scheduled.get("status").and_then(|value| value.as_str()) != Some("scheduled") {
-        return Err("Codex scheduled reset has an unexpected status".to_owned());
-    }
-    if scheduled
-        .get("id")
-        .and_then(|value| value.as_str())
-        .is_none_or(str::is_empty)
-    {
-        return Err("Codex scheduled reset has no id".to_owned());
-    }
-    let announced_at = parse_timestamp(scheduled, "announced_at")?;
-    let scheduled_for = parse_optional_timestamp(scheduled, "scheduled_for")?;
-    let source = scheduled
-        .get("source")
-        .ok_or("Codex scheduled reset has no source")?;
-    let source_url = parse_codex_source_url(source)?;
-    Ok(Some(ScheduledReset {
-        announced_at,
-        scheduled_for,
-        source_url,
-        is_banked: parse_is_banked(scheduled)?,
-    }))
+    let scheduled = if scheduled.is_null() {
+        None
+    } else {
+        if scheduled.get("status").and_then(|value| value.as_str()) != Some("scheduled") {
+            return Err("Codex scheduled reset has an unexpected status".to_owned());
+        }
+        if scheduled
+            .get("id")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        {
+            return Err("Codex scheduled reset has no id".to_owned());
+        }
+        let announced_at = parse_timestamp(scheduled, "announced_at")?;
+        let scheduled_for = parse_optional_timestamp(scheduled, "scheduled_for")?;
+        let source = scheduled
+            .get("source")
+            .ok_or("Codex scheduled reset has no source")?;
+        let source_url = parse_codex_source_url(source)?;
+        Some(ScheduledReset {
+            announced_at,
+            scheduled_for,
+            source_url,
+            is_banked: parse_is_banked(scheduled)?,
+        })
+    };
+    let active_watch = match data.get("active_watch") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(watch) => {
+            let expires_at = parse_timestamp(watch, "expires_at")?;
+            (expires_at > now).then_some(ActiveResetWatch { expires_at })
+        }
+    };
+    Ok(ParsedProviderResetData {
+        scheduled,
+        active_watch,
+    })
 }
 
 fn parse_codex_legacy(body: &str) -> Result<Option<ScheduledReset>, String> {
@@ -681,6 +724,81 @@ pub fn countdown_text(
     }
 }
 
+pub fn active_reset_watch_text(
+    provider: ResetProvider,
+    watch: &ActiveResetWatch,
+    style: ResetTimeStyle,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let remaining = (watch.expires_at - now).num_seconds();
+    if remaining <= 0 {
+        return None;
+    }
+    let duration = match style {
+        ResetTimeStyle::Exact => {
+            let days = remaining / 86_400;
+            let hours = (remaining % 86_400) / 3_600;
+            let minutes = (remaining % 3_600) / 60;
+            let seconds = remaining % 60;
+            if days > 0 {
+                format!("{days}d {hours}h {minutes}m {seconds}s")
+            } else if hours > 0 {
+                format!("{hours}h {minutes}m {seconds}s")
+            } else {
+                format!("{minutes}m {seconds}s")
+            }
+        }
+        ResetTimeStyle::Human if remaining >= 86_400 => {
+            let days = (remaining + 43_200) / 86_400;
+            format!("{days} {}", if days == 1 { "day" } else { "days" })
+        }
+        ResetTimeStyle::Human if remaining >= 3_600 => {
+            let hours = (remaining + 1_800) / 3_600;
+            format!("{hours} {}", if hours == 1 { "hour" } else { "hours" })
+        }
+        ResetTimeStyle::Human => {
+            let minutes = ((remaining + 30) / 60).max(1);
+            format!(
+                "{minutes} {}",
+                if minutes == 1 { "minute" } else { "minutes" }
+            )
+        }
+    };
+    Some(format!(
+        "Possible {} reset watch window ends in {duration}",
+        provider.label()
+    ))
+}
+
+pub fn compact_active_reset_watch_text(
+    provider: ResetProvider,
+    watch: &ActiveResetWatch,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let remaining = (watch.expires_at - now).num_seconds();
+    if remaining <= 0 {
+        return None;
+    }
+    let duration = if remaining >= 3_600 {
+        let rounded_hours = (remaining + 1_800) / 3_600;
+        let days = rounded_hours / 24;
+        let hours = rounded_hours % 24;
+        if days > 0 && hours > 0 {
+            format!("{days}d{hours}h")
+        } else if days > 0 {
+            format!("{days}d")
+        } else {
+            format!("{hours}h")
+        }
+    } else {
+        format!("{}m", ((remaining + 30) / 60).max(1))
+    };
+    Some(format!(
+        "Possible {} reset watch ends in {duration}",
+        provider.label()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,6 +815,20 @@ mod tests {
             "api_version":"v1","generated_at":"2026-09-27T03:43:37.281Z"
         }})
         .to_string()
+    }
+
+    fn v1_with_watch(scheduled: Value, active_watch: Option<Value>) -> String {
+        let mut document = json!({"data":{"scheduled_reset":scheduled},"meta":{
+            "api_version":"v1","generated_at":"2026-09-27T03:43:37.281Z"
+        }});
+        if let Some(active_watch) = active_watch {
+            document["data"]["active_watch"] = active_watch;
+        }
+        document.to_string()
+    }
+
+    fn parse_scheduled(body: &str) -> Result<Option<ScheduledReset>, String> {
+        parse_codex_status(body, now(), Duration::ZERO).map(|status| status.scheduled)
     }
 
     fn pending() -> Value {
@@ -733,9 +865,7 @@ mod tests {
 
     #[test]
     fn codex_scheduled_without_time_is_not_a_countdown() {
-        let scheduled = parse_codex_status(&v1(pending()), now(), Duration::ZERO)
-            .unwrap()
-            .unwrap();
+        let scheduled = parse_scheduled(&v1(pending())).unwrap().unwrap();
         assert_eq!(scheduled.scheduled_for, None);
         assert_eq!(
             countdown_text(
@@ -752,9 +882,7 @@ mod tests {
     fn codex_explicit_target_offset_and_due_are_not_completion() {
         let mut event = pending();
         event["scheduled_for"] = json!("2026-09-28T02:00:00+02:00");
-        let scheduled = parse_codex_status(&v1(event), now(), Duration::ZERO)
-            .unwrap()
-            .unwrap();
+        let scheduled = parse_scheduled(&v1(event)).unwrap().unwrap();
         let target = DateTime::parse_from_rfc3339("2026-09-28T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -774,10 +902,10 @@ mod tests {
     fn codex_v1_rejects_unknown_type_missing_target_and_stale_metadata() {
         let mut event = pending();
         event["reset_type"] = json!("unknown");
-        assert!(parse_codex_status(&v1(event), now(), Duration::ZERO).is_err());
+        assert!(parse_scheduled(&v1(event)).is_err());
         let mut event = pending();
         event.as_object_mut().unwrap().remove("scheduled_for");
-        assert!(parse_codex_status(&v1(event), now(), Duration::ZERO).is_err());
+        assert!(parse_scheduled(&v1(event)).is_err());
         assert!(parse_codex_status(
             &v1(Value::Null),
             now() + chrono::Duration::days(1),
@@ -793,10 +921,78 @@ mod tests {
     fn codex_observed_source_uses_status_page_without_url() {
         let mut event = pending();
         event["source"] = json!({"type":"observed"});
-        let scheduled = parse_codex_status(&v1(event), now(), Duration::ZERO)
-            .unwrap()
-            .unwrap();
+        let scheduled = parse_scheduled(&v1(event)).unwrap().unwrap();
         assert_eq!(scheduled.source_url, CODEX_STATUS_URL);
+    }
+
+    #[test]
+    fn codex_active_watch_is_a_separate_possible_reset_window() {
+        let expires_at = DateTime::parse_from_rfc3339("2026-09-29T04:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let status = parse_codex_status(
+            &v1_with_watch(
+                Value::Null,
+                Some(json!({"expires_at":expires_at.to_rfc3339()})),
+            ),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+
+        assert!(status.scheduled.is_none());
+        let watch = status.active_watch.expect("active watch should be parsed");
+        assert_eq!(watch.expires_at, expires_at);
+        let label =
+            active_reset_watch_text(ResetProvider::Codex, &watch, ResetTimeStyle::Human, now())
+                .expect("unexpired watch should be displayed");
+        assert!(label.contains("Possible Codex reset"), "{label}");
+        assert!(label.contains("watch window ends"), "{label}");
+        assert!(label.contains("2 days"), "{label}");
+    }
+
+    #[test]
+    fn codex_active_watch_may_be_missing_or_null() {
+        let missing = parse_codex_status(&v1(Value::Null), now(), Duration::ZERO).unwrap();
+        assert!(missing.scheduled.is_none());
+        assert!(missing.active_watch.is_none());
+
+        let explicit_null = parse_codex_status(
+            &v1_with_watch(Value::Null, Some(Value::Null)),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(explicit_null.scheduled.is_none());
+        assert!(explicit_null.active_watch.is_none());
+    }
+
+    #[test]
+    fn codex_expired_active_watch_is_not_reported_as_a_future_watch() {
+        let status = parse_codex_status(
+            &v1_with_watch(
+                Value::Null,
+                Some(json!({"expires_at":"2026-09-27T03:59:59Z"})),
+            ),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+
+        assert!(status.scheduled.is_none());
+        assert!(status.active_watch.is_none());
+    }
+
+    #[test]
+    fn compact_watch_text_keeps_hours_when_the_window_is_more_than_a_day_away() {
+        let watch = ActiveResetWatch {
+            expires_at: now() + chrono::Duration::days(2) + chrono::Duration::hours(8),
+        };
+
+        assert_eq!(
+            compact_active_reset_watch_text(ResetProvider::Codex, &watch, now()),
+            Some("Possible Codex reset watch ends in 2d8h".to_owned())
+        );
     }
 
     #[test]
@@ -836,7 +1032,7 @@ mod tests {
             urls.push(url.to_owned());
             Ok(fetched(v1(Value::Null)))
         });
-        assert!(healthy.result.unwrap().is_none());
+        assert!(healthy.result.unwrap().scheduled.is_none());
         assert_eq!(urls, vec![CODEX_STATUS_URL]);
         urls.clear();
         let degraded = fetch_provider_with(ResetProvider::Codex, now(), |url| {
@@ -849,7 +1045,7 @@ mod tests {
                 ))
             }
         });
-        assert!(degraded.result.unwrap().is_none());
+        assert!(degraded.result.unwrap().scheduled.is_none());
         assert!(degraded
             .source_warning
             .unwrap()
@@ -933,16 +1129,14 @@ mod tests {
 
     #[test]
     fn degraded_legacy_cannot_retract_or_roll_back_retained_announcement() {
-        let retained = parse_codex_status(&v1(pending()), now(), Duration::ZERO)
-            .unwrap()
-            .unwrap();
+        let retained = parse_scheduled(&v1(pending())).unwrap().unwrap();
         let mut state = ResetMonitorState::default();
         state.codex.scheduled = Some(retained.clone());
         let settings = ResetPlanningSettings::default();
         state.apply(
             MonitorEvent {
                 provider: ResetProvider::Codex,
-                result: Ok(None),
+                result: Ok(ParsedProviderResetData::default()),
                 source_warning: Some("primary failed; legacy used".to_owned()),
             },
             &settings,
@@ -957,7 +1151,10 @@ mod tests {
         state.apply(
             MonitorEvent {
                 provider: ResetProvider::Codex,
-                result: Ok(Some(older)),
+                result: Ok(ParsedProviderResetData {
+                    scheduled: Some(older),
+                    active_watch: None,
+                }),
                 source_warning: Some("legacy used".to_owned()),
             },
             &settings,
@@ -967,13 +1164,57 @@ mod tests {
         state.apply(
             MonitorEvent {
                 provider: ResetProvider::Codex,
-                result: Ok(None),
+                result: Ok(ParsedProviderResetData::default()),
                 source_warning: None,
             },
             &settings,
         );
         assert!(state.codex.scheduled.is_none());
         assert!(state.codex.last_error.is_none());
+    }
+
+    #[test]
+    fn active_watch_survives_legacy_fallback_and_clears_on_primary_null() {
+        let watch = ActiveResetWatch {
+            expires_at: now() + chrono::Duration::days(2),
+        };
+        let mut state = ResetMonitorState::default();
+        let settings = ResetPlanningSettings::default();
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData {
+                    scheduled: None,
+                    active_watch: Some(watch.clone()),
+                }),
+                source_warning: None,
+            },
+            &settings,
+        );
+        assert_eq!(state.codex.active_watch, Some(watch.clone()));
+        assert!(state
+            .display_tick_interval(&settings)
+            .is_some_and(|interval| interval <= Duration::from_secs(60)));
+
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: Some("primary failed; legacy used".to_owned()),
+            },
+            &settings,
+        );
+        assert_eq!(state.codex.active_watch, Some(watch));
+
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: None,
+            },
+            &settings,
+        );
+        assert!(state.codex.active_watch.is_none());
     }
 
     #[test]

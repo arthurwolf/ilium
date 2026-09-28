@@ -2236,6 +2236,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         left_cap,
     );
     let now = chrono::Utc::now();
+    let standard_maximum_pill_width = usize::from(inner.width.saturating_sub(20));
     let mut reset_labels = Vec::new();
     for provider in [
         crate::reset_planning::ResetProvider::Claude,
@@ -2251,9 +2252,24 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
                 app.reset_planning_settings.time_style,
                 now,
             ));
+        } else if let Some(watch) = &app.reset_monitor_state.provider(provider).active_watch {
+            if let Some(label) = crate::reset_planning::active_reset_watch_text(
+                provider,
+                watch,
+                app.reset_planning_settings.time_style,
+                now,
+            ) {
+                if UnicodeWidthStr::width(label.as_str()) + 2 <= standard_maximum_pill_width {
+                    reset_labels.push(label);
+                } else if let Some(compact_label) =
+                    crate::reset_planning::compact_active_reset_watch_text(provider, watch, now)
+                {
+                    reset_labels.push(compact_label);
+                }
+            }
         }
     }
-    let maximum_pill_width = usize::from(inner.width.saturating_sub(20));
+    let maximum_pill_width = usize::from(inner.width.saturating_sub(14));
     let combined = reset_labels.join("  ·  ");
     let reset_label = if !reset_labels.is_empty()
         && UnicodeWidthStr::width(combined.as_str()) + 2 <= maximum_pill_width
@@ -2504,6 +2520,65 @@ mod tests {
             .map(|x| buffer[(x, 0)].symbol())
             .collect::<String>();
         assert!(!line.contains("Codex reset"));
+    }
+
+    #[test]
+    fn active_codex_reset_watch_is_shown_as_a_possible_window_only_while_monitoring_is_enabled() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
+        app.reset_planning_settings.time_style = crate::reset_planning::ResetTimeStyle::Human;
+        let now = chrono::Utc::now();
+        let watch = crate::reset_planning::ActiveResetWatch {
+            expires_at: now + chrono::Duration::days(2),
+        };
+        let expected = crate::reset_planning::active_reset_watch_text(
+            crate::reset_planning::ResetProvider::Codex,
+            &watch,
+            app.reset_planning_settings.time_style,
+            now,
+        )
+        .expect("an unexpired active watch should have status text");
+        app.reset_monitor_state.codex.active_watch = Some(watch);
+        let mut terminal = Terminal::new(TestBackend::new(140, 1)).unwrap();
+        terminal
+            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
+            .unwrap();
+        let line = (0..140)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(line.contains("Possible Codex reset watch window ends in"));
+        assert!(line.contains(&expected));
+
+        app.reset_planning_settings.monitor_codex = false;
+        terminal
+            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
+            .unwrap();
+        let line = (0..140)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(!line.contains("Possible Codex reset watch"));
+    }
+
+    #[test]
+    fn active_codex_reset_watch_keeps_a_compact_label_at_typical_terminal_width() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
+        app.reset_planning_settings.time_style = crate::reset_planning::ResetTimeStyle::Human;
+        app.reset_monitor_state.codex.active_watch =
+            Some(crate::reset_planning::ActiveResetWatch {
+                expires_at: chrono::Utc::now()
+                    + chrono::Duration::days(2)
+                    + chrono::Duration::hours(1),
+            });
+        let mut terminal = Terminal::new(TestBackend::new(58, 1)).unwrap();
+        terminal
+            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
+            .unwrap();
+        let line = (0..58)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(
+            line.contains("Possible Codex reset watch ends in 2d1h"),
+            "{line}"
+        );
     }
 
     #[test]

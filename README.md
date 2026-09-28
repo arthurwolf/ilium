@@ -421,7 +421,7 @@ File logging is off by default. When enabled, logs can retain HTTP/LLM request b
 
 ### Automation and agent setup
 
-Scheduled input and text triggers can send commands to panes. Check the target and result when using them around confirmation prompts. Reset planning follows public Claude and Codex reset announcements; it cannot know private rolling limits.
+Scheduled input and text triggers can send commands to panes. Check the target and result when using them around confirmation prompts. Reset planning follows public Claude and Codex announcements and possible-reset forecasts; it cannot know private rolling limits or promise that a forecast will happen.
 
 Optional setup writes marked Chatroom or progress instructions to Claude and Codex files, preserving text outside those blocks. Chatroom setup also creates or repairs `CHATROOM.md` and agent hooks. The files are `~/.claude/CLAUDE.md`, `<project>/CLAUDE.md`, `~/.codex/AGENTS.md`, and `<project>/AGENTS.md`.
 
