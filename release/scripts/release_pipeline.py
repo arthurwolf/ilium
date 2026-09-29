@@ -1061,7 +1061,9 @@ def missing_response(url):
         with urllib.request.build_opener(HTTPSOnly()).open(url, timeout=30):
             raise release_tool.ReleaseError('expected absent endpoint is publicly available')
     except urllib.error.HTTPError as error:
-        require(error.code == 404, 'absence must be HTTP 404, not a provider/authentication error')
+        if error.code != 404:
+            error.close()
+            raise HTTPFailure(error.code) from None
         content = error.read(2_000_001)
         require(len(content) <= 2_000_000, 'oversized missing-resource response')
         headers = error.headers
