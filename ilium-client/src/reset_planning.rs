@@ -1176,7 +1176,7 @@ mod tests {
     #[test]
     fn active_watch_survives_legacy_fallback_and_clears_on_primary_null() {
         let watch = ActiveResetWatch {
-            expires_at: now() + chrono::Duration::days(2),
+            expires_at: Utc::now() + chrono::Duration::days(2),
         };
         let mut state = ResetMonitorState::default();
         let settings = ResetPlanningSettings::default();

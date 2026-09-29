@@ -1015,6 +1015,12 @@ def public_latest_tag():
     except urllib.error.HTTPError as error:
         if error.code == 404:
             error.close(); return None
+        # A newly-created Pages project can answer through Cloudflare before
+        # its first deployment exists. Treat that as an empty latest channel;
+        # once GitHub has a release, latest_identity still requires the public
+        # redirect to resolve to that exact tag.
+        if error.code in (522, 530):
+            error.close(); return None
         raise HTTPFailure(error.code) from None
     prefix = ORIGIN + '/tag/'
     require(final.startswith(prefix) and re.fullmatch(pages.TAG_PATTERN, final[len(prefix):]), 'public latest redirect does not identify one safe release tag')
@@ -1087,7 +1093,10 @@ def capture_baseline(arguments):
     _prefix, project = pages_project()
     production = project.get('canonical_deployment')
     if production is None:
-        verify_absent_installers('https://' + pages.HOST)
+        try:
+            verify_absent_installers('https://' + pages.HOST)
+        except HTTPFailure as error:
+            require(latest is None and error.status in (522, 530), 'unconfigured public channel returned an unexpected error')
     if production is not None:
         require(production.get('environment') == 'production' and production.get('latest_stage', {}).get('status') == 'success', 'previous Pages deployment is not a successful production rollback target')
     output.mkdir(parents=True)

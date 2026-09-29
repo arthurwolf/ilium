@@ -408,7 +408,7 @@ class NativeAuditTests(unittest.TestCase):
         build = self.module("build_intel_ort")
         self.assertTrue(hasattr(build, "build_command"), "pinned source archive build command is missing")
         command = build.build_command(Path("/native/source"), Path("/native/build"), 4)
-        self.assertEqual(command, ["/native/source/build.sh", "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--build_dir", "/native/build", "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"])
+        self.assertEqual(command, ["/native/source/build.sh", "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", "/native/build", "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"])
         environment = build.cargo_environment(Path("/native/ort"), Path("/native/cargo-home"), Path("/native/cargo-target"))
         self.assertEqual(environment["ORT_LIB_LOCATION"], "/native/ort")
         self.assertEqual(environment["ORT_LIB_PATH"], "/native/ort")

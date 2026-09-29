@@ -66,8 +66,10 @@ def build_command(source, output, parallel, toolset_version):
 
 def cargo_environment(runtime_directory, cargo_home, cargo_target):
     return {
-        "ORT_LIB_LOCATION": str(runtime_directory),
-        "ORT_LIB_PATH": str(runtime_directory),
+        # Forward slashes are accepted by MSVC/Cargo and keep the emitted
+        # receipt stable across Python's Windows and POSIX path renderers.
+        "ORT_LIB_LOCATION": Path(runtime_directory).as_posix(),
+        "ORT_LIB_PATH": Path(runtime_directory).as_posix(),
         "ORT_PREFER_DYNAMIC_LINK": "1",
         "CARGO_HOME": str(cargo_home),
         "CARGO_TARGET_DIR": str(cargo_target),

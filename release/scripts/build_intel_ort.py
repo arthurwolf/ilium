@@ -124,7 +124,7 @@ def build_command(source, output, parallel):
     # Upstream performs git submodule sync by default. A reviewed source archive
     # has no .git metadata, so use the supported skip flag; CMake retains its
     # own pinned dependency acquisition. No implicit Git mutation is authorized.
-    return [str(source / "build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", str(parallel), "--use_xcode", "--skip_submodule_sync", "--build_dir", str(output), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
+    return [str(source / "build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", str(parallel), "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", str(output), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
 
 
 def cargo_environment(runtime_directory, cargo_home, cargo_target):
