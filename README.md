@@ -1,19 +1,26 @@
 <p align="center"><img src="assets/ilium-mark.svg" alt="" width="68" height="68"></p>
 <h1 align="center">Ilium</h1>
 <p align="center"><strong>AI names agents and organizes your project tree.</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
-<p align="center"><sub>Linux-first · Rust · MIT</sub></p>
+<p align="center"><sub>Linux · macOS · Windows · Rust · MIT</sub></p>
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#worktrees-and-session-recovery">Worktrees</a> · <a href="#full-reference">Reference</a></p>
 
 ## Quick start
 
-Linux is the primary platform. [Install the prerequisites](#install-and-platform-support), then build Ilium and point it at a project:
+Linux and macOS:
 
 ```sh
-git clone https://github.com/arthurwolf/ilium.git
-cd ilium
-make install
-./target/release/ilium --cwd /absolute/path/to/project
+curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
+
+Windows PowerShell:
+
+```powershell
+irm https://ilium-setup.pages.dev/install.ps1 | iex
+```
+
+Open a new terminal in your project and run `ilium`. Re-run the install command
+to upgrade. The installer downloads a matching client/server pair; no Rust
+toolchain is needed. [Platform details](#install-and-platform-support).
 
 Use a UTF-8 terminal with 256-colour support. Install your agent CLI separately.
 
