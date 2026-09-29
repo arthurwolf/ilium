@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -99,6 +100,19 @@ class PosixInstallTests(unittest.TestCase):
 
     def invoke(self, *arguments, env=None):
         return subprocess.run(["/bin/sh", str(INSTALLER), *arguments], env=self.environment | (env or {}), capture_output=True, text=True)
+
+    def test_recovery_command_preserves_custom_paths_without_local_script(self):
+        install = self.home / "custom ' install é"
+        bin_directory = self.home / "custom ' bin é"
+        result = self.invoke("--version", "0.1.0", "--install-dir", str(install), "--bin-dir", str(bin_directory), env={"FIXTURE_DOWNLOAD_FAILURE": "network"})
+        self.assertNotEqual(result.returncode, 0)
+        line = next(line for line in result.stderr.splitlines() if line.startswith("ilium-install: recovery="))
+        tokens = shlex.split(line.split("recovery=", 1)[1])
+        self.assertIn("https://ilium-setup.pages.dev/install.sh", tokens)
+        self.assertEqual(tokens[tokens.index("--install-dir") + 1], str(install))
+        self.assertEqual(tokens[tokens.index("--bin-dir") + 1], str(bin_directory))
+        self.assertEqual(tokens[tokens.index("--version") + 1], "0.1.0")
+        self.assertNotIn("./install.sh", tokens)
 
     def success(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -235,6 +249,14 @@ class PosixInstallTests(unittest.TestCase):
         self.assertNotEqual(localized.stdout, "THIRD-PARTY.txt\nVERSION\nilium\nilium-server\n")
         self.success(self.invoke("--version", "0.1.0", env={"LC_ALL": locale}))
 
+    def test_fix_round_fresh_missing_hash_failure_leaves_retry_possible(self):
+        for name in ("sha256sum", "shasum", "openssl"):
+            (self.commands / name).unlink(missing_ok=True)
+        self.failure(self.invoke("--version", "0.1.0"), "prerequisites")
+        self.assertFalse(self.install_root.exists())
+        (self.commands / "sha256sum").symlink_to(shutil.which("sha256sum"))
+        self.success(self.invoke("--version", "0.1.0"))
+
     def assert_profile_publication_fault_preserves_original(self, fault):
         self.success(self.invoke("--version", "0.1.0", "--no-modify-path"))
         self.release("0.2.0")
@@ -244,7 +266,7 @@ class PosixInstallTests(unittest.TestCase):
         profile.write_bytes(original)
         profile.chmod(0o640)
         self.script("cat", 'case "$1" in */profile-block) case "${FIXTURE_PROFILE_FAULT:-}" in partial) printf "partial"; exit 1;; write) exit 1;; esac;; esac\nexec /bin/cat "$@"\n')
-        self.script("mv", 'if [ "${FIXTURE_PROFILE_FAULT:-}" = publish ]; then case "$2" in */.profile) exit 1;; esac; fi\nexec /bin/mv "$@"\n')
+        self.script("mv", 'case "$2" in */.profile) case "${FIXTURE_PROFILE_FAULT:-}" in publish) exit 1;; interrupt) if [ ! -f "$FIXTURE_RELEASE_ROOT/profile-interrupted" ]; then /bin/mv "$@" || exit 1; : > "$FIXTURE_RELEASE_ROOT/profile-interrupted"; kill -HUP "$PPID"; exit 0; fi;; esac;; esac\nexec /bin/mv "$@"\n')
         self.script("cp", 'if [ "${FIXTURE_PROFILE_FAULT:-}" = metadata ]; then case "$2" in */installer-state/profile-path) printf "partial" > "$2"; exit 1;; esac; fi\nexec /bin/cp "$@"\n')
         self.failure(self.invoke("--version", "0.2.0", env={"FIXTURE_PROFILE_FAULT": fault}), "profile", previous=True)
         self.assertEqual(profile.read_bytes(), original)
@@ -263,6 +285,9 @@ class PosixInstallTests(unittest.TestCase):
 
     def test_fix_round_profile_metadata_failure_preserves_exact_original(self):
         self.assert_profile_publication_fault_preserves_original("metadata")
+
+    def test_fix_round_profile_publish_interruption_preserves_exact_original(self):
+        self.assert_profile_publication_fault_preserves_original("interrupt")
 
     def test_fix_round_concurrent_profile_edit_is_not_overwritten(self):
         self.success(self.invoke("--version", "0.1.0", "--no-modify-path"))
@@ -311,6 +336,38 @@ class PosixInstallTests(unittest.TestCase):
                 process.kill()
                 process.wait()
 
+    def test_fix_round_version_publication_failures_remove_only_pending_receipt(self):
+        self.success(self.invoke("--version", "0.1.0", "--no-modify-path"))
+        self.release("0.2.0")
+        for fault in ("receipt", "directory"):
+            with self.subTest(fault=fault):
+                self.script("mv", 'case "${FIXTURE_VERSION_FAULT:-}:$2" in receipt:*/version-0.2.0|directory:*/versions/0.2.0) exit 1;; esac\nexec /bin/mv "$@"\n')
+                self.failure(self.invoke("--version", "0.2.0", "--no-modify-path", env={"FIXTURE_VERSION_FAULT": fault}), "ownership", previous=True)
+                self.assertFalse((self.install_root / "versions/0.2.0").exists())
+                self.assertFalse((self.install_root / "installer-state/version-0.2.0").exists())
+                self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+        self.script("mv", 'exec /bin/mv "$@"\n')
+        result = self.invoke("--version", "0.2.0", "--no-modify-path")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.launch(), "ilium 0.2.0\nilium-server 0.2.0\n")
+
+    def test_fix_round_read_only_history_file_is_preserved(self):
+        self.success(self.invoke("--version", "0.1.0", "--no-modify-path"))
+        self.release("0.2.0")
+        self.assertEqual(self.invoke("--version", "0.2.0", "--no-modify-path").returncode, 0)
+        self.release("0.3.0")
+        previous = self.install_root / "installer-state/previous"
+        previous.chmod(0o400)
+        try:
+            result = self.invoke("--version", "0.3.0", "--no-modify-path")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("old versions preserved", result.stderr)
+            self.assertEqual(previous.read_bytes(), b"0.1.0\n")
+            self.assertEqual(previous.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(sorted(path.name for path in (self.install_root / "versions").iterdir()), ["0.1.0", "0.2.0", "0.3.0"])
+        finally:
+            previous.chmod(0o600)
+
     def test_fix_round_read_only_previous_state_skips_pruning(self):
         self.success(self.invoke("--version", "0.1.0", "--no-modify-path"))
         self.release("0.2.0")
@@ -328,6 +385,10 @@ class PosixInstallTests(unittest.TestCase):
         finally:
             state.chmod(0o700)
             (state / "previous").chmod(0o600)
+        self.script("mv", 'exec /bin/mv "$@"\n')
+        repeated = self.invoke("--version", "0.3.0", "--no-modify-path")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(sorted(path.name for path in (self.install_root / "versions").iterdir()), ["0.1.0", "0.2.0", "0.3.0"])
 
     def test_failed_extraction_or_pointer_switch_rolls_back(self):
         self.success(self.invoke("--version", "0.1.0"))
@@ -552,8 +613,10 @@ class PosixInstallTests(unittest.TestCase):
         before = (self.install_root / "current").read_bytes()
         self.install_root.chmod(0o500)
         try:
-            self.failure(self.invoke("--version", "0.1.0"), "ownership", previous=True)
+            # Prior activity cannot be confirmed before the lock is acquired.
+            self.failure(self.invoke("--version", "0.1.0"), "ownership")
             self.assertEqual((self.install_root / "current").read_bytes(), before)
+            self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
         finally:
             self.install_root.chmod(0o700)
 

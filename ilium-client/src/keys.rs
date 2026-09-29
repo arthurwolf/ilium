@@ -2093,6 +2093,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         app.mode = Mode::Settings(state);
         return;
     }
+    state.animation_slider_drag = None;
 
     if state.tab == SettingsTab::AgentMonitoring && app.agent_detection_signature_input.is_some() {
         match key.code {
@@ -2280,12 +2281,14 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.scroll = 0;
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Animations => {
+            state.animation_slider_drag = None;
             state.selected_row = state.selected_row.saturating_sub(1);
             if state.selected_row < 10 {
                 app.settings_adjust_animation_row(state.selected_row, 1);
             }
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Animations => {
+            state.animation_slider_drag = None;
             state.selected_row =
                 (state.selected_row + 1).min(crate::animation_settings_ui::ROW_COUNT - 1);
             if state.selected_row < 10 {
@@ -2293,11 +2296,17 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             }
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Animations => {
+            state.animation_slider_drag = None;
             app.settings_adjust_animation_row(state.selected_row, -1);
+        }
+        KeyCode::Enter if state.tab == SettingsTab::Animations && state.selected_row < 10 => {
+            app.settings_adjust_animation_row(state.selected_row, 1);
+            state.selected_row = 17;
         }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Animations =>
         {
+            state.animation_slider_drag = None;
             app.settings_adjust_animation_row(state.selected_row, 1);
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Setup => {

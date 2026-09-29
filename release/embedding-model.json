@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "reviewed": true,
+  "reviewed_by": "ilium installation continuation 01a0eb35-c808; official publisher revision, card licence and exact byte readbacks",
+  "repository": "Qdrant/all-MiniLM-L6-v2-onnx",
+  "revision": "8f518e882455312b086101e60691f5e6e2f05c3c",
+  "dimension": 384,
+  "files": {
+    "model.onnx": "bbd7b466f6d58e646fdc2bd5fd67b2f5e93c0b687011bd4548c420f7bd46f0c5",
+    "tokenizer.json": "59f410da6d9dad2025f0e53b6c45554a3b3a0a5c574927f201e99d0217c1a26b",
+    "config.json": "1b4d8e2a3988377ed8b519a31d8d31025a25f1c5f8606998e8014111438efcd7",
+    "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+    "tokenizer_config.json": "abda01c8c14c5151ae498aceb30db406d6b91242c394fd88d3b6fd5a63a101e6"
+  },
+  "license": "Apache-2.0",
+  "license_source": "https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/raw/8f518e882455312b086101e60691f5e6e2f05c3c/README.md",
+  "bundled_in_release": false
+}

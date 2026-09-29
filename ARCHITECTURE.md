@@ -219,6 +219,18 @@ Text-scraping a banner is what most "detect the AI tool" hacks do, and it breaks
 
 This is also why ilium is not installable from crates.io: `[patch.crates-io]` applies only to the top-level workspace, so a downstream consumer would silently build against the unpatched crate. `ilium-client/vendor/tui-tree-widget` is vendored as a path dependency for the same class of reason. Both vendored crates keep their upstream licenses in place.
 
+### Native release boundary
+
+The release tooling under `release/` keeps distribution outside the runtime
+crates. One manifest drives native build runners, paired archives, installer
+selection and Pages metadata. Each installer selects a complete version directory
+through one current pointer; the client and server resolve from that same
+directory. Native loader, licence, embedding and installed-PTY receipts gate
+publication independently of source tests. The hidden release embedding probe
+uses the client inference dependency; release scripts own model acquisition and
+process observation. See [`release/RELEASING.md`](release/RELEASING.md) for source,
+native, publication and public-installation gates.
+
 ## Implementation plan
 
 Each milestone is meant to be independently runnable/demoable, not a big-bang integration.

@@ -181,6 +181,7 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
         selected_row: 14,
         ..Default::default()
     });
+    let expected_lightness = app.animation_settings.slider(14).unwrap().adjusted(1);
     crate::keys::handle_event(
         &mut app,
         Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
@@ -189,7 +190,7 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
         .unwrap()
         .animation;
     let value = serde_json::to_value(saved).unwrap();
-    assert_eq!(value["lightness_percent"], 65);
+    assert_eq!(value["lightness_percent"], expected_lightness);
     assert_eq!(saved.kind, AnimationKind::Shoreline);
     let Mode::Settings(state) = &app.mode else {
         panic!("slider keeps Settings open")

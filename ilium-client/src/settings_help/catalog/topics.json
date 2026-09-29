@@ -255,9 +255,9 @@
   {
     "id": "AN-01",
     "title": "Wave washing up sand",
-    "explanation": "A slow diagonal wash leaves sparse foam and briefly darkens wet sand. Changes save immediately to this project.",
+    "explanation": "A diagonal tide leaves narrow foam and sparse wet-sand detail. Adjust tide reach, foam width, sand grains and wash-cycle length for this scene. Changes save immediately to this project.",
     "specimen": "Wave washing up sand\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Wave washing up sand\n\n● Selected scene → live preview"
     ],
@@ -267,9 +267,9 @@
   {
     "id": "AN-02",
     "title": "Moon over moving water",
-    "explanation": "A stationary moon reflects in coherent moving horizontal fragments. Changes save immediately to this project.",
+    "explanation": "Crossing fine wavelets break the moon reflection into irregular horizontal fragments that widen towards the viewer. Adjust wave strength, ripple scale, reflection width and moon size. Changes save immediately to this project.",
     "specimen": "Moon over moving water\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Moon over moving water\n\n● Selected scene → live preview"
     ],
@@ -279,9 +279,9 @@
   {
     "id": "AN-03",
     "title": "Clouds over a sleeping ridge",
-    "explanation": "Cloud masses and valley mist drift over stationary mountain silhouettes. Changes save immediately to this project.",
+    "explanation": "Cloud banks and layered valley mist drift over a stationary ridge. Adjust cloud cover, valley mist, ridge height and cloud drift. Changes save immediately to this project.",
     "specimen": "Clouds over a sleeping ridge\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Clouds over a sleeping ridge\n\n● Selected scene → live preview"
     ],
@@ -291,9 +291,9 @@
   {
     "id": "AN-04",
     "title": "Hillside brushed by wind",
-    "explanation": "Broad gusts bend rooted grass together across a rounded hillside. Changes save immediately to this project.",
+    "explanation": "Many fine, irregularly placed stems and seed heads follow shared gusts across a rounded hillside. Adjust plant density, wind strength, plant height and gust breadth. Changes save immediately to this project.",
     "specimen": "Hillside brushed by wind\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Hillside brushed by wind\n\n● Selected scene → live preview"
     ],
@@ -303,9 +303,9 @@
   {
     "id": "AN-05",
     "title": "Steam above a tea cup",
-    "explanation": "Sparse curling steam rises above a stationary cup. Changes save immediately to this project.",
+    "explanation": "A smooth porcelain cup, hollow handle and fine rim sit beneath curling steam filaments. Adjust cup size, steam wisps, curl and steam height. Changes save immediately to this project.",
     "specimen": "Steam above a tea cup\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Steam above a tea cup\n\n● Selected scene → live preview"
     ],
@@ -314,12 +314,12 @@
   },
   {
     "id": "AN-06",
-    "title": "Kelp in a slow current",
-    "explanation": "Rooted kelp follows slow currents with greater motion near its tips. Changes save immediately to this project.",
-    "specimen": "Kelp in a slow current\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "title": "Kelp in a gentle current",
+    "explanation": "Uneven clusters of tapered kelp ribbons twist and sway, with varied lengths and stronger motion near their tips. No ground line is drawn. Adjust plant density, current strength, ribbon length and clustering. Changes save immediately to this project.",
+    "specimen": "Kelp in a gentle current\n\n● Selected scene → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Kelp in a slow current\n\n● Selected scene → live preview"
+      "Kelp in a gentle current\n\n● Selected scene → live preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -327,9 +327,9 @@
   {
     "id": "AN-07",
     "title": "Water caustics on stone",
-    "explanation": "A stylized web of light moves across stationary rounded stones. Changes save immediately to this project.",
+    "explanation": "A moving light web bends over domed stone normals. Large and small stones gather in irregular clusters with sparse sand between them. Adjust stone relief, light-web scale, small stones and sand grains. Changes save immediately to this project.",
     "specimen": "Water caustics on stone\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Water caustics on stone\n\n● Selected scene → live preview"
     ],
@@ -338,12 +338,12 @@
   },
   {
     "id": "AN-08",
-    "title": "Metaballs becoming cloudlets",
-    "explanation": "Rounded field sources drift, merge through bridges, and separate. Changes save immediately to this project.",
-    "specimen": "Metaballs becoming cloudlets\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "title": "Drifting cloud islands",
+    "explanation": "Soft rounded islands drift, join and separate. Adjust cloud-island count, island size, joining softness and drift breadth. Changes save immediately to this project.",
+    "specimen": "Drifting cloud islands\n\n● Selected scene → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Metaballs becoming cloudlets\n\n● Selected scene → live preview"
+      "Drifting cloud islands\n\n● Selected scene → live preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -351,9 +351,9 @@
   {
     "id": "AN-09",
     "title": "Two gentle wave sources",
-    "explanation": "Two broad radial wave fields overlap in drifting contours. Changes save immediately to this project.",
+    "explanation": "Faster radial wave crests cross and interfere while remaining visible through destructive interference. Adjust source separation, wavelength, interference and damping. Changes save immediately to this project.",
     "specimen": "Two gentle wave sources\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Two gentle wave sources\n\n● Selected scene → live preview"
     ],
@@ -362,12 +362,12 @@
   },
   {
     "id": "AN-10",
-    "title": "Wireframe mountain breathing",
-    "explanation": "A sparse perspective mountain mesh deforms gently beneath a fixed horizon. Changes save immediately to this project.",
-    "specimen": "Wireframe mountain breathing\n\n● Selected scene → live preview",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "title": "Lily pads on a quiet pond",
+    "explanation": "Notched lily pads and fine veins float above a gently moving water surface. Adjust lily-pad count, pad size, water ripples and surface drift. Changes save immediately to this project.",
+    "specimen": "Lily pads on a quiet pond\n\n● Selected scene → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Wireframe mountain breathing\n\n● Selected scene → live preview"
+      "Lily pads on a quiet pond\n\n● Selected scene → live preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -387,11 +387,11 @@
   {
     "id": "AN-12",
     "title": "Animation speed",
-    "explanation": "Change the speed of the selected procedural scene from 25% to 200%. Changes save immediately to this project.",
-    "specimen": "Animation speed\n\nSpeed ‹ 25% … 200% ›",
+    "explanation": "Change scene motion from 25% to 300% using the visible slider. Left/Right adjusts by 5 percentage points; clicking or dragging the track chooses a value directly. Changes save immediately to this project.",
+    "specimen": "Animation speed\n\nSpeed       ─────●──────── 100%\nRange 25%..300%; default 100%",
     "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Animation speed\n\nSpeed ‹ 25% … 200% ›"
+      "Animation speed\n\nSpeed       ─────●──────── 100%\nRange 25%..300%; default 100%"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -399,11 +399,11 @@
   {
     "id": "AN-13",
     "title": "Animation density",
-    "explanation": "Change the visible dot density from 25% to 100%. Changes save immediately to this project.",
-    "specimen": "Animation density\n\nDensity ‹ 25% … 100% ›",
+    "explanation": "Change visible dot density from 25% to 100%. Left/Right adjusts by 5 percentage points; clicking or dragging the track chooses a value directly. Geometry stays at the full Braille dot resolution. Changes save immediately to this project.",
+    "specimen": "Animation density\n\nDensity     ─────●────────  60%\nRange 25%..100%; default 60%",
     "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Animation density\n\nDensity ‹ 25% … 100% ›"
+      "Animation density\n\nDensity     ─────●────────  60%\nRange 25%..100%; default 60%"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -419,6 +419,90 @@
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-15",
+    "title": "Animation lightness",
+    "explanation": "Set shared HSL lightness from 0% to 100%. The discreet default is 60%, which produces neutral RGB 153,153,153 at zero saturation.",
+    "specimen": "Animation lightness\n\nLightness   ───────●──────  60%\nRange 0%..100%",
+    "frames": [
+      "Animation lightness\n\nLightness   ───────●──────  60%\nRange 0%..100%"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-16",
+    "title": "Animation hue",
+    "explanation": "Choose shared HSL hue from 0° to 359°. Hue becomes visible when saturation is above zero.",
+    "specimen": "Animation hue\n\nHue         ───────●────── 210°\nRange 0°..359°",
+    "frames": [
+      "Animation hue\n\nHue         ───────●────── 210°\nRange 0°..359°"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-17",
+    "title": "Animation saturation",
+    "explanation": "Set shared HSL saturation from 0% to 100%. The default is 0%, keeping every scene neutral light grey.",
+    "specimen": "Animation saturation\n\nSaturation  ●─────────────   0%\nRange 0%..100%",
+    "frames": [
+      "Animation saturation\n\nSaturation  ●─────────────   0%\nRange 0%..100%"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-18",
+    "title": "Scene control 1",
+    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the first named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
+    "specimen": "Current scene → named slider\n\n 1. Tide reach (50..150%)\n 2. Wave strength (0..200%)\n 3. Cloud cover (0..100%)\n 4. Plant density (25..200%)\n 5. Cup size (60..140%)\n 6. Plant density (25..200%)\n 7. Stone relief (25..200%)\n 8. Cloud islands (2..10)\n 9. Source separation (10..90%)\n10. Lily pads (3..14)",
+    "frames": [
+      "Current scene → named slider\n\n 1. Tide reach (50..150%)\n 2. Wave strength (0..200%)\n 3. Cloud cover (0..100%)\n 4. Plant density (25..200%)\n 5. Cup size (60..140%)\n 6. Plant density (25..200%)\n 7. Stone relief (25..200%)\n 8. Cloud islands (2..10)\n 9. Source separation (10..90%)\n10. Lily pads (3..14)"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-19",
+    "title": "Scene control 2",
+    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the second named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
+    "specimen": "Current scene → named slider\n\n 1. Foam width (25..200%)\n 2. Ripple scale (50..200%)\n 3. Valley mist (0..100%)\n 4. Wind strength (0..200%)\n 5. Steam wisps (1..6)\n 6. Current strength (0..200%)\n 7. Light web scale (50..200%)\n 8. Island size (50..175%)\n 9. Wavelength (50..200%)\n10. Pad size (50..175%)",
+    "frames": [
+      "Current scene → named slider\n\n 1. Foam width (25..200%)\n 2. Ripple scale (50..200%)\n 3. Valley mist (0..100%)\n 4. Wind strength (0..200%)\n 5. Steam wisps (1..6)\n 6. Current strength (0..200%)\n 7. Light web scale (50..200%)\n 8. Island size (50..175%)\n 9. Wavelength (50..200%)\n10. Pad size (50..175%)"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-20",
+    "title": "Scene control 3",
+    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the third named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
+    "specimen": "Current scene → named slider\n\n 1. Sand grains (0..100%)\n 2. Reflection width (25..200%)\n 3. Ridge height (50..150%)\n 4. Plant height (50..150%)\n 5. Steam curl (25..200%)\n 6. Ribbon length (50..175%)\n 7. Small stones (0..100%)\n 8. Joining softness (25..200%)\n 9. Interference (0..100%)\n10. Water ripples (0..100%)",
+    "frames": [
+      "Current scene → named slider\n\n 1. Sand grains (0..100%)\n 2. Reflection width (25..200%)\n 3. Ridge height (50..150%)\n 4. Plant height (50..150%)\n 5. Steam curl (25..200%)\n 6. Ribbon length (50..175%)\n 7. Small stones (0..100%)\n 8. Joining softness (25..200%)\n 9. Interference (0..100%)\n10. Water ripples (0..100%)"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-21",
+    "title": "Scene control 4",
+    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the fourth named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
+    "specimen": "Current scene → named slider\n\n 1. Wash cycle (6..30s)\n 2. Moon size (50..150%)\n 3. Cloud drift (25..200%)\n 4. Gust breadth (50..200%)\n 5. Steam height (50..150%)\n 6. Clustering (0..100%)\n 7. Sand grains (0..100%)\n 8. Drift breadth (25..150%)\n 9. Damping (0..100%)\n10. Surface drift (25..200%)",
+    "frames": [
+      "Current scene → named slider\n\n 1. Wash cycle (6..30s)\n 2. Moon size (50..150%)\n 3. Cloud drift (25..200%)\n 4. Gust breadth (50..200%)\n 5. Steam height (50..150%)\n 6. Clustering (0..100%)\n 7. Sand grains (0..100%)\n 8. Drift breadth (25..150%)\n 9. Damping (0..100%)\n10. Surface drift (25..200%)"
+    ],
+    "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
     "id": "AP-01",

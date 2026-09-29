@@ -13,7 +13,6 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Mode, PaneRuntime, RightPanelTarget};
 use crate::config::MotionLevel;
-use crate::theme::ColorScheme;
 
 const FRAMES_PER_SECOND: u128 = 12;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
@@ -89,10 +88,8 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     };
     app.animation_frame
         .render(&settings, buffer.area.width, buffer.area.height, elapsed);
-    let foreground = match app.ui_settings.color_scheme {
-        ColorScheme::Dark => Color::White,
-        ColorScheme::Light => Color::Black,
-    };
+    let (red, green, blue) = settings.foreground_rgb();
+    let foreground = Color::Rgb(red, green, blue);
     paint_region(
         buffer,
         panel_inner(app.layout.tree_area),

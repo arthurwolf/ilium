@@ -125,6 +125,22 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    // A settings slider retains its gesture through release, including when
+    // the pointer crosses another globally interactive surface.
+    if matches!(&app.mode, Mode::Settings(state)
+        if state.tab == crate::app::SettingsTab::Animations && state.animation_slider_drag.is_some())
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+        )
+    {
+        let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched owned Animations slider gesture above");
+        };
+        handle_settings_mouse(app, state, mouse);
+        return;
+    }
+
     // An active scrollbar drag retains ownership even when the pointer leaves
     // the chatroom panel, so releasing over the tree or status row cannot
     // leave the drag latched or route the same gesture into another surface.
@@ -1796,6 +1812,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            state.animation_slider_drag = None;
             if crate::settings_ui::close_button_hit(layout.header_area, position) {
                 app.mode = Mode::Normal;
                 return;
@@ -1839,11 +1856,30 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.trigger_action_cursor = 0;
                 }
             } else if state.tab == crate::app::SettingsTab::Animations {
-                if let Some((row, direction)) =
-                    crate::animation_settings_ui::hit(layout.content_area, state.scroll, position)
-                {
-                    state.selected_row = row;
-                    app.settings_adjust_animation_row(row, direction);
+                use crate::animation_settings_ui::AnimationHit;
+                match crate::animation_settings_ui::hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    &app.animation_settings,
+                ) {
+                    Some(AnimationHit::Select(row)) => {
+                        state.selected_row = row;
+                        if row < 10 {
+                            app.settings_adjust_animation_row(row, 1);
+                        }
+                    }
+                    Some(AnimationHit::Toggle(row)) => {
+                        state.selected_row = row;
+                        app.settings_adjust_animation_row(row, 1);
+                    }
+                    Some(AnimationHit::Slider { row, value }) => {
+                        state.selected_row = row;
+                        state.animation_slider_drag = Some(row);
+                        app.settings_set_animation_slider(row, value);
+                    }
+                    Some(AnimationHit::ScrollTo(scroll)) => state.scroll = scroll,
+                    None => {}
                 }
             } else if state.tab == crate::app::SettingsTab::Setup {
                 if let Some(index) = crate::settings_ui::setup_content_hit(
@@ -2216,10 +2252,28 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 }
             }
         }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if state.tab == crate::app::SettingsTab::Animations {
+                if let Some(row) = state.animation_slider_drag {
+                    if let Some(value) = crate::animation_settings_ui::slider_value_at(
+                        layout.content_area,
+                        row,
+                        state.scroll,
+                        mouse.column,
+                        &app.animation_settings,
+                    ) {
+                        app.settings_set_animation_slider(row, value);
+                    }
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => state.animation_slider_drag = None,
         MouseEventKind::ScrollUp => {
+            state.animation_slider_drag = None;
             state.scroll = state.scroll.saturating_sub(SETTINGS_WHEEL_SCROLL_LINES);
         }
         MouseEventKind::ScrollDown => {
+            state.animation_slider_drag = None;
             state.scroll = state.scroll.saturating_add(SETTINGS_WHEEL_SCROLL_LINES);
         }
         _ => {}

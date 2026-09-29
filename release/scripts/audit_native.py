@@ -16,7 +16,7 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import re
 import selectors
@@ -143,7 +143,7 @@ def validate_intel_toolchain(toolchain):
         require(isinstance(evidence.get("stdout"), str) and isinstance(evidence.get("stderr"), str), f"Intel {name} identity output is malformed")
     require(re.search(r"\b(?:Apple )?clang version [0-9]+\.[0-9]+", toolchain["clang"]["stdout"]), "Intel clang version evidence is missing")
     require(re.search(r"(?m)^Xcode [0-9]+(?:\.[0-9]+)*$", toolchain["xcode"]["stdout"]) and re.search(r"(?m)^Build version [A-Za-z0-9]+$", toolchain["xcode"]["stdout"]), "Intel Xcode version/build evidence is missing")
-    require(Path(toolchain["developer_directory"]["stdout"].strip()).is_absolute(), "Intel Xcode developer directory is not absolute")
+    require(PurePosixPath(toolchain["developer_directory"]["stdout"].strip()).is_absolute(), "Intel Xcode developer directory is not absolute")
     require(re.search(r"(?m)^cmake version [0-9]+\.[0-9]+", toolchain["cmake"]["stdout"]), "Intel CMake version evidence is missing")
     require(re.search(r"(?m)^rustc [0-9]+\.[0-9]+\.[0-9]+", toolchain["rustc"]["stdout"]) and re.search(r"(?m)^host: x86_64-apple-darwin$", toolchain["rustc"]["stdout"]), "Intel Rust compiler/version/host evidence is missing")
     require(re.search(r"(?m)^cargo [0-9]+\.[0-9]+\.[0-9]+", toolchain["cargo"]["stdout"]), "Intel Cargo version evidence is missing")
@@ -153,28 +153,28 @@ def validate_intel_toolchain(toolchain):
 def validate_intel_commands(receipt, workspace=None):
     ort = receipt.get("ort_command")
     require(isinstance(ort, list) and len(ort) == 12 and all(isinstance(value, str) for value in ort), "Intel ORT build command evidence is missing/malformed")
-    source, build_directory = Path(ort[0]), Path(ort[9])
+    source, build_directory = PurePosixPath(ort[0]), PurePosixPath(ort[9])
     require(source.is_absolute() and source.name == "build.sh" and source.parent.name == "onnxruntime-058787ceead760166e3c50a0a4cba8a833a6f53f" and ".." not in source.parts, "Intel ORT command is not from the pinned source tree")
     require(build_directory.is_absolute() and ".." not in build_directory.parts and re.fullmatch(r"[1-9][0-9]?", ort[5]) and 1 <= int(ort[5]) <= 64, "Intel ORT build directory/parallel evidence differs")
-    expected_ort = [str(source), "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--build_dir", str(build_directory), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
+    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--build_dir", ort[9], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
     require(ort == expected_ort, "Intel ORT command differs from the reviewed Xcode/x86_64 recipe")
     cargo = receipt.get("cargo_command")
     require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Intel Cargo command evidence is missing/malformed")
-    manifest = Path(cargo[5])
+    manifest = PurePosixPath(cargo[5])
     require(manifest.is_absolute() and manifest.name == "Cargo.toml" and ".." not in manifest.parts, "Intel Cargo manifest identity is invalid")
-    require(workspace is None or manifest == Path(workspace).resolve(), "Intel Cargo command used a different workspace path")
-    expected_cargo = ["cargo", "build", "--locked", "--release", "--manifest-path", str(manifest), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"]
+    require(workspace is None or manifest == PurePosixPath(str(Path(workspace).resolve())), "Intel Cargo command used a different workspace path")
+    expected_cargo = ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"]
     require(cargo == expected_cargo, "Intel Cargo command differs from the locked native release-pair build")
     environment = receipt.get("environment")
     require(isinstance(environment, dict), "Intel Cargo environment evidence is missing")
     for variable in ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR"):
         value = environment.get(variable)
-        require(isinstance(value, str) and Path(value).is_absolute() and ".." not in Path(value).parts, f"Intel Cargo boundary has no absolute {variable}")
+        require(isinstance(value, str) and PurePosixPath(value).is_absolute() and ".." not in PurePosixPath(value).parts, f"Intel Cargo boundary has no absolute {variable}")
     runtime_path = receipt.get("runtime", {}).get("path")
-    require(isinstance(runtime_path, str) and Path(runtime_path).is_absolute() and Path(runtime_path).name == "libonnxruntime.1.24.2.dylib", "Intel source-built runtime path is missing")
-    runtime = Path(runtime_path)
-    require(build_directory in runtime.parents and environment["ORT_LIB_LOCATION"] == str(runtime.parent) and environment["ORT_LIB_PATH"] == str(runtime.parent) and environment.get("ORT_PREFER_DYNAMIC_LINK") == "1", "Intel Cargo ORT_LIB_LOCATION/ORT_LIB_PATH do not use the verified build output")
-    outputs = [build_directory, Path(environment["CARGO_HOME"]), Path(environment["CARGO_TARGET_DIR"])]
+    require(isinstance(runtime_path, str) and PurePosixPath(runtime_path).is_absolute() and PurePosixPath(runtime_path).name == "libonnxruntime.1.24.2.dylib", "Intel source-built runtime path is missing")
+    runtime = PurePosixPath(runtime_path)
+    require(build_directory in runtime.parents and PurePosixPath(environment["ORT_LIB_LOCATION"]) == runtime.parent and PurePosixPath(environment["ORT_LIB_PATH"]) == runtime.parent and environment.get("ORT_PREFER_DYNAMIC_LINK") == "1", "Intel Cargo ORT_LIB_LOCATION/ORT_LIB_PATH do not use the verified build output")
+    outputs = [build_directory, PurePosixPath(environment["CARGO_HOME"]), PurePosixPath(environment["CARGO_TARGET_DIR"])]
     require(all(left != right and left not in right.parents and right not in left.parents for index, left in enumerate(outputs) for right in outputs[index + 1:]), "Intel ORT/Cargo output directories overlap")
 
 
@@ -197,12 +197,90 @@ def validate_intel_build_receipt(receipt, runtimes, runner="macos-15-intel", wor
     return {"state": "passed", "source_tag": register["tag"], "source_commit": register["commit"], "source_sha256": register["source_sha256"], "built_runtime_sha256": matches[0]["sha256"]}
 
 
+def validate_windows_build_receipt(receipt, runtimes, runner="windows-2022", workspace=None):
+    from build_intel_ort import validate_source_register, verify_tag_commit
+    def receipt_path(value):
+        windows_path = PureWindowsPath(value)
+        return windows_path if windows_path.is_absolute() else Path(value)
+
+    def same_receipt_path(left, right):
+        return receipt_path(left) == receipt_path(right)
+
+    require(receipt.get("schema") == 1 and receipt.get("state") == "built-not-qualified" and receipt.get("publication_allowed") is False, "Windows ORT build receipt is missing, qualified prematurely, or blocked")
+    register = validate_source_register(receipt.get("source_register", {}))
+    require(isinstance(receipt.get("source_register_sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", receipt["source_register_sha256"]), "Windows reviewed source-register byte identity is missing")
+    resolution = receipt.get("tag_resolution", {})
+    require(isinstance(resolution, dict) and resolution.get("reference_url") == "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2" and resolution.get("reference", {}).get("ref") == "refs/tags/v1.24.2", "Windows source tag-resolution identity is missing or differs")
+    verify_tag_commit(resolution.get("reference", {}), resolution.get("tag_object"))
+    identity = receipt.get("native_identity")
+    require(isinstance(identity, dict) and identity.get("system") == "Windows" and identity.get("machine") == "AMD64" and all(isinstance(identity.get(field), str) and identity[field] for field in ("release", "version")), "Windows ORT receipt has no structured native AMD64 identity")
+    require(receipt.get("runner_identity") == runner, "Windows ORT runner identity differs from the approved native runner")
+    toolchain = receipt.get("toolchain")
+    require(isinstance(toolchain, dict), "Windows ORT toolchain evidence must be structured")
+    for name in ("vswhere", "vswhere_version", "vswhere_compiler", "cl", "cmake", "rustc", "cargo"):
+        evidence = toolchain.get(name)
+        require(isinstance(evidence, dict) and isinstance(evidence.get("command"), list) and evidence["command"] and all(isinstance(item, str) for item in evidence["command"]) and isinstance(evidence.get("stdout"), str) and isinstance(evidence.get("stderr"), str), f"Windows {name} identity evidence is malformed")
+    vswhere = toolchain["vswhere"]["command"][0]
+    prefix = [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"]
+    require(receipt_path(vswhere).is_absolute() and toolchain["vswhere"]["command"] == prefix + ["-property", "installationPath"] and toolchain["vswhere_version"]["command"] == prefix + ["-property", "installationVersion"] and toolchain["vswhere_compiler"]["command"] == prefix + ["-find", "VC/Tools/MSVC/**/bin/Hostx64/x64/cl.exe"], "Windows vswhere identity commands differ")
+    selection = toolchain.get("selection")
+    require(isinstance(selection, dict) and all(isinstance(selection.get(name), str) and selection[name] for name in ("installation_path", "installation_version", "toolset_version", "compiler_path")), "Windows selected Visual Studio identity is missing")
+    require(toolchain["vswhere"]["stdout"].strip() == selection["installation_path"] and toolchain["vswhere_version"]["stdout"].strip() == selection["installation_version"] and toolchain["vswhere_compiler"]["stdout"].strip() == selection["compiler_path"] and re.fullmatch(r"17\.[0-9.]+", selection["installation_version"]) and re.fullmatch(r"14\.[0-9.]+", selection["toolset_version"]), "Windows selected Visual Studio identity differs from vswhere")
+    compiler = receipt_path(toolchain["cl"]["command"][0])
+    cl_arguments = toolchain["cl"]["command"][1:]
+    compiler_output = toolchain["cl"]["stdout"] + "\n" + toolchain["cl"]["stderr"]
+    require(compiler.is_absolute() and compiler.name.casefold() == "cl.exe" and len(cl_arguments) == 5 and cl_arguments[:3] == ["/nologo", "/Bv", "/c"] and receipt_path(cl_arguments[3]).is_absolute() and cl_arguments[4].startswith("/Fo") and receipt_path(cl_arguments[4][3:]).is_absolute() and re.search(r"Compiler Version [0-9.]+ for x64", compiler_output), "Windows native x64 MSVC identity differs")
+    installation_path = receipt_path(selection["installation_path"])
+    require(same_receipt_path(str(compiler), selection["compiler_path"]) and installation_path in compiler.parents, "Windows compiler probe is not from the selected Visual Studio instance")
+    require(toolchain["cmake"]["command"] == ["cmake", "--version"] and re.search(r"(?m)^cmake version [0-9]+\.[0-9]+", toolchain["cmake"]["stdout"]), "Windows CMake identity differs")
+    require(toolchain["rustc"]["command"] == ["rustc", "-Vv"] and re.search(r"(?m)^host: x86_64-pc-windows-msvc$", toolchain["rustc"]["stdout"]), "Windows Rust host identity differs")
+    require(toolchain["cargo"]["command"] == ["cargo", "--version"] and re.search(r"(?m)^cargo [0-9]+\.[0-9]+\.[0-9]+", toolchain["cargo"]["stdout"]), "Windows Cargo identity differs")
+    require(isinstance(toolchain.get("python"), str) and re.match(r"3\.[0-9]+\.[0-9]+(?:\s|$)", toolchain["python"]), "Windows Python identity differs")
+    ort = receipt.get("ort_command")
+    require(isinstance(ort, list) and len(ort) == 14 and all(isinstance(value, str) for value in ort), "Windows ORT build command evidence is missing/malformed")
+    source, build_directory = receipt_path(ort[0]), receipt_path(ort[13])
+    require(source.is_absolute() and source.name.casefold() == "build.bat" and source.parent.name == "onnxruntime-058787ceead760166e3c50a0a4cba8a833a6f53f" and ".." not in source.parts, "Windows ORT command is not from the pinned source tree")
+    require(build_directory.is_absolute() and ".." not in build_directory.parts and re.fullmatch(r"[1-9][0-9]?", ort[10]) and 1 <= int(ort[10]) <= 64, "Windows ORT build directory/parallel evidence differs")
+    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--enable_msvc_static_runtime", "--cmake_generator", "Visual Studio 17 2022", "--msvc_toolset", selection["toolset_version"], "--parallel", ort[10], "--skip_submodule_sync", "--build_dir", ort[13]]
+    require(ort == expected_ort, "Windows ORT command differs from the reviewed static-CRT shared-runtime recipe")
+    require(receipt.get("ort_environment") == {"CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}, "Windows ORT generator-instance environment differs")
+    cache = receipt.get("cmake_cache")
+    require(isinstance(cache, dict) and receipt_path(cache.get("path", "")).is_absolute() and build_directory in receipt_path(cache["path"]).parents and re.fullmatch(r"[0-9a-f]{64}", cache.get("sha256", "")), "Windows CMake cache identity is malformed")
+    values = cache.get("values")
+    require(isinstance(values, dict) and values.get("CMAKE_GENERATOR") == "Visual Studio 17 2022" and same_receipt_path(values.get("CMAKE_GENERATOR_INSTANCE", ""), selection["installation_path"]) and values.get("CMAKE_GENERATOR_TOOLSET") == "host=x64,version=" + selection["toolset_version"] and same_receipt_path(values.get("CMAKE_C_COMPILER", ""), selection["compiler_path"]) and same_receipt_path(values.get("CMAKE_CXX_COMPILER", ""), selection["compiler_path"]) and values.get("CMAKE_MSVC_RUNTIME_LIBRARY") == "MultiThreaded$<$<CONFIG:Debug>:Debug>" and same_receipt_path(values.get("CMAKE_HOME_DIRECTORY", ""), str(source.parent / "cmake")), "Windows CMake cache does not bind the selected Visual Studio static-runtime build")
+    invocation = receipt.get("ort_invocation")
+    require(isinstance(invocation, list) and len(invocation) == 5 and [value.casefold() for value in invocation[:4]] == ["cmd.exe", "/d", "/s", "/c"] and invocation[4] == subprocess.list2cmdline(ort), "Windows ORT invocation evidence is malformed")
+    cargo = receipt.get("cargo_command")
+    require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Windows Cargo command evidence is missing/malformed")
+    manifest = receipt_path(cargo[5])
+    require(manifest.is_absolute() and manifest.name == "Cargo.toml" and ".." not in manifest.parts and (workspace is None or manifest == receipt_path(str(Path(workspace).resolve()))), "Windows Cargo manifest identity is invalid")
+    require(cargo == ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server"], "Windows Cargo command differs from the locked native release-pair build")
+    environment = receipt.get("environment")
+    required_paths = ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR")
+    require(isinstance(environment, dict) and all(isinstance(environment.get(name), str) and receipt_path(environment[name]).is_absolute() and ".." not in receipt_path(environment[name]).parts for name in required_paths), "Windows Cargo boundary lacks absolute owned paths")
+    require(environment.get("ORT_PREFER_DYNAMIC_LINK") == "1" and environment.get("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS") == "-Ctarget-feature=+crt-static" and "CARGO_ENCODED_RUSTFLAGS" not in environment, "Windows Rust/ORT linkage flags differ from the static-CRT shared-runtime contract")
+    runtime_path = receipt_path(receipt.get("runtime", {}).get("path", ""))
+    import_path = receipt_path(receipt.get("import_library", {}).get("path", ""))
+    require(runtime_path.is_absolute() and runtime_path.name.casefold() == "onnxruntime.dll" and import_path.is_absolute() and import_path.name.casefold() == "onnxruntime.lib" and runtime_path.parent == import_path.parent and build_directory in runtime_path.parents and re.fullmatch(r"[0-9a-f]{64}", receipt.get("import_library", {}).get("sha256", "")), "Windows source-built DLL/import-library location is invalid")
+    require(same_receipt_path(environment["ORT_LIB_LOCATION"], str(runtime_path.parent)) and same_receipt_path(environment["ORT_LIB_PATH"], str(runtime_path.parent)), "Windows Cargo ORT path does not use the verified source-build output")
+    outputs = [build_directory, receipt_path(environment["CARGO_HOME"]), receipt_path(environment["CARGO_TARGET_DIR"])]
+    require(all(left != right and left not in right.parents and right not in left.parents for index, left in enumerate(outputs) for right in outputs[index + 1:]), "Windows ORT/Cargo output directories overlap")
+    matches = [item for item in runtimes if item["name"].casefold() == "onnxruntime.dll"]
+    require(len(matches) == 1 and re.match(r"^1\.24\.2(?:\D|$)", matches[0].get("version", "")) and receipt.get("runtime", {}).get("version") == "1.24.2" and matches[0].get("sha256") == receipt.get("runtime", {}).get("sha256"), "Windows candidate runtime differs from the pinned source build")
+    return {"state": "passed", "source_tag": register["tag"], "source_commit": register["commit"], "source_sha256": register["source_sha256"], "built_runtime_sha256": matches[0]["sha256"], "rust_crt": "static", "ort_crt": "static"}
+
+
+def reject_windows_dynamic_crt(name):
+    normalized = Path(name).name.casefold()
+    require(not (re.fullmatch(r"(?:msvcp|vcruntime|concrt)[a-z0-9_.-]*\.dll", normalized) or normalized in {"ucrtbase.dll", "ucrtbased.dll"}), f"Windows dynamic CRT dependency is prohibited: {name}")
+
+
 def system_dependency(operating_system, name):
     if operating_system == "macos":
         return (name.startswith("/System/Library/Frameworks/") or name.startswith("/usr/lib/")) and "onnx" not in name.casefold() and ".." not in name
     if operating_system == "windows":
         # Vendor CRT/UCRT redistributables are intentionally not exempted.
-        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
+        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
     return bool(re.fullmatch(r"(?:lib(?:c|m|pthread|dl|rt|resolv|util)\.so\.[0-9]+|ld-linux[^/]*\.so\.[0-9]+|lib(?:asound|udev|gcc_s)\.so\.[0-9]+|libstdc\+\+\.so\.6)", name))
 
 
@@ -220,6 +298,8 @@ def validate_closure(operating_system, graph, inventory, shipped, roots=None):
             continue
         visited.add(parent)
         for dependency in graph[parent]:
+            if operating_system == "windows":
+                reject_windows_dynamic_crt(dependency)
             if operating_system == "macos" and dependency.startswith("@executable_path/"):
                 name = dependency.removeprefix("@executable_path/")
                 safe_member_name(name)
@@ -480,7 +560,7 @@ def windows_version(path):
 
 
 def audit(arguments):
-    inputs = [arguments.manifest, arguments.workspace, arguments.lockfile, arguments.runtime_inventory, arguments.dependency_inventory, arguments.embedding_command, arguments.embedding_model, arguments.intel_ort_report, arguments.dumpbin]
+    inputs = [arguments.manifest, arguments.workspace, arguments.lockfile, arguments.runtime_inventory, arguments.dependency_inventory, arguments.embedding_command, arguments.embedding_model, arguments.intel_ort_report, getattr(arguments, "windows_ort_report", None), arguments.dumpbin]
     validate_output_paths(arguments.output, arguments.notices_output, arguments.directory, inputs)
     arguments.can_record_failure = True
     target = selected_target(arguments.manifest, arguments.target)
@@ -509,6 +589,7 @@ def audit(arguments):
         else:
             require(".so" in path.name, "Linux runtime is not a shared library")
     intel_provenance = None
+    windows_provenance = None
     if (target["os"], target["arch"]) == ("macos", "x86_64"):
         require(arguments.intel_ort_report is not None, "Intel candidate requires its pinned native ORT build receipt")
         build_receipt = read_json(arguments.intel_ort_report)
@@ -516,6 +597,14 @@ def audit(arguments):
         intel_provenance["build_receipt_sha256"] = digest(arguments.intel_ort_report.read_bytes())
         require(build_receipt.get("workspace_sha256") == digest(arguments.workspace.read_bytes()) and build_receipt.get("lock_sha256") == digest(arguments.lockfile.read_bytes()), "Intel ORT Cargo build used different workspace/lock inputs")
         require(build_receipt.get("binaries") == {name: digest((directory / name).read_bytes()) for name in target["executables"]}, "Intel candidate binaries differ from the source-runtime Cargo build")
+    if target["os"] == "windows":
+        windows_report = getattr(arguments, "windows_ort_report", None)
+        require(windows_report is not None, "Windows candidate requires its pinned static-CRT native ORT build receipt")
+        build_receipt = read_json(windows_report)
+        windows_provenance = validate_windows_build_receipt(build_receipt, inventory["files"], target["runner"], arguments.workspace)
+        windows_provenance["build_receipt_sha256"] = digest(windows_report.read_bytes())
+        require(build_receipt.get("workspace_sha256") == digest(arguments.workspace.read_bytes()) and build_receipt.get("lock_sha256") == digest(arguments.lockfile.read_bytes()), "Windows ORT Cargo build used different workspace/lock inputs")
+        require(build_receipt.get("binaries") == {name: digest((directory / name).read_bytes()) for name in target["executables"]}, "Windows candidate binaries differ from the source-runtime Cargo build")
     notices = generate_notices(arguments.lockfile, dependencies, inventory)
     require(arguments.notices_output.resolve() == directory / "THIRD-PARTY.txt", "notices output must be the candidate THIRD-PARTY.txt")
     atomic_write(arguments.notices_output, notices)
@@ -541,6 +630,8 @@ def audit(arguments):
     else:
         require(not arguments.signing_identity and not arguments.notarization_profile, "macOS signing flags used on another OS")
         qualified_hashes = before_inspection
+        if windows_provenance:
+            receipt["windows_ort"] = windows_provenance
     versions = {}
     for executable in target["executables"]:
         environment = dict(os.environ)
@@ -564,7 +655,7 @@ def parser():
         result.add_argument("--" + flag, type=Path, required=True)
     for flag in ("target", "tag", "runner-identity"):
         result.add_argument("--" + flag, required=True)
-    for flag in ("dumpbin", "embedding-command", "embedding-model", "intel-ort-report"):
+    for flag in ("dumpbin", "embedding-command", "embedding-model", "intel-ort-report", "windows-ort-report"):
         result.add_argument("--" + flag, type=Path)
     result.add_argument("--signing-identity")
     result.add_argument("--notarization-profile")

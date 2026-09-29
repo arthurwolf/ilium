@@ -4,7 +4,9 @@ import hashlib
 import copy
 import importlib
 import json
+import os
 from pathlib import Path
+from pathlib import PurePosixPath, PureWindowsPath
 import sys
 import subprocess
 import shutil
@@ -23,6 +25,8 @@ class NativeAuditTests(unittest.TestCase):
         return importlib.import_module(name)
 
     def intel_build_receipt(self):
+        native = PurePosixPath("/native")
+        self.assertTrue(native.is_absolute())
         commit = "058787ceead760166e3c50a0a4cba8a833a6f53f"
         toolchains = {
             "clang": (["clang", "--version"], "Apple clang version 17.0.0\nTarget: x86_64-apple-darwin24.5.0\n"),
@@ -39,10 +43,49 @@ class NativeAuditTests(unittest.TestCase):
             "runner_identity": "macos-15-intel",
             "native_identity": {"system": "Darwin", "machine": "x86_64", "release": "24.5.0", "version": "Darwin Kernel Version 24.5.0: synthetic fixture"},
             "toolchain": {**{name: {"command": command, "stdout": output, "stderr": ""} for name, (command, output) in toolchains.items()}, "python": "3.11.7 (synthetic fixture)"},
-            "runtime": {"path": "/native/build/Release/Release/libonnxruntime.1.24.2.dylib", "version": "1.24.2", "sha256": "b" * 64},
-            "environment": {"ORT_LIB_LOCATION": "/native/build/Release/Release", "ORT_LIB_PATH": "/native/build/Release/Release", "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": "/native/cargo-home", "CARGO_TARGET_DIR": "/native/cargo-target"},
-            "ort_command": [f"/native/source/onnxruntime-{commit}/build.sh", "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--build_dir", "/native/build", "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
-            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", "/native/workspace/Cargo.toml", "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"],
+            "runtime": {"path": str(native / "build/Release/Release/libonnxruntime.1.24.2.dylib"), "version": "1.24.2", "sha256": "b" * 64},
+            "environment": {"ORT_LIB_LOCATION": str(native / "build/Release/Release"), "ORT_LIB_PATH": str(native / "build/Release/Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target")},
+            "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
+            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"],
+        }
+
+    def windows_build_receipt(self):
+        native = Path("C:/native") if os.name == "nt" else Path("/native")
+        self.assertTrue(native.is_absolute())
+        commit = "058787ceead760166e3c50a0a4cba8a833a6f53f"
+        installation = native / "Microsoft Visual Studio/2022/Enterprise"
+        source = str(native / f"source/onnxruntime-{commit}/build.bat")
+        vswhere = str(native / "Visual Studio/Installer/vswhere.exe")
+        compiler = str(installation / "VC/Tools/MSVC/14.40.33807/bin/Hostx64/x64/cl.exe")
+        build = native / "ort-build"
+        cache = build / "Windows/Release/CMakeCache.txt"
+        ort_command = [source, "--config", "Release", "--build_shared_lib", "--enable_msvc_static_runtime", "--cmake_generator", "Visual Studio 17 2022", "--msvc_toolset", "14.40.33807", "--parallel", "4", "--skip_submodule_sync", "--build_dir", str(build)]
+        return {
+            "schema": 1, "state": "built-not-qualified", "publication_allowed": False,
+            "source_register": {"schema": 1, "state": "reviewed", "version": "1.24.2", "tag": "v1.24.2", "commit": commit, "source_url": f"https://codeload.github.com/microsoft/onnxruntime/tar.gz/{commit}", "reviewed_by": "fixture reviewer", "source_sha256": "a" * 64},
+            "source_register_sha256": "b" * 64,
+            "tag_resolution": {"reference_url": "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2", "reference": {"ref": "refs/tags/v1.24.2", "object": {"type": "commit", "sha": commit}}, "tag_object": None},
+            "native_identity": {"system": "Windows", "machine": "AMD64", "release": "10", "version": "Windows fixture"},
+            "runner_identity": "windows-2022",
+            "toolchain": {
+                "vswhere": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], "stdout": str(installation) + "\n", "stderr": ""},
+                "vswhere_version": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationVersion"], "stdout": "17.11.35222.181\n", "stderr": ""},
+                "vswhere_compiler": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-find", "VC/Tools/MSVC/**/bin/Hostx64/x64/cl.exe"], "stdout": compiler + "\n", "stderr": ""},
+                "selection": {"installation_path": str(installation), "installation_version": "17.11.35222.181", "toolset_version": "14.40.33807", "compiler_path": compiler},
+                "cl": {"command": [compiler, "/nologo", "/Bv", "/c", str(native / "msvc-identity-probe.c"), "/Fo" + str(native / "msvc-identity-probe.obj")], "stdout": "Microsoft (R) C/C++ Optimizing Compiler Version 19.40 for x64\n", "stderr": ""},
+                "cmake": {"command": ["cmake", "--version"], "stdout": "cmake version 3.31.0\n", "stderr": ""},
+                "rustc": {"command": ["rustc", "-Vv"], "stdout": "rustc 1.91.0\nhost: x86_64-pc-windows-msvc\n", "stderr": ""},
+                "cargo": {"command": ["cargo", "--version"], "stdout": "cargo 1.91.0\n", "stderr": ""},
+                "python": "3.11.9 fixture",
+            },
+            "cmake_cache": {"path": str(cache), "sha256": "e" * 64, "values": {"CMAKE_GENERATOR": "Visual Studio 17 2022", "CMAKE_GENERATOR_INSTANCE": str(installation), "CMAKE_GENERATOR_TOOLSET": "host=x64,version=14.40.33807", "CMAKE_C_COMPILER": compiler, "CMAKE_CXX_COMPILER": compiler, "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>", "CMAKE_HOME_DIRECTORY": str(native / f"source/onnxruntime-{commit}/cmake")}},
+            "ort_environment": {"CMAKE_GENERATOR_INSTANCE": str(installation)},
+            "ort_command": ort_command,
+            "ort_invocation": ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(ort_command)],
+            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server"],
+            "environment": {"ORT_LIB_LOCATION": str(build / "Release"), "ORT_LIB_PATH": str(build / "Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target"), "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS": "-Ctarget-feature=+crt-static"},
+            "runtime": {"path": str(build / "Release/onnxruntime.dll"), "version": "1.24.2", "sha256": "c" * 64},
+            "import_library": {"path": str(build / "Release/onnxruntime.lib"), "sha256": "d" * 64},
         }
 
     def test_loader_parsers_recover_dependencies_without_executing_code(self):
@@ -62,6 +105,49 @@ class NativeAuditTests(unittest.TestCase):
         inventory["system_libraries"][0]["reviewed"] = False
         with self.assertRaises(ValueError):
             audit.validate_closure("windows", {"ilium.exe": ["KERNEL32.dll"], "ilium-server.exe": []}, inventory, {"ilium.exe", "ilium-server.exe"})
+
+    def test_windows_source_build_allows_reviewed_os_edges_but_never_crt_edges(self):
+        audit = self.module("audit_native")
+        for name in ("dbghelp.dll", "dxgi.dll"):
+            with self.subTest(name=name):
+                self.assertTrue(audit.system_dependency("windows", name))
+        for name in ("MSVCP140.dll", "msvcp140_1.dll", "VCRUNTIME140.dll",
+                     "VCRUNTIME140_1.dll", "concrt140.dll", "ucrtbase.dll", "ucrtbased.dll"):
+            with self.subTest(name=name):
+                self.assertFalse(audit.system_dependency("windows", name))
+                with self.assertRaisesRegex(ValueError, "dynamic CRT"):
+                    audit.reject_windows_dynamic_crt(name)
+        for name in ("kernel32.dll", "api-ms-win-crt-runtime-l1-1-0.dll"):
+            audit.reject_windows_dynamic_crt(name)
+
+    def test_windows_source_build_receipt_binds_static_crt_and_candidate_runtime(self):
+        audit = self.module("audit_native")
+        receipt = self.windows_build_receipt()
+        runtimes = [{"name": "onnxruntime.dll", "version": "1.24.2.0", "sha256": "c" * 64}]
+        result = audit.validate_windows_build_receipt(receipt, runtimes)
+        self.assertEqual(result["source_commit"], "058787ceead760166e3c50a0a4cba8a833a6f53f")
+        self.assertEqual(result["rust_crt"], "static")
+        for mutation in (
+            lambda value: value["ort_command"].remove("--enable_msvc_static_runtime"),
+            lambda value: value["environment"].update(CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=""),
+            lambda value: value["native_identity"].update(machine="ARM64"),
+            lambda value: value["runtime"].update(sha256="0" * 64),
+            lambda value: value["cmake_cache"]["values"].update(CMAKE_GENERATOR_INSTANCE="C:/other"),
+            lambda value: value["cmake_cache"]["values"].update(CMAKE_C_COMPILER="C:/other/cl.exe"),
+            lambda value: value["cmake_cache"]["values"].update(CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreadedDLL"),
+        ):
+            changed = copy.deepcopy(receipt)
+            mutation(changed)
+            with self.assertRaises(ValueError):
+                audit.validate_windows_build_receipt(changed, runtimes)
+
+    def test_windows_receipt_revalidates_on_a_different_aggregate_host(self):
+        if os.name == "nt":
+            self.skipTest("cross-host path flavour is exercised from POSIX")
+        audit = self.module("audit_native")
+        receipt = json.loads(json.dumps(self.windows_build_receipt()).replace("/native", "C:/native"))
+        runtimes = [{"name": "onnxruntime.dll", "version": "1.24.2.0", "sha256": "c" * 64}]
+        self.assertEqual(audit.validate_windows_build_receipt(receipt, runtimes)["ort_crt"], "static")
 
     def test_macos_homebrew_and_unversioned_onnx_are_rejected(self):
         audit = self.module("audit_native")
@@ -120,6 +206,23 @@ class NativeAuditTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaises(ValueError):
                     audit.validate_intel_build_receipt(dict(receipt, **changes), runtimes)
+
+    def test_intel_posix_receipt_paths_remain_absolute_under_windows_path_semantics(self):
+        audit = self.module("audit_native")
+        receipt = self.intel_build_receipt()
+        receipt["toolchain"]["developer_directory"]["stdout"] = "/Applications/Xcode_16.4.app/Contents/Developer\n"
+        runtimes = [{"name": "libonnxruntime.1.24.2.dylib", "version": "1.24.2", "sha256": "b" * 64}]
+        with patch.object(audit, "Path", PureWindowsPath):
+            self.assertEqual(audit.validate_intel_build_receipt(receipt, runtimes)["state"], "passed")
+
+    def test_intel_receipt_fixture_never_uses_windows_host_path_serialization(self):
+        with patch.object(os, "name", "nt"):
+            receipt = self.intel_build_receipt()
+        paths = [receipt["runtime"]["path"], receipt["ort_command"][0],
+                 receipt["ort_command"][9], receipt["cargo_command"][5],
+                 *[receipt["environment"][name] for name in
+                   ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR")]]
+        self.assertTrue(all(PurePosixPath(value).is_absolute() and "\\" not in value for value in paths))
 
     def test_intel_receipt_requires_structured_toolchain_runner_and_source_evidence(self):
         audit = self.module("audit_native")

@@ -1,0 +1,1042 @@
+# Action commits read back from official GitHub tag refs on 2026-09-29.
+# workflow_dispatch is strictly nonpublishing. Automatic native receipts replace
+# manual qualification. Latest activation precedes literal default-command tests
+# because those commands resolve /releases/latest; five default-preview installs
+# gate production deployment; five literal production commands gate completion.
+name: Native release and installation
+'on':
+  push:
+    tags:
+    - v*
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional tag matching workspace version; dispatch never publishes
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ilium-native-release-publication
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: '1'
+jobs:
+  source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Manifest and source identity
+      run: python release/scripts/release_pipeline.py source --tag "$RELEASE_TAG"
+      id: identity
+      env:
+        RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+    - name: Release contracts
+      run: 'python -m pip install PyYAML==6.0.2
+
+        python -m unittest discover -s release/tests -p "test_*.py"'
+    outputs:
+      matrix: ${{ steps.identity.outputs.matrix }}
+      tag: ${{ steps.identity.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
+  native:
+    needs:
+    - source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Linux native build prerequisites
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y libasound2-dev pkg-config libssl-dev'
+      if: matrix.os == 'linux'
+    - name: Pinned release test parser
+      run: python -m pip install PyYAML==6.0.2
+    - name: Pinned Windows ORT static-CRT source-builder contract
+      if: matrix.os == 'windows'
+      run: |
+        python release/scripts/build_windows_ort.py --help
+        python -m unittest release.tests.test_build_windows_ort
+    - name: Full native build, tests, licence closure and candidate audit
+      run: python release/scripts/release_pipeline.py native --tag "${{ needs.source.outputs.tag }}" --target "${{
+        matrix.rust_target }}" --runner-identity "${{ matrix.runner }}" --work "$RUNNER_TEMP/native-work" --output
+        "$GITHUB_WORKSPACE/native-output"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output/
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain native failure evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/native-work/**/*.log
+        if-no-files-found: warn
+        retention-days: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  aggregate:
+    needs:
+    - source
+    - native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: native-*
+        path: native-artifacts
+    - name: Assemble exact five archives and installer/site bytes
+      run: python release/scripts/release_pipeline.py aggregate --tag "${{ needs.source.outputs.tag }}" --artifacts
+        native-artifacts --output candidate
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: candidate
+        path: candidate/
+        if-no-files-found: error
+        retention-days: 30
+  candidate-installs:
+    needs:
+    - source
+    - aggregate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode candidate --output "$RUNNER_TEMP/install-result/receipt.json" --log "$RUNNER_TEMP/install-candidate.log"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  local-qualification:
+    needs:
+    - source
+    - aggregate
+    - candidate-installs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: install-*
+        path: install-receipts
+    - name: Bind all five native installs to source and archive hashes
+      run: python release/scripts/release_pipeline.py qualify --candidate candidate --receipts install-receipts
+        --output candidate/qualification.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: qualified-candidate
+        path: candidate/
+        if-no-files-found: error
+        retention-days: 30
+  attest:
+    needs:
+    - source
+    - aggregate
+    - candidate-installs
+    - local-qualification
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - name: Attest exact immutable candidate assets
+      uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+      with:
+        subject-path: 'candidate/*.tar.gz
+
+          candidate/*.zip
+
+          candidate/SHA256SUMS
+
+          candidate/VERSION
+
+          candidate/install.sh
+
+          candidate/install.ps1
+
+          candidate/candidate.json
+
+          candidate/qualification.json'
+    if: github.event_name == 'push'
+  draft:
+    needs:
+    - source
+    - local-qualification
+    - attest
+    - baseline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - name: Create draft once and read back exact asset digests
+      run: python release/scripts/release_pipeline.py draft --candidate candidate --output draft-evidence/draft-receipt.json
+      env:
+        GH_TOKEN: ${{ github.token }}
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: draft-receipt
+        path: draft-evidence/
+        if-no-files-found: error
+        retention-days: 30
+      if: always()
+    if: github.event_name == 'push'
+  qualify:
+    needs:
+    - source
+    - candidate-installs
+    - local-qualification
+    - draft
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: install-*
+        path: install-receipts
+    - name: Independent archive and native-receipt reconstruction
+      run: 'python -m pip install PyYAML==6.0.2
+
+        python -m unittest discover -s release/tests -p test_workflow.py
+
+        python release/scripts/release_pipeline.py qualify --candidate candidate --receipts install-receipts --output
+        final-qualification.json
+
+        cmp candidate/qualification.json final-qualification.json'
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: final-qualification
+        path: final-qualification.json
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    environment: release-qualification
+  publish:
+    needs:
+    - source
+    - qualify
+    - draft
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: draft-receipt
+        path: draft-evidence
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: final-qualification
+        path: final-evidence
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - name: Publish once, require immutable=true and all digests
+      run: 'cmp candidate/qualification.json final-evidence/final-qualification.json
+
+        python release/scripts/release_pipeline.py publish --candidate candidate --draft-receipt draft-evidence/draft-receipt.json
+        --baseline baseline --output publication-evidence/publication-receipt.json'
+      env: &id001
+        GH_TOKEN: ${{ github.token }}
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: publication-receipt
+        path: publication-evidence/
+        if-no-files-found: error
+        retention-days: 30
+      if: always()
+    if: github.event_name == 'push'
+  github-installs:
+    needs:
+    - source
+    - publish
+    - local-qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode github --output "$RUNNER_TEMP/install-result/receipt.json" --log "$RUNNER_TEMP/install-github.log"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: github-install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  latest:
+    needs:
+    - source
+    - github-installs
+    - publish
+    - local-qualification
+    - pages-preview
+    - preview-tag-qualification
+    - previous-qualification
+    - recovery-ready
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: github-install-*
+        path: github-receipts
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: recovery-ready
+        path: recovery-ready
+    - name: Promote latest after five pinned GitHub installs
+      run: python release/scripts/release_pipeline.py latest --candidate candidate --receipts github-receipts --publication-receipt
+        published/publication-receipt.json --baseline baseline --recovery-ready recovery-ready --output latest-evidence/latest-receipt.json
+        --receipt-prefix github-install-
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: latest-receipt
+        path: latest-evidence/
+        if-no-files-found: error
+        retention-days: 30
+      if: always()
+    if: github.event_name == 'push'
+  pages-preview:
+    needs:
+    - source
+    - local-qualification
+    - github-installs
+    - baseline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - name: Deploy and verify exact six-file static artifact
+      run: python release/scripts/release_pipeline.py deploy --candidate candidate --output pages-preview-receipt.json
+        --log "$RUNNER_TEMP/pages-preview.log" --baseline baseline --publication-receipt published/publication-receipt.json
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: pages-preview-receipt
+        path: pages-preview-receipt.json
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain Pages operation journal
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: pages-preview-journal
+        path: ${{ runner.temp }}/pages-preview*
+        if-no-files-found: warn
+        retention-days: 30
+    if: github.event_name == 'push'
+  pages-production:
+    needs:
+    - source
+    - local-qualification
+    - preview-qualification
+    - baseline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - name: Deploy and verify exact six-file static artifact
+      run: python release/scripts/release_pipeline.py deploy --candidate candidate --output pages-production-receipt.json
+        --log "$RUNNER_TEMP/pages-production.log" --production --baseline baseline --publication-receipt published/publication-receipt.json
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: pages-production-receipt
+        path: pages-production-receipt.json
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain Pages operation journal
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: pages-production-journal
+        path: ${{ runner.temp }}/pages-production*
+        if-no-files-found: warn
+        retention-days: 30
+    if: github.event_name == 'push'
+  preview-installs:
+    needs:
+    - source
+    - latest
+    - pages-preview
+    - local-qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: pages-preview-receipt
+        path: preview
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode preview --output "$RUNNER_TEMP/install-result/receipt.json" --log "$RUNNER_TEMP/install-preview.log"
+        --preview-receipt preview/pages-preview-receipt.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: preview-install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  preview-qualification:
+    needs:
+    - source
+    - preview-installs
+    - pages-preview
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: pages-preview-receipt
+        path: preview
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: preview-install-*
+        path: preview-receipts
+    - name: Bind all five default-preview installs
+      run: python release/scripts/release_pipeline.py qualify --candidate candidate --receipts preview-receipts
+        --receipt-prefix preview-install- --public --preview-receipt preview/pages-preview-receipt.json --output
+        qualified-preview.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: qualified-preview
+        path: qualified-preview.json
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  public-installs:
+    needs:
+    - source
+    - pages-production
+    - local-qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode public --output "$RUNNER_TEMP/install-result/receipt.json" --log "$RUNNER_TEMP/install-public.log"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: public-install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  complete:
+    needs:
+    - source
+    - public-installs
+    - pages-production
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: public-install-*
+        path: public-receipts
+    - name: Final all-five public transport/hash acceptance
+      run: python release/scripts/release_pipeline.py qualify --candidate candidate --receipts public-receipts --receipt-prefix
+        public-install- --public --literal --output completed-public-qualification.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: completed-public-qualification
+        path: completed-public-qualification.json
+        if-no-files-found: error
+        retention-days: 30
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: pages-production-receipt
+        path: production
+    - name: Final latest/assets/production served-byte readback
+      run: python release/scripts/release_pipeline.py readback --candidate candidate --publication-receipt published/publication-receipt.json
+        --production-receipt production/pages-production-receipt.json --output final-channel-readback.json
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: final-channel-readback
+        path: final-channel-readback.json
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  baseline:
+    needs:
+    - source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Freeze verified prior latest and production bytes
+      run: python release/scripts/release_pipeline.py baseline --output baseline
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: channel-baseline
+        path: baseline/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  preview-tag-installs:
+    needs:
+    - source
+    - pages-preview
+    - github-installs
+    - local-qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: pages-preview-receipt
+        path: preview
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode preview-tag --output "$RUNNER_TEMP/install-result/receipt.json" --log
+        "$RUNNER_TEMP/install-preview-tag.log" --preview-receipt preview/pages-preview-receipt.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: preview-tag-install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  preview-tag-qualification:
+    needs:
+    - source
+    - preview-tag-installs
+    - pages-preview
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: pages-preview-receipt
+        path: preview
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: preview-tag-install-*
+        path: preview-tag-receipts
+    - name: Verify five preview source/tag receipts
+      run: python release/scripts/release_pipeline.py qualify --candidate candidate --receipts preview-tag-receipts
+        --receipt-prefix preview-tag-install- --public --preview-tag --preview-receipt preview/pages-preview-receipt.json
+        --output qualified-preview-tag.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: qualified-preview-tag
+        path: qualified-preview-tag.json
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  previous-installs:
+    needs:
+    - source
+    - github-installs
+    - baseline
+    - local-qualification
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-output
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - name: Installed pair and real PTY acceptance
+      run: python release/scripts/release_pipeline.py install --candidate candidate --native native-output --target
+        "${{ matrix.rust_target }}" --mode previous --output "$RUNNER_TEMP/install-result/receipt.json" --log "$RUNNER_TEMP/install-previous.log"
+        --baseline baseline
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: previous-install-${{ matrix.rust_target }}
+        path: ${{ runner.temp }}/install-result/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  previous-qualification:
+    needs:
+    - source
+    - previous-installs
+    - baseline
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: previous-install-*
+        path: previous-receipts
+    - name: Verify previous-script compatibility or all-five first-release N/A
+      run: python release/scripts/release_pipeline.py qualify --candidate candidate --receipts previous-receipts
+        --receipt-prefix previous-install- --public --previous --baseline baseline --output qualified-previous.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: qualified-previous
+        path: qualified-previous.json
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  recovery-ready:
+    needs:
+    - source
+    - baseline
+    - local-qualification
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - name: Prepare successful rollback target or preview-verified withdrawal
+      run: python release/scripts/release_pipeline.py recovery-ready --candidate candidate --baseline baseline --output
+        recovery-ready --log "$RUNNER_TEMP/withdrawal-preview.log"
+      env: *id001
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: recovery-ready
+        path: recovery-ready/
+        if-no-files-found: error
+        retention-days: 30
+    if: github.event_name == 'push'
+  recover:
+    needs:
+    - source
+    - baseline
+    - local-qualification
+    - publish
+    - latest
+    - preview-installs
+    - pages-production
+    - public-installs
+    - complete
+    - recovery-ready
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: channel-baseline
+        path: baseline
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: recovery-ready
+        path: recovery-ready
+    - name: Read both providers, preserve other owners, restore both channels
+      run: python release/scripts/release_pipeline.py recover --candidate candidate --baseline baseline --publication-receipt
+        published/publication-receipt.json --recovery-ready recovery-ready --output recovery-evidence/recovery-result.json
+        --log "$RUNNER_TEMP/withdrawal-production.log" --fault "$RECOVERY_FAULT"
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        RECOVERY_FAULT: ${{ needs.pages-production.result == 'failure' && 'script-delivery' || 'unknown' }}
+    - name: Retain recovery outcome and attempted write evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: channel-recovery
+        path: 'recovery-evidence/
+
+          ${{ runner.temp }}/withdrawal-production*'
+        if-no-files-found: warn
+        retention-days: 30
+    if: always() && github.event_name == 'push' && (needs.publish.result == 'success' || needs.publish.result ==
+      'failure' || needs.publish.result == 'cancelled') && needs.recovery-ready.result == 'success' && needs.complete.result
+      != 'success'

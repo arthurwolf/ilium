@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Install Ilium on Linux, macOS or Windows with one native command.">
+<title>Install Ilium</title>
+</head>
+<body>
+<main>
+<h1>Install Ilium</h1>
+<p>A terminal workspace for coding agents. These installers download a matched client and server into your user directory; Rust and administrator access are not required.</p>
+<h2>Linux and macOS</h2>
+<p><code>curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh</code></p>
+<p><a href="/install.sh">Inspect the POSIX installer before running it</a>. Requires a POSIX shell, curl, tar and an available SHA-256 tool. Linux requires the release's native runtime libraries.</p>
+<h2>Windows PowerShell</h2>
+<p><code>irm https://ilium-setup.pages.dev/install.ps1 | iex</code></p>
+<p><a href="/install.ps1">Inspect the PowerShell installer before running it</a>. Requires 64-bit Windows PowerShell 5.1 or current PowerShell. No execution-policy changes or elevation.</p>
+<h2>Supported targets</h2>
+<p>Release @RELEASE@ covers the five targets below. Baselines identify native qualification environments; they do not promise support on older operating systems.</p>
+<table>
+<caption>Native release qualification baselines</caption>
+<thead><tr><th scope="col">Platform</th><th scope="col">Rust target</th><th scope="col">Baseline</th></tr></thead>
+<tbody>
+@TARGET_ROWS@
+</tbody>
+</table>
+<p>Windows ARM64, 32-bit systems and musl Linux are unsupported. Linux needs a compatible glibc distribution; macOS Intel and Apple Silicon use separate archives.</p>
+<h2>Inspect and verify</h2>
+<p><a href="https://github.com/arthurwolf/ilium/releases/tag/@RELEASE@">Fixed GitHub release</a> · <a href="https://github.com/arthurwolf/ilium/releases/download/@RELEASE@/SHA256SUMS">Archive checksums</a> · <a href="https://github.com/arthurwolf/ilium/attestations">Build attestations</a> · <a href="/manifest.json">Deployment manifest</a></p>
+<p>The public commands trust this HTTPS site and the release publisher. For a fixed version, download and inspect the script first, then use its version option. Verify release assets and attestations before running them.</p>
+<p>Installation and upgrades leave running sessions alone. Agent CLIs are installed separately. Ilium's default automatic naming uses Kilo Gateway; review privacy settings before entering sensitive content.</p>
+</main>
+</body>
+</html>

@@ -932,6 +932,8 @@ pub struct SettingsState {
     /// terminal too short to show every row at once. See
     /// `crate::settings_ui::content_scroll_bounds`.
     pub scroll: u16,
+    /// An Animations slider owns its left-button gesture until release.
+    pub animation_slider_drag: Option<usize>,
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
@@ -1043,6 +1045,7 @@ impl SettingsState {
             tab: SettingsTab::Appearance,
             selected_row: 0,
             scroll: 0,
+            animation_slider_drag: None,
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
@@ -5822,32 +5825,28 @@ impl App {
 
     /// Apply only after the project write succeeds; failed saves retain the effective scene.
     pub fn settings_adjust_animation_row(&mut self, row: usize, direction: i32) {
-        use crate::background_animation::{AnimationKind, DitherMode};
         let mut settings = self.animation_settings;
-        match row {
-            0..=9 => settings.kind = AnimationKind::ALL[row],
-            10 => settings.enabled = !settings.enabled,
-            11 => {
-                settings.speed_percent = (i32::from(settings.speed_percent)
-                    + direction.signum() * 25)
-                    .clamp(25, 200) as u16
-            }
-            12 => {
-                settings.density_percent = (i32::from(settings.density_percent)
-                    + direction.signum() * 5)
-                    .clamp(25, 100) as u16
-            }
-            13 => {
-                settings.dither = match settings.dither {
-                    DitherMode::Ordered => DitherMode::Stippled,
-                    DitherMode::Stippled => DitherMode::Ordered,
-                }
-            }
-            _ => return,
+        if !settings.adjust_row(row, direction) {
+            return;
         }
+        self.settings_save_animation(settings);
+    }
+
+    pub fn settings_set_animation_slider(&mut self, row: usize, value: u16) {
+        let mut settings = self.animation_settings;
+        if !settings.set_slider_value(row, value) {
+            return;
+        }
+        self.settings_save_animation(settings);
+    }
+
+    fn settings_save_animation(
+        &mut self,
+        settings: crate::background_animation::AnimationSettings,
+    ) {
         match crate::project_config::set_animation(&self.session_cwd, settings) {
             Ok(()) => {
-                self.animation_settings = settings;
+                self.animation_settings = settings.normalized();
                 self.status_message = None;
             }
             Err(error) => {

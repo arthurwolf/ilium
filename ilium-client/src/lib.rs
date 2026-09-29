@@ -83,6 +83,7 @@ pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
 mod proxy_database;
+pub mod release_embedding;
 pub mod render_cache;
 pub mod reset_planning;
 pub mod restructure;

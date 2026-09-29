@@ -17,11 +17,17 @@ work=
 lock_owned=no
 committed=no
 profile_added=no
+profile_metadata=no
+profile_publishing=no
+new_receipt=no
+previous=
 new_client=no
 new_server=no
 launcher_temp=
 repair_temp=
 profile_temp=
+receipt_temp=
+previous_temp=
 diagnosed=no
 user_home=${HOME:-}
 install_root=${XDG_DATA_HOME:-$user_home/.local/share}/ilium
@@ -29,10 +35,28 @@ bin_dir=${XDG_BIN_HOME:-$user_home/.local/bin}
 modify_path=yes
 uninstall=no
 
+recovery_quote() {
+    # Diagnostics must also work when a required external tool is missing.
+    recovery_remaining=$1
+    printf "'"
+    while :; do
+        case "$recovery_remaining" in
+            *"'"*)
+                recovery_prefix=${recovery_remaining%%"'"*}
+                printf '%s%s' "$recovery_prefix" "'\\''"
+                recovery_remaining=${recovery_remaining#*"'"} ;;
+            *) printf "%s'" "$recovery_remaining"; break ;;
+        esac
+    done
+}
+
 diagnostic() {
     printf 'ilium-install: stage=%s version=%s target=%s prior_active=%s error=%s\n' "$stage" "$requested_version" "$target" "$prior_active" "$1" >&2
-    printf 'ilium-install: recovery=/bin/sh ./install.sh' >&2
-    if [ -n "$version" ]; then printf ' --version %s' "$version" >&2; fi
+    printf "ilium-install: recovery=curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh -s --" >&2
+    if [ -n "$version" ]; then printf ' --version ' >&2; recovery_quote "$version" >&2; fi
+    printf ' --install-dir ' >&2; recovery_quote "$install_root" >&2
+    printf ' --bin-dir ' >&2; recovery_quote "$bin_dir" >&2
+    if [ "$uninstall" = yes ]; then printf ' --uninstall' >&2; fi
     printf ' --no-modify-path\n' >&2
 }
 fail() {
@@ -81,22 +105,6 @@ if ! valid_path "$install_root" || ! valid_path "$bin_dir"; then fail "Directori
 case "$bin_dir/" in "$install_root/"*) fail "Stable bin directory must be outside installation root" ;; esac
 case "$install_root/" in "$bin_dir/"*) fail "Installation root must be outside stable bin directory" ;; esac
 
-# Read the pointer once, before any mutation; unknown/partial installations fail
-# closed. Launchers use this same version grammar and matched-pair invariant.
-stage=ownership
-if [ -e "$install_root/current" ] || [ -L "$install_root/current" ]; then
-    [ -f "$install_root/current" ] && [ ! -L "$install_root/current" ] || fail "Current pointer is not a regular file"
-    newline='
-'
-    pointer=$(cat "$install_root/current" | od -A n -v -t u1 | LC_ALL=C awk '{for(i=1;i<=NF;i++){if($i==0)exit 1;printf "%c",$i}}' && printf '.') || fail "Invalid or unreadable current version pointer"
-    case "$pointer" in *"$newline.") previous=${pointer%"$newline."} ;; *) fail "Invalid current version pointer" ;; esac
-    valid_version "$previous" || fail "Invalid current version pointer"
-    if [ -f "$install_root/versions/$previous/bin/ilium" ] && [ -x "$install_root/versions/$previous/bin/ilium" ] && [ ! -L "$install_root/versions/$previous/bin/ilium" ] &&
-        [ -f "$install_root/versions/$previous/bin/ilium-server" ] && [ -x "$install_root/versions/$previous/bin/ilium-server" ] && [ ! -L "$install_root/versions/$previous/bin/ilium-server" ]; then prior_active=yes; fi
-else
-    previous=
-fi
-
 stage=target
 kernel=$(uname -s) || fail "Cannot determine kernel"
 architecture=$(uname -m) || fail "Cannot determine architecture"
@@ -123,8 +131,12 @@ done
 if command -v sha256sum >/dev/null 2>&1; then hash_tool=sha256sum
 elif command -v shasum >/dev/null 2>&1; then hash_tool=shasum
 elif command -v openssl >/dev/null 2>&1; then hash_tool=openssl
-else fail "A SHA-256 tool is required: sha256sum, shasum, or openssl"
+else hash_tool=
 fi
+require_hash() { [ -n "$hash_tool" ] || fail "A SHA-256 tool is required: sha256sum, shasum, or openssl"; }
+# A fresh missing-tool failure must not leave an unowned skeleton that blocks
+# retry. Existing owned installs defer this error until their locked prior read.
+if [ ! -f "$install_root/installer-state/owner" ]; then require_hash; fi
 hash_file() {
     case "$hash_tool" in
         sha256sum) sha256sum < "$1" ;;
@@ -146,7 +158,6 @@ fi
 if [ -f "$state/owner" ]; then
     [ ! -L "$state/owner" ] && [ "$(cat "$state/owner")" = "ilium-posix-installer-1" ] || fail "Invalid ownership state"
     [ -f "$state/bin-dir" ] && [ ! -L "$state/bin-dir" ] && [ "$(cat "$state/bin-dir")" = "$bin_dir" ] || fail "Stable bin directory differs from recorded ownership"
-    if [ -n "$previous" ] && { [ ! -f "$state/version-$previous" ] || [ -L "$state/version-$previous" ]; }; then fail "Current pointer does not refer to an installer-owned version"; fi
 fi
 if [ "$uninstall" = yes ] && [ ! -f "$state/owner" ]; then
     printf 'ilium-install: stage=complete action=uninstall removed=0\n'
@@ -190,7 +201,19 @@ cleanup() {
     trap - 0 HUP INT TERM
     if [ "$result" -ne 0 ] && [ "$diagnosed" = no ]; then diagnostic "Filesystem operation or interruption failed during this stage"; fi
     if [ "$committed" = no ]; then
+        # A signal can arrive after mv completed but before the next assignment.
+        # Its private source disappears only after atomic profile publication.
+        if [ "$profile_publishing" = yes ] && [ "$profile_added" = no ] && [ -n "$profile_temp" ] && [ ! -e "$profile_temp" ] && [ ! -L "$profile_temp" ]; then profile_added=yes; fi
         if [ "$profile_added" = yes ]; then remove_profile_block || printf 'ilium-install: warning=Owned profile block could not be rolled back; preserved for inspection.\n' >&2; fi
+        if [ "$profile_metadata" = yes ] && [ "$profile_added" = no ]; then
+            for profile_record in profile-path profile-offset profile-block; do
+                if [ -f "$state/$profile_record" ] && [ ! -L "$state/$profile_record" ]; then rm -f "$state/$profile_record"; fi
+            done
+        fi
+        # A receipt is prepared before its directory is published. If that
+        # atomic directory rename fails, remove only this transaction's receipt.
+        if [ "$new_receipt" = yes ] && [ ! -e "$install_root/versions/$version" ] && [ ! -L "$install_root/versions/$version" ] &&
+            [ ! -L "$state/version-$version" ] && cmp -s "$work/version-receipt" "$state/version-$version"; then rm -f "$state/version-$version"; fi
         if [ "$new_client" = yes ] && cmp -s "$bin_dir/ilium" "$state/launcher-ilium"; then rm -f "$bin_dir/ilium" "$state/launcher-ilium"; fi
         if [ "$new_server" = yes ] && cmp -s "$bin_dir/ilium-server" "$state/launcher-ilium-server"; then rm -f "$bin_dir/ilium-server" "$state/launcher-ilium-server"; fi
     fi
@@ -201,12 +224,31 @@ cleanup() {
     if [ -n "$launcher_temp" ]; then rm -f "$launcher_temp"; fi
     if [ -n "$repair_temp" ]; then rm -f "$repair_temp"; fi
     if [ -n "$profile_temp" ]; then rm -f "$profile_temp"; fi
+    if [ -n "$receipt_temp" ]; then rm -f "$receipt_temp"; fi
+    if [ -n "$previous_temp" ]; then rm -f "$previous_temp" || printf 'ilium-install: warning=Preserved inaccessible private previous-state stage.\n' >&2; fi
     if [ "$lock_owned" = yes ]; then rm -f "$install_root/.install-lock/process"; rmdir "$install_root/.install-lock" || :; fi
     exit "$result"
 }
 trap cleanup 0
 trap 'exit 1' HUP INT TERM
 printf '%s\n' "$$" > "$install_root/.install-lock/process" || fail "Cannot record lock owner"
+# The transaction's prior pointer is read and validated only while holding the
+# installer lock. A waiting invocation must retain the immediately prior pair,
+# not a snapshot captured before another installer completed.
+stage=ownership
+if [ -e "$install_root/current" ] || [ -L "$install_root/current" ]; then
+    [ -f "$install_root/current" ] && [ ! -L "$install_root/current" ] || fail "Current pointer is not a regular file"
+    newline='
+'
+    pointer=$(cat "$install_root/current" | od -A n -v -t u1 | LC_ALL=C awk '{for(i=1;i<=NF;i++){if($i==0)exit 1;printf "%c",$i}}' && printf '.') || fail "Invalid or unreadable current version pointer"
+    case "$pointer" in *"$newline.") previous=${pointer%"$newline."} ;; *) fail "Invalid current version pointer" ;; esac
+    valid_version "$previous" || fail "Invalid current version pointer"
+    [ -f "$state/version-$previous" ] && [ ! -L "$state/version-$previous" ] || fail "Current pointer does not refer to an installer-owned version"
+    if [ -f "$install_root/versions/$previous/bin/ilium" ] && [ -x "$install_root/versions/$previous/bin/ilium" ] && [ ! -L "$install_root/versions/$previous/bin/ilium" ] &&
+        [ -f "$install_root/versions/$previous/bin/ilium-server" ] && [ -x "$install_root/versions/$previous/bin/ilium-server" ] && [ ! -L "$install_root/versions/$previous/bin/ilium-server" ]; then prior_active=yes; fi
+fi
+stage=prerequisites
+require_hash
 stage=staging
 work=$(mktemp -d "$install_root/.stage.XXXXXXXX") || fail "Cannot create private staging directory"
 chmod 700 "$work" || fail "Cannot secure staging directory"
@@ -361,7 +403,7 @@ EOF
     block=$((block + 1 + (member_size + 511) / 512))
     [ "$block" -lt "$((archive_bytes / 512))" ] || fail "Archive data is truncated"
 done
-sort -u "$work/members" > "$work/sorted-members"
+LC_ALL=C sort -u "$work/members" > "$work/sorted-members"
 cmp -s "$work/members" "$work/sorted-members" || fail "Duplicate or noncanonical archive member order"
 for member in VERSION THIRD-PARTY.txt ilium ilium-server; do grep -x "$member" "$work/members" >/dev/null || fail "Archive is missing a required pair member"; done
 mkdir "$work/extract" || fail "Cannot create private extraction directory"
@@ -385,10 +427,17 @@ if [ -e "$install_root/versions/$version" ]; then
         fi
     done < "$work/members"
 else
+    [ ! -e "$state/version-$version" ] && [ ! -L "$state/version-$version" ] || fail "Unpublished version ownership state already exists; preserved"
+    receipt_temp=$(mktemp "$state/.ilium-version.XXXXXXXX") || fail "Cannot stage version ownership"
+    cp "$work/version-receipt" "$receipt_temp" || fail "Cannot record version ownership"
+    cmp -s "$work/version-receipt" "$receipt_temp" || fail "Staged version ownership differs from verified receipt"
     mkdir "$work/version" || fail "Cannot stage complete version"
     mv "$candidate" "$work/version/bin" || fail "Cannot stage matched binary pair"
+    new_receipt=yes
+    mv "$receipt_temp" "$state/version-$version" || fail "Cannot publish version ownership"
+    receipt_temp=
     mv "$work/version" "$install_root/versions/$version" || fail "Cannot install complete version"
-    cp "$work/version-receipt" "$state/version-$version" || fail "Cannot record version ownership"
+    new_receipt=no
 fi
 
 stage=launchers
@@ -442,18 +491,41 @@ if [ "$modify_path" = yes ] && [ ! -f "$state/profile-path" ]; then
         if [ "$needs_profile" = yes ]; then
             [ ! -e "$profile" ] || [ -w "$profile" ] || fail "Shell profile is not writable"
             offset=0
-            if [ -f "$profile" ]; then offset=$(wc -c < "$profile" | tr -d ' '); fi
+            profile_existed=no
+            if [ -f "$profile" ]; then
+                profile_existed=yes
+                cp -p "$profile" "$work/profile-before" || fail "Cannot snapshot shell profile"
+                offset=$(wc -c < "$work/profile-before" | tr -d ' ')
+            fi
             {
                 printf '\n# >>> ilium installer PATH >>>\ncase ":$PATH:" in *:'
                 quote "$bin_dir"
                 printf ':*) ;; *) export PATH='
                 quote "$bin_dir"
                 printf ':"$PATH" ;; esac\n# <<< ilium installer PATH <<<\n'
-            } > "$state/profile-block" || fail "Cannot record owned profile block"
-            printf '%s\n' "$profile" > "$state/profile-path"
-            printf '%s\n' "$offset" > "$state/profile-offset"
+            } > "$work/profile-block" || fail "Cannot stage owned profile block"
+            profile_temp=$(mktemp "${profile%/*}/.ilium-profile.XXXXXXXX") || fail "Cannot stage shell profile"
+            if [ "$profile_existed" = yes ]; then cp -p "$work/profile-before" "$profile_temp" || fail "Cannot preserve shell profile bytes and mode"; fi
+            cat "$work/profile-block" >> "$profile_temp" || fail "Shell profile PATH staging was rejected"
+            printf '%s\n' "$profile" > "$work/profile-path" || fail "Cannot stage profile ownership path"
+            printf '%s\n' "$offset" > "$work/profile-offset" || fail "Cannot stage profile ownership offset"
+            for profile_record in profile-path profile-offset profile-block; do
+                [ ! -e "$state/$profile_record" ] && [ ! -L "$state/$profile_record" ] || fail "Unknown profile ownership state already exists; preserved"
+            done
+            profile_metadata=yes
+            for profile_record in profile-path profile-offset profile-block; do
+                cp "$work/$profile_record" "$state/$profile_record" || fail "Cannot record owned profile metadata"
+            done
+            if [ "$profile_existed" = yes ]; then
+                if [ ! -f "$profile" ] || [ -L "$profile" ] || ! cmp -s "$profile" "$work/profile-before"; then fail "Shell profile changed concurrently; preserved"; fi
+            else
+                [ ! -e "$profile" ] && [ ! -L "$profile" ] || fail "Shell profile appeared concurrently; preserved"
+            fi
+            profile_publishing=yes
+            mv "$profile_temp" "$profile" || fail "Atomic shell profile publication failed; original bytes preserved"
             profile_added=yes
-            cat "$state/profile-block" >> "$profile" || fail "Shell profile PATH update was rejected"
+            profile_publishing=no
+            profile_temp=
         fi
     fi
 fi
@@ -464,17 +536,36 @@ printf '%s\n' "$version" > "$work/current" || fail "Cannot stage version pointer
 mv "$work/current" "$install_root/current" || fail "Atomic pointer switch failed; previous pair remains active"
 committed=yes
 # Following maintenance cannot invalidate a successful pair activation.
+persist_previous() {
+    if [ -e "$state/previous" ] || [ -L "$state/previous" ]; then
+        [ -f "$state/previous" ] && [ ! -L "$state/previous" ] && [ -w "$state/previous" ] || return 1
+    fi
+    previous_temp=$(mktemp "$state/.ilium-previous.XXXXXXXX") || return 1
+    printf '%s\n' "$previous" > "$previous_temp" || return 1
+    mv "$previous_temp" "$state/previous" || return 1
+    previous_temp=
+}
+prune_versions=yes
+retained_previous=$previous
 if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
-    printf '%s\n' "$previous" > "$state/previous" || printf 'ilium-install: warning=Could not record previous version; old versions preserved.\n' >&2
+    if ! persist_previous; then
+        prune_versions=no
+        printf 'ilium-install: warning=Could not record previous version; old versions preserved.\n' >&2
+    fi
+elif [ "$previous" = "$version" ]; then
+    # A same-version retry has no distinct lock-protected prior pointer. An old
+    # history record may have survived a failed write, so it cannot justify
+    # deleting another version. Normal upgrades already perform their pruning.
+    prune_versions=no
 fi
-retained_previous=
-if [ -f "$state/previous" ]; then retained_previous=$(cat "$state/previous"); fi
-for receipt in "$state"/version-*; do
-    [ -f "$receipt" ] || continue
-    removal_version=${receipt##*/version-}
-    [ "$removal_version" != "$version" ] && [ "$removal_version" != "$retained_previous" ] || continue
-    remove_owned_version "$removal_version" || printf 'ilium-install: warning=Could not prune older version %s; preserved.\n' "$removal_version" >&2
-done
+if [ "$prune_versions" = yes ]; then
+    for receipt in "$state"/version-*; do
+        [ -f "$receipt" ] || continue
+        removal_version=${receipt##*/version-}
+        [ "$removal_version" != "$version" ] && [ "$removal_version" != "$retained_previous" ] || continue
+        remove_owned_version "$removal_version" || printf 'ilium-install: warning=Could not prune older version %s; preserved.\n' "$removal_version" >&2
+    done
+fi
 printf 'ilium-install: stage=complete version=%s target=%s matched_pair=verified\n' "$version" "$target"
 case ":${PATH:-}:" in
     *":$bin_dir:"*) ;;

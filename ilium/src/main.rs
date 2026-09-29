@@ -75,6 +75,16 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Internal offline release qualification; opens no terminal or session.
+    #[command(hide = true)]
+    ReleaseEmbeddingProbe {
+        #[arg(long)]
+        model_directory: PathBuf,
+        #[arg(long)]
+        text: String,
+        #[arg(long)]
+        hold_for_native_audit: bool,
+    },
     /// Create (if not already running) and attach to a named session.
     NewSession { name: String },
     /// List this project's known sessions and whether each is currently running.
@@ -239,6 +249,16 @@ async fn main() -> ExitCode {
 
 async fn dispatch(cli: Cli) -> Result<(), CliError> {
     match cli.command {
+        Some(Command::ReleaseEmbeddingProbe {
+            model_directory,
+            text,
+            hold_for_native_audit,
+        }) => {
+            ilium_client::release_embedding::probe(&model_directory, &text, hold_for_native_audit)
+                .map_err(|error| {
+                    CliError::ServerReportedError(format!("release embedding probe: {error:#}"))
+                })
+        }
         None => {
             attach_or_create(
                 session::DEFAULT_SESSION_NAME,

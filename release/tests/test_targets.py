@@ -13,6 +13,8 @@ import unittest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = PROJECT_ROOT / "release" / "targets.toml"
 TOOL = PROJECT_ROOT / "release" / "scripts" / "release_tool.py"
+sys.path.insert(0, str(TOOL.parent))
+import release_tool as tool
 
 
 def manifest_text(document):
@@ -72,7 +74,7 @@ class TargetManifestTests(unittest.TestCase):
         expected = [
             ("linux", "x86_64", "x86_64-unknown-linux-gnu", "ubuntu-22.04", "ilium-linux-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
             ("linux", "aarch64", "aarch64-unknown-linux-gnu", "ubuntu-22.04-arm", "ilium-linux-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
-            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2022", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe"], "upstream-prebuilt"),
+            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2022", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe"], "pinned-source-build"),
             ("macos", "aarch64", "aarch64-apple-darwin", "macos-15", "ilium-macos-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
             ("macos", "x86_64", "x86_64-apple-darwin", "macos-15-intel", "ilium-macos-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "pinned-source-build"),
         ]
@@ -94,6 +96,31 @@ class TargetManifestTests(unittest.TestCase):
         row.update(arch="aarch64", rust_target="aarch64-pc-windows-msvc", archive="ilium-windows-aarch64.zip", runner="windows-11-arm")
         document["target"].append(row)
         self.rejects_document(document, "Windows ARM64 is not approved")
+
+    def test_windows_package_receipt_requires_static_crt_source_provenance(self):
+        target = next(row for row in tool.load_targets(MANIFEST) if row["os"] == "windows")
+        receipt = {
+            "schema": 1, "state": "passed", "publication_allowed": True,
+            "target": target["rust_target"], "tag": "v0.1.0", "version": "0.1.0",
+            "os": "windows", "arch": "x86_64",
+            "native_identity": {"system": "Windows", "machine": "AMD64", "runner": "windows-2022"},
+            "dependency_closure": {"complete": True},
+            "binary_versions": {"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"},
+            "files": {"ilium.exe": "a" * 64, "ilium-server.exe": "b" * 64,
+                      "VERSION": "c" * 64, "THIRD-PARTY.txt": "d" * 64,
+                      "onnxruntime.dll": "e" * 64},
+            "notices": {"state": "reviewed", "sha256": "d" * 64},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "audit.json"
+            path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "Windows package lacks"):
+                tool.audit_receipt(path, target, "0.1.0", "v0.1.0")
+            receipt["windows_ort"] = {"state": "passed", "source_tag": "v1.24.2",
+                                      "source_commit": "058787ceead760166e3c50a0a4cba8a833a6f53f",
+                                      "source_sha256": "f" * 64, "rust_crt": "static", "ort_crt": "static"}
+            path.write_text(json.dumps(receipt))
+            self.assertEqual(tool.audit_receipt(path, target, "0.1.0", "v0.1.0"), receipt)
 
     def test_replaced_target_pair_is_rejected(self):
         document = self.document()

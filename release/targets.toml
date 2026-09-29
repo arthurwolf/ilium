@@ -32,7 +32,7 @@ runner = "windows-2022"
 archive = "ilium-windows-x86_64.zip"
 format = "zip"
 executables = ["ilium.exe", "ilium-server.exe"]
-ort_strategy = "upstream-prebuilt"
+ort_strategy = "pinned-source-build"
 minimum_tested_os = "windows-2022"
 
 [[target]]

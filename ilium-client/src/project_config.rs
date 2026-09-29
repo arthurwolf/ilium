@@ -272,4 +272,57 @@ mod tests {
         assert_eq!(config.project_icon.as_deref(), Some("🧭"));
         assert!(config.show_project_separators);
     }
+
+    #[test]
+    fn animation_palette_and_named_parameters_survive_yaml_reload_and_metadata_updates() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
+        std::fs::write(
+            project.path().join(RELATIVE_PATH),
+            "project name: Pond\ncustom: keep-me\nratio: .inf\nanimation:\n  kind: breathing_mountain\n  speed_percent: 125\n",
+        )
+        .unwrap();
+        let initial = load(project.path()).unwrap();
+        assert_eq!(initial.animation.kind, AnimationKind::QuietPond);
+        assert_eq!(initial.animation.lightness_percent, 60);
+        assert_eq!(initial.animation.speed_percent, 125);
+
+        let mut settings = AnimationSettings {
+            lightness_percent: 35,
+            hue_degrees: 125,
+            saturation_percent: 50,
+            ..initial.animation
+        };
+        for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
+            settings.kind = kind;
+            for row in 17..=20 {
+                let slider = settings.slider(row).unwrap();
+                settings.set_slider_value(
+                    row,
+                    if index % 2 == 0 {
+                        slider.minimum
+                    } else {
+                        slider.maximum
+                    },
+                );
+            }
+        }
+        set_animation(project.path(), settings).unwrap();
+        update(project.path(), |config| {
+            config.project_icon = Some("🧭".into())
+        })
+        .unwrap();
+
+        let reloaded = load(project.path()).unwrap();
+        assert_eq!(reloaded.animation, settings);
+        assert_eq!(reloaded.project_name.as_deref(), Some("Pond"));
+        assert_eq!(reloaded.project_icon.as_deref(), Some("🧭"));
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("kind: quiet_pond"));
+        assert!(!saved.contains("breathing_mountain"));
+        assert!(saved.contains("custom: keep-me"));
+        assert!(saved.contains("ratio: .inf"));
+    }
 }

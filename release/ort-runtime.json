@@ -1,0 +1,412 @@
+{
+  "asset_metadata_url": "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v1.24.2",
+  "assets": {
+    "aarch64-apple-darwin": {
+      "asset_id": 358441256,
+      "bytes": 31604221,
+      "format": "tar.gz",
+      "github_digest": "sha256:0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+      "members": {
+        "onnxruntime-osx-arm64-1.24.2": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/GIT_COMMIT_ID": {
+          "size": 41,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/LICENSE": {
+          "size": 1073,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/Privacy.md": {
+          "size": 2469,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/README.md": {
+          "size": 2971,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/ThirdPartyNotices.txt": {
+          "size": 325054,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/VERSION_NUMBER": {
+          "size": 7,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/core": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/core/providers": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/core/providers/custom_op_context.h": {
+          "size": 296,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/core/providers/resource.h": {
+          "size": 365,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/coreml_provider_factory.h": {
+          "size": 5247,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/cpu_provider_factory.h": {
+          "size": 397,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_c_api.h": {
+          "size": 373908,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_cxx_api.h": {
+          "size": 156761,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_cxx_inline.h": {
+          "size": 144392,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_env_config_keys.h": {
+          "size": 1315,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_ep_c_api.h": {
+          "size": 102494,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_ep_device_ep_metadata_keys.h": {
+          "size": 1460,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_float16.h": {
+          "size": 17991,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_lite_custom_op.h": {
+          "size": 61254,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_run_options_config_keys.h": {
+          "size": 2952,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/onnxruntime_session_options_config_keys.h": {
+          "size": 27448,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/provider_options.h": {
+          "size": 480,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/include/webgpu_provider_factory.h": {
+          "size": 627,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake/onnxruntime": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake/onnxruntime/onnxruntimeConfig.cmake": {
+          "size": 939,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake/onnxruntime/onnxruntimeConfigVersion.cmake": {
+          "size": 2765,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake/onnxruntime/onnxruntimeTargets-release.cmake": {
+          "size": 938,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/cmake/onnxruntime/onnxruntimeTargets.cmake": {
+          "size": 4173,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib": {
+          "size": 35361512,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Info.plist": {
+          "size": 656,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/DWARF": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/DWARF/libonnxruntime.1.24.2.dylib": {
+          "size": 54574705,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/Relocations": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/Relocations/aarch64": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/Relocations/aarch64/libonnxruntime.1.24.2.dylib.yml": {
+          "size": 1852276,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.dylib": {
+          "size": 35361512,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/pkgconfig": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/pkgconfig/libonnxruntime.pc": {
+          "size": 330,
+          "type": "file"
+        },
+        "onnxruntime-osx-arm64-1.24.2/testdata": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-osx-arm64-1.24.2/testdata/libcustom_op_library.dylib": {
+          "size": 240872,
+          "type": "file"
+        }
+      },
+      "name": "onnxruntime-osx-arm64-1.24.2.tgz",
+      "root": "onnxruntime-osx-arm64-1.24.2",
+      "selected": {
+        "onnxruntime-osx-arm64-1.24.2/GIT_COMMIT_ID": {
+          "output": "GIT_COMMIT_ID",
+          "sha256": "af35a07434336bc7008227419ae62eb47639633169539ca66158bf0ea0564aa8"
+        },
+        "onnxruntime-osx-arm64-1.24.2/LICENSE": {
+          "output": "LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+        },
+        "onnxruntime-osx-arm64-1.24.2/ThirdPartyNotices.txt": {
+          "output": "ThirdPartyNotices.txt",
+          "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2"
+        },
+        "onnxruntime-osx-arm64-1.24.2/VERSION_NUMBER": {
+          "output": "VERSION_NUMBER",
+          "sha256": "32060e9461395f8bd2b74d95efac19a1d021f3fff70c4d6f10510330d8e6355a"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib": {
+          "output": "lib/libonnxruntime.1.24.2.dylib",
+          "sha256": "87df6f94dd559ea958748adc80fd4c46d91c52bc025771f513291d155539590a"
+        },
+        "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.dylib": {
+          "output": "lib/libonnxruntime.dylib",
+          "sha256": "87df6f94dd559ea958748adc80fd4c46d91c52bc025771f513291d155539590a"
+        }
+      },
+      "sha256": "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-osx-arm64-1.24.2.tgz"
+    },
+    "x86_64-pc-windows-msvc": {
+      "asset_id": 358441296,
+      "bytes": 74075355,
+      "format": "zip",
+      "github_digest": "sha256:8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+      "members": {
+        "onnxruntime-win-x64-1.24.2": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-win-x64-1.24.2/GIT_COMMIT_ID": {
+          "size": 43,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/LICENSE": {
+          "size": 1094,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/Privacy.md": {
+          "size": 2490,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/README.md": {
+          "size": 3020,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/ThirdPartyNotices.txt": {
+          "size": 331175,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/VERSION_NUMBER": {
+          "size": 8,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-win-x64-1.24.2/include/cpu_provider_factory.h": {
+          "size": 416,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_c_api.h": {
+          "size": 382197,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_cxx_api.h": {
+          "size": 160295,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_cxx_inline.h": {
+          "size": 148288,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_env_config_keys.h": {
+          "size": 1339,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_ep_c_api.h": {
+          "size": 104606,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_ep_device_ep_metadata_keys.h": {
+          "size": 1488,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_float16.h": {
+          "size": 18528,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_lite_custom_op.h": {
+          "size": 62353,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_run_options_config_keys.h": {
+          "size": 3006,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_session_options_config_keys.h": {
+          "size": 27879,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_training_c_api.h": {
+          "size": 36508,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_training_cxx_api.h": {
+          "size": 19993,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/onnxruntime_training_cxx_inline.h": {
+          "size": 13166,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/include/provider_options.h": {
+          "size": 498,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib": {
+          "size": 0,
+          "type": "directory"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime.dll": {
+          "size": 14148680,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime.lib": {
+          "size": 2124,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime.pdb": {
+          "size": 381652992,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.dll": {
+          "size": 22048,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.lib": {
+          "size": 2314,
+          "type": "file"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.pdb": {
+          "size": 413696,
+          "type": "file"
+        }
+      },
+      "name": "onnxruntime-win-x64-1.24.2.zip",
+      "root": "onnxruntime-win-x64-1.24.2",
+      "selected": {
+        "onnxruntime-win-x64-1.24.2/GIT_COMMIT_ID": {
+          "output": "GIT_COMMIT_ID",
+          "sha256": "4fa52de69091a5ffb61ca34fa227a4dbb8052177dd4406c7e06d858fc877f1c2"
+        },
+        "onnxruntime-win-x64-1.24.2/LICENSE": {
+          "output": "LICENSE",
+          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+        },
+        "onnxruntime-win-x64-1.24.2/ThirdPartyNotices.txt": {
+          "output": "ThirdPartyNotices.txt",
+          "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+        },
+        "onnxruntime-win-x64-1.24.2/VERSION_NUMBER": {
+          "output": "VERSION_NUMBER",
+          "sha256": "c3dc7b35ecfe0c875050c091e983328b1b45634cff70396daf316ab33d7f25b9"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime.dll": {
+          "output": "lib/onnxruntime.dll",
+          "sha256": "114947d633e6844ce3c4b51ef6678f776628571d08a5763859c61642c8dcca9c"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime.lib": {
+          "output": "lib/onnxruntime.lib",
+          "sha256": "2ec547a0e0e655fd60d549d23a3155a3ec47217f92de32e84df51866175a51ff"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.dll": {
+          "output": "lib/onnxruntime_providers_shared.dll",
+          "sha256": "c10763a3764f5c292072533560c341565be64f38fd2807ed5035cd177d3bbb26"
+        },
+        "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.lib": {
+          "output": "lib/onnxruntime_providers_shared.lib",
+          "sha256": "5eb0d652cb9bcb81d11803611108115b23a618f23b40bee1fdf2228060476447"
+        }
+      },
+      "sha256": "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip"
+    }
+  },
+  "commit": "058787ceead760166e3c50a0a4cba8a833a6f53f",
+  "metadata_sha256": "0830263c0df7a54cfb80578ae65f036f74e23751ac63b33fd1bb7e41ff16a974",
+  "qualification": "extraction and upstream bytes only; native linkage, dependency closure, licences, installed inference and release acceptance remain required",
+  "release_id": 288056667,
+  "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.24.2",
+  "reviewed_by": "ilium release continuation: official GitHub API asset digest and downloaded archive-byte/member inspection",
+  "schema": 1,
+  "state": "reviewed",
+  "strategy": "upstream-shared-assets-explicit-link-location",
+  "tag": "v1.24.2",
+  "version": "1.24.2"
+}

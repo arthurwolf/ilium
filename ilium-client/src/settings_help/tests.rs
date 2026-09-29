@@ -5,6 +5,10 @@ use super::catalog;
 #[test]
 fn catalog_covers_every_settings_help_id_once_with_complete_content() {
     let topics = catalog::all();
+    assert!(
+        topics.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "catalog::by_id requires stable sorted IDs"
+    );
     let ids = topics
         .iter()
         .map(|topic| topic.id.clone())
@@ -105,7 +109,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 25);
-    add_range(&mut ids, "AN", 1, 14);
+    add_range(&mut ids, "AN", 1, crate::animation_settings_ui::ROW_COUNT);
     add_range(&mut ids, "AM", 1, 21);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
@@ -130,5 +134,71 @@ fn expected_ids() -> BTreeSet<String> {
 fn add_range(ids: &mut BTreeSet<String>, prefix: &str, start: usize, end: usize) {
     for value in start..=end {
         ids.insert(format!("{prefix}-{value:02}"));
+    }
+}
+
+#[test]
+fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
+    use crate::background_animation::{AnimationKind, AnimationSettings};
+
+    let settings = AnimationSettings::default();
+    for (id, phrase) in [("AN-15", "60%"), ("AN-16", "359"), ("AN-17", "0%")] {
+        let topic = catalog::by_id(id).expect("palette help topic exists");
+        assert!(
+            topic.explanation.contains(phrase),
+            "{id} explains its range/default"
+        );
+    }
+    for kind in AnimationKind::ALL {
+        let selected = AnimationSettings { kind, ..settings };
+        for (index, slider) in selected.scene_sliders().iter().enumerate() {
+            let id = format!("AN-{:02}", index + 18);
+            let topic = catalog::by_id(&id).expect("scene-control help topic exists");
+            assert!(
+                topic.specimen.contains(slider.label),
+                "{id} explains {} for {}",
+                slider.label,
+                kind.label()
+            );
+        }
+    }
+    assert_eq!(
+        catalog::by_id("AN-08").unwrap().title,
+        AnimationKind::Cloudlets.label()
+    );
+    assert_eq!(
+        catalog::by_id("AN-10").unwrap().title,
+        AnimationKind::QuietPond.label()
+    );
+}
+
+#[test]
+fn narrow_animation_settings_help_anchors_reach_every_lower_control() {
+    use crate::app::{App, SettingsState, SettingsTab};
+    use ratatui::layout::Rect;
+
+    let project = tempfile::tempdir().unwrap();
+    let app = App::new(
+        "animation-help-test".to_owned(),
+        project.path().to_path_buf(),
+    );
+    let layout = crate::settings_ui::compute_layout(Rect::new(0, 0, 80, 24));
+    for row in 0..crate::animation_settings_ui::ROW_COUNT {
+        let state = SettingsState {
+            tab: SettingsTab::Animations,
+            selected_row: row,
+            scroll: crate::animation_settings_ui::scroll_for_selection(layout.content_area, row, 0),
+            ..SettingsState::default()
+        };
+        let anchors = crate::settings_ui::settings_help_anchors(&layout, &app, &state);
+        let expected_id = format!("AN-{:02}", row + 1);
+        assert!(
+            catalog::by_id(&expected_id).is_some(),
+            "{expected_id} resolves"
+        );
+        assert!(
+            anchors.iter().any(|anchor| anchor.topic_id == expected_id),
+            "selected row's help anchor remains reachable when scrolled"
+        );
     }
 }

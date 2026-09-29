@@ -92,7 +92,9 @@ def validate_policy(target):
         "archive": f"ilium-{operating_system}-{architecture}.{archive_format}",
         "format": archive_format,
         "executables": [f"ilium{executable_suffix}", f"ilium-server{executable_suffix}"],
-        "ort_strategy": "pinned-source-build" if (operating_system, architecture) == ("macos", "x86_64") else "upstream-prebuilt",
+        "ort_strategy": "pinned-source-build" if (operating_system, architecture) in {
+            ("macos", "x86_64"), ("windows", "x86_64")
+        } else "upstream-prebuilt",
         "minimum_tested_os": runner,
     }
     for field, value in expected.items():
@@ -218,6 +220,10 @@ def audit_receipt(path, target, version, tag):
             ort = receipt.get("intel_ort", {})
             if ort.get("state") != "passed" or ort.get("source_tag") != "v1.24.2" or ort.get("source_commit") != "058787ceead760166e3c50a0a4cba8a833a6f53f" or not re.fullmatch(r"[0-9a-f]{64}", ort.get("source_sha256", "")):
                 raise ReleaseError("Intel package lacks pinned native ORT source provenance")
+    if target["os"] == "windows":
+        ort = receipt.get("windows_ort", {})
+        if ort.get("state") != "passed" or ort.get("source_tag") != "v1.24.2" or ort.get("source_commit") != "058787ceead760166e3c50a0a4cba8a833a6f53f" or not re.fullmatch(r"[0-9a-f]{64}", ort.get("source_sha256", "")) or ort.get("rust_crt") != "static" or ort.get("ort_crt") != "static":
+            raise ReleaseError("Windows package lacks pinned native static-CRT ORT source provenance")
     return receipt
 
 
@@ -426,6 +432,39 @@ def generate_posix_table(arguments):
     emit({"type": "result", "command": "generate-posix-table", "state": "passed", "installer": str(arguments.installer.resolve()), "output": str(arguments.output.resolve()) if arguments.output else None, "sha256": digest(updated.encode()), "targets": sum(row["os"] != "windows" for row in targets)})
 
 
+WINDOWS_TABLE_START = "# BEGIN GENERATED WINDOWS TARGETS"
+WINDOWS_TABLE_END = "# END GENERATED WINDOWS TARGETS"
+
+
+def windows_table(targets):
+    """Manifest records are the sole Windows archive/identity selection source."""
+    archives = ", ".join("'" + row["archive"] + "'" for row in targets)
+    lines = [WINDOWS_TABLE_START, "$checksum_archives = @(" + archives + ")", "$windows_targets = @{"]
+    architectures = {"x86_64": "AMD64"}
+    for row in targets:
+        if row["os"] == "windows":
+            architecture = architectures[row["arch"]]
+            lines.append("    '" + architecture + "' = @{ archive = '" + row["archive"] + "'; target = '" + row["rust_target"] + "'; prefix = '" + archive_prefix(row) + "' }")
+    lines.extend(["}", WINDOWS_TABLE_END])
+    return "\n".join(lines)
+
+
+def generate_windows_table(arguments):
+    targets = load_targets(arguments.manifest)
+    original = arguments.installer.read_text(encoding="utf-8")
+    if original.count(WINDOWS_TABLE_START) != 1 or original.count(WINDOWS_TABLE_END) != 1:
+        raise ReleaseError("installer must contain exactly one generated Windows target block")
+    before, remainder = original.split(WINDOWS_TABLE_START)
+    _, after = remainder.split(WINDOWS_TABLE_END)
+    updated = before + windows_table(targets) + after
+    if arguments.check:
+        if updated != original:
+            raise ReleaseError("generated Windows target table differs from targets.toml")
+    else:
+        arguments.output.write_text(updated, encoding="utf-8")
+    emit({"type": "result", "command": "generate-windows-table", "state": "passed", "installer": str(arguments.installer.resolve()), "output": str(arguments.output.resolve()) if arguments.output else None, "sha256": digest(updated.encode()), "targets": sum(row["os"] == "windows" for row in targets)})
+
+
 def build_parser():
     parser = JsonArgumentParser(description=__doc__, allow_abbrev=False)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -437,6 +476,20 @@ def build_parser():
     posix_mode = posix_parser.add_mutually_exclusive_group(required=True)
     posix_mode.add_argument("--check", action="store_true")
     posix_mode.add_argument("--output", type=Path, help="explicit generated output path")
+    windows_parser = subcommands.add_parser("generate-windows-table", allow_abbrev=False)
+    windows_parser.add_argument("--manifest", type=Path, required=True)
+    windows_parser.add_argument("--installer", type=Path, required=True)
+    windows_mode = windows_parser.add_mutually_exclusive_group(required=True)
+    windows_mode.add_argument("--check", action="store_true")
+    windows_mode.add_argument("--output", type=Path, help="explicit generated output path")
+    pages_parser = subcommands.add_parser("build-pages", allow_abbrev=False)
+    for flag in ("manifest", "output", "release-sha256sums"):
+        pages_parser.add_argument("--" + flag, type=Path, required=True)
+    pages_parser.add_argument("--release-tag", required=True)
+    pages_check_parser = subcommands.add_parser("verify-pages", allow_abbrev=False)
+    pages_check_parser.add_argument("--manifest", type=Path, required=True)
+    pages_check_parser.add_argument("--directory", type=Path, required=True)
+    pages_check_parser.add_argument("--release-sha256sums", type=Path, required=True)
     for command in ("package", "verify-package"):
         command_parser = subcommands.add_parser(command, allow_abbrev=False)
         for flag in ("manifest", "workspace", "audit-report"):
@@ -463,6 +516,16 @@ def main(argv=None):
             package(arguments)
         elif arguments.command == "generate-posix-table":
             generate_posix_table(arguments)
+        elif arguments.command == "generate-windows-table":
+            generate_windows_table(arguments)
+        elif arguments.command == "build-pages":
+            import pages
+            metadata = pages.build_pages(arguments.manifest, arguments.output, arguments.release_tag, arguments.release_sha256sums)
+            emit({"type": "artifact", "output": str(arguments.output.resolve()), "files": sorted(pages.FILES), "release_tag": metadata["release_tag"]})
+        elif arguments.command == "verify-pages":
+            import pages
+            pages.verify_pages(arguments.directory, arguments.release_sha256sums, manifest=arguments.manifest)
+            emit({"type": "result", "command": "verify-pages", "state": "passed", "directory": str(arguments.directory.resolve())})
         else:
             verify_package(arguments)
         return 0
@@ -472,4 +535,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Pages imports this policy module too. Preserve the same exception class
+    # when this file is the CLI entrypoint instead of importing a second copy.
+    sys.modules["release_tool"] = sys.modules[__name__]
     sys.exit(main())

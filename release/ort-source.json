@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "state": "reviewed",
+  "version": "1.24.2",
+  "tag": "v1.24.2",
+  "commit": "058787ceead760166e3c50a0a4cba8a833a6f53f",
+  "source_url": "https://codeload.github.com/microsoft/onnxruntime/tar.gz/058787ceead760166e3c50a0a4cba8a833a6f53f",
+  "source_sha256": "effd7da5ab292b18618e2d0675daba14dceef62d04ab3d7adf1c0ffb8a4eeb01",
+  "reviewed_by": "ilium installation continuation 01a0eb35-c808; official tag-to-commit readback and source archive member audit",
+  "upstream_reference_url": "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2"
+}

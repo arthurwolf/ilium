@@ -1,0 +1,357 @@
+{
+  "schema": 1,
+  "packages": {
+    "objc2-foundation@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "anes@0.1.6": {
+      "file": "licences/dcaccebcecfe606e3a0452d85a9dfea15f27b56fa192f61aeafa114b6f5ac8eb.txt",
+      "sha256": "dcaccebcecfe606e3a0452d85a9dfea15f27b56fa192f61aeafa114b6f5ac8eb",
+      "source": "https://raw.githubusercontent.com/zrzka/anes-rs/378ac7461ecac29fde9e10df7b08359d1315a9ad/LICENSE-APACHE; https://raw.githubusercontent.com/zrzka/anes-rs/378ac7461ecac29fde9e10df7b08359d1315a9ad/LICENSE-MIT",
+      "source_commit": "378ac7461ecac29fde9e10df7b08359d1315a9ad",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "base64-simd@0.8.0": {
+      "file": "licences/d1b325db146b07a8319a6ace85e491369a906f4e6d7a9f9f0d8d920f3ac55cc8.txt",
+      "sha256": "d1b325db146b07a8319a6ace85e491369a906f4e6d7a9f9f0d8d920f3ac55cc8",
+      "source": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+      "source_commit": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "vsimd@0.8.0": {
+      "file": "licences/d1b325db146b07a8319a6ace85e491369a906f4e6d7a9f9f0d8d920f3ac55cc8.txt",
+      "sha256": "d1b325db146b07a8319a6ace85e491369a906f4e6d7a9f9f0d8d920f3ac55cc8",
+      "source": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+      "source_commit": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "block2@0.6.2": {
+      "file": "licences/82e400404ed31771fc33b018b039731af2187ac1bbc9254124fc2cfa6211cdfb.txt",
+      "sha256": "82e400404ed31771fc33b018b039731af2187ac1bbc9254124fc2cfa6211cdfb",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+      "source_commit": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "clipboard-win@5.4.1": {
+      "file": "licences/28e5c350f5335e77eaf0a4723239042cb7543ed8756767a90e46e66db4985d44.txt",
+      "sha256": "28e5c350f5335e77eaf0a4723239042cb7543ed8756767a90e46e66db4985d44",
+      "source": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+      "source_commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "dasp_sample@0.11.0": {
+      "file": "licences/ea467d0a12bd82ed399566d0e85de22037a86c4a5d4e5e6326c4030dff149bbb.txt",
+      "sha256": "ea467d0a12bd82ed399566d0e85de22037a86c4a5d4e5e6326c4030dff149bbb",
+      "source": "https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE; https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+      "source_commit": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "dispatch2@0.3.1": {
+      "file": "licences/fe2e8964db89cbbb92785b2f9ebcc8f1beb1f0f5521c38a7a74dd569a48a8c70.txt",
+      "sha256": "fe2e8964db89cbbb92785b2f9ebcc8f1beb1f0f5521c38a7a74dd569a48a8c70",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+      "source_commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2@0.6.4": {
+      "file": "licences/fe2e8964db89cbbb92785b2f9ebcc8f1beb1f0f5521c38a7a74dd569a48a8c70.txt",
+      "sha256": "fe2e8964db89cbbb92785b2f9ebcc8f1beb1f0f5521c38a7a74dd569a48a8c70",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+      "source_commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "emoji@0.2.1": {
+      "file": "licences/087871e763635acf5e208f6f9e9b4796923269d925259241e31db8271e2d8057.txt",
+      "sha256": "087871e763635acf5e208f6f9e9b4796923269d925259241e31db8271e2d8057",
+      "source": "https://raw.githubusercontent.com/Shizcow/emoji-rs/3a04dddb189fc774da740390fffe3e92b4b3b6d9/LICENSE-APACHE; https://raw.githubusercontent.com/Shizcow/emoji-rs/3a04dddb189fc774da740390fffe3e92b4b3b6d9/LICENSE-MIT",
+      "source_commit": "3a04dddb189fc774da740390fffe3e92b4b3b6d9",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "icy_sixel@0.5.0": {
+      "file": "licences/4157347b17aaafc34a4065b19491ccd448b4b88db844b6ec92f1ebd5468287ad.txt",
+      "sha256": "4157347b17aaafc34a4065b19491ccd448b4b88db844b6ec92f1ebd5468287ad",
+      "source": "https://raw.githubusercontent.com/mkrueger/icy_sixel/998cbb2c6d8ed5272f9cc4702a4660778972bf3f/LICENSE-APACHE; https://raw.githubusercontent.com/mkrueger/icy_sixel/998cbb2c6d8ed5272f9cc4702a4660778972bf3f/LICENSE-MIT",
+      "source_commit": "998cbb2c6d8ed5272f9cc4702a4660778972bf3f",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "jni@0.22.4": {
+      "file": "licences/cf5770561b4400378dfe989aa766f5c0d3d740e0a227282a8191e9dc3fb4a40a.txt",
+      "sha256": "cf5770561b4400378dfe989aa766f5c0d3d740e0a227282a8191e9dc3fb4a40a",
+      "source": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-APACHE; https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT",
+      "source_commit": "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "jni-macros@0.22.4": {
+      "file": "licences/b4775188a3822ae4635a02af5e94528cd7971879b72f01a461e4487c4e06e93f.txt",
+      "sha256": "b4775188a3822ae4635a02af5e94528cd7971879b72f01a461e4487c4e06e93f",
+      "source": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-APACHE; https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT",
+      "source_commit": "33045a124105c939d1e2cbdcb5a39e5d868ffa03",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "jni-sys-macros@0.4.1": {
+      "file": "licences/5c557ce52ef6c86067d84865f52b9c190dd1b2cff23083f958199508b89eb7cc.txt",
+      "sha256": "5c557ce52ef6c86067d84865f52b9c190dd1b2cff23083f958199508b89eb7cc",
+      "source": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-APACHE; https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT",
+      "source_commit": "64d77b7a5f119d7b55b4e2c169a4668067ff59e6",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "mac-notification-sys@0.6.15": {
+      "file": "licences/dcd2c8b50f2018f94255c39d2107a9304db95185f80ebaf0b447e345e583a464.txt",
+      "sha256": "dcd2c8b50f2018f94255c39d2107a9304db95185f80ebaf0b447e345e583a464",
+      "source": "https://raw.githubusercontent.com/h4llow3En/mac-notification-sys/deb559683962d314a7693478476bf8d052efa84e/LICENSE-Apache; https://raw.githubusercontent.com/h4llow3En/mac-notification-sys/deb559683962d314a7693478476bf8d052efa84e/LICENSE-MIT",
+      "source_commit": "deb559683962d314a7693478476bf8d052efa84e",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "mongocrypt@0.4.0": {
+      "file": "licences/50a7389a40523bb6c228d1cf3d2259f9620b7eea114cd53928101d7994597967.txt",
+      "sha256": "50a7389a40523bb6c228d1cf3d2259f9620b7eea114cd53928101d7994597967",
+      "source": "https://raw.githubusercontent.com/mongodb/libmongocrypt-rust/025292bb68e7d702497ac7564b79ca78403edca3/LICENSE",
+      "source_commit": "025292bb68e7d702497ac7564b79ca78403edca3",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "mongocrypt-sys@0.1.6+1.18.2": {
+      "file": "licences/50a7389a40523bb6c228d1cf3d2259f9620b7eea114cd53928101d7994597967.txt",
+      "sha256": "50a7389a40523bb6c228d1cf3d2259f9620b7eea114cd53928101d7994597967",
+      "source": "https://raw.githubusercontent.com/mongodb/libmongocrypt-rust/025292bb68e7d702497ac7564b79ca78403edca3/LICENSE",
+      "source_commit": "025292bb68e7d702497ac7564b79ca78403edca3",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "mongodb@3.9.1": {
+      "file": "licences/81489d74f09597def2a22ade0c56cdd8f3a80b7f4b0ff9d97337fd6cc9906c2e.txt",
+      "sha256": "81489d74f09597def2a22ade0c56cdd8f3a80b7f4b0ff9d97337fd6cc9906c2e",
+      "source": "https://raw.githubusercontent.com/mongodb/mongo-rust-driver/16bc932cf4d8a161a49e8161b2158228a6ca8956/LICENSE",
+      "source_commit": "16bc932cf4d8a161a49e8161b2158228a6ca8956",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "mongodb-internal-macros@3.9.1": {
+      "file": "licences/81489d74f09597def2a22ade0c56cdd8f3a80b7f4b0ff9d97337fd6cc9906c2e.txt",
+      "sha256": "81489d74f09597def2a22ade0c56cdd8f3a80b7f4b0ff9d97337fd6cc9906c2e",
+      "source": "https://raw.githubusercontent.com/mongodb/mongo-rust-driver/16bc932cf4d8a161a49e8161b2158228a6ca8956/LICENSE",
+      "source_commit": "16bc932cf4d8a161a49e8161b2158228a6ca8956",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "ndk@0.9.0": {
+      "file": "licences/a7327714cc7a992df1bbd3edeb9a4ae10599b0145f7b8239fd7508a5ce753db5.txt",
+      "sha256": "a7327714cc7a992df1bbd3edeb9a4ae10599b0145f7b8239fd7508a5ce753db5",
+      "source": "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-APACHE; https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT",
+      "source_commit": "49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "ndk-sys@0.6.0+11769913": {
+      "file": "licences/a7327714cc7a992df1bbd3edeb9a4ae10599b0145f7b8239fd7508a5ce753db5.txt",
+      "sha256": "a7327714cc7a992df1bbd3edeb9a4ae10599b0145f7b8239fd7508a5ce753db5",
+      "source": "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-APACHE; https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT",
+      "source_commit": "49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "ndk-context@0.1.1": {
+      "file": "licences/7c595b53c30a63fbe35a3a91794850857508964786a50e6a71dfbea91eddc5dc.txt",
+      "sha256": "7c595b53c30a63fbe35a3a91794850857508964786a50e6a71dfbea91eddc5dc",
+      "source": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-APACHE; https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-MIT",
+      "source_commit": "10f2ba388fca20f7349996ebae26ccda7a6fda5c",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "objc2-app-kit@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-audio-toolbox@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-avf-audio@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-core-audio@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-core-audio-types@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-core-foundation@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-core-graphics@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-io-kit@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-io-surface@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-open-directory@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-encode@4.1.0": {
+      "file": "licences/5fcc195625601dec3829d8fa2d06227daa9ea177ab9571d4f7f0ad27e1038d0b.txt",
+      "sha256": "5fcc195625601dec3829d8fa2d06227daa9ea177ab9571d4f7f0ad27e1038d0b",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+      "source_commit": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "phf@0.8.0": {
+      "file": "licences/bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337.txt",
+      "sha256": "bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337",
+      "source": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+      "source_commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "phf_generator@0.8.0": {
+      "file": "licences/bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337.txt",
+      "sha256": "bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337",
+      "source": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+      "source_commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "phf_macros@0.8.0": {
+      "file": "licences/bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337.txt",
+      "sha256": "bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337",
+      "source": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+      "source_commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "phf_shared@0.8.0": {
+      "file": "licences/bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337.txt",
+      "sha256": "bfa2101c2b1e2e808594a11fa5b00e4b635cf4787d42b56c3ab78bf83897e337",
+      "source": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+      "source_commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "quantette@0.5.1": {
+      "file": "licences/465581ce64bbfdb95ed5cea41b529a3d98ce7a739d74fd4ac948d08d18d14414.txt",
+      "sha256": "465581ce64bbfdb95ed5cea41b529a3d98ce7a739d74fd4ac948d08d18d14414",
+      "source": "https://raw.githubusercontent.com/IanManske/quantette/f85ca4da8c1b9c52215f33fdedfb103df8555329/LICENSE-APACHE; https://raw.githubusercontent.com/IanManske/quantette/f85ca4da8c1b9c52215f33fdedfb103df8555329/LICENSE-MIT",
+      "source_commit": "f85ca4da8c1b9c52215f33fdedfb103df8555329",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "r-efi@5.3.0": {
+      "file": "licences/3fa1891c4691a024b89283c898a93f50323f91bfecb06460fed43a9f6e8181b8.txt",
+      "sha256": "3fa1891c4691a024b89283c898a93f50323f91bfecb06460fed43a9f6e8181b8",
+      "source": "https://raw.githubusercontent.com/r-efi/r-efi/97b55bed1c2c91dcbf787674849f05337ff80b33/AUTHORS",
+      "source_commit": "97b55bed1c2c91dcbf787674849f05337ff80b33",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "r-efi@6.0.0": {
+      "file": "licences/44fd5c98f5e13c250de445d22c0e6277b0e51d4b9638a783e4376a09d127aedb.txt",
+      "sha256": "44fd5c98f5e13c250de445d22c0e6277b0e51d4b9638a783e4376a09d127aedb",
+      "source": "https://raw.githubusercontent.com/r-efi/r-efi/7e1b0322d31d625f81a5656096330934f9cd835d/AUTHORS",
+      "source_commit": "7e1b0322d31d625f81a5656096330934f9cd835d",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "ratatui-termina@0.1.0": {
+      "file": "licences/28e364b4cdebfdbbf452ed30ab6600523b42d03bd19718be227c17818e4e6cd0.txt",
+      "sha256": "28e364b4cdebfdbbf452ed30ab6600523b42d03bd19718be227c17818e4e6cd0",
+      "source": "https://raw.githubusercontent.com/ratatui/ratatui/e665c36cb14752a61cd777fbd06dbef8474f2add/LICENSE",
+      "source_commit": "e665c36cb14752a61cd777fbd06dbef8474f2add",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "valuable@0.1.1": {
+      "file": "licences/4567281a5259d22a6b51f7515df6eeca96ecbdf34648dc396c3121cdbddfd628.txt",
+      "sha256": "4567281a5259d22a6b51f7515df6eeca96ecbdf34648dc396c3121cdbddfd628",
+      "source": "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE",
+      "source_commit": "9efc29b6e58cef28f6566a47aa7e142a55fead77",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "vtparse@0.6.2": {
+      "file": "licences/10d6aaa9434790f9d94ec90a30f7bc04a0f937886368228e41116a61ed8fb0eb.txt",
+      "sha256": "10d6aaa9434790f9d94ec90a30f7bc04a0f937886368228e41116a61ed8fb0eb",
+      "source": "https://raw.githubusercontent.com/wez/wezterm/edeae72b5fc55c7fa4aa1d08bbefd08c5493f757/LICENSE.md",
+      "source_commit": "edeae72b5fc55c7fa4aa1d08bbefd08c5493f757",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "wezterm-input-types@0.1.0": {
+      "file": "licences/1a11d28c1fe249a1892fcee447700c6c04af325183ee939adb6e832184eca2dd.txt",
+      "sha256": "1a11d28c1fe249a1892fcee447700c6c04af325183ee939adb6e832184eca2dd",
+      "source": "https://raw.githubusercontent.com/wez/wezterm/d5ca5509b95edc31291ba29bd1fcbf3f0b12c92d/LICENSE.md",
+      "source_commit": "d5ca5509b95edc31291ba29bd1fcbf3f0b12c92d",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "winapi-i686-pc-windows-gnu@0.4.0": {
+      "file": "licences/1eb9fcf3625a38dfb0b8a2a8a2ac8634cf6815e53b83a29d14116bfc59a14ca2.txt",
+      "sha256": "1eb9fcf3625a38dfb0b8a2a8a2ac8634cf6815e53b83a29d14116bfc59a14ca2",
+      "source": "https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-APACHE; https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-MIT",
+      "source_commit": "796a8e6c2971dc2ff1bcff166e6671284f9b5b6b",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "winapi-x86_64-pc-windows-gnu@0.4.0": {
+      "file": "licences/1eb9fcf3625a38dfb0b8a2a8a2ac8634cf6815e53b83a29d14116bfc59a14ca2.txt",
+      "sha256": "1eb9fcf3625a38dfb0b8a2a8a2ac8634cf6815e53b83a29d14116bfc59a14ca2",
+      "source": "https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-APACHE; https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-MIT",
+      "source_commit": "796a8e6c2971dc2ff1bcff166e6671284f9b5b6b",
+      "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    }
+  }
+}

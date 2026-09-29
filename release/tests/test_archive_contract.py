@@ -195,7 +195,7 @@ class ArchiveContractTests(unittest.TestCase):
             path.unlink()
         for name, content in self.files.items():
             (self.directory / name).write_bytes(content)
-        self.write_receipt(os="windows", arch="x86_64", binary_versions={"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"}, native_identity={"system": "Windows", "machine": "AMD64", "runner": "fixture"})
+        self.write_receipt(os="windows", arch="x86_64", binary_versions={"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"}, native_identity={"system": "Windows", "machine": "AMD64", "runner": "fixture"}, windows_ort={"state": "passed", "source_tag": "v1.24.2", "source_commit": "058787ceead760166e3c50a0a4cba8a833a6f53f", "source_sha256": "a" * 64, "rust_crt": "static", "ort_crt": "static"})
         path = self.root / self.target["archive"]
         result, record = self.invoke("package", path)
         self.assertEqual(result.returncode, 0, record)
