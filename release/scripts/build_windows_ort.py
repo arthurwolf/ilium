@@ -119,13 +119,14 @@ def same_windows_path(left, right):
 
 
 def select_msvc_compiler(installation, compiler_paths):
+    installation = Path(installation).resolve()
     candidates = []
     for path in compiler_paths:
         candidate = Path(path)
         if not candidate.is_absolute() or not candidate.is_file():
             continue
         resolved = candidate.resolve()
-        if installation not in resolved.parents:
+        if not any(same_windows_path(parent, installation) for parent in resolved.parents):
             continue
         parts = resolved.parts
         indices = [index for index, value in enumerate(parts) if value.casefold() == "msvc"]
