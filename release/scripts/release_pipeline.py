@@ -1022,6 +1022,10 @@ def public_latest_tag():
         if error.code in (522, 530):
             error.close(); return None
         raise HTTPFailure(error.code) from None
+    # GitHub redirects /releases/latest to the releases index when no release
+    # exists yet. That is the safe empty state for a first publication.
+    if final.rstrip('/') == ORIGIN:
+        return None
     prefix = ORIGIN + '/tag/'
     require(final.startswith(prefix) and re.fullmatch(pages.TAG_PATTERN, final[len(prefix):]), 'public latest redirect does not identify one safe release tag')
     return final[len(prefix):]
