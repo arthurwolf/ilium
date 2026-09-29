@@ -1,0 +1,1 @@
+Fixture starts a branch-bound Codex pane.

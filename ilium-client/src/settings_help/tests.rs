@@ -11,7 +11,7 @@ fn catalog_covers_every_settings_help_id_once_with_complete_content() {
         .collect::<BTreeSet<_>>();
     let expected = expected_ids();
 
-    assert_eq!(topics.len(), 205, "catalog topic count");
+    assert_eq!(topics.len(), expected.len(), "catalog topic count");
     assert_eq!(ids.len(), topics.len(), "catalog IDs must be unique");
     assert_eq!(ids, expected, "catalog must cover the reviewed inventory");
     for topic in topics {
@@ -105,6 +105,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 25);
+    add_range(&mut ids, "AN", 1, 14);
     add_range(&mut ids, "AM", 1, 21);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);

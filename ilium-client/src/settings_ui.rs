@@ -316,6 +316,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             .lines;
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::Animations => {
+            crate::animation_settings_ui::render(frame, layout.content_area, app, state)
+        }
         SettingsTab::Terminal => render_scrollable(
             frame,
             layout.content_area,
@@ -445,6 +448,22 @@ pub fn settings_help_anchors(
     };
     match state.tab {
         SettingsTab::About => {}
+        SettingsTab::Animations => {
+            for row in 0..crate::animation_settings_ui::ROW_COUNT {
+                if let Some(y) =
+                    crate::animation_settings_ui::row_y(layout.content_area, row, state.scroll)
+                {
+                    push_help_anchor(
+                        &mut anchors,
+                        layout,
+                        &format!("AN-{:02}", row + 1),
+                        y.saturating_sub(layout.content_area.y),
+                        0,
+                        state.selected_row == row,
+                    );
+                }
+            }
+        }
         SettingsTab::Terminal => {
             for (i, id) in simple_rows("TERM-", 2) {
                 push_help_anchor(
@@ -1008,7 +1027,11 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 /// height -- callers (`crate::keys`/`crate::mouse`) clamp scroll-wheel and
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
+    if tab == SettingsTab::Animations {
+        return crate::animation_settings_ui::max_scroll(content_area);
+    }
     let total_lines = match tab {
+        SettingsTab::Animations => unreachable!("handled by animation geometry"),
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,

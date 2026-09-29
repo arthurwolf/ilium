@@ -1214,13 +1214,16 @@ mod tests {
     #[tokio::test]
     async fn api_default_path_uses_main_checkout_even_from_a_linked_project() {
         let temporary = TempDir::new().unwrap();
-        let main = temporary.path().join("main");
+        let fixture_root = paths::canonicalize(temporary.path()).unwrap();
+        let main = fixture_root.join("main");
         std::fs::create_dir(&main).unwrap();
         git(&main, &["init", "-q", "-b", "main"]);
         git(&main, &["config", "user.name", "Ilium Test"]);
         git(&main, &["config", "user.email", "ilium@example.invalid"]);
         git(&main, &["commit", "-q", "--allow-empty", "-m", "initial"]);
-        let linked = temporary.path().join("linked");
+        let linked = paths::canonicalize(temporary.path())
+            .unwrap()
+            .join("linked");
         ilium_git::create_worktree(&main, &linked, "agent/old", "main")
             .await
             .unwrap();
@@ -1232,7 +1235,9 @@ mod tests {
             WorkspaceCreateSpec::New {
                 branch: "agent/new-task".into(),
                 base_ref: "main".into(),
-                path: temporary.path().join("main.worktrees/agent-new-task"),
+                path: paths::canonicalize(temporary.path())
+                    .unwrap()
+                    .join("main.worktrees/agent-new-task"),
             }
         );
     }
@@ -1240,14 +1245,17 @@ mod tests {
     #[tokio::test]
     async fn restore_accepts_only_the_saved_registered_worktree() {
         let temporary = TempDir::new().unwrap();
-        let main = &temporary.path().join("main");
+        let fixture_root = paths::canonicalize(temporary.path()).unwrap();
+        let main = &fixture_root.join("main");
         std::fs::create_dir(main).unwrap();
         git(main, &["init", "-q", "-b", "main"]);
         git(main, &["config", "user.name", "Ilium Test"]);
         git(main, &["config", "user.email", "ilium@example.invalid"]);
         git(main, &["commit", "-q", "--allow-empty", "-m", "initial"]);
 
-        let linked = temporary.path().join("linked");
+        let linked = paths::canonicalize(temporary.path())
+            .unwrap()
+            .join("linked");
         ilium_git::create_worktree(main, &linked, "agent/restore", "main")
             .await
             .unwrap();

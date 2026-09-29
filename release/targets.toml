@@ -1,0 +1,58 @@
+# The release workflow, installers, packaging and tests consume this manifest.
+# minimum_tested_os identifies the native runner baseline; it is not a public
+# minimum-version claim until the clean-install gate has passed on that runner.
+
+[[target]]
+os = "linux"
+arch = "x86_64"
+rust_target = "x86_64-unknown-linux-gnu"
+runner = "ubuntu-22.04"
+archive = "ilium-linux-x86_64.tar.gz"
+format = "tar.gz"
+executables = ["ilium", "ilium-server"]
+ort_strategy = "upstream-prebuilt"
+minimum_tested_os = "ubuntu-22.04"
+
+[[target]]
+os = "linux"
+arch = "aarch64"
+rust_target = "aarch64-unknown-linux-gnu"
+runner = "ubuntu-22.04-arm"
+archive = "ilium-linux-aarch64.tar.gz"
+format = "tar.gz"
+executables = ["ilium", "ilium-server"]
+ort_strategy = "upstream-prebuilt"
+minimum_tested_os = "ubuntu-22.04-arm"
+
+[[target]]
+os = "windows"
+arch = "x86_64"
+rust_target = "x86_64-pc-windows-msvc"
+runner = "windows-2022"
+archive = "ilium-windows-x86_64.zip"
+format = "zip"
+executables = ["ilium.exe", "ilium-server.exe"]
+ort_strategy = "upstream-prebuilt"
+minimum_tested_os = "windows-2022"
+
+[[target]]
+os = "macos"
+arch = "aarch64"
+rust_target = "aarch64-apple-darwin"
+runner = "macos-15"
+archive = "ilium-macos-aarch64.tar.gz"
+format = "tar.gz"
+executables = ["ilium", "ilium-server"]
+ort_strategy = "upstream-prebuilt"
+minimum_tested_os = "macos-15"
+
+[[target]]
+os = "macos"
+arch = "x86_64"
+rust_target = "x86_64-apple-darwin"
+runner = "macos-15-intel"
+archive = "ilium-macos-x86_64.tar.gz"
+format = "tar.gz"
+executables = ["ilium", "ilium-server"]
+ort_strategy = "pinned-source-build"
+minimum_tested_os = "macos-15-intel"

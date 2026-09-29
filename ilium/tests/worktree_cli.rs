@@ -2,7 +2,9 @@
 //! The only `codex` on the child server's PATH is a test script; this test
 //! never launches an installed agent or connects to a user session.
 
-#![cfg(unix)]
+// This scenario exercises configured setup, whose child-exit supervision
+// currently requires Linux non-reaping process-group observation.
+#![cfg(target_os = "linux")]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -58,7 +60,9 @@ impl IsolatedSession {
             .prefix("iwc")
             .tempdir_in("/tmp")
             .expect("short isolated test root");
-        let project = root.path().join("project");
+        let project = ilium_platform::paths::canonicalize(root.path())
+            .expect("canonical fixture root")
+            .join("project");
         let bin = root.path().join("bin");
         let home = root.path().join("home");
         let data = root.path().join("data");
@@ -231,9 +235,18 @@ impl IsolatedSession {
             .await
             .expect("connect isolated snapshot observer");
         let event = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut tree = None;
             loop {
                 match connection.events.recv().await {
-                    Some(ServerEvent::TreeSnapshot(tree)) => return tree,
+                    Some(ServerEvent::PaneStateSnapshot { tree: snapshot, .. }) => {
+                        tree = Some(snapshot)
+                    }
+                    Some(ServerEvent::TreeSnapshot(snapshot)) if tree.is_none() => {
+                        tree = Some(snapshot)
+                    }
+                    Some(ServerEvent::InitialStateSyncComplete) => {
+                        return tree.expect("initial state includes a tree")
+                    }
                     Some(ServerEvent::Error { message }) => panic!("snapshot error: {message}"),
                     Some(_) => {}
                     None => panic!("server closed before snapshot"),

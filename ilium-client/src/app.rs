@@ -392,6 +392,7 @@ pub enum SettingsTab {
     TextTriggers,
     Icons,
     Appearance,
+    Animations,
     Terminal,
     Editor,
     Session,
@@ -561,8 +562,9 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 20] = [
+    pub const ALL: [SettingsTab; 21] = [
         Self::Appearance,
+        Self::Animations,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Keyboard,
@@ -593,6 +595,7 @@ impl SettingsTab {
             Self::TextTriggers => "Text Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
+            Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
             Self::Session => "Session",
@@ -1688,6 +1691,9 @@ pub struct App {
     pub exit_reason: Option<ClientExitReason>,
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
+    pub animation_settings: crate::background_animation::AnimationSettings,
+    pub animation_frame: crate::background_animation::AnimationFrame,
+    pub animation_preview_frame: std::cell::RefCell<crate::background_animation::AnimationFrame>,
     /// Structural row transitions live beside the render-cache mirror, never
     /// in the authoritative server tree or the IPC protocol.
     pub(crate) tree_transitions: TreeTransitions,
@@ -2110,6 +2116,9 @@ impl App {
             pending_terminal_link: None,
             exit_reason: None,
             started_at,
+            animation_settings: Default::default(),
+            animation_frame: Default::default(),
+            animation_preview_frame: Default::default(),
             tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             requested_pane_sizes: HashMap::new(),
@@ -5802,6 +5811,49 @@ impl App {
         let mut ui = self.ui_settings.clone();
         ui.show_inferred_title_icons = !ui.show_inferred_title_icons;
         self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// An explicitly opened, unobscured demo may animate independently of ambient motion.
+    pub fn is_animation_preview_visible(&self) -> bool {
+        self.modal_stack.is_empty()
+            && matches!(&self.mode, Mode::Settings(state)
+            if state.tab == SettingsTab::Animations && state.icon_picker.is_none() && state.keyboard_picker.is_none())
+    }
+
+    /// Apply only after the project write succeeds; failed saves retain the effective scene.
+    pub fn settings_adjust_animation_row(&mut self, row: usize, direction: i32) {
+        use crate::background_animation::{AnimationKind, DitherMode};
+        let mut settings = self.animation_settings;
+        match row {
+            0..=9 => settings.kind = AnimationKind::ALL[row],
+            10 => settings.enabled = !settings.enabled,
+            11 => {
+                settings.speed_percent = (i32::from(settings.speed_percent)
+                    + direction.signum() * 25)
+                    .clamp(25, 200) as u16
+            }
+            12 => {
+                settings.density_percent = (i32::from(settings.density_percent)
+                    + direction.signum() * 5)
+                    .clamp(25, 100) as u16
+            }
+            13 => {
+                settings.dither = match settings.dither {
+                    DitherMode::Ordered => DitherMode::Stippled,
+                    DitherMode::Stippled => DitherMode::Ordered,
+                }
+            }
+            _ => return,
+        }
+        match crate::project_config::set_animation(&self.session_cwd, settings) {
+            Ok(()) => {
+                self.animation_settings = settings;
+                self.status_message = None;
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Could not save animation settings: {error}"))
+            }
+        }
     }
 
     /// Toggles the durable project-scoped divider preference. Project names,
@@ -9856,6 +9908,7 @@ impl App {
             self.layout.tree_area,
             position,
             self.ui_settings.sidebar_density,
+            self.ui_settings.show_project_separators,
         )
     }
 
@@ -9885,7 +9938,13 @@ impl App {
             self.ui_settings.tree_order,
             self.tree_state.opened(),
         );
-        tree_ui::node_at_position(items, &self.tree_state, self.layout.tree_area, position)
+        tree_ui::node_at_position(
+            items,
+            &self.tree_state,
+            self.layout.tree_area,
+            position,
+            self.ui_settings.show_project_separators,
+        )
     }
 
     /// Consumes the oldest still-pending editor-open request whose
@@ -16512,7 +16571,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Animations);
+        assert_eq!(SettingsTab::Animations.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Keyboard);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);

@@ -1751,38 +1751,23 @@ pub fn row_action_at(
         .then_some(action)
 }
 
-/// Maps a screen line to a flattened item using exactly the same item-height
-/// accounting as the widget. The cache can be queried before the next render,
-/// so `rendered_at` alone would incorrectly refer to the previous frame.
+/// Uses the widget's fresh layout query, including separator rows and the
+/// viewport's fitting/clipping policy. Cached last-render rows can be stale
+/// after expansion, scrolling or a tree update before the next frame.
 fn item_at_position(
     items: &[TreeItem<'static, NodeId>],
     state: &TreeState<NodeId>,
     list: Rect,
     position: Position,
+    show_project_separators: bool,
 ) -> Option<(NodeId, u16, usize)> {
-    if !list.contains(position) {
-        return None;
-    }
-    let mut row = list.y;
-    for flattened in state.flatten(items).iter().skip(state.get_offset()) {
-        let height = u16::try_from(flattened.item.height()).unwrap_or(u16::MAX);
-        if row > list.y && height > list.bottom().saturating_sub(row) {
-            break;
-        }
-        let next_row = row.saturating_add(height);
-        if position.y < next_row {
-            return Some((
-                flattened.identifier.last().copied()?,
-                position.y - row,
-                flattened.depth(),
-            ));
-        }
-        row = next_row;
-        if row >= list.bottom() {
-            break;
-        }
-    }
-    None
+    let (flattened, line) =
+        state.item_at_position(items, list, position, show_project_separators)?;
+    Some((
+        flattened.identifier.last().copied()?,
+        line,
+        flattened.depth(),
+    ))
 }
 
 /// Returns a node only when `position` is on one of the actually visible
@@ -1797,9 +1782,10 @@ pub fn node_at_position(
     state: &TreeState<NodeId>,
     area: Rect,
     position: Position,
+    show_project_separators: bool,
 ) -> Option<TreeNodeHit> {
     let list = list_area(area);
-    let (id, line, _) = item_at_position(items, state, list, position)?;
+    let (id, line, _) = item_at_position(items, state, list, position, show_project_separators)?;
     Some(TreeNodeHit {
         id,
         row: position.y,
@@ -1818,11 +1804,13 @@ pub fn status_slot_at_position(
     area: Rect,
     position: Position,
     density: SidebarDensity,
+    show_project_separators: bool,
 ) -> Option<(NodeId, crate::status_icons::StatusSlot, Position)> {
     use crate::status_icons::{StatusSlot, NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
 
     let list = list_area(area);
-    let (id, line, depth) = item_at_position(items, state, list, position)?;
+    let (id, line, depth) =
+        item_at_position(items, state, list, position, show_project_separators)?;
     if line != 0 {
         return None;
     }
@@ -3749,6 +3737,346 @@ mod tests {
         );
     }
 
+    fn separator_hit_fixture() -> (Tree, [NodeId; 3], [NodeId; 3]) {
+        let mut tree = Tree::new();
+        let mut projects = [ROOT_ID; 3];
+        let mut panes = [ROOT_ID; 3];
+        for index in 0..3 {
+            projects[index] = tree
+                .add_project(PathBuf::from(format!(
+                    "/nonexistent/ilium-separator-hit-{index}"
+                )))
+                .unwrap();
+            panes[index] = tree
+                .add_pane(
+                    projects[index],
+                    format!("shell-{index}"),
+                    ilium_core::PaneContentKind::Terminal,
+                )
+                .unwrap();
+        }
+        tree.set_pane_workspace(
+            panes[1],
+            Some(ilium_core::PaneWorkspace {
+                workspace_id: Some("separator-hit-test".into()),
+                repo_common_dir: PathBuf::from("/nonexistent/ilium-separator-hit-repo/.git"),
+                worktree_root: PathBuf::from("/nonexistent/ilium-separator-hit-worktree"),
+                branch: "agent/separator-hit".into(),
+                base_ref: "main".into(),
+                base_commit: "abcdef0".into(),
+                created_by_ilium: true,
+                created_at_unix: 0,
+            }),
+        )
+        .unwrap();
+        (tree, projects, panes)
+    }
+
+    #[test]
+    fn separator_client_hits_match_literal_rows_status_slots_and_action_anchors() {
+        use crate::status_icons::StatusSlot;
+        let (tree, projects, panes) = separator_hit_fixture();
+        let area = Rect::new(0, 0, 48, 15);
+        let list = list_area(area);
+        for expanded in [false, true] {
+            for separators in [false, true] {
+                let mut state = TreeState::default();
+                if expanded {
+                    for project in projects {
+                        state.open(vec![project]);
+                    }
+                }
+                let buffer = render_tree_buffer_in_area(
+                    &tree,
+                    &mut state,
+                    &TreeTransitions::default(),
+                    &HashMap::new(),
+                    0,
+                    area,
+                    separators,
+                );
+                let mut cache = TreeItemCache::default();
+                let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
+                let expected = match (expanded, separators) {
+                    (true, true) => vec![
+                        Some((projects[0], 0)),
+                        Some((panes[0], 0)),
+                        None,
+                        Some((projects[1], 0)),
+                        Some((panes[1], 0)),
+                        Some((panes[1], 1)),
+                        None,
+                        Some((projects[2], 0)),
+                        Some((panes[2], 0)),
+                    ],
+                    (true, false) => vec![
+                        Some((projects[0], 0)),
+                        Some((panes[0], 0)),
+                        Some((projects[1], 0)),
+                        Some((panes[1], 0)),
+                        Some((panes[1], 1)),
+                        Some((projects[2], 0)),
+                        Some((panes[2], 0)),
+                    ],
+                    (false, true) => vec![
+                        Some((projects[0], 0)),
+                        None,
+                        Some((projects[1], 0)),
+                        None,
+                        Some((projects[2], 0)),
+                    ],
+                    (false, false) => vec![
+                        Some((projects[0], 0)),
+                        Some((projects[1], 0)),
+                        Some((projects[2], 0)),
+                    ],
+                };
+                for relative_row in 0..list.height {
+                    let row = list.y + relative_row;
+                    let expected_hit = expected.get(usize::from(relative_row)).copied().flatten();
+                    let hit = node_at_position(
+                        items,
+                        &state,
+                        area,
+                        Position::new(list.x, row),
+                        separators,
+                    );
+                    assert_eq!(
+                        hit.map(|hit| (hit.id, hit.line)),
+                        expected_hit,
+                        "expanded {expanded}, separators {separators}, row {relative_row}"
+                    );
+                    assert_eq!(
+                        state
+                            .rendered_at(Position::new(list.x, row))
+                            .and_then(|path| path.last().copied()),
+                        expected_hit.map(|(id, _)| id)
+                    );
+                    let Some((id, 0)) = expected_hit else {
+                        for column in list.x..list.right() {
+                            assert!(status_slot_at_position(
+                                items,
+                                &state,
+                                area,
+                                Position::new(column, row),
+                                SidebarDensity::default(),
+                                separators
+                            )
+                            .is_none());
+                        }
+                        if expected_hit.is_none() && usize::from(relative_row) < expected.len() {
+                            assert!((list.x..list.right())
+                                .all(|column| buffer[(column, row)].symbol() == "─"));
+                        }
+                        continue;
+                    };
+                    let depth = u16::from(panes.contains(&id));
+                    let padding = match SidebarDensity::default() {
+                        SidebarDensity::Compact => 0,
+                        SidebarDensity::Standard => 1,
+                        SidebarDensity::Comfortable => 2,
+                    };
+                    let label_x = list.x + depth + TREE_EXPAND_SYMBOL_WIDTH + padding;
+                    for (slot, offset) in [
+                        (StatusSlot::Identity, 0),
+                        (StatusSlot::Objective, OBJECTIVE_SLOT_OFFSET),
+                        (StatusSlot::Now, NOW_SLOT_OFFSET),
+                    ] {
+                        let position = Position::new(label_x + offset, row);
+                        assert_eq!(
+                            status_slot_at_position(
+                                items,
+                                &state,
+                                area,
+                                position,
+                                SidebarDensity::default(),
+                                separators
+                            ),
+                            Some((id, slot, position))
+                        );
+                    }
+                    let close_x = list.right() - ROW_ACTION_TOTAL_WIDTH + 3 * ROW_ACTION_WIDTH;
+                    assert_eq!(
+                        row_action_at(
+                            &tree,
+                            id,
+                            area,
+                            hit.unwrap().row,
+                            Position::new(close_x, row),
+                            true
+                        ),
+                        Some(TreeRowAction::Close)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn separator_client_hits_refresh_before_render_after_expansion_scroll_and_selection() {
+        let (tree, projects, panes) = separator_hit_fixture();
+        let area = Rect::new(0, 0, 48, 15);
+        let list = list_area(area);
+        let mut state = TreeState::default();
+        let mut cache = TreeItemCache::default();
+        let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
+        assert_eq!(
+            node_at_position(items, &state, area, Position::new(list.x, list.y + 4), true)
+                .map(|hit| hit.id),
+            Some(projects[2])
+        );
+        let _ = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            true,
+        );
+        for project in projects {
+            state.open(vec![project]);
+        }
+        assert_eq!(
+            node_at_position(items, &state, area, Position::new(list.x, list.y + 4), true)
+                .map(|hit| (hit.id, hit.line)),
+            Some((panes[1], 0))
+        );
+        let _ = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            true,
+        );
+        assert!(state.scroll_down(1));
+        assert_eq!(
+            node_at_position(items, &state, area, Position::new(list.x, list.y), true)
+                .map(|hit| hit.id),
+            Some(panes[0])
+        );
+        assert!(
+            node_at_position(items, &state, area, Position::new(list.x, list.y + 1), true)
+                .is_none()
+        );
+
+        // A pending selection scroll is queried without mutating offset or
+        // consuming the flag; the next renderer must paint the same rows.
+        state.set_item_offset(0);
+        state.select(vec![projects[2], panes[2]]);
+        let short_area = Rect::new(0, 0, 48, 7);
+        let short_list = list_area(short_area);
+        assert_eq!(short_list.height, 3);
+        assert_eq!(
+            node_at_position(
+                items,
+                &state,
+                short_area,
+                Position::new(short_list.x, short_list.y),
+                true
+            )
+            .map(|hit| hit.id),
+            Some(projects[2])
+        );
+        assert_eq!(state.get_offset(), 0);
+        let _ = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            short_area,
+            true,
+        );
+        assert_eq!(
+            state.rendered_at(Position::new(short_list.x, short_list.y)),
+            Some(&[projects[2]][..])
+        );
+        assert_eq!(
+            node_at_position(
+                items,
+                &state,
+                short_area,
+                Position::new(short_list.x, short_list.y + 1),
+                true
+            )
+            .map(|hit| hit.id),
+            Some(panes[2])
+        );
+    }
+
+    #[test]
+    fn separator_client_hits_exclude_unpainted_rows_and_keep_clipped_worktree_lines() {
+        let (tree, projects, panes) = separator_hit_fixture();
+        let mut state = TreeState::default();
+        for project in projects {
+            state.open(vec![project]);
+        }
+        let mut cache = TreeItemCache::default();
+        let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
+        // Project B fits; the two-line agent and its bar do not fit after it.
+        state.set_item_offset(2);
+        let area = Rect::new(0, 0, 48, 7);
+        let list = list_area(area);
+        let buffer = render_tree_buffer_in_area(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            area,
+            true,
+        );
+        assert_eq!(list.height, 3);
+        assert_eq!(
+            node_at_position(items, &state, area, Position::new(list.x, list.y), true)
+                .map(|hit| hit.id),
+            Some(projects[1])
+        );
+        for relative_row in [1, 2] {
+            let position = Position::new(list.x, list.y + relative_row);
+            assert!(node_at_position(items, &state, area, position, true).is_none());
+            // The rightmost cell belongs to the decorative scrollbar.
+            assert!((list.x..list.right().saturating_sub(1)).all(|column| buffer
+                [(column, position.y)]
+                .symbol()
+                .trim()
+                .is_empty()));
+        }
+        // Scrolling that same agent to the top permits clipping its first
+        // line in a one-line viewport and its branch in a two-line viewport.
+        for height in [1, 2] {
+            state.set_item_offset(3);
+            let clipped_area = Rect::new(0, 0, 48, height + 4);
+            let clipped_list = list_area(clipped_area);
+            assert_eq!(clipped_list.height, height);
+            let _ = render_tree_buffer_in_area(
+                &tree,
+                &mut state,
+                &TreeTransitions::default(),
+                &HashMap::new(),
+                0,
+                clipped_area,
+                true,
+            );
+            for line in 0..height {
+                assert_eq!(
+                    node_at_position(
+                        items,
+                        &state,
+                        clipped_area,
+                        Position::new(clipped_list.x, clipped_list.y + line),
+                        true
+                    )
+                    .map(|hit| (hit.id, hit.line)),
+                    Some((panes[1], line))
+                );
+            }
+        }
+    }
+
     #[test]
     fn mixed_tree_rows_hit_both_worktree_lines_and_select_both() {
         let mut tree = Tree::new();
@@ -3874,7 +4202,13 @@ mod tests {
             },
         );
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y + 1)),
+            node_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(list.x, list.y + 1),
+                false
+            ),
             Some(TreeNodeHit {
                 id: pane,
                 row: list.y + 1,
@@ -3882,7 +4216,13 @@ mod tests {
             })
         );
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y + 2)),
+            node_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(list.x, list.y + 2),
+                false
+            ),
             Some(TreeNodeHit {
                 id: pane,
                 row: list.y + 2,
@@ -3890,7 +4230,13 @@ mod tests {
             })
         );
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y + 3)),
+            node_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(list.x, list.y + 3),
+                false
+            ),
             Some(TreeNodeHit {
                 id: tail,
                 row: list.y + 3,
@@ -3904,6 +4250,7 @@ mod tests {
                 area,
                 Position::new(x, list.y + 1),
                 SidebarDensity::Standard,
+                false,
             )
             .filter(|(id, slot, _)| {
                 *id == pane && *slot == crate::status_icons::StatusSlot::Identity
@@ -3918,7 +4265,8 @@ mod tests {
             &state,
             area,
             Position::new(list.x + 6, list.y + 2),
-            SidebarDensity::Standard
+            SidebarDensity::Standard,
+            false,
         )
         .is_none());
     }
@@ -4611,7 +4959,7 @@ mod tests {
         );
 
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y)),
+            node_at_position(&items, &state, area, Position::new(list.x, list.y), false),
             Some(TreeNodeHit {
                 id: group,
                 row: list.y,
@@ -4619,7 +4967,13 @@ mod tests {
             })
         );
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y + 1)),
+            node_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(list.x, list.y + 1),
+                false
+            ),
             Some(TreeNodeHit {
                 id: pane,
                 row: list.y + 1,
@@ -4627,7 +4981,13 @@ mod tests {
             })
         );
         assert_eq!(
-            node_at_position(&items, &state, area, Position::new(list.x, list.y + 2)),
+            node_at_position(
+                &items,
+                &state,
+                area,
+                Position::new(list.x, list.y + 2),
+                false
+            ),
             None
         );
     }

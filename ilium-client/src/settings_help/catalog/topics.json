@@ -253,6 +253,174 @@
     ]
   },
   {
+    "id": "AN-01",
+    "title": "Wave washing up sand",
+    "explanation": "A slow diagonal wash leaves sparse foam and briefly darkens wet sand. Changes save immediately to this project.",
+    "specimen": "Wave washing up sand\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Wave washing up sand\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-02",
+    "title": "Moon over moving water",
+    "explanation": "A stationary moon reflects in coherent moving horizontal fragments. Changes save immediately to this project.",
+    "specimen": "Moon over moving water\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Moon over moving water\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-03",
+    "title": "Clouds over a sleeping ridge",
+    "explanation": "Cloud masses and valley mist drift over stationary mountain silhouettes. Changes save immediately to this project.",
+    "specimen": "Clouds over a sleeping ridge\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Clouds over a sleeping ridge\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-04",
+    "title": "Hillside brushed by wind",
+    "explanation": "Broad gusts bend rooted grass together across a rounded hillside. Changes save immediately to this project.",
+    "specimen": "Hillside brushed by wind\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Hillside brushed by wind\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-05",
+    "title": "Steam above a tea cup",
+    "explanation": "Sparse curling steam rises above a stationary cup. Changes save immediately to this project.",
+    "specimen": "Steam above a tea cup\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Steam above a tea cup\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-06",
+    "title": "Kelp in a slow current",
+    "explanation": "Rooted kelp follows slow currents with greater motion near its tips. Changes save immediately to this project.",
+    "specimen": "Kelp in a slow current\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Kelp in a slow current\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-07",
+    "title": "Water caustics on stone",
+    "explanation": "A stylized web of light moves across stationary rounded stones. Changes save immediately to this project.",
+    "specimen": "Water caustics on stone\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Water caustics on stone\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-08",
+    "title": "Metaballs becoming cloudlets",
+    "explanation": "Rounded field sources drift, merge through bridges, and separate. Changes save immediately to this project.",
+    "specimen": "Metaballs becoming cloudlets\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Metaballs becoming cloudlets\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-09",
+    "title": "Two gentle wave sources",
+    "explanation": "Two broad radial wave fields overlap in drifting contours. Changes save immediately to this project.",
+    "specimen": "Two gentle wave sources\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Two gentle wave sources\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-10",
+    "title": "Wireframe mountain breathing",
+    "explanation": "A sparse perspective mountain mesh deforms gently beneath a fixed horizon. Changes save immediately to this project.",
+    "specimen": "Wireframe mountain breathing\n\n● Selected scene → live preview",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Wireframe mountain breathing\n\n● Selected scene → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-11",
+    "title": "Background animation",
+    "explanation": "Enable a screen-wide Braille scene behind eligible blank cells. Changes save immediately to this project.",
+    "specimen": "Background animation\n\nBackground ‹ Off / On ›",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Background animation\n\nBackground ‹ Off / On ›"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-12",
+    "title": "Animation speed",
+    "explanation": "Change the speed of the selected procedural scene from 25% to 200%. Changes save immediately to this project.",
+    "specimen": "Animation speed\n\nSpeed ‹ 25% … 200% ›",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Animation speed\n\nSpeed ‹ 25% … 200% ›"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-13",
+    "title": "Animation density",
+    "explanation": "Change the visible dot density from 25% to 100%. Changes save immediately to this project.",
+    "specimen": "Animation density\n\nDensity ‹ 25% … 100% ›",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Animation density\n\nDensity ‹ 25% … 100% ›"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-14",
+    "title": "Animation dithering",
+    "explanation": "Choose a repeating ordered pattern or stable irregular stippling. Changes save immediately to this project.",
+    "specimen": "Animation dithering\n\nDither ‹ Ordered / Stippled ›",
+    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Animation dithering\n\nDither ‹ Ordered / Stippled ›"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
     "id": "AP-01",
     "title": "Left panel sizing mode",
     "explanation": "“Choose whether the left panel keeps one width, changes with focus, or changes with focus only on narrower terminals.”",

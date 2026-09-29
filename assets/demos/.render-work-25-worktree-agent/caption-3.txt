@@ -1,0 +1,1 @@
+Codex-shaped fixture. No provider call.

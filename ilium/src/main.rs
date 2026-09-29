@@ -982,9 +982,17 @@ async fn run_new_workspace_pane(
     )
     .await?;
     let attach = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+        let mut initial_tree = None;
         while let Some(event) = connection.events.recv().await {
             match event {
-                ServerEvent::TreeSnapshot(_) => return Ok(()),
+                ServerEvent::PaneStateSnapshot { tree, .. } => initial_tree = Some(tree),
+                ServerEvent::TreeSnapshot(tree) if initial_tree.is_none() => {
+                    initial_tree = Some(tree)
+                }
+                ServerEvent::InitialStateSyncComplete => {
+                    return initial_tree
+                        .ok_or_else(|| "session attach completed without a tree".to_string());
+                }
                 ServerEvent::Error { message } => return Err(message),
                 _ => {}
             }
@@ -994,7 +1002,7 @@ async fn run_new_workspace_pane(
     .await
     .map_err(|_| CliError::ServerReportedError("session attach timed out".into()))?
     .map_err(CliError::ServerReportedError);
-    attach?;
+    let _initial_tree = attach?;
 
     println!(
         "{{\"type\":\"progress\",\"request_id\":{request_id},\"stage\":\"querying-repository\"}}"

@@ -714,7 +714,8 @@ mod restore_tests {
         let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "missing-worktree-test".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("snapshot.json"),
             socket_path: directory.path().join("session.sock"),
@@ -726,7 +727,9 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        let project_root = directory.path().join("nested-project");
+        let project_root = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical fixture root")
+            .join("nested-project");
         std::fs::create_dir(&project_root).unwrap();
         let mut tree = Tree::new();
         let project = tree.add_project(project_root.clone()).unwrap();
@@ -905,9 +908,10 @@ mod restore_tests {
     #[tokio::test]
     async fn startup_respawns_panes_from_a_crash_recovery_snapshot() {
         let dir = tempfile::tempdir().expect("create tempdir");
-        let socket_path = dir.path().join("restore-test.sock");
-        let snapshot_path = dir
-            .path()
+        let project_dir = ilium_platform::paths::canonicalize(dir.path())
+            .expect("canonical restore fixture directory");
+        let socket_path = project_dir.join("restore-test.sock");
+        let snapshot_path = project_dir
             .join(".ilium")
             .join("sessions")
             .join("restore-test.json");
@@ -921,7 +925,7 @@ mod restore_tests {
         // `ilium-pty/tests/pty_integration.rs`'s own `cat` tests.
         let mut tree = Tree::new();
         let project = tree
-            .ensure_launch_project(dir.path().to_path_buf())
+            .ensure_launch_project(ilium_platform::paths::canonicalize(dir.path()).unwrap())
             .expect("snapshot fixture accepts its launch project");
         let group = tree.add_group(project, "restored").unwrap();
         let terminal_pane_id = tree
@@ -982,7 +986,8 @@ mod restore_tests {
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
             ready_log_metadata: None,
-            session_cwd: dir.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
             home_dir: dir.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
@@ -1163,7 +1168,8 @@ mod restore_tests {
         let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "orphan-test".to_string(),
-            session_cwd: dir.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("orphan-test.snapshot.json"),
             socket_path: dir.path().join("orphan-test.sock"),
@@ -1241,7 +1247,8 @@ mod restore_tests {
         let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "collision-test".to_string(),
-            session_cwd: dir.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("collision-test.snapshot.json"),
             socket_path: dir.path().join("collision-test.sock"),
@@ -1347,7 +1354,8 @@ mod restore_tests {
         let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "new-pane-race-test".to_string(),
-            session_cwd: dir.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
             home_dir: dir.path().to_path_buf(),
             snapshot_path: dir.path().join("new-pane-race-test.snapshot.json"),
             socket_path: dir.path().join("new-pane-race-test.sock"),
@@ -1414,7 +1422,8 @@ mod restore_tests {
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
             ready_log_metadata: None,
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
@@ -1485,7 +1494,8 @@ mod socket_tests {
             socket_path,
             snapshot_path: directory.path().join("session.snapshot.json"),
             ready_log_metadata,
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),

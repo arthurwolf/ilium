@@ -188,8 +188,9 @@ fn real_shell() -> (String, &'static str) {
 fn run_record_submitted_prompt(transcript_path: &std::path::Path) {
     std::fs::write(transcript_path, "STARTED")
         .unwrap_or_else(|error| panic!("fixture recording its start: {error}"));
-    // The leading spaces match the composer shape `ilium-detect` looks for.
-    emit("  send a message\r\n");
+    // Keep the cursor in Codex's visibly empty input cell so the real
+    // readiness boundary can safely submit the initial prompt.
+    emit("› ");
     if let Some(line) = read_submitted_line() {
         std::fs::write(transcript_path, line)
             .unwrap_or_else(|error| panic!("fixture recording the submitted prompt: {error}"));

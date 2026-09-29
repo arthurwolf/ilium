@@ -1823,8 +1823,27 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             && app.inference_settings.title_style
                                 == ilium_inference::TitleStyle::Summarization,
                     );
+                    if tab == crate::app::SettingsTab::Animations {
+                        state.selected_row = crate::background_animation::AnimationKind::ALL
+                            .iter()
+                            .position(|kind| *kind == app.animation_settings.kind)
+                            .unwrap_or(0);
+                        state.scroll = crate::animation_settings_ui::scroll_for_selection(
+                            layout.content_area,
+                            state.selected_row,
+                            0,
+                        );
+                    } else {
+                        state.scroll = 0;
+                    }
                     state.trigger_action_cursor = 0;
-                    state.scroll = 0;
+                }
+            } else if state.tab == crate::app::SettingsTab::Animations {
+                if let Some((row, direction)) =
+                    crate::animation_settings_ui::hit(layout.content_area, state.scroll, position)
+                {
+                    state.selected_row = row;
+                    app.settings_adjust_animation_row(row, direction);
                 }
             } else if state.tab == crate::app::SettingsTab::Setup {
                 if let Some(index) = crate::settings_ui::setup_content_hit(
@@ -3140,6 +3159,95 @@ mod row_action_click_tests {
         let mut app = App::new("test-session".to_string(), std::env::temp_dir());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
         app
+    }
+
+    #[test]
+    fn project_separator_mouse_clicks_select_the_rendered_entry() {
+        let mut app = test_app();
+        app.ui_settings.show_project_separators = true;
+        app.ui_settings.show_tree_row_management_controls = false;
+        let mut panes = Vec::new();
+        for index in 0..3 {
+            let project = app
+                .tree
+                .add_project(std::path::PathBuf::from(format!(
+                    "/nonexistent/ilium-separator-regression-{index}"
+                )))
+                .unwrap();
+            let pane = app
+                .tree
+                .add_pane(
+                    project,
+                    format!("shell-{index}"),
+                    ilium_core::PaneContentKind::Terminal,
+                )
+                .unwrap();
+            app.panes.insert(
+                pane,
+                crate::app::PaneRuntime::Terminal(Box::new(
+                    crate::terminal_view::TerminalView::new(24, 80),
+                )),
+            );
+            app.tree_state.open(vec![project]);
+            panes.push(pane);
+        }
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let list = tree_ui::list_area(app.layout.tree_area);
+        // Project, pane, bar; project, pane, bar; project, pane.
+        for (offset, expected) in [(4, panes[1]), (7, panes[2])] {
+            let position = Position::new(list.x + 1, list.y + offset);
+            let row: String = (list.x..list.right())
+                .map(|x| terminal.backend().buffer()[(x, position.y)].symbol())
+                .collect();
+            assert!(
+                row.contains(if offset == 4 { "shell-1" } else { "shell-2" }),
+                "fixture row: {row}"
+            );
+            assert_eq!(
+                tree_ui::row_action_at(
+                    &app.tree,
+                    expected,
+                    app.layout.tree_area,
+                    position.y,
+                    position,
+                    false
+                ),
+                None,
+                "entry click must be outside the row action strip",
+            );
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: position.x,
+                    row: position.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            assert_eq!(
+                app.selected_node_id(),
+                Some(expected),
+                "clicked row {offset}"
+            );
+            assert_eq!(app.active_pane_id(), Some(expected));
+        }
+        let selected = app.selected_node_id();
+        for offset in [2, 5] {
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: list.x + 1,
+                    row: list.y + offset,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            assert_eq!(app.selected_node_id(), selected, "bar must be inert");
+        }
     }
 
     #[test]

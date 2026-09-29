@@ -63,7 +63,7 @@ use ilium_server::SoundPlayer;
 use ilium_test_fixtures::{install, FixtureBehavior};
 
 mod common;
-use common::{expect_event, TestServer};
+use common::{expect_event, read_initial_state, TestServer};
 
 /// How long the fake `codex` script prints the `"esc to interrupt"`
 /// marker before switching to its idle phase. Long enough to comfortably
@@ -183,10 +183,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     )
     .await
     .expect("attach to the live focus-acknowledgement session");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -199,10 +196,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     .await
     .expect("start the live finished fake Codex agent");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -233,10 +227,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     )
     .await
     .expect("attach the observer client before completion");
-    let _ = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut observer, Duration::from_secs(5)).await;
 
     // Only now: the fixture holds its working state until this marker exists,
     // so the working status above cannot have been missed between polls.
@@ -354,13 +345,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     )
     .await
     .expect("write Attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::UpdateAgentDebugMenu { enabled: true },
@@ -398,10 +383,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     .await
     .expect("write NewPane request");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -869,13 +851,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("write Attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     // Turns the server's own session-discovery reasoning into broadcast debug
     // entries. Without it a discovery that resolves nothing is indistinguishable
     // from one that never ran, because a decision is only recorded when the
@@ -907,10 +883,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("write NewPane request");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -1049,20 +1022,12 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("request authoritative tree after the stale clear result");
-    let tree_after_stale_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
-    let ServerEvent::PaneStateSnapshot {
-        tree: tree_after_stale_clear,
-        ..
-    } = tree_after_stale_clear
-    else {
-        unreachable!("reattach must include the authoritative tree and detector evidence");
-    };
+    let (tree_after_stale_clear, observed) =
+        read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(matches!(
+        observed.last(),
+        Some(ServerEvent::InitialStateSyncComplete)
+    ));
     assert_eq!(tree_after_stale_clear.get(pane_id).unwrap().name, "<new>");
     assert_eq!(
         tree_after_stale_clear.get(pane_id).unwrap().short_name,
@@ -1134,20 +1099,12 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("request authoritative tree after stale title");
-    let authoritative_tree = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
-    let ServerEvent::PaneStateSnapshot {
-        tree: authoritative_tree,
-        ..
-    } = authoritative_tree
-    else {
-        unreachable!("reattach must include the authoritative tree and detector evidence");
-    };
+    let (authoritative_tree, observed) =
+        read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(matches!(
+        observed.last(),
+        Some(ServerEvent::InitialStateSyncComplete)
+    ));
     assert_eq!(authoritative_tree.get(pane_id).unwrap().name, "<new>");
 
     write_frame(&mut client, &ClientRequest::KillSession)
@@ -1192,13 +1149,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("write Attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     let command_line = format!("{} resume {resumed_session_id}", fake_codex_path.display());
     write_frame(
@@ -1212,10 +1163,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("write NewPane request");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -1297,13 +1245,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
@@ -1315,10 +1257,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
     .await
     .unwrap();
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -1496,13 +1435,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     )
     .await
     .expect("write Attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -1519,10 +1452,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     .await
     .expect("write NewPane request");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -1586,13 +1516,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     )
     .await
     .expect("write Attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -1610,10 +1534,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     .await
     .expect("write NewPane request");
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(_) | ServerEvent::PaneStateSnapshot { .. }
-        )
+        matches!(event, ServerEvent::TreeSnapshot(_))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree) = event else {
@@ -1932,10 +1853,7 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
     )
     .await
     .expect("attach to the auto-resume-prompt session");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,

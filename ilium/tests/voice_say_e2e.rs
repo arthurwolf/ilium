@@ -413,11 +413,20 @@ async fn first_pane_id(dirs: &IsolatedDirs, project_dir: &Path) -> NodeId {
         .await
         .expect("connect to the isolated server");
     let pane_id = tokio::time::timeout(WAIT_TIMEOUT, async {
+        let mut tree = None;
         while let Some(event) = connection.events.recv().await {
-            if let ServerEvent::TreeSnapshot(tree) = event {
-                if let Some(pane) = tree.panes().next() {
-                    return pane.id;
+            match event {
+                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => tree = Some(snapshot),
+                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => tree = Some(snapshot),
+                ServerEvent::InitialStateSyncComplete => {
+                    return tree
+                        .expect("initial state includes a tree")
+                        .panes()
+                        .next()
+                        .expect("initial state includes the receiver pane")
+                        .id;
                 }
+                _ => {}
             }
         }
         panic!("server closed the connection before a tree snapshot with a pane");

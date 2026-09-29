@@ -206,11 +206,7 @@ where
         }
 
         let visible = state.flatten(self.items);
-        let separator_after_indices = if self.subtree_separators {
-            subtree_separator_indices(&visible)
-        } else {
-            HashSet::new()
-        };
+        let separator_after_indices = subtree_separator_indices(&visible, self.subtree_separators);
         state.last_biggest_index = visible.len().saturating_sub(1);
         state
             .last_item_heights
@@ -223,49 +219,10 @@ where
         }
         let available_height = area.height as usize;
 
-        let ensure_index_in_view =
-            if state.ensure_selected_in_view_on_next_render && !state.selected.is_empty() {
-                visible
-                    .iter()
-                    .position(|flattened| flattened.identifier == state.selected)
-            } else {
-                None
-            };
-
-        // Ensure last line is still visible
-        let mut start = state.offset.min(state.last_biggest_index);
-
-        if let Some(ensure_index_in_view) = ensure_index_in_view {
-            start = start.min(ensure_index_in_view);
-        }
-
-        let mut end = start;
-        let mut height = 0;
-        for item_height in state.last_item_heights.iter().skip(start).copied() {
-            if height + item_height > available_height {
-                // A two-line row in a one-line viewport must still paint its
-                // first line and remain an accessible scroll target.
-                if height == 0 {
-                    height = available_height;
-                    end += 1;
-                }
-                break;
-            }
-            height += item_height;
-            end += 1;
-        }
-
-        if let Some(ensure_index_in_view) = ensure_index_in_view {
-            while ensure_index_in_view >= end {
-                height += state.last_item_heights[end].min(available_height);
-                end += 1;
-                while height > available_height {
-                    height =
-                        height.saturating_sub(state.last_item_heights[start].min(available_height));
-                    start += 1;
-                }
-            }
-        }
+        let visible_range =
+            state.visible_range(&visible, &state.last_item_heights, available_height);
+        let start = visible_range.start;
+        let end = visible_range.end;
 
         state.offset = start;
         state.ensure_selected_in_view_on_next_render = false;
@@ -408,8 +365,14 @@ where
 /// Finds each marked item's last currently visible descendant. The
 /// separator belongs to that rendered row, while remaining absent from the
 /// identifier list so it cannot be selected or hit-tested.
-fn subtree_separator_indices<Identifier>(visible: &[Flattened<'_, Identifier>]) -> HashSet<usize> {
+fn subtree_separator_indices<Identifier>(
+    visible: &[Flattened<'_, Identifier>],
+    enabled: bool,
+) -> HashSet<usize> {
     let mut separators = HashSet::new();
+    if !enabled {
+        return separators;
+    }
     for (index, flattened) in visible.iter().enumerate() {
         if !flattened.item.separator_after_subtree {
             continue;
@@ -570,6 +533,204 @@ mod render_tests {
             state.rendered_rows().next().map(|(_, _, height)| height),
             Some(1)
         );
+    }
+
+    fn separated_query_items() -> Vec<TreeItem<'static, &'static str>> {
+        vec![
+            TreeItem::new(
+                "project-a",
+                "Project A",
+                vec![TreeItem::new_leaf("pane-a", "Pane A\nbranch-a")],
+            )
+            .unwrap()
+            .separator_after_subtree(),
+            TreeItem::new(
+                "project-b",
+                "Project B",
+                vec![TreeItem::new_leaf("pane-b", "Pane B")],
+            )
+            .unwrap()
+            .separator_after_subtree(),
+            TreeItem::new_leaf("project-c", "Project C"),
+        ]
+    }
+
+    fn query_hit(
+        items: &[TreeItem<'static, &'static str>],
+        state: &TreeState<&'static str>,
+        area: Rect,
+        relative_row: u16,
+        separators: bool,
+    ) -> Option<(Vec<&'static str>, u16)> {
+        state
+            .item_at_position(
+                items,
+                area,
+                Position::new(area.x, area.y + relative_row),
+                separators,
+            )
+            .map(|(flattened, line)| (flattened.identifier, line))
+    }
+
+    #[test]
+    fn fresh_query_counts_two_bars_and_preserves_multiline_offsets() {
+        let items = separated_query_items();
+        let area = Rect::new(4, 7, 20, 8);
+        let mut state = TreeState::default();
+        state.open(vec!["project-a"]);
+        state.open(vec!["project-b"]);
+        let expected = [
+            Some((vec!["project-a"], 0)),
+            Some((vec!["project-a", "pane-a"], 0)),
+            Some((vec!["project-a", "pane-a"], 1)),
+            None,
+            Some((vec!["project-b"], 0)),
+            Some((vec!["project-b", "pane-b"], 0)),
+            None,
+            Some((vec!["project-c"], 0)),
+        ];
+        for (relative_row, expected_hit) in (0..area.height).zip(expected) {
+            assert_eq!(
+                query_hit(&items, &state, area, relative_row, true),
+                expected_hit
+            );
+        }
+        let mut buffer = Buffer::empty(area);
+        StatefulWidget::render(
+            Tree::new(&items).unwrap().subtree_separators(true),
+            area,
+            &mut buffer,
+            &mut state,
+        );
+        assert_eq!(buffer[(area.x, area.y + 3)].symbol(), "─");
+        assert_eq!(buffer[(area.x, area.y + 6)].symbol(), "─");
+        for relative_row in [3, 6] {
+            assert!(!state.click_at(Position::new(area.x, area.y + relative_row)));
+        }
+    }
+
+    #[test]
+    fn fresh_query_rejects_nonfitting_items_and_clips_only_the_first_item() {
+        let items = separated_query_items();
+        let mut state = TreeState::default();
+        state.open(vec!["project-a"]);
+        state.open(vec!["project-b"]);
+        // Pane A's text would fit in the remaining two lines, but its
+        // attached bar would not. The renderer leaves both lines blank.
+        let area = Rect::new(4, 7, 20, 3);
+        assert_eq!(
+            query_hit(&items, &state, area, 0, true),
+            Some((vec!["project-a"], 0))
+        );
+        assert_eq!(query_hit(&items, &state, area, 1, true), None);
+        assert_eq!(query_hit(&items, &state, area, 2, true), None);
+        assert_eq!(
+            query_hit(&items, &state, area, 2, false),
+            Some((vec!["project-a", "pane-a"], 1))
+        );
+
+        state.set_item_offset(1);
+        let short_area = Rect::new(4, 7, 20, 1);
+        assert_eq!(
+            query_hit(&items, &state, short_area, 0, true),
+            Some((vec!["project-a", "pane-a"], 0))
+        );
+        let mut buffer = Buffer::empty(short_area);
+        StatefulWidget::render(
+            Tree::new(&items).unwrap().subtree_separators(true),
+            short_area,
+            &mut buffer,
+            &mut state,
+        );
+        assert_eq!(
+            state.rendered_rows().next().map(|(_, _, height)| height),
+            Some(1)
+        );
+        assert!(
+            state
+                .item_at_position(&items, short_area, Position::new(4, 8), true)
+                .is_none()
+        );
+        assert!(
+            state
+                .item_at_position(&items, Rect::ZERO, Position::new(0, 0), true)
+                .is_none()
+        );
+        assert!(
+            state
+                .item_at_position(&[], area, Position::new(4, 7), true)
+                .is_none()
+        );
+    }
+
+    fn assert_fresh_query_matches_render(
+        items: &[TreeItem<'static, &'static str>],
+        state: &mut TreeState<&'static str>,
+        area: Rect,
+        separators: bool,
+    ) {
+        let before_render: Vec<_> = (0..area.height)
+            .map(|relative_row| query_hit(items, state, area, relative_row, separators))
+            .collect();
+        let mut buffer = Buffer::empty(area);
+        StatefulWidget::render(
+            Tree::new(items).unwrap().subtree_separators(separators),
+            area,
+            &mut buffer,
+            state,
+        );
+        for (relative_row, fresh_hit) in (0..area.height).zip(before_render) {
+            let row = area.y + relative_row;
+            let rendered_hit = state
+                .rendered_rows()
+                .find_map(|(identifier, first_row, height)| {
+                    (row >= first_row && row < first_row.saturating_add(height))
+                        .then(|| (identifier.to_vec(), row - first_row))
+                });
+            assert_eq!(
+                fresh_hit,
+                rendered_hit,
+                "row {relative_row}, offset {}, height {}, separators {separators}",
+                state.get_offset(),
+                area.height
+            );
+            assert_eq!(
+                query_hit(items, state, area, relative_row, separators),
+                rendered_hit
+            );
+        }
+    }
+
+    #[test]
+    fn fresh_query_matches_render_after_expansion_offsets_and_pending_selection_scroll() {
+        let items = separated_query_items();
+        for separators in [false, true] {
+            for (open_a, open_b) in [(false, false), (true, false), (false, true), (true, true)] {
+                for (height, offset) in
+                    (1..=8).flat_map(|height| (0..=7).map(move |offset| (height, offset)))
+                {
+                    for pending_selection in [false, true] {
+                        let mut state = TreeState::default();
+                        if open_a {
+                            state.open(vec!["project-a"]);
+                        }
+                        if open_b {
+                            state.open(vec!["project-b"]);
+                        }
+                        state.set_item_offset(offset);
+                        if pending_selection {
+                            state.select(vec!["project-c"]);
+                        }
+                        assert_fresh_query_matches_render(
+                            &items,
+                            &mut state,
+                            Rect::new(4, 7, 20, height),
+                            separators,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

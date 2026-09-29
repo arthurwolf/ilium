@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "state": "blocked",
+  "publication_allowed": false,
+  "target": "x86_64-pc-windows-msvc",
+  "files": [],
+  "system_libraries": [],
+  "unresolved_evidence": [
+    "Native candidate PE import closure from both executables and every recursively bundled DLL",
+    "Review of exact non-system DLL bytes, versions, redistribution rights and licence source bytes",
+    "Native Windows candidate runtime and installed-pair acceptance"
+  ]
+}

@@ -36,8 +36,13 @@ pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
 pub mod agent_toolbar;
+mod animation_settings_ui;
 pub mod app;
 pub mod ascii_chart;
+#[cfg(test)]
+mod background_acceptance;
+pub mod background_animation;
+pub mod background_composition;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
@@ -520,6 +525,7 @@ async fn run_inner(
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
             app.ui_settings.show_project_separators = project_config.show_project_separators;
+            app.animation_settings = project_config.animation.normalized();
         }
         Err(error) => {
             tracing::warn!(%error, "failed to load project-scoped UI settings");
@@ -639,6 +645,7 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
+    let mut last_animation_frame_bucket = None;
     let mut last_recorded_status_message = None;
     let mut last_recorded_surface = None;
     let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
@@ -656,6 +663,12 @@ async fn run_inner(
             .display_tick_interval(&app.reset_planning_settings)
         {
             tick_delay = tick_delay.min(interval);
+        }
+        if let Some(delay) = crate::background_composition::animation_frame_delay(
+            &app,
+            now.saturating_duration_since(app.started_at),
+        ) {
+            tick_delay = tick_delay.min(delay);
         }
 
         tokio::select! {
@@ -887,14 +900,24 @@ async fn run_inner(
             &mut last_recorded_status_message,
         );
 
+        // Check every branch so ready PTY/input channels cannot postpone a due frame.
+        let animation_elapsed = crate::background_composition::quantized_elapsed(
+            Instant::now().saturating_duration_since(app.started_at),
+        );
+        let animation_frame_bucket =
+            crate::background_composition::animation_frame_bucket(&app, animation_elapsed);
+        if animation_frame_bucket != last_animation_frame_bucket {
+            needs_redraw = true;
+        }
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         if needs_redraw && can_draw {
             terminal
-                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .draw(|frame| crate::ui::draw_at(frame, &mut app, animation_elapsed))
                 .map_err(ClientError::TerminalSetup)?;
             needs_redraw = false;
             needs_immediate_redraw = false;
             last_draw_at = Instant::now();
+            last_animation_frame_bucket = animation_frame_bucket;
         }
     }
     reset_monitor.abort();

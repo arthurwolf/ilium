@@ -4,7 +4,7 @@
 //! active. It consumes the shared animated `App::layout`; everything it
 //! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ilium_core::{AgentClass, AgentProvider, NodeId, NodeKind, PaneStatus, ROOT_ID};
 use ratatui::buffer::{Buffer, CellDiffOption};
@@ -33,10 +33,17 @@ use crate::{
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let elapsed = app.started_at.elapsed();
+    draw_at(frame, app, elapsed);
+}
+
+/// Share the event loop's sampled animation time while retaining the public renderer.
+pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     let area = frame.area();
     let layout = app.layout;
 
     draw_base_layer(frame, area, app);
+    crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
     draw_voice_control(frame, layout.voice_control_area, app);
     if app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
         draw_status_tooltip(frame, app);

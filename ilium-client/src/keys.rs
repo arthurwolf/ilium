@@ -2279,6 +2279,27 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Animations => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+            if state.selected_row < 10 {
+                app.settings_adjust_animation_row(state.selected_row, 1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Animations => {
+            state.selected_row =
+                (state.selected_row + 1).min(crate::animation_settings_ui::ROW_COUNT - 1);
+            if state.selected_row < 10 {
+                app.settings_adjust_animation_row(state.selected_row, 1);
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Animations => {
+            app.settings_adjust_animation_row(state.selected_row, -1);
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Animations =>
+        {
+            app.settings_adjust_animation_row(state.selected_row, 1);
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Setup => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -2844,7 +2865,20 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         _ => {}
     }
 
+    if state.tab == SettingsTab::Animations && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+        state.selected_row = crate::background_animation::AnimationKind::ALL
+            .iter()
+            .position(|kind| *kind == app.animation_settings.kind)
+            .unwrap_or(0);
+    }
     let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+    if state.tab == SettingsTab::Animations {
+        state.scroll = crate::animation_settings_ui::scroll_for_selection(
+            content_area,
+            state.selected_row,
+            state.scroll,
+        );
+    }
     if state.tab == SettingsTab::Triggers {
         state.scroll = crate::trigger_settings_ui::scroll_for_selection(
             app,

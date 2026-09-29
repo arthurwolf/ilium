@@ -32,12 +32,26 @@ pub struct ProjectConfig {
     pub project_icon: Option<String>,
     #[serde(rename = "show project separators", default)]
     pub show_project_separators: bool,
+    #[serde(default, skip_serializing_if = "animation_is_default")]
+    pub animation: crate::background_animation::AnimationSettings,
     // `serde_norway::Value`, not `serde_json::Value`: the JSON data model has
     // no representation for YAML-only values (non-finite floats like `.inf`,
     // `.nan`), so round-tripping through it silently rewrote them to `null`
     // and violated the "unknown fields preserved" contract above.
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
+}
+
+fn animation_is_default(settings: &crate::background_animation::AnimationSettings) -> bool {
+    *settings == crate::background_animation::AnimationSettings::default()
+}
+
+/// Atomically merges the project animation preference with current metadata.
+pub fn set_animation(
+    cwd: &Path,
+    settings: crate::background_animation::AnimationSettings,
+) -> anyhow::Result<()> {
+    update(cwd, |config| config.animation = settings.normalized())
 }
 
 /// Reads the project configuration. An absent file is a clean, empty config.
@@ -124,6 +138,31 @@ fn save_unlocked(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animation_round_trip_preserves_metadata_and_isolates_projects() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        update(first.path(), |config| {
+            config.project_name = Some("Beach".into())
+        })
+        .unwrap();
+        let settings = crate::background_animation::AnimationSettings {
+            kind: crate::background_animation::AnimationKind::Kelp,
+            speed_percent: 150,
+            ..Default::default()
+        };
+        set_animation(first.path(), settings).unwrap();
+        let reloaded = load(first.path()).unwrap();
+        assert_eq!(reloaded.animation, settings);
+        assert_eq!(reloaded.project_name.as_deref(), Some("Beach"));
+        assert_eq!(load(second.path()).unwrap().animation, Default::default());
+        update(first.path(), |config| {
+            config.project_icon = Some("x".into())
+        })
+        .unwrap();
+        assert_eq!(load(first.path()).unwrap().animation, settings);
+    }
 
     fn scratch_dir() -> std::path::PathBuf {
         let path = std::env::temp_dir()

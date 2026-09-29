@@ -17,7 +17,7 @@ use ilium_core::{NodeKind, PaneTitleSource, ROOT_ID};
 use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
 
 mod common;
-use common::{expect_event, TestServer};
+use common::{expect_event, read_initial_state, TestServer};
 
 /// A foreground command that is not a shell (so it must never receive an
 /// automatic title) and that keeps reading stdin instead of exiting
@@ -45,10 +45,7 @@ async fn create_plain_shell(
     )
     .await
     .expect("attach client");
-    let _ = expect_event(client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(client, Duration::from_secs(5)).await;
 
     write_frame(
         client,
@@ -106,10 +103,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
     )
     .await
     .expect("attach observer");
-    let _ = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut observer, Duration::from_secs(5)).await;
 
     for bytes in [b"echo ".as_slice(), b"shell-title-marker\r".as_slice()] {
         write_frame(
@@ -194,17 +188,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
     )
     .await
     .expect("request authoritative snapshot");
-    let event = expect_event(&mut creator, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "manual shell name")
-        )
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only matches tree snapshots");
-    };
+    let (tree, _) = read_initial_state(&mut creator, Duration::from_secs(5)).await;
     let pane = tree.get(pane_id).expect("pane exists");
     assert_eq!(pane.name, "manual shell name");
     let NodeKind::Pane { title_source, .. } = &pane.kind else {
@@ -280,15 +264,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     )
     .await
     .expect("request snapshot");
-    let event = expect_event(
-        &mut client,
-        Duration::from_secs(5),
-        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some()),
-    )
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only matches tree snapshots");
-    };
+    let (tree, _) = read_initial_state(&mut client, Duration::from_secs(5)).await;
     assert_eq!(
         tree.get(pane_id).expect("pane exists").name,
         NON_SHELL_PROBE_COMMAND

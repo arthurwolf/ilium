@@ -10,10 +10,13 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use ilium_core::{NodeId, Tree};
-use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
+use ilium_ipc::{write_frame, ClientRequest};
 use ilium_transport::{Liveness, SessionEndpoint};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::read_initial_state;
 
 fn git(directory: &Path, arguments: &[&str]) -> String {
     let output = Command::new("git")
@@ -76,7 +79,9 @@ impl IsolatedHttpServer {
             .prefix("iwh")
             .tempdir_in("/tmp")
             .expect("short isolated test root");
-        let project = root.path().join("project");
+        let project = ilium_platform::paths::canonicalize(root.path())
+            .expect("canonical fixture root")
+            .join("project");
         let bin = root.path().join("bin");
         let config = root.path().join("config");
         let home = root.path().join("home");
@@ -247,16 +252,7 @@ impl IsolatedHttpServer {
         )
         .await
         .expect("attach isolated observer");
-        let tree = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let event: ServerEvent = read_frame(&mut stream).await.expect("snapshot frame");
-                if let ServerEvent::TreeSnapshot(tree) = event {
-                    break tree;
-                }
-            }
-        })
-        .await
-        .expect("snapshot before timeout");
+        let (tree, _) = read_initial_state(&mut stream, Duration::from_secs(5)).await;
         write_frame(&mut stream, &ClientRequest::KillSession)
             .await
             .expect("stop isolated session");
@@ -320,9 +316,8 @@ async fn http_workspace_uses_server_path_and_preserves_legacy_request() {
     .is_empty());
 
     let branch = "agent/http-boundary";
-    let worktree_path = server
-        .root
-        .path()
+    let worktree_path = ilium_platform::paths::canonicalize(server.root.path())
+        .expect("canonical fixture root")
         .join("project.worktrees/agent-http-boundary");
     let (status, body) = server
         .post(json!({
@@ -414,9 +409,8 @@ async fn disconnect_during_worktree_add_never_commits_a_pane() {
     std::fs::set_permissions(&hook, permissions).expect("hook permissions");
 
     let branch = "agent/disconnected-http";
-    let worktree = server
-        .root
-        .path()
+    let worktree = ilium_platform::paths::canonicalize(server.root.path())
+        .expect("canonical fixture root")
         .join("project.worktrees/agent-disconnected-http");
     let connection = server
         .send_post(json!({

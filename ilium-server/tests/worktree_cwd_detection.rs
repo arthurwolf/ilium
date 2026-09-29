@@ -1,6 +1,8 @@
 //! A pane started from a focused terminal's subdirectory keeps that exact cwd
 //! for live agent-session discovery and in the durable session tree.
 
+#![cfg(not(windows))]
+
 use std::time::Duration;
 
 use ilium_core::{NodeKind, Tree, ROOT_ID};
@@ -9,7 +11,7 @@ use ilium_server::config::DetectionConfig;
 use ilium_test_fixtures::{install, FixtureBehavior};
 
 mod common;
-use common::{expect_event, wait_until, TestServer};
+use common::{expect_event, read_initial_state, wait_until, TestServer};
 
 #[cfg(not(windows))]
 #[tokio::test]
@@ -54,10 +56,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
     )
     .await
     .unwrap();
-    expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,

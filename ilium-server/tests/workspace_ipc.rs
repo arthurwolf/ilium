@@ -1,18 +1,27 @@
 //! Real IPC preflight and rejection against an isolated temporary Git repo.
 
 use std::path::Path;
+#[cfg(unix)]
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
+#[cfg(unix)]
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
-use ilium_core::{BuiltinAgentProvider, Tree, ROOT_ID};
+#[cfg(unix)]
+use ilium_core::Tree;
+use ilium_core::{BuiltinAgentProvider, ROOT_ID};
 use ilium_ipc::{
     read_frame, write_frame, ClientRequest, ServerEvent, WorkspaceCreateSpec, WorkspaceCreateStage,
 };
-use ilium_transport::{Liveness, SessionEndpoint, SessionStream};
+use ilium_transport::SessionStream;
+#[cfg(unix)]
+use ilium_transport::{Liveness, SessionEndpoint};
 
 mod common;
-use common::{expect_event, wait_until, TestServer};
+#[cfg(unix)]
+use common::wait_until;
+use common::{expect_event, read_initial_state, TestServer};
 
 fn git(directory: &Path, arguments: &[&str]) {
     let output = Command::new("git")
@@ -46,7 +55,6 @@ fn git_stdout(directory: &Path, arguments: &[&str]) -> String {
         .to_owned()
 }
 
-#[cfg(unix)]
 async fn create_result(
     client: &mut SessionStream,
     request_id: u64,
@@ -79,7 +87,7 @@ async fn create_result(
 async fn live_worktree_status_refreshes_and_replays_after_head_changes() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let linked = server._directory.path().join("status-linked");
+    let linked = server.root.join("status-linked");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -191,37 +199,41 @@ async fn workspace_request_can_derive_a_safe_default_path_on_the_server() {
             .contains(expected.to_str().unwrap())
     );
 
-    write_frame(
-        &mut client,
-        &ClientRequest::CreateAgentInWorkspace {
-            request_id: 95,
-            parent_group: ROOT_ID,
-            provider: BuiltinAgentProvider::Codex,
-            spec: WorkspaceCreateSpec::NewAtDefaultPathWithSetup {
-                branch: "agent/configured-path".into(),
-                base_ref: None,
-                setup_command: "printf ready > control-setup".into(),
+    // Configured setup has a Linux-only supervision contract.
+    #[cfg(target_os = "linux")]
+    {
+        write_frame(
+            &mut client,
+            &ClientRequest::CreateAgentInWorkspace {
+                request_id: 95,
+                parent_group: ROOT_ID,
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::NewAtDefaultPathWithSetup {
+                    branch: "agent/configured-path".into(),
+                    base_ref: None,
+                    setup_command: "printf ready > control-setup".into(),
+                },
+                initial_input: None,
             },
-            initial_input: None,
-        },
-    )
-    .await
-    .unwrap();
-    let (configured, stages) = create_result(&mut client, 95).await;
-    assert!(
-        matches!(configured, ServerEvent::WorkspaceCreated { .. }),
-        "configured default-path creation failed: {configured:?}"
-    );
-    assert!(stages.contains(&WorkspaceCreateStage::RunningSetup));
-    let configured_path = server
-        .project
-        .parent()
-        .unwrap()
-        .join("project.worktrees/agent-configured-path");
-    assert_eq!(
-        std::fs::read(configured_path.join("control-setup")).unwrap(),
-        b"ready"
-    );
+        )
+        .await
+        .unwrap();
+        let (configured, stages) = create_result(&mut client, 95).await;
+        assert!(
+            matches!(configured, ServerEvent::WorkspaceCreated { .. }),
+            "configured default-path creation failed: {configured:?}"
+        );
+        assert!(stages.contains(&WorkspaceCreateStage::RunningSetup));
+        let configured_path = server
+            .project
+            .parent()
+            .unwrap()
+            .join("project.worktrees/agent-configured-path");
+        assert_eq!(
+            std::fs::read(configured_path.join("control-setup")).unwrap(),
+            b"ready"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -229,7 +241,7 @@ async fn workspace_request_can_derive_a_safe_default_path_on_the_server() {
 async fn existing_worktree_cannot_start_a_second_agent_pane() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let linked = server._directory.path().join("single-agent-worktree");
+    let linked = server.root.join("single-agent-worktree");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -273,7 +285,7 @@ async fn existing_worktree_cannot_start_a_second_agent_pane() {
 #[tokio::test]
 async fn concurrent_existing_worktree_requests_admit_one_agent() {
     let server = IsolatedWorkspaceServer::start().await;
-    let linked = server._directory.path().join("concurrent-existing");
+    let linked = server.root.join("concurrent-existing");
     git(
         &server.project,
         &[
@@ -331,7 +343,7 @@ async fn concurrent_existing_worktree_requests_admit_one_agent() {
 async fn retained_owned_worktree_is_recognized_and_reused_after_pane_close() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let linked = server._directory.path().join("retained-owned");
+    let linked = server.root.join("retained-owned");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -430,7 +442,7 @@ async fn retained_owned_worktree_is_recognized_and_reused_after_pane_close() {
 async fn close_offer_policy_persists_and_dirty_checkout_is_kept() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let linked = server._directory.path().join("close-offer-owned");
+    let linked = server.root.join("close-offer-owned");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -453,7 +465,7 @@ async fn close_offer_policy_persists_and_dirty_checkout_is_kept() {
     let ServerEvent::WorkspaceCreated { pane_id, .. } = created else {
         panic!("worktree creation failed: {created:?}");
     };
-    let snapshot_path = server._directory.path().join("workspace.json");
+    let snapshot_path = server.root.join("workspace.json");
     assert!(
         wait_until(
             || std::fs::read(&snapshot_path).ok().is_some_and(|bytes| {
@@ -519,12 +531,13 @@ async fn close_offer_policy_persists_and_dirty_checkout_is_kept() {
     );
 }
 
-#[cfg(unix)]
+// Setup supervision requires Linux non-reaping child/process-group observation.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn configured_setup_runs_before_agent_start_and_failure_retains_worktree() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let ready = server._directory.path().join("setup-ready");
+    let ready = server.root.join("setup-ready");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -561,7 +574,7 @@ async fn configured_setup_runs_before_agent_start_and_failure_retains_worktree()
         "ready"
     );
 
-    let failed = server._directory.path().join("setup-failed");
+    let failed = server.root.join("setup-failed");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -597,7 +610,7 @@ async fn configured_setup_runs_before_agent_start_and_failure_retains_worktree()
     );
     assert_eq!(server.snapshot().await.panes().count(), 1);
 
-    let rejected = server._directory.path().join("setup-rejected");
+    let rejected = server.root.join("setup-rejected");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -634,7 +647,7 @@ async fn measure_live_git_status_with_49_workspace_panes() {
     let mut client = server.connect().await;
     for index in 0..49 {
         let branch = format!("agent/perf-{index:02}");
-        let linked = server._directory.path().join(format!("perf-{index:02}"));
+        let linked = server.root.join(format!("perf-{index:02}"));
         let request_id = 1000 + index;
         write_frame(
             &mut client,
@@ -684,6 +697,7 @@ async fn measure_live_git_status_with_49_workspace_panes() {
 struct IsolatedWorkspaceServer {
     child: Child,
     _directory: tempfile::TempDir,
+    root: PathBuf,
     project: PathBuf,
     socket: PathBuf,
     launch_record: PathBuf,
@@ -704,15 +718,20 @@ impl IsolatedWorkspaceServer {
     async fn start() -> Self {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = tempfile::tempdir().expect("temporary project and server state");
-        let project = directory.path().join("project");
-        let bin = directory.path().join("bin");
-        let config = directory.path().join("config");
-        let home = directory.path().join("home");
-        let socket = directory.path().join("workspace.sock");
-        let snapshot = directory.path().join("workspace.json");
-        let log = directory.path().join("workspace.log");
-        let launch_record = directory.path().join("launch-record");
+        let directory = tempfile::Builder::new()
+            .prefix("iw")
+            .tempdir_in("/tmp")
+            .expect("temporary project and server state");
+        let root =
+            ilium_platform::paths::canonicalize(directory.path()).expect("canonical fixture root");
+        let project = root.join("project");
+        let bin = root.join("bin");
+        let config = root.join("config");
+        let home = root.join("home");
+        let socket = root.join("workspace.sock");
+        let snapshot = root.join("workspace.json");
+        let log = root.join("workspace.log");
+        let launch_record = root.join("launch-record");
         for path in [&project, &bin, &config, &home] {
             std::fs::create_dir(path).expect("isolated server directory");
         }
@@ -772,6 +791,7 @@ impl IsolatedWorkspaceServer {
         let server = Self {
             child,
             _directory: directory,
+            root,
             project,
             socket,
             launch_record,
@@ -801,10 +821,7 @@ impl IsolatedWorkspaceServer {
         )
         .await
         .expect("attach isolated server");
-        expect_event(&mut stream, Duration::from_secs(5), |event| {
-            matches!(event, ServerEvent::InitialStateSyncComplete)
-        })
-        .await;
+        read_initial_state(&mut stream, Duration::from_secs(5)).await;
         stream
     }
 
@@ -821,14 +838,9 @@ impl IsolatedWorkspaceServer {
         )
         .await
         .expect("attach snapshot observer");
-        let event = expect_event(&mut stream, Duration::from_secs(5), |event| {
-            matches!(event, ServerEvent::TreeSnapshot(_))
-        })
-        .await;
-        let ServerEvent::TreeSnapshot(tree) = event else {
-            unreachable!()
-        };
-        tree
+        read_initial_state(&mut stream, Duration::from_secs(5))
+            .await
+            .0
     }
 }
 
@@ -855,10 +867,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
     )
     .await
     .unwrap();
-    expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -931,13 +940,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
     )
     .await
     .unwrap();
-    let snapshot = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = snapshot else {
-        unreachable!()
-    };
+    let (tree, _) = read_initial_state(&mut observer, Duration::from_secs(5)).await;
     assert_eq!(tree.panes().count(), 0);
 }
 
@@ -961,7 +964,9 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
     )
     .unwrap();
     let linked_parent = tempfile::tempdir().expect("isolated linked-worktree parent");
-    let linked = linked_parent.path().join("include-rollback");
+    let linked = ilium_platform::paths::canonicalize(linked_parent.path())
+        .unwrap()
+        .join("include-rollback");
     assert!(
         !linked.exists(),
         "fixture checkout path unexpectedly exists"
@@ -975,10 +980,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
     )
     .await
     .unwrap();
-    expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -1056,13 +1058,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
     )
     .await
     .unwrap();
-    let snapshot = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = snapshot else {
-        unreachable!()
-    };
+    let (tree, _) = read_initial_state(&mut observer, Duration::from_secs(5)).await;
     assert_eq!(tree.panes().count(), 0);
 }
 
@@ -1081,7 +1077,9 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
     std::fs::write(server.project_cwd.join("a"), "copied a").unwrap();
     std::fs::write(server.project_cwd.join(".worktreeinclude"), "a\nb\n").unwrap();
     let linked_holder = tempfile::tempdir().unwrap();
-    let linked = linked_holder.path().join("partial-include");
+    let linked = ilium_platform::paths::canonicalize(linked_holder.path())
+        .unwrap()
+        .join("partial-include");
     let mut client = server.connect().await;
     write_frame(
         &mut client,
@@ -1091,10 +1089,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
     )
     .await
     .unwrap();
-    expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -1130,13 +1125,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
     )
     .await
     .unwrap();
-    let snapshot = expect_event(&mut observer, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = snapshot else {
-        unreachable!()
-    };
+    let (tree, _) = read_initial_state(&mut observer, Duration::from_secs(5)).await;
     assert_eq!(tree.panes().count(), 0);
 }
 
@@ -1149,9 +1138,9 @@ async fn disconnect_during_worktree_add_finishes_git_then_rolls_back() {
     use std::os::unix::fs::PermissionsExt;
 
     let server = IsolatedWorkspaceServer::start().await;
-    let linked = server._directory.path().join("disconnected-linked");
-    let hook_ready = server._directory.path().join("hook-ready");
-    let hook_release = server._directory.path().join("hook-release");
+    let linked = server.root.join("disconnected-linked");
+    let hook_ready = server.root.join("hook-ready");
+    let hook_release = server.root.join("hook-release");
     let hook = server.project.join(".git/hooks/post-checkout");
     std::fs::write(
         &hook,
@@ -1235,7 +1224,7 @@ async fn disconnect_during_worktree_add_finishes_git_then_rolls_back() {
 async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
-    let linked = server._directory.path().join("linked");
+    let linked = server.root.join("linked");
     write_frame(
         &mut client,
         &ClientRequest::CreateAgentInWorkspace {
@@ -1326,7 +1315,7 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
             spec: WorkspaceCreateSpec::New {
                 branch: "agent/isolated".into(),
                 base_ref: "main".into(),
-                path: server._directory.path().join("duplicate"),
+                path: server.root.join("duplicate"),
             },
             initial_input: None,
         },
@@ -1344,9 +1333,9 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
         unreachable!()
     };
     assert!(error.contains("already exists"), "{error}");
-    assert!(!server._directory.path().join("duplicate").exists());
+    assert!(!server.root.join("duplicate").exists());
 
-    let foreign = server._directory.path().join("foreign-linked");
+    let foreign = server.root.join("foreign-linked");
     git(
         &server.project,
         &[
@@ -1559,8 +1548,8 @@ async fn concurrent_clients_cannot_create_two_worktrees_on_one_branch() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut first = server.connect().await;
     let mut second = server.connect().await;
-    let first_path = server._directory.path().join("first-linked");
-    let second_path = server._directory.path().join("second-linked");
+    let first_path = server.root.join("first-linked");
+    let second_path = server.root.join("second-linked");
     let first_request = ClientRequest::CreateAgentInWorkspace {
         request_id: 41,
         parent_group: ROOT_ID,
@@ -1662,32 +1651,48 @@ async fn b21_retained_target(
     client: &mut SessionStream,
     request_id: u64,
 ) -> ilium_ipc::WorkspacePruneTarget {
-    let path = server
-        ._directory
-        .path()
-        .join(format!("retained-{request_id}"));
+    let path = server.root.join(format!("retained-{request_id}"));
+    // Copy the ignored file first, then collide with the tracked include file.
+    // Partial-copy retention works on macOS too, unlike configured setup.
+    std::fs::write(
+        server.project.join(".worktreeinclude"),
+        ".local.env\n.worktreeinclude\n",
+    )
+    .unwrap();
     write_frame(
         client,
         &ClientRequest::CreateAgentInWorkspace {
             request_id,
             parent_group: ROOT_ID,
             provider: BuiltinAgentProvider::Codex,
-            spec: WorkspaceCreateSpec::NewWithSetup {
+            spec: WorkspaceCreateSpec::New {
                 branch: format!("agent/retained-{request_id}"),
                 base_ref: "main".into(),
                 path: path.clone(),
-                setup_command: "exit 17".into(),
             },
             initial_input: None,
         },
     )
     .await
     .unwrap();
-    assert!(matches!(
-        create_result(client, request_id).await.0,
-        ServerEvent::WorkspaceCreateFailed { .. }
-    ));
+    let (result, stages) = create_result(client, request_id).await;
+    let ServerEvent::WorkspaceCreateFailed { error, .. } = result else {
+        panic!("partial include copy unexpectedly succeeded: {result:?}");
+    };
+    assert!(error.contains("worktree retained"), "{error}");
+    assert!(
+        !stages.contains(&WorkspaceCreateStage::RunningSetup),
+        "retained security fixture must not depend on platform-specific setup: {stages:?}"
+    );
     assert!(path.is_dir());
+    assert_eq!(
+        std::fs::read(path.join(".local.env")).unwrap(),
+        b"isolated fixture\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.join(".worktreeinclude")).unwrap(),
+        ".local.env\n"
+    );
     assert_eq!(server.snapshot().await.panes().count(), 0);
     b21_inventory(client, request_id + 1)
         .await

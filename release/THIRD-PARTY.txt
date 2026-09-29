@@ -1,0 +1,10 @@
+ILIUM THIRD-PARTY PROVENANCE STATUS
+State: blocked
+Publication allowed: false
+
+No candidate-specific third-party notice bundle has passed review.
+Required evidence: exact Cargo.lock coverage (including vendored packages),
+reviewed licence source bytes and hashes, and the native dependency closure
+for each candidate runtime. audit_native.py generates the publishable notice
+bundle only from those reviewed inventories. Packaging rejects this status
+record; it is not a licence notice bundle.

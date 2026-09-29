@@ -1,3 +1,4 @@
+use core::ops::Range;
 use std::collections::HashSet;
 
 use ratatui_core::layout::{Position, Rect};
@@ -105,6 +106,107 @@ where
         items: &'text [TreeItem<'text, Identifier>],
     ) -> Vec<Flattened<'text, Identifier>> {
         flatten(&self.opened, items, &[])
+    }
+
+    /// Resolves a position using the current items and interaction state,
+    /// rather than the previous render. `area` is the widget's inner area.
+    /// Separators have no item target; `line` is relative to the item's text.
+    #[must_use]
+    pub fn item_at_position<'text>(
+        &self,
+        items: &'text [TreeItem<'text, Identifier>],
+        area: Rect,
+        position: Position,
+        subtree_separators: bool,
+    ) -> Option<(Flattened<'text, Identifier>, u16)> {
+        if !area.contains(position) {
+            return None;
+        }
+
+        let visible = self.flatten(items);
+        let separators = crate::subtree_separator_indices(&visible, subtree_separators);
+        let item_heights: Vec<_> = visible
+            .iter()
+            .enumerate()
+            .map(|(index, flattened)| {
+                flattened.item.height().max(1) + usize::from(separators.contains(&index))
+            })
+            .collect();
+        let range = self.visible_range(&visible, &item_heights, usize::from(area.height));
+        let relative_row = position.y - area.y;
+        let mut current_height = 0u16;
+        for (index, flattened) in visible
+            .into_iter()
+            .enumerate()
+            .skip(range.start)
+            .take(range.end - range.start)
+        {
+            let height = u16::try_from(
+                flattened
+                    .item
+                    .height()
+                    .min(usize::from(area.height.saturating_sub(current_height))),
+            )
+            .ok()?;
+            let next_row = current_height.saturating_add(height);
+            if (current_height..next_row).contains(&relative_row) {
+                return Some((flattened, relative_row - current_height));
+            }
+            current_height = next_row.saturating_add(u16::from(separators.contains(&index)));
+        }
+        None
+    }
+
+    /// Shared fitting policy for rendering and fresh position queries. A
+    /// separator travels with its preceding item; only the first item may
+    /// be clipped when it is taller than the viewport.
+    #[must_use]
+    pub(super) fn visible_range(
+        &self,
+        visible: &[Flattened<'_, Identifier>],
+        item_heights: &[usize],
+        available_height: usize,
+    ) -> Range<usize> {
+        if visible.is_empty() || available_height == 0 {
+            return 0..0;
+        }
+        let ensure_index_in_view =
+            if self.ensure_selected_in_view_on_next_render && !self.selected.is_empty() {
+                visible
+                    .iter()
+                    .position(|flattened| flattened.identifier == self.selected)
+            } else {
+                None
+            };
+        let mut start = self.offset.min(visible.len().saturating_sub(1));
+        if let Some(ensure_index_in_view) = ensure_index_in_view {
+            start = start.min(ensure_index_in_view);
+        }
+
+        let mut end = start;
+        let mut height = 0;
+        for item_height in item_heights.iter().skip(start).copied() {
+            if height + item_height > available_height {
+                if height == 0 {
+                    height = available_height;
+                    end += 1;
+                }
+                break;
+            }
+            height += item_height;
+            end += 1;
+        }
+        if let Some(ensure_index_in_view) = ensure_index_in_view {
+            while ensure_index_in_view >= end {
+                height += item_heights[end].min(available_height);
+                end += 1;
+                while height > available_height {
+                    height = height.saturating_sub(item_heights[start].min(available_height));
+                    start += 1;
+                }
+            }
+        }
+        start..end
     }
 
     /// Selects the given identifier.

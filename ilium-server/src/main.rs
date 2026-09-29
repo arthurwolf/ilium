@@ -26,14 +26,26 @@ struct ServerLaunch {
     active_log_path_file: Option<PathBuf>,
 }
 
+enum ServerCommand {
+    Version,
+    Launch(ServerLaunch),
+}
+
 fn main() -> ExitCode {
-    let launch = match parse_launch(std::env::args().collect()) {
-        Ok(launch) => launch,
+    match parse_command(std::env::args().collect()) {
+        Ok(ServerCommand::Version) => {
+            println!("ilium-server {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Ok(ServerCommand::Launch(launch)) => run_launch(launch),
         Err(message) => {
             eprintln!("{message}");
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
-    };
+    }
+}
+
+fn run_launch(launch: ServerLaunch) -> ExitCode {
     let config_dir = match ilium_server::paths::config_dir() {
         Ok(config_dir) => config_dir,
         Err(error) => {
@@ -150,7 +162,14 @@ async fn async_main(
     }
 }
 
-fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
+fn parse_command(argv: Vec<String>) -> Result<ServerCommand, String> {
+    let arguments = argv.get(1..).unwrap_or_default();
+    if arguments == ["--version"] {
+        return Ok(ServerCommand::Version);
+    }
+    if arguments.iter().any(|argument| argument == "--version") {
+        return Err("--version must be used alone".to_string());
+    }
     let mut values = argv.into_iter().skip(1);
     let mut session_name = None;
     let mut socket_path = None;
@@ -172,18 +191,18 @@ fn parse_launch(argv: Vec<String>) -> Result<ServerLaunch, String> {
             _ => return Err(format!("unknown argument {flag}")),
         }
     }
-    Ok(ServerLaunch {
+    Ok(ServerCommand::Launch(ServerLaunch {
         session_name: session_name.ok_or_else(usage)?,
         socket_path: socket_path.ok_or_else(usage)?,
         snapshot_path: snapshot_path.ok_or_else(usage)?,
         session_cwd: session_cwd.ok_or_else(usage)?,
         log_path: log_path.ok_or_else(usage)?,
         active_log_path_file,
-    })
+    }))
 }
 
 fn usage() -> String {
-    "usage: ilium-server --session-name <name> --socket-path <path> --snapshot-path <path> --session-cwd <directory> --log-path <path> [--active-log-path-file <path>]".to_string()
+    "usage: ilium-server --version | --session-name <name> --socket-path <path> --snapshot-path <path> --session-cwd <directory> --log-path <path> [--active-log-path-file <path>]".to_string()
 }
 
 #[cfg(test)]
@@ -192,7 +211,7 @@ mod tests {
 
     #[test]
     fn parses_all_project_session_paths() {
-        let launch = parse_launch(vec![
+        let ServerCommand::Launch(launch) = parse_command(vec![
             "ilium-server".to_string(),
             "--session-name".to_string(),
             "default".to_string(),
@@ -207,7 +226,9 @@ mod tests {
             "--active-log-path-file".to_string(),
             "/tmp/.ilium/work-project-default/.active-log-path".to_string(),
         ])
-        .expect("valid launch");
+        .expect("valid launch") else {
+            panic!("launch arguments parsed as a version command");
+        };
         assert_eq!(launch.session_name, "default");
         assert_eq!(
             launch.socket_path,
@@ -232,6 +253,90 @@ mod tests {
 
     #[test]
     fn rejects_missing_project_paths() {
-        assert!(parse_launch(vec!["ilium-server".to_string()]).is_err());
+        assert!(parse_command(vec!["ilium-server".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parses_version_without_launch_flags() {
+        assert!(matches!(
+            parse_command(vec!["ilium-server".to_string(), "--version".to_string()]),
+            Ok(ServerCommand::Version)
+        ));
+    }
+
+    fn launch_arguments() -> Vec<String> {
+        [
+            "ilium-server",
+            "--session-name",
+            "default",
+            "--socket-path",
+            "project.sock",
+            "--snapshot-path",
+            "default.json",
+            "--session-cwd",
+            "project",
+            "--log-path",
+            "server.log",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    #[test]
+    fn rejects_each_missing_required_launch_flag() {
+        for flag_index in (1..launch_arguments().len()).step_by(2) {
+            let mut arguments = launch_arguments();
+            let missing_flag = arguments[flag_index].clone();
+            arguments.drain(flag_index..flag_index + 2);
+            assert!(
+                parse_command(arguments).is_err(),
+                "accepted missing {missing_flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_launch_without_optional_log_metadata() {
+        let ServerCommand::Launch(launch) =
+            parse_command(launch_arguments()).expect("valid launch")
+        else {
+            panic!("launch arguments parsed as a version command");
+        };
+        assert!(launch.active_log_path_file.is_none());
+    }
+
+    #[test]
+    fn rejects_unknown_and_incomplete_flags() {
+        for suffix in [
+            vec!["--unknown"],
+            vec!["--unknown", "value"],
+            vec!["--log-path"],
+        ] {
+            let mut arguments = launch_arguments();
+            arguments.extend(suffix.into_iter().map(str::to_string));
+            assert!(parse_command(arguments).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_version_mixed_with_launch_flags() {
+        let mut arguments = launch_arguments();
+        arguments.push("--version".to_string());
+        assert!(parse_command(arguments).is_err());
+        assert!(parse_command(
+            ["ilium-server", "--version", "--session-name", "default"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        )
+        .is_err());
+        assert!(parse_command(
+            ["ilium-server", "--version", "--version"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        )
+        .is_err());
     }
 }

@@ -39,7 +39,8 @@ fn repository() -> TempDir {
 #[tokio::test]
 async fn discovers_same_common_directory_from_nested_and_linked_worktrees() {
     let temporary = repository();
-    let main = temporary.path();
+    let main =
+        &ilium_platform::paths::canonicalize(temporary.path()).expect("canonical main checkout");
     let nested = main.join("src");
     std::fs::create_dir(&nested).expect("nested dir");
     let linked = main.parent().expect("parent").join(format!(
@@ -93,7 +94,8 @@ async fn discovers_same_common_directory_from_nested_and_linked_worktrees() {
 #[tokio::test]
 async fn preserves_dirty_linked_worktree_and_rejects_main_checkout_removal() {
     let temporary = repository();
-    let main = temporary.path();
+    let main =
+        &ilium_platform::paths::canonicalize(temporary.path()).expect("canonical main checkout");
     let linked = main.parent().expect("parent").join(format!(
         "{}-dirty",
         main.file_name().expect("name").to_string_lossy()
@@ -120,7 +122,8 @@ async fn preserves_dirty_linked_worktree_and_rejects_main_checkout_removal() {
 #[tokio::test]
 async fn rollback_pristine_check_detects_ignored_hook_output() {
     let temporary = repository();
-    let main = temporary.path();
+    let main =
+        &ilium_platform::paths::canonicalize(temporary.path()).expect("canonical main checkout");
     std::fs::write(main.join(".gitignore"), "secret\n").expect("ignore rule");
     git(main, &["add", ".gitignore"]);
     git(main, &["commit", "-q", "-m", "ignore secret"]);
@@ -150,7 +153,8 @@ async fn rollback_pristine_check_detects_ignored_hook_output() {
 #[tokio::test]
 async fn removal_clears_a_custom_file_in_registered_worktree_metadata() {
     let temporary = repository();
-    let main = temporary.path();
+    let main =
+        &ilium_platform::paths::canonicalize(temporary.path()).expect("canonical main checkout");
     let linked = main.parent().expect("parent").join(format!(
         "{}-metadata",
         main.file_name().expect("name").to_string_lossy()
@@ -190,7 +194,8 @@ async fn rejects_invalid_branch_without_creating_worktree() {
 #[tokio::test]
 async fn resolves_selected_base_and_compare_deletes_only_the_expected_tip() {
     let temporary = repository();
-    let main = temporary.path();
+    let main =
+        &ilium_platform::paths::canonicalize(temporary.path()).expect("canonical main checkout");
     let initial_commit = resolve_commit(main, "main").await.expect("main commit");
     git(main, &["branch", "agent/rollback", "main"]);
     assert_eq!(

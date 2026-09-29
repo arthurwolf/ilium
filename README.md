@@ -210,7 +210,7 @@ Normal mode separates agent identity, longer-running work, and current activity.
 </table>
 
 <details>
-<summary>Show the other 13 demos</summary>
+<summary>Show the other 14 demos</summary>
 
 <table width="100%">
 <tbody>
@@ -357,7 +357,16 @@ Normal mode separates agent identity, longer-running work, and current activity.
 </a>
 </p>
 </td>
-<td width="50%" valign="top"></td>
+<td width="50%" valign="top">
+<p>
+<strong>Run agents in their own worktrees</strong>
+</p>
+<p>
+<a href="assets/demos/25-worktree-agent.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/25-worktree-agent.gif" alt="A locally labelled Codex-shaped fixture runs on agent/map-east-side; a terminal shows its worktree path, branch, and file diff" width="100%">
+</a>
+</p>
+</td>
 </tr>
 </tbody>
 </table>

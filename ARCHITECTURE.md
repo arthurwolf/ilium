@@ -82,6 +82,14 @@ One raw Idle sample after an active agent turn is provisional: the server keeps 
 
 The blocked/waiting-for-approval state wasn't explicitly requested but falls out of the same detection pass at near-zero extra cost, and it's the state you most want a distinct color for in practice (herdr treats it as a 4th state for the same reason).
 
+## Ambient animation rendering
+
+`ilium-client::background_animation` evaluates ten deterministic monochrome scenes into a reusable 2×4-dot raster per terminal cell, then applies fixed spatial ordered or stippled thresholds and packs Unicode Braille. Settings → Animations selects the scene, speed, density and dither with a live preview; `.ilium/config.yaml` owns this project-local choice. Ambient animation defaults off.
+
+`background_composition` reveals one screen-wide field through eligible workspace blanks after ordinary rendering and before overlays. Text, styled spaces, selections, cursors and wide-character continuations remain foreground; editors, boards, chatroom and Smart Copy inspection stay opaque. Decoration changes only the final Ratatui buffer, so PTY content, cached screens, history, copied text and detection inputs remain untouched.
+
+The client checks absolute integer 12 Hz frame boundaries after every event-loop branch, including busy input/output branches. Requests within a frame reuse raster buffers and pixels. Disabled or hidden ambient animation contributes no recurring deadline. Motion Off uses a static scene; an explicitly opened Animations preview remains live independently of that preference.
+
 ## Process architecture
 
 Client/server, like Zellij and tmux itself — this is what makes detach/reattach and session persistence possible instead of "just a TUI app that dies with the terminal."

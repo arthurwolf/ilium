@@ -28,7 +28,7 @@ use ilium_ipc::{
 };
 
 mod common;
-use common::{expect_event, TestServer};
+use common::{expect_event, read_initial_state, TestServer};
 use ilium_test_fixtures::{install, FixtureBehavior};
 
 /// How long the delayed-composer fixture stays unreadable. One second is
@@ -97,10 +97,11 @@ async fn attach_returns_a_tree_snapshot_with_an_empty_launch_project() {
     .await
     .expect("write Attach request");
 
-    let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        panic!("expected TreeSnapshot on attach, got {event:?}");
-    };
+    let (tree, observed) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(matches!(
+        observed.first(),
+        Some(ServerEvent::PaneStateSnapshot { .. })
+    ));
     assert!(
         tree.get(ROOT_ID).is_some(),
         "snapshot should include the root"
@@ -111,11 +112,10 @@ async fn attach_returns_a_tree_snapshot_with_an_empty_launch_project() {
         "a brand-new session should contain its launch project"
     );
     assert!(tree.get(launch_project_id(&tree)).unwrap().is_project());
-    let startup_complete = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
-    assert_eq!(startup_complete, ServerEvent::InitialStateSyncComplete);
+    assert_eq!(
+        observed.last(),
+        Some(&ServerEvent::InitialStateSyncComplete)
+    );
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -172,10 +172,7 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -225,10 +222,7 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
@@ -303,10 +297,7 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
@@ -395,10 +386,7 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -492,10 +480,7 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
     )
     .await
     .expect("attach test client");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -581,10 +566,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
@@ -637,21 +619,20 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
     )
     .await
     .unwrap();
-    let cleared_tree = expect_event(&mut reattached, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.scheduled_pane_inputs().count() == 0)
-    })
-    .await;
-    assert!(matches!(cleared_tree, ServerEvent::TreeSnapshot(_)));
-    let replay = expect_event(&mut reattached, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
-                if *event_pane_id == pane_id
-                    && String::from_utf8_lossy(bytes).contains("scheduled:<detached payload>")
-        )
-    })
-    .await;
-    assert!(matches!(replay, ServerEvent::TerminalReplay { .. }));
+    let (cleared_tree, initial_events) =
+        read_initial_state(&mut reattached, Duration::from_secs(5)).await;
+    assert_eq!(cleared_tree.scheduled_pane_inputs().count(), 0);
+    assert!(
+        initial_events.iter().any(|event| {
+            matches!(
+                event,
+                ServerEvent::TerminalReplay { pane_id: event_pane_id, bytes, .. }
+                    if *event_pane_id == pane_id
+                        && String::from_utf8_lossy(bytes).contains("scheduled:<detached payload>")
+            )
+        }),
+        "initial replay must contain the detached scheduled input"
+    );
 
     write_frame(&mut reattached, &ClientRequest::KillSession)
         .await
@@ -671,10 +652,7 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     let mut pane_ids = Vec::new();
     let mut parent_group = ROOT_ID;
@@ -758,10 +736,7 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     )
     .await
     .unwrap();
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -772,14 +747,12 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     )
     .await
     .unwrap();
-    // `NewGroup` with `parent_group: ROOT_ID` lands directly under the launch
-    // project (see `ipc::handlers::resolve_parent_group`), as a sibling of
-    // the project's pre-existing "default" group -- so waiting on the
-    // project's child count (rather than root's, which never changes) is
-    // what actually confirms "work" was created, and `.last()` is what
-    // actually names it instead of the pre-existing "default" group.
+    // An empty launch project has no default group until a pane needs one.
+    // Match the requested group by its parent and name, not a guessed count.
     let created = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(launch_project_id(tree)).is_ok_and(|children| children.len() == 2))
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.children_of(launch_project_id(tree)).is_ok_and(|children| {
+            children.len() == 1 && tree.get(children[0]).is_some_and(|node| node.name == "work")
+        }))
     })
     .await;
     let ServerEvent::TreeSnapshot(tree_before) = created else {
@@ -819,13 +792,7 @@ async fn invalid_split_request_returns_an_error_without_mutating_the_tree() {
     )
     .await
     .unwrap();
-    let snapshot = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
-    let ServerEvent::TreeSnapshot(tree_after) = snapshot else {
-        unreachable!();
-    };
+    let (tree_after, _) = read_initial_state(&mut client, Duration::from_secs(5)).await;
     assert_eq!(tree_after, tree_before);
     assert!(
         tree_after
@@ -867,10 +834,7 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     )
     .await
     .expect("attach first client");
-    let _ = expect_event(&mut first_client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut first_client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut first_client,
@@ -979,8 +943,8 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
     )
     .await
     .expect("write Attach request after a prior error");
-    let event: ServerEvent = read_frame(&mut client).await.expect("read a reply");
-    assert!(matches!(event, ServerEvent::TreeSnapshot(_)));
+    let (tree, _) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(tree.get(ROOT_ID).is_some());
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -1004,10 +968,7 @@ async fn successful_resize_records_its_typed_client_cause_in_the_debug_journal()
     )
     .await
     .expect("attach debug-enabled client");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {

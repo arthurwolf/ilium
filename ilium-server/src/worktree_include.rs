@@ -419,6 +419,8 @@ mod tests {
         let target = temp.path().join("target");
         fs::create_dir(&source).expect("source");
         fs::create_dir(&target).expect("target");
+        let source = ilium_platform::paths::canonicalize(&source).expect("canonical source");
+        let target = ilium_platform::paths::canonicalize(&target).expect("canonical target");
         (temp, source, target)
     }
 

@@ -12,7 +12,7 @@ use ilium_ipc::{
 use ilium_test_fixtures::{install, FixtureBehavior};
 
 mod common;
-use common::{expect_event, TestServer};
+use common::{expect_event, read_initial_state, TestServer};
 
 fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
     let project_id = tree
@@ -42,10 +42,7 @@ async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
     )
     .await
     .expect("attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     let settings = TextTriggerSettings {
         triggers: vec![TextTrigger {
@@ -159,10 +156,7 @@ async fn client_semantic_submission_reaches_the_pty_after_a_separate_enter() {
     )
     .await
     .expect("attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
@@ -247,10 +241,7 @@ async fn repainting_one_matching_screen_line_submits_only_once() {
     )
     .await
     .expect("attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,
@@ -346,10 +337,7 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
     )
     .await
     .expect("attach request");
-    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::InitialStateSyncComplete)
-    })
-    .await;
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
 
     write_frame(
         &mut client,

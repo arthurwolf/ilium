@@ -587,6 +587,26 @@ async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tr
     .unwrap_or_else(|_| panic!("{context}: no tree snapshot within {WAIT_TIMEOUT:?}"))
 }
 
+/// Completes the attach stream before reading mutation broadcasts.
+async fn receive_initial_tree(connection: &mut Connection, context: &str) -> Tree {
+    let mut tree = None;
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        while let Some(event) = connection.events.recv().await {
+            match event {
+                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => tree = Some(snapshot),
+                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => tree = Some(snapshot),
+                ServerEvent::InitialStateSyncComplete => {
+                    return tree.expect("initial state includes a tree");
+                }
+                _ => {}
+            }
+        }
+        panic!("{context}: server closed before initial state completed");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context}: no initial state within {WAIT_TIMEOUT:?}"))
+}
+
 /// Writes `.ilium/config.yaml` with a pre-set project name into `cwd`,
 /// matching `ilium_client::project_config`'s on-disk format (a plain
 /// YAML mapping under the `project name` key) closely enough for
@@ -1091,10 +1111,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
-    // Settings opens on User Interface. Ten real Tab key events reach the
+    // Settings opens on User Interface. Eleven real Tab key events reach the
     // Voice control tab in the registry order, proving the feature is wired
     // into the same navigable settings surface as every established tab.
-    tui.write(b"\t\t\t\t\t\t\t\t\t\t")
+    tui.write(b"\t\t\t\t\t\t\t\t\t\t\t")
         .expect("navigating to Voice control settings");
     let voice_settings_shown = wait_until(
         || {
@@ -1525,9 +1545,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the agent identifier choice to persist, config={:?}",
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
     );
-    // Icons follows Appearance. Exercise the live table, demo/real toolbar,
-    // and full-screen catalogue before continuing to Keyboard.
-    tui.write(b"\t")
+    // Animations now sits between Appearance and Icons. Exercise the live
+    // Icons table, demo/real toolbar, and catalogue before Keyboard.
+    tui.write(b"\t\t")
         .expect("switching to the Icons settings tab");
     let icons_tab_shown = wait_until(
         || {
@@ -2344,7 +2364,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         .await
         .expect("attach restructure control connection");
     let tree_before_restructure =
-        receive_tree_snapshot(&mut control_connection, "initial control attach").await;
+        receive_initial_tree(&mut control_connection, "initial control attach").await;
     let project_ids = tree_before_restructure.project_ids();
     assert_eq!(project_ids.len(), 1, "expected one isolated project");
     let project_id = project_ids[0];
@@ -2858,8 +2878,19 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // instant), since the two panes' windows start a few milliseconds
     // apart and the flash itself toggles on/off every
     // `RECENTLY_CREATED_PULSE_PHASE_MS`.
-    let first_flashed = wait_until(
-        || tui.with_screen(|screen| row_has_inverse_cell(screen, first_row)),
+    let mut first_flashed = false;
+    let mut second_flashed = false;
+    wait_for_transient_frame(
+        || {
+            tui.with_screen(|screen| {
+                let rows = rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]);
+                if let [first, second] = rows.as_slice() {
+                    first_flashed |= row_has_inverse_cell(screen, *first);
+                    second_flashed |= row_has_inverse_cell(screen, *second);
+                }
+            });
+            first_flashed && second_flashed
+        },
         PULSE_WINDOW,
     )
     .await;
@@ -2868,11 +2899,6 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         "expected the first newly created pane's row ({first_row}) to flash, got: {:?}",
         tui.screen_text()
     );
-    let second_flashed = wait_until(
-        || tui.with_screen(|screen| row_has_inverse_cell(screen, second_row)),
-        PULSE_WINDOW,
-    )
-    .await;
     assert!(
         second_flashed,
         "expected the second newly created pane's row ({second_row}) to flash too -- \
@@ -3102,6 +3128,8 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         "first line\nCREATE_AGENT_TARGET_LINE\nlast line\n",
     )
     .expect("write source file");
+    let source_path = ilium_platform::paths::canonicalize(&source_path)
+        .expect("canonical create-agent source path");
 
     let fake_bin_dir = temp_root.path().join("fake-bin");
     std::fs::create_dir_all(&fake_bin_dir).expect("create fake bin dir");
@@ -3342,7 +3370,9 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     );
     let (context_column, context_row) = tui
         .with_screen(|screen| {
-            let row = rows_containing(screen, "context.md").first().copied()?;
+            let row = rows_containing_in_order(screen, &["\u{1f4c4} context.md"])
+                .first()
+                .copied()?;
             Some((column_of_text_in_row(screen, row, "context.md")?, row))
         })
         .expect("context.md should be visible in the picker");
@@ -3367,12 +3397,33 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     tui.write(b"\x7f\x7f\x7f\x7f\x7fContext\x10")
         .expect("name context board and open its path picker");
     assert!(
-        wait_until(|| tui.screen_text().contains("context.md"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui.with_screen(
+                |screen| !rows_containing_in_order(screen, &["📄 context.md"]).is_empty()
+            ),
+            WAIT_TIMEOUT,
+        )
+        .await,
         "expected context.md in board path picker, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[B\r\r")
-        .expect("select context.md and create its board");
+    let (path_column, path_row) = tui
+        .with_screen(|screen| {
+            let row = rows_containing_in_order(screen, &["\u{1f4c4} context.md"])
+                .first()
+                .copied()?;
+            Some((column_of_text_in_row(screen, row, "context.md")?, row))
+        })
+        .expect("context.md should be visible in the board path picker");
+    // Select the authored document by its visible row: .ilium and CHATROOM.md
+    // also exist by this point, so a positional Down selects a different path.
+    for _ in 0..2 {
+        tui.write(&sgr_mouse_down(0, path_column, path_row))
+            .expect("select then choose context.md");
+        tui.write(&sgr_mouse_up(path_column, path_row))
+            .expect("release context.md click");
+    }
+    tui.write(b"\r").expect("create the context-backed board");
     assert!(
         wait_until(
             || {
@@ -3552,9 +3603,8 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         tui.screen_text()
     );
 
-    // The generic New board path must make the same adapter decision. Its
-    // picker starts on `..`; context.md is first and dialog.md second, so two
-    // Down events select dialog.md before Enter returns to the create form.
+    // The generic New board path must select the same storage adapter for the
+    // visible dialog.md document, regardless of other directory entries.
     tui.write(b"\x02B").expect("open New board dialog");
     assert!(
         wait_until(|| tui.screen_text().contains("New board"), WAIT_TIMEOUT).await,
@@ -3571,14 +3621,18 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     tui.write(b"\x7f\x10")
         .expect("restore the name and open board path picker with Ctrl+P");
     assert!(
-        wait_until(|| tui.screen_text().contains("dialog.md"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui.with_screen(
+                |screen| !rows_containing_in_order(screen, &["📄 dialog.md"]).is_empty()
+            ),
+            WAIT_TIMEOUT,
+        )
+        .await,
         "expected dialog.md in board path picker, got: {:?}",
         tui.screen_text()
     );
-    // The two key presses below assume the listing is exactly `..`,
-    // `context.md`, `dialog.md`. Asserting that first means a platform which
-    // surfaces an extra entry reports what it actually showed, instead of
-    // silently selecting the wrong file and failing later on the create form.
+    // Keep evidence for the two authored documents' order, while selecting
+    // the target by its own file row rather than a positional key count.
     let picker_rows = tui.with_screen(|screen| {
         let cols = screen.size().1;
         screen
@@ -3601,8 +3655,19 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         dialog_below_context,
         "board path picker should list dialog.md directly below context.md, rows were: {picker_rows:#?}"
     );
-    tui.write(b"\x1b[B\x1b[B\r")
-        .expect("select dialog.md below parent and context.md");
+    let (path_column, path_row) = tui.with_screen(|screen| {
+        let row = rows_containing_in_order(screen, &["\u{1f4c4} dialog.md"])[0];
+        (
+            column_of_text_in_row(screen, row, "dialog.md").unwrap(),
+            row,
+        )
+    });
+    for _ in 0..2 {
+        tui.write(&sgr_mouse_down(0, path_column, path_row))
+            .expect("select then choose dialog.md");
+        tui.write(&sgr_mouse_up(path_column, path_row))
+            .expect("release dialog.md click");
+    }
     // The form must come back carrying a storage path, but the *filename* is
     // deliberately not required on screen: the field clips its value to the
     // widget's width, so whether `dialog.md` survives that clip depends on how
@@ -3781,6 +3846,10 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     // An out-of-band edit must be preserved. The stale local mutation is
     // rejected and rolled back; `r` then adopts the external revision so a
     // later edit can commit normally.
+    // Give the complete guidance room beside the optional public reset pill;
+    // the 120-column status bar legitimately clips the end of this message.
+    tui.resize(40, 220)
+        .expect("widen the terminal for complete stale-write guidance");
     let external_source = std::fs::read_to_string(&dialog_path)
         .unwrap()
         .replace("- Second task\n", "- Second task\n- External task\n");
@@ -4881,7 +4950,7 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     let mut control_connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
         .await
         .expect("attach last-prompt control connection");
-    let tree = receive_tree_snapshot(&mut control_connection, "last-prompt verification").await;
+    let tree = receive_initial_tree(&mut control_connection, "last-prompt verification").await;
     let pane_ids = tree.pane_ids_in_tree_order();
     assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
     assert_eq!(
@@ -5037,7 +5106,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         let mut connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
             .await
             .expect("attach typed-prompt control connection");
-        let tree = receive_tree_snapshot(&mut connection, "typed-prompt verification").await;
+        let tree = receive_initial_tree(&mut connection, "typed-prompt verification").await;
         let pane_ids = tree.pane_ids_in_tree_order();
         assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
         let last_prompt = tree.last_prompt(pane_ids[0]).map(str::to_owned);
@@ -5582,18 +5651,34 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     let worktree_column = tui
         .with_screen(|screen| column_of_text_in_row(screen, worktree_row, "[Worktree"))
         .expect("popover worktree choice column");
+    // Repository availability arrives asynchronously after the preview opens.
+    // Wait for the drawn enabled choice before clicking it once; clicking the
+    // gray pending choice only reports "Checking Git repository…".
     assert!(
         wait_until(
-            || {
-                if tui.screen_text().contains("New agent in a worktree") {
-                    return true;
-                }
-                tui.write(&sgr_mouse_down(0, worktree_column, worktree_row))
-                    .expect("click popover worktree choice");
-                tui.write(&sgr_mouse_up(worktree_column, worktree_row))
-                    .expect("release popover choice");
-                false
-            },
+            || tui.with_screen(|screen| {
+                screen
+                    .cell(worktree_row, worktree_column)
+                    .is_some_and(|cell| {
+                        cell.contents() == "["
+                            && cell.fgcolor() == vt100::Color::Rgb(0xd0, 0xd4, 0xe4)
+                    })
+            }),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "popover worktree choice did not become available: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_move(worktree_column, worktree_row))
+        .expect("move onto the enabled popover choice");
+    tui.write(&sgr_mouse_down(0, worktree_column, worktree_row))
+        .expect("click popover worktree choice");
+    tui.write(&sgr_mouse_up(worktree_column, worktree_row))
+        .expect("release popover choice");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("New agent in a worktree"),
             WAIT_TIMEOUT
         )
         .await,

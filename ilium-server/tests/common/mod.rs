@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ilium_core::Tree;
 use ilium_ipc::{read_frame, ServerEvent};
 use ilium_server::config::{DetectionConfig, NotificationsConfig};
 use ilium_server::{run, NoopSoundPlayer, ServerOptions, SoundPlayer};
@@ -50,6 +51,37 @@ pub async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) 
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// Reads the attach stream before a test sends mutations.
+pub async fn read_initial_state(
+    stream: &mut SessionStream,
+    timeout: Duration,
+) -> (Tree, Vec<ServerEvent>) {
+    let mut tree = None;
+    let mut observed = Vec::new();
+    tokio::time::timeout(timeout, async {
+        loop {
+            let event: ServerEvent = read_frame(stream).await.expect("initial server event");
+            match &event {
+                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => {
+                    tree = Some(snapshot.clone());
+                }
+                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => {
+                    tree = Some(snapshot.clone());
+                }
+                ServerEvent::InitialStateSyncComplete => {
+                    observed.push(event);
+                    break;
+                }
+                _ => {}
+            }
+            observed.push(event);
+        }
+    })
+    .await
+    .expect("initial state before timeout");
+    (tree.expect("initial state includes a tree"), observed)
 }
 
 /// Reads frames from `stream` until one matches `predicate`, ignoring
@@ -340,8 +372,10 @@ impl TestServer {
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),
             ready_log_metadata: None,
-            session_cwd: dir.path().to_path_buf(),
-            home_dir: dir.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
+            home_dir: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test home directory"),
             detection_config,
             notifications_config: NotificationsConfig { enabled: false },
             sound_settings,
@@ -393,8 +427,10 @@ impl TestServer {
             socket_path,
             _socket_dir: socket_dir,
             snapshot_path,
-            project_cwd: dir.path().to_path_buf(),
-            home_dir: dir.path().to_path_buf(),
+            project_cwd: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test launch directory"),
+            home_dir: ilium_platform::paths::canonicalize(dir.path())
+                .expect("canonical test home directory"),
             server_task,
             // Held for the struct's lifetime (see the field doc) instead
             // of being forgotten -- the directory it owns is exactly the
@@ -410,5 +446,84 @@ impl TestServer {
             .connect()
             .await
             .expect("connect to the session socket")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ilium_ipc::write_frame;
+
+    #[tokio::test]
+    async fn initial_state_consumes_pane_snapshot_and_settings_through_sync_complete() {
+        let directory = short_socket_dir();
+        let endpoint = SessionEndpoint::from_path(directory.path().join("attach.sock"));
+        let mut listener = endpoint.bind().await.expect("bind mock attach endpoint");
+        let (writer, reader) = tokio::join!(listener.accept(), endpoint.connect());
+        let mut writer = writer.expect("accept mock attach stream");
+        let mut reader = reader.expect("connect mock attach stream");
+        let mut initial_tree = Tree::new();
+        let group_id = initial_tree
+            .add_group(ilium_core::ROOT_ID, "initial-state")
+            .unwrap();
+        let events = vec![
+            ServerEvent::PaneStateSnapshot {
+                tree: initial_tree,
+                detection_evidence: Vec::new(),
+            },
+            ServerEvent::AgentDetectionSettingsChanged {
+                result: Ok(ilium_ipc::AgentDetectionSettings {
+                    working_poll_seconds: 10,
+                    idle_poll_seconds: 45,
+                    custom_signatures: Vec::new(),
+                }),
+            },
+            ServerEvent::InitialStateSyncComplete,
+        ];
+        for event in &events {
+            write_frame(&mut writer, event)
+                .await
+                .expect("mock attach frame");
+        }
+        // A later mutation must remain unread after the attach boundary.
+        write_frame(&mut writer, &ServerEvent::TreeSnapshot(Tree::new()))
+            .await
+            .expect("mock mutation frame");
+
+        let (tree, observed) = read_initial_state(&mut reader, Duration::from_millis(100)).await;
+        assert_eq!(tree.get(group_id).unwrap().name, "initial-state");
+        assert_eq!(observed, events);
+        let mutation: ServerEvent = read_frame(&mut reader)
+            .await
+            .expect("mutation remains queued");
+        assert!(matches!(mutation, ServerEvent::TreeSnapshot(_)));
+    }
+
+    #[tokio::test]
+    async fn initial_state_prefers_pane_snapshot_after_a_legacy_tree_snapshot() {
+        let directory = short_socket_dir();
+        let endpoint = SessionEndpoint::from_path(directory.path().join("legacy.sock"));
+        let mut listener = endpoint.bind().await.expect("bind mock attach endpoint");
+        let (writer, reader) = tokio::join!(listener.accept(), endpoint.connect());
+        let mut writer = writer.expect("accept mock attach stream");
+        let mut reader = reader.expect("connect mock attach stream");
+        let mut current = Tree::new();
+        let group_id = current.add_group(ilium_core::ROOT_ID, "current").unwrap();
+        let events = vec![
+            ServerEvent::TreeSnapshot(Tree::new()),
+            ServerEvent::PaneStateSnapshot {
+                tree: current,
+                detection_evidence: Vec::new(),
+            },
+            ServerEvent::InitialStateSyncComplete,
+        ];
+        for event in &events {
+            write_frame(&mut writer, event)
+                .await
+                .expect("mock attach frame");
+        }
+        let (tree, observed) = read_initial_state(&mut reader, Duration::from_millis(100)).await;
+        assert_eq!(tree.get(group_id).unwrap().name, "current");
+        assert_eq!(observed, events);
     }
 }

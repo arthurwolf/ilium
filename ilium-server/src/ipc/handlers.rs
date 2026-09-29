@@ -5040,7 +5040,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "bookmark-request".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("bookmark.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -5094,7 +5095,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "lock-request".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("lock.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -5191,7 +5193,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "focus-activity".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("focus-activity.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -5272,7 +5275,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "hidden-terminal-activity".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory
                 .path()
@@ -5333,7 +5337,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "terminal-activity".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("terminal-activity.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -5424,7 +5429,8 @@ mod tests {
         let (sound_requests, _sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: session_name.to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("progress-monitor.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -6390,7 +6396,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "pane-scoped-recovery".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("pane-scoped-recovery.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -6521,7 +6528,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "protected-split-restructure".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("protected-split.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -6715,7 +6723,8 @@ mod tests {
         let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "revert-orphan-debug".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("revert-orphan-debug.snapshot.json"),
             socket_path: directory.path().join("test.sock"),
