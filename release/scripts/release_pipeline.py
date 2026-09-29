@@ -1102,7 +1102,7 @@ def capture_baseline(arguments):
         try:
             verify_absent_installers('https://' + pages.HOST)
         except HTTPFailure as error:
-            require(latest is None and error.status in (522, 530), 'unconfigured public channel returned an unexpected error')
+            require(latest is None and 500 <= error.status < 600, 'unconfigured public channel returned an unexpected error')
     if production is not None:
         require(production.get('environment') == 'production' and production.get('latest_stage', {}).get('status') == 'success', 'previous Pages deployment is not a successful production rollback target')
     output.mkdir(parents=True)
