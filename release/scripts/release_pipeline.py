@@ -13,7 +13,7 @@ import copy
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import platform
 import re
 import shutil
@@ -244,7 +244,7 @@ def native(arguments):
     else:
         cargo_home.mkdir(); cargo_target.mkdir()
         environment.update(CARGO_HOME=str(cargo_home), CARGO_TARGET_DIR=str(cargo_target))
-        if target['os'] != 'linux':
+        if target['os'] in ('linux', 'macos'):
             shared_register = root / 'release/ort-runtime.json'
             policy = release_tool.read_json(shared_register)
             require(policy.get('schema') == 1 and policy.get('state') == 'reviewed', 'shared ORT runtime source policy is not reviewed')
@@ -261,6 +261,9 @@ def native(arguments):
             require(ort_library_directory.is_absolute() and ort_library_directory.is_dir(), 'shared ORT library directory is invalid')
             if target['os'] == 'macos':
                 environment['DYLD_LIBRARY_PATH'] = str(ort_library_directory)
+            elif target['os'] == 'linux':
+                existing_loader_path = environment.get('LD_LIBRARY_PATH', '')
+                environment['LD_LIBRARY_PATH'] = str(ort_library_directory) + (os.pathsep + existing_loader_path if existing_loader_path else '')
             else:
                 environment['PATH'] = str(ort_library_directory) + os.pathsep + environment['PATH']
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server'], root, work / 'release-build.log', environment)
@@ -303,8 +306,8 @@ def native(arguments):
             command.extend(['--intel-ort-report', work / 'intel-ort/receipt.json'])
         else:
             command.extend(['--windows-ort-report', work / 'windows-ort/receipt.json'])
-    if target['os'] != 'linux' and target['ort_strategy'] != 'pinned-source-build':
-        # The prebuilt macOS ARM runtime remains isolated under one explicit
+    if target['os'] in ('linux', 'macos') and target['ort_strategy'] != 'pinned-source-build':
+        # Linux and macOS ARM use an explicit, SHA-pinned shared runtime
         # discovery root. Windows and Intel macOS use pinned source receipts.
         runtime_root = work / 'candidate-runtime'
         shutil.copytree(ort_library_directory, runtime_root / 'ort')
@@ -316,7 +319,7 @@ def native(arguments):
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
     output = arguments.output.resolve()
-    if target['os'] != 'linux' and target['ort_strategy'] != 'pinned-source-build':
+    if target['os'] in ('linux', 'macos') and target['ort_strategy'] != 'pinned-source-build':
         shutil.copyfile(shared_output / 'ort-runtime-receipt.json', output / 'evidence/ort-runtime-receipt.json')
     harness_name = 'native-test-binary.exe' if target['os'] == 'windows' else 'native-test-binary'
     harness_directory = output / 'evidence/harness'
@@ -517,14 +520,16 @@ def validate_install_receipt(metadata, proof, target, *, public):
             embedding.get('dimension') == 384 and embedding.get('finite_nonzero') is True and
             embedding.get('state') == 'passed', 'installed embedding proof is missing or not aggregate-bound')
     pair_directory = proof.get('installed_pair_directory')
-    require(isinstance(pair_directory, str) and Path(pair_directory).is_absolute() and
-            embedding.get('executable_path') == str(Path(pair_directory) / ('ilium.exe' if target['os'] == 'windows' else 'ilium')) and
+    pair_path = PureWindowsPath(pair_directory) if target['os'] == 'windows' and isinstance(pair_directory, str) else Path(pair_directory) if isinstance(pair_directory, str) else None
+    require(isinstance(pair_directory, str) and pair_path.is_absolute() and
+            embedding.get('executable_path') == str(pair_path / ('ilium.exe' if target['os'] == 'windows' else 'ilium')) and
             type(embedding.get('process_id')) is int and embedding['process_id'] > 0,
             'installed embedding executable path or process identity differs')
     runtime = embedding.get('loaded_runtime')
     if runtime:
-        require(Path(runtime).is_absolute() and Path(runtime).parent == Path(pair_directory) and
-                binding.get('runtime_files', {}).get(Path(runtime).name) == embedding.get('runtime_sha256'),
+        runtime_path = PureWindowsPath(runtime) if target['os'] == 'windows' else Path(runtime)
+        require(runtime_path.is_absolute() and runtime_path.parent == pair_path and
+                binding.get('runtime_files', {}).get(runtime_path.name) == embedding.get('runtime_sha256'),
                 'installed embedding runtime path/hash is not aggregate-bound')
     if target['os'] == 'macos':
         require(embedding.get('native_mapping_verified') is True and
@@ -604,6 +609,8 @@ def validate_install_evidence(proof, receipt_path, target=None):
         require(((value['exit_code'] == 0) if succeeds else value['exit_code'] != 0), 'installer exit code differs from scenario')
         stdout, stderr = evidence_path(value['stdout']), evidence_path(value['stderr'])
         require(stdout.name == label + '-stdout.txt' and stderr.name == label + '-stderr.txt', 'installer logs use unexpected paths')
+        if label == 'corrupt-candidate':
+            require('Archive SHA-256 mismatch' in stderr.read_text(encoding='utf-8'), 'corrupt-candidate did not fail closed on archive checksum mismatch')
     scenarios = proof['scenarios']
     public = proof.get('origin') != 'local'
     if not public:

@@ -23,7 +23,12 @@ MAX_ARCHIVE = 100_000_000
 MAX_UNCOMPRESSED = 1_073_741_824
 MAX_MEMBERS = 256
 MAX_SELECTED = 134_217_728
-TARGETS = {'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'}
+TARGETS = {
+    'aarch64-apple-darwin',
+    'x86_64-pc-windows-msvc',
+    'x86_64-unknown-linux-gnu',
+    'aarch64-unknown-linux-gnu',
+}
 
 
 def require(condition, message):
@@ -55,7 +60,7 @@ def validate_register(register, source, target):
     for field in ('version', 'tag', 'commit'):
         require(register.get(field) == source.get(field), 'Shared asset policy differs from pinned source: ' + field)
     require(register.get('version') == '1.24.2' and register.get('tag') == 'v1.24.2' and register.get('commit') == '058787ceead760166e3c50a0a4cba8a833a6f53f', 'Shared adapter supports only locked ONNX Runtime 1.24.2')
-    require(target in TARGETS and target in register.get('assets', {}), 'Shared adapter must not alter Linux static or Intel source-build strategies')
+    require(target in TARGETS and target in register.get('assets', {}), 'Shared adapter target is not in the reviewed runtime policy')
     asset = register['assets'][target]
     require(asset.get('github_digest') == 'sha256:' + asset.get('sha256', ''), 'Shared asset hash differs from recorded GitHub digest')
     require(type(asset.get('asset_id')) is int and asset['asset_id'] > 0, 'Official shared asset ID missing')
@@ -68,13 +73,21 @@ def validate_register(register, source, target):
     root = asset.get('root')
     for name, item in members.items():
         require(member_name(name) == name and name.split('/')[0] == root, 'Shared member policy root/path differs')
-        require(item.get('type') in ('file', 'directory') and type(item.get('size')) is int and item['size'] >= 0, 'Shared member type/size policy invalid')
+        require(item.get('type') in ('file', 'directory', 'symlink') and type(item.get('size')) is int and item['size'] >= 0, 'Shared member type/size policy invalid')
+        if item['type'] == 'symlink':
+            link = item.get('link')
+            require(isinstance(link, str) and link and not link.startswith('/') and '\\' not in link, 'Shared symlink target is unsafe')
     for name, item in selected.items():
         output = member_name(item.get('output'))
-        require(output.casefold() not in outputs and members[name]['type'] == 'file' and re.fullmatch('[0-9a-f]{64}', item.get('sha256', '')), 'Selected member output collision/hash/type invalid')
+        require(output.casefold() not in outputs and members[name]['type'] in ('file', 'symlink') and re.fullmatch('[0-9a-f]{64}', item.get('sha256', '')), 'Selected member output collision/hash/type invalid')
         outputs.add(output.casefold())
     required = {'LICENSE', 'ThirdPartyNotices.txt', 'VERSION_NUMBER', 'GIT_COMMIT_ID'}
-    required |= {'lib/libonnxruntime.1.24.2.dylib', 'lib/libonnxruntime.dylib'} if target == 'aarch64-apple-darwin' else {'lib/onnxruntime.dll', 'lib/onnxruntime.lib', 'lib/onnxruntime_providers_shared.dll', 'lib/onnxruntime_providers_shared.lib'}
+    if target == 'aarch64-apple-darwin':
+        required |= {'lib/libonnxruntime.1.24.2.dylib', 'lib/libonnxruntime.dylib'}
+    elif target in {'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu'}:
+        required |= {'lib/libonnxruntime.so', 'lib/libonnxruntime.so.1', 'lib/libonnxruntime.so.1.24.2', 'lib/libonnxruntime_providers_shared.so'}
+    else:
+        required |= {'lib/onnxruntime.dll', 'lib/onnxruntime.lib', 'lib/onnxruntime_providers_shared.dll', 'lib/onnxruntime_providers_shared.lib'}
     require(outputs == {name.casefold() for name in required}, 'Selected shared linker/runtime/notice outputs differ from reviewed set')
     return asset
 
@@ -82,15 +95,19 @@ def validate_register(register, source, target):
 def validate_inventory(entries, asset):
     seen, folded = {}, set()
     total = 0
-    for name, kind, size in entries:
+    for entry in entries:
+        name, kind, size = entry[:3]
+        link = entry[3] if len(entry) > 3 else None
         name = member_name(name, kind == 'directory')
         require(name not in seen and name.casefold() not in folded, 'Archive has duplicate or case-colliding members')
-        require(kind in ('file', 'directory') and type(size) is int and size >= 0, 'Archive contains a link/special or invalid member')
+        require(kind in ('file', 'directory', 'symlink') and type(size) is int and size >= 0, 'Archive contains a link/special or invalid member')
         require(name.split('/')[0] == asset['root'], 'Archive has mixed or unexpected roots')
         require(kind != 'directory' or size == 0, 'Directory member carries data')
+        if kind == 'symlink':
+            require(isinstance(link, str) and link and not link.startswith('/') and '\\' not in link, 'Archive symlink target is unsafe')
         total += size
         require(total <= MAX_UNCOMPRESSED and len(seen) < MAX_MEMBERS, 'Archive exceeds bounded expanded inventory')
-        seen[name] = {'type': kind, 'size': size}
+        seen[name] = {'type': kind, 'size': size, **({'link': link} if kind == 'symlink' else {})}
         folded.add(name.casefold())
     require(seen == asset['members'], 'Archive member inventory differs from reviewed upstream asset')
     for name in seen:
@@ -106,16 +123,26 @@ def read_selected(archive, asset):
     if asset['format'] == 'tar.gz':
         with tarfile.open(archive, 'r:gz') as stream:
             infos = stream.getmembers()
-            entries = [(info.name, 'directory' if info.isdir() else 'file' if info.isfile() else 'special', info.size) for info in infos]
+            entries = [(info.name, 'directory' if info.isdir() else 'file' if info.isfile() else 'symlink' if info.issym() else 'special', info.size, info.linkname) for info in infos]
             validate_inventory(entries, asset)
+            by_name = {info.name: info for info in infos}
             for info in infos:
                 if info.name not in asset['selected']:
                     continue
-                require(0 < info.size <= MAX_SELECTED, 'Selected upstream member exceeds bound')
-                source = stream.extractfile(info)
+                selected_info = info
+                seen_links = set()
+                while selected_info.issym():
+                    require(selected_info.name not in seen_links, 'Selected symlink chain is cyclic')
+                    seen_links.add(selected_info.name)
+                    target = str(PurePosixPath(selected_info.name).parent / selected_info.linkname)
+                    selected_info = by_name.get(target)
+                    require(selected_info is not None, 'Selected symlink target is missing')
+                require(selected_info.isfile(), 'Selected symlink target is not a regular member')
+                require(0 < selected_info.size <= MAX_SELECTED, 'Selected upstream member exceeds bound')
+                source = stream.extractfile(selected_info)
                 require(source is not None, 'Selected tar member unreadable')
-                data = source.read(info.size + 1)
-                require(len(data) == info.size, 'Selected tar member truncated')
+                data = source.read(selected_info.size + 1)
+                require(len(data) == selected_info.size, 'Selected tar member truncated')
                 selected[info.name] = data
     else:
         with zipfile.ZipFile(archive) as stream:

@@ -71,6 +71,8 @@ class OrtRuntimeTests(unittest.TestCase):
             self.assertTrue(asset['selected'])
         self.assertEqual(register['assets']['aarch64-apple-darwin']['sha256'], '0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde')
         self.assertEqual(register['assets']['x86_64-pc-windows-msvc']['sha256'], '8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0')
+        self.assertEqual(register['assets']['x86_64-unknown-linux-gnu']['sha256'], '43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6')
+        self.assertEqual(register['assets']['aarch64-unknown-linux-gnu']['sha256'], '6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e')
 
     def test_selected_regular_assets_and_explicit_dynamic_environment(self):
         for target in adapter.TARGETS:
@@ -153,8 +155,8 @@ class OrtRuntimeTests(unittest.TestCase):
     def test_source_version_commit_and_strategy_mismatch_fail(self):
         register = json.loads((ROOT / 'release/ort-runtime.json').read_text())
         source = json.loads((ROOT / 'release/ort-source.json').read_text())
-        for target in ('x86_64-unknown-linux-gnu', 'x86_64-apple-darwin'):
-            with self.assertRaisesRegex(ValueError, 'strategies'): adapter.validate_register(register, source, target)
+        for target in ('x86_64-pc-windows-gnu', 'x86_64-apple-darwin'):
+            with self.assertRaisesRegex(ValueError, 'policy'): adapter.validate_register(register, source, target)
         changed = dict(source, commit='0' * 40)
         with self.assertRaisesRegex(ValueError, 'source'): adapter.validate_register(register, changed, 'aarch64-apple-darwin')
 

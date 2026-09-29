@@ -62,14 +62,17 @@ builds both the ONNX shared library and the Rust executable pair and records
 must qualify the resulting bytes.
 
 Apple Silicon uses the official shared-library archive pinned in
-`ort-runtime.json`. That register also retains historical Windows prebuilt
-metadata; it does not replace the current Windows source-build requirement.
+`ort-runtime.json`. Linux x86_64 and aarch64 use the corresponding official
+shared-library archives from the same register; this avoids linking the
+cached static archive against newer glibc-only `__isoc23_*` symbols. That
+register also retains historical Windows prebuilt metadata; it does not
+replace the current Windows source-build requirement.
 `ort_runtime.py` verifies archive and member hashes,
-embedded source identity and original notices before extracting to a new owned
-directory. Its receipt supplies `ORT_LIB_LOCATION` and the explicit runtime
-root. `ORT_PREFER_DYNAMIC_LINK` alone does not select shared linking in the
-locked `ort-sys` build. Extraction remains unqualified until native linkage,
-loader relocation, dependency closure and inference pass.
+embedded source identity, safe symlink targets and original notices before
+extracting to a new owned directory. Its receipt supplies `ORT_LIB_LOCATION`
+and the explicit runtime root. `ORT_PREFER_DYNAMIC_LINK` alone does not select
+shared linking in the locked `ort-sys` build. Extraction remains unqualified
+until native linkage, loader relocation, dependency closure and inference pass.
 
 `embedding-model.json` pins the test-only model and tokenizer
 assets; these assets are excluded from product archives. The actual candidate

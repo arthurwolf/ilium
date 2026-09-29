@@ -181,7 +181,7 @@ def discovery(arguments, target, candidate, notices):
                 item['source_path'] = str(source)
                 runtimes[runtime_name] = item
                 pending.append(runtime_name)
-    if target['os'] in ('macos', 'windows'):
+    if target['os'] in ('linux', 'macos', 'windows'):
         require(any('onnxruntime' in name.casefold() for name in runtimes), 'Native client must link a bundled shared ONNX Runtime')
     inventory = {'schema': 1, 'state': 'reviewed', 'publication_allowed': True, 'target': arguments.target, 'files': list(runtimes.values()), 'system_libraries': list(systems.values())}
     return inventory, {'graph': graph, 'evidence': evidence}
