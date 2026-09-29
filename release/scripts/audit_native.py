@@ -249,7 +249,7 @@ def validate_windows_build_receipt(receipt, runtimes, runner="windows-2022", wor
     values = cache.get("values")
     require(isinstance(values, dict) and values.get("CMAKE_GENERATOR") == "Visual Studio 17 2022" and same_receipt_path(values.get("CMAKE_GENERATOR_INSTANCE", ""), selection["installation_path"]) and values.get("CMAKE_GENERATOR_TOOLSET") == "host=x64,version=" + selection["toolset_version"] and same_receipt_path(values.get("CMAKE_C_COMPILER", ""), selection["compiler_path"]) and same_receipt_path(values.get("CMAKE_CXX_COMPILER", ""), selection["compiler_path"]) and values.get("CMAKE_MSVC_RUNTIME_LIBRARY") == "MultiThreaded$<$<CONFIG:Debug>:Debug>" and same_receipt_path(values.get("CMAKE_HOME_DIRECTORY", ""), str(source.parent / "cmake")), "Windows CMake cache does not bind the selected Visual Studio static-runtime build")
     invocation = receipt.get("ort_invocation")
-    require(isinstance(invocation, list) and len(invocation) == 5 and [value.casefold() for value in invocation[:4]] == ["cmd.exe", "/d", "/s", "/c"] and invocation[4] == subprocess.list2cmdline(ort), "Windows ORT invocation evidence is malformed")
+    require(isinstance(invocation, list) and len(invocation) == 4 and [value.casefold() for value in invocation[:3]] == ["cmd.exe", "/d", "/c"] and invocation[3] == subprocess.list2cmdline(ort), "Windows ORT invocation evidence is malformed")
     cargo = receipt.get("cargo_command")
     require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Windows Cargo command evidence is missing/malformed")
     manifest = receipt_path(cargo[5])
@@ -281,7 +281,7 @@ def system_dependency(operating_system, name):
     if operating_system == "windows":
         # Vendor CRT/UCRT redistributables are intentionally not exempted.
         return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
-    return bool(re.fullmatch(r"(?:lib(?:c|m|pthread|dl|rt|resolv|util)\.so\.[0-9]+|ld-linux[^/]*\.so\.[0-9]+|lib(?:asound|udev|gcc_s)\.so\.[0-9]+|libstdc\+\+\.so\.6)", name))
+    return bool(re.fullmatch(r"(?:lib(?:c|m|pthread|dl|rt|resolv|util|ssl|crypto)\.so\.[0-9]+|ld-linux[^/]*\.so\.[0-9]+|lib(?:asound|udev|gcc_s)\.so\.[0-9]+|libstdc\+\+\.so\.6)", name))
 
 
 def validate_closure(operating_system, graph, inventory, shipped, roots=None):

@@ -251,7 +251,9 @@ def build(arguments):
         environment.pop(variable, None)
     ort_environment = {"CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}
     environment.update(ort_environment)
-    invocation = ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(ort_command)]
+    # /s makes cmd.exe strip the quotes around the multi-word generator name,
+    # turning it into two arguments before build.bat sees it.
+    invocation = ["cmd.exe", "/d", "/c", subprocess.list2cmdline(ort_command)]
     logged_command(invocation, source, environment, arguments.output_root / "ort-build.log")
     cmake_cache = cmake_build_identity(native_build, source, selection)
     runtime, import_library = find_outputs(native_build)
