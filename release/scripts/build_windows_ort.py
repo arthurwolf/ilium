@@ -118,6 +118,31 @@ def same_windows_path(left, right):
     return os.path.normpath(str(left)).casefold() == os.path.normpath(str(right)).casefold()
 
 
+def select_msvc_compiler(installation, compiler_paths):
+    candidates = []
+    for path in compiler_paths:
+        candidate = Path(path)
+        if not candidate.is_absolute() or not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        if installation not in resolved.parents:
+            continue
+        parts = resolved.parts
+        indices = [index for index, value in enumerate(parts) if value.casefold() == "msvc"]
+        if len(indices) != 1 or indices[0] + 1 >= len(parts):
+            continue
+        toolset_version = parts[indices[0] + 1]
+        if not re.fullmatch(r"14\.[0-9.]+", toolset_version):
+            continue
+        candidates.append((tuple(int(part) for part in toolset_version.split(".")), resolved, toolset_version))
+    require(candidates, "cannot resolve a native x64 MSVC compiler")
+    newest = max(item[0] for item in candidates)
+    selected = [item for item in candidates if item[0] == newest]
+    require(len(selected) == 1, "cannot resolve one native x64 MSVC compiler for the newest toolset")
+    _version, compiler, toolset_version = selected[0]
+    return compiler, toolset_version
+
+
 def cmake_build_identity(build_directory, source, selection):
     matches = []
     for path in Path(build_directory).rglob("CMakeCache.txt"):
@@ -164,14 +189,7 @@ def resolve_msvc_toolchain(probe_directory):
             "cannot resolve the selected Visual Studio 2022 version")
     compiler_result = command_identity(prefix + ["-find", "VC/Tools/MSVC/**/bin/Hostx64/x64/cl.exe"])
     paths = [Path(line.strip()) for line in compiler_result["stdout"].splitlines() if line.strip()]
-    require(len(paths) == 1 and paths[0].is_absolute() and paths[0].is_file(), "cannot resolve one native x64 MSVC compiler")
-    compiler = paths[0].resolve()
-    require(installation in compiler.parents, "resolved MSVC compiler is outside the selected Visual Studio instance")
-    parts = compiler.parts
-    indices = [index for index, value in enumerate(parts) if value.casefold() == "msvc"]
-    require(len(indices) == 1 and indices[0] + 1 < len(parts), "cannot derive selected MSVC toolset version")
-    toolset_version = parts[indices[0] + 1]
-    require(re.fullmatch(r"14\.[0-9.]+", toolset_version), "selected MSVC toolset version is malformed")
+    compiler, toolset_version = select_msvc_compiler(installation, paths)
     probe_source = Path(probe_directory) / "msvc-identity-probe.c"
     probe_object = Path(probe_directory) / "msvc-identity-probe.obj"
     probe_source.write_text("int ilium_msvc_identity_probe(void) { return 0; }\n", encoding="utf-8")

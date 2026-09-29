@@ -83,6 +83,21 @@ class WindowsOrtBuilderTests(unittest.TestCase):
         self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", environment)
         self.assertNotIn("RUSTFLAGS", environment)
 
+    def test_select_msvc_compiler_chooses_newest_toolset_from_selected_instance(self):
+        builder = load_builder()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / "Microsoft Visual Studio/2022/Enterprise"
+            older = installation / "VC/Tools/MSVC/14.40.33807/bin/Hostx64/x64/cl.exe"
+            newer = installation / "VC/Tools/MSVC/14.42.34433/bin/Hostx64/x64/cl.exe"
+            unrelated = root / "other/VC/Tools/MSVC/14.43.34808/bin/Hostx64/x64/cl.exe"
+            for path in (older, newer, unrelated):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+            selected, version = builder.select_msvc_compiler(installation, [older, newer, unrelated])
+            self.assertEqual(selected, newer.resolve())
+            self.assertEqual(version, "14.42.34433")
+
     def test_cmake_cache_binds_selected_visual_studio_instance_compilers_and_static_runtime(self):
         builder = load_builder()
         with tempfile.TemporaryDirectory() as temporary:
