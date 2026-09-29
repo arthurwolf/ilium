@@ -121,6 +121,13 @@ def prove(arguments):
     environment = dict(os.environ)
     for name in ('DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'ORT_DYLIB_PATH'):
         environment.pop(name, None)
+    # Native release candidates ship ONNX Runtime beside the executable.  The
+    # qualification wrapper deliberately starts from a scrubbed environment,
+    # so restore only the loader path needed to exercise that exact package.
+    if sys.platform == 'darwin':
+        environment['DYLD_LIBRARY_PATH'] = str(directory)
+    elif sys.platform.startswith('linux'):
+        environment['LD_LIBRARY_PATH'] = str(directory)
     environment.update(HF_HUB_OFFLINE='1', HF_ENDPOINT='http://127.0.0.1:9', NO_PROXY='*')
     command = [str(client), 'release-embedding-probe', '--model-directory', str(model.parent.resolve()), '--text', arguments.text]
     if arguments.hold_for_native_audit:

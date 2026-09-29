@@ -81,7 +81,7 @@ class NativeAuditTests(unittest.TestCase):
             "cmake_cache": {"path": str(cache), "sha256": "e" * 64, "values": {"CMAKE_GENERATOR": "Visual Studio 17 2022", "CMAKE_GENERATOR_INSTANCE": str(installation), "CMAKE_GENERATOR_TOOLSET": "host=x64,version=14.40.33807", "CMAKE_C_COMPILER": compiler, "CMAKE_CXX_COMPILER": compiler, "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>", "CMAKE_HOME_DIRECTORY": str(native / f"source/onnxruntime-{commit}/cmake")}},
             "ort_environment": {"CMAKE_GENERATOR_INSTANCE": str(installation)},
             "ort_command": ort_command,
-            "ort_invocation": ["cmd.exe", "/d", "/c", subprocess.list2cmdline(ort_command)],
+            "ort_invocation": ["cmd.exe", "/d", "/c", *ort_command],
             "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server"],
             "environment": {"ORT_LIB_LOCATION": str(build / "Release"), "ORT_LIB_PATH": str(build / "Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target"), "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS": "-Ctarget-feature=+crt-static"},
             "runtime": {"path": str(build / "Release/onnxruntime.dll"), "version": "1.24.2", "sha256": "c" * 64},

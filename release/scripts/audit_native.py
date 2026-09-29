@@ -249,7 +249,7 @@ def validate_windows_build_receipt(receipt, runtimes, runner="windows-2022", wor
     values = cache.get("values")
     require(isinstance(values, dict) and values.get("CMAKE_GENERATOR") == "Visual Studio 17 2022" and same_receipt_path(values.get("CMAKE_GENERATOR_INSTANCE", ""), selection["installation_path"]) and values.get("CMAKE_GENERATOR_TOOLSET") == "host=x64,version=" + selection["toolset_version"] and same_receipt_path(values.get("CMAKE_C_COMPILER", ""), selection["compiler_path"]) and same_receipt_path(values.get("CMAKE_CXX_COMPILER", ""), selection["compiler_path"]) and values.get("CMAKE_MSVC_RUNTIME_LIBRARY") == "MultiThreaded$<$<CONFIG:Debug>:Debug>" and same_receipt_path(values.get("CMAKE_HOME_DIRECTORY", ""), str(source.parent / "cmake")), "Windows CMake cache does not bind the selected Visual Studio static-runtime build")
     invocation = receipt.get("ort_invocation")
-    require(isinstance(invocation, list) and len(invocation) == 4 and [value.casefold() for value in invocation[:3]] == ["cmd.exe", "/d", "/c"] and invocation[3] == subprocess.list2cmdline(ort), "Windows ORT invocation evidence is malformed")
+    require(isinstance(invocation, list) and len(invocation) == len(ort) + 3 and [value.casefold() for value in invocation[:3]] == ["cmd.exe", "/d", "/c"] and invocation[3:] == ort, "Windows ORT invocation evidence is malformed")
     cargo = receipt.get("cargo_command")
     require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Windows Cargo command evidence is missing/malformed")
     manifest = receipt_path(cargo[5])
