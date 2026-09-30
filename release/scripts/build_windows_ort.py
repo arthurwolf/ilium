@@ -144,6 +144,16 @@ def select_msvc_compiler(installation, compiler_paths):
     return compiler, toolset_version
 
 
+def generated_compiler_path(cache_path, language):
+    """Compiler recorded by CMake's own compiler-detection output, or None."""
+    files = sorted(Path(cache_path).parent.glob(f"CMakeFiles/*/CMake{language}Compiler.cmake"))
+    files = [file for file in files if file.is_file() and not file.is_symlink()]
+    if len(files) != 1:
+        return None
+    match = re.search(rf'^set\(CMAKE_{language}_COMPILER "([^"]+)"\)', files[0].read_text(encoding="utf-8"), re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def cmake_build_identity(build_directory, source, selection):
     matches = []
     for path in Path(build_directory).rglob("CMakeCache.txt"):
@@ -154,11 +164,20 @@ def cmake_build_identity(build_directory, source, selection):
                 matches.append((path.resolve(), values))
     require(len(matches) == 1, "Windows ORT build must have exactly one top-level CMake cache")
     path, values = matches[0]
+    # Visual Studio generators do not cache the compiler: CMake records the
+    # resolved cl.exe in the generated CMake{C,CXX}Compiler.cmake files beside
+    # the cache. Those files are the authoritative identity, so fall back to
+    # them only when the cache itself lacks the entry.
+    for language, key in (("C", "CMAKE_C_COMPILER"), ("CXX", "CMAKE_CXX_COMPILER")):
+        if not values.get(key):
+            generated = generated_compiler_path(path, language)
+            if generated is not None:
+                values[key] = generated
     required = ("CMAKE_GENERATOR", "CMAKE_GENERATOR_INSTANCE", "CMAKE_GENERATOR_TOOLSET",
                 "CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER", "CMAKE_MSVC_RUNTIME_LIBRARY",
                 "CMAKE_HOME_DIRECTORY")
-    require(all(isinstance(values.get(name), str) and values[name] for name in required),
-            "Windows ORT CMake cache lacks required build identity")
+    missing = [name for name in required if not (isinstance(values.get(name), str) and values[name])]
+    require(not missing, "Windows ORT CMake cache lacks required build identity: " + ", ".join(missing))
     require(same_windows_path(values["CMAKE_GENERATOR_INSTANCE"], selection["installation_path"]),
             "CMake generator instance differs from selected Visual Studio instance")
     require(values["CMAKE_GENERATOR_TOOLSET"] == "host=x64,version=" + selection["toolset_version"],

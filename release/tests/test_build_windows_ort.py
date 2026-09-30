@@ -133,6 +133,41 @@ class WindowsOrtBuilderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "static MSVC runtime"):
                 builder.cmake_build_identity(root / "build", source, selection)
 
+    def test_cmake_identity_falls_back_to_generated_compiler_files_for_visual_studio_generators(self):
+        builder = load_builder()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / "Microsoft Visual Studio/2022/Enterprise"
+            compiler = installation / "VC/Tools/MSVC/14.40.33807/bin/Hostx64/x64/cl.exe"
+            compiler.parent.mkdir(parents=True)
+            compiler.write_bytes(b"fixture")
+            source = root / ("source/onnxruntime-" + builder.COMMIT)
+            cache = root / "build/Release/CMakeCache.txt"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("\n".join([
+                "CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022",
+                f"CMAKE_GENERATOR_INSTANCE:INTERNAL={installation}",
+                "CMAKE_GENERATOR_TOOLSET:INTERNAL=host=x64,version=14.40.33807",
+                "CMAKE_MSVC_RUNTIME_LIBRARY:UNINITIALIZED=MultiThreaded$<$<CONFIG:Debug>:Debug>",
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={source / 'cmake'}",
+            ]) + "\n")
+            generated = cache.parent / "CMakeFiles/3.31.0"
+            generated.mkdir(parents=True)
+            for language in ("C", "CXX"):
+                (generated / f"CMake{language}Compiler.cmake").write_text(
+                    f'set(CMAKE_{language}_COMPILER "{compiler.as_posix()}")\n')
+            selection = {
+                "installation_path": str(installation),
+                "installation_version": "17.11.35222.181",
+                "toolset_version": "14.40.33807",
+                "compiler_path": str(compiler),
+            }
+            identity = builder.cmake_build_identity(root / "build", source, selection)
+            self.assertEqual(identity["values"]["CMAKE_CXX_COMPILER"], compiler.as_posix())
+            (generated / "CMakeCXXCompiler.cmake").unlink()
+            with self.assertRaisesRegex(ValueError, "CMAKE_CXX_COMPILER"):
+                builder.cmake_build_identity(root / "build", source, selection)
+
     def test_parse_cmake_cache_rejects_duplicate_keys(self):
         builder = load_builder()
         with tempfile.TemporaryDirectory() as temporary:
