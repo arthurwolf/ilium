@@ -991,6 +991,182 @@ fn write_change_only_fake_codex(directory: &Path) -> PathBuf {
     .path
 }
 
+/// A real client's expiry must advance even when output repeatedly wins its
+/// select loop. The authoritative server result remains available afterward.
+#[cfg(unix)]
+#[tokio::test]
+async fn completed_progress_footer_expires_during_continuous_pty_output() {
+    let temp_root = tempfile::tempdir().expect("create expiry tempdir");
+    let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("isolate expiry runtime");
+    let project_dir = temp_root.path().join("progress-expiry");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    seed_project_config(&xdg, &project_dir);
+    update_isolated_ui_settings(&xdg, |ui| {
+        ui.progress_monitor_enabled = true;
+        ui.completed_progress_hide_after_seconds = 3;
+    });
+    let mut cleanup_guard = KillSessionOnDrop {
+        xdg: &xdg,
+        cwd: project_dir.clone(),
+        session_name: SESSION_NAME,
+        already_cleaned_up: false,
+    };
+    let output = run_one_shot(&xdg, &project_dir, &[
+        "new-pane", "--", "/bin/sh", "-c",
+        "counter=0; while :; do counter=$((counter+1)); printf '\\rbusy-expiry-output-%s' \"$counter\"; done",
+    ]).await;
+    assert!(output.status.success(), "new-pane: {output:?}");
+    let (socket_path, _) = isolated_server_identity(&xdg, &project_dir).await;
+    let mut control = Connection::connect(&socket_path, SESSION_NAME.to_owned())
+        .await
+        .unwrap();
+    let tree = receive_initial_tree(&mut control, "expiry initial tree").await;
+    let pane_id = tree.pane_ids_in_tree_order()[0];
+    control
+        .requests
+        .send(ClientRequest::RenameNode {
+            node_id: pane_id,
+            title: "expiry-pane".to_owned(),
+            short_title: None,
+            inferred_icon: None,
+        })
+        .await
+        .unwrap();
+    receive_tree_snapshot(&mut control, "expiry pane name").await;
+    let attach = PtyCommand::new(ilium_binary(), &project_dir, 40, 120)
+        .arg("--cwd")
+        .arg(project_dir.to_string_lossy().to_string());
+    let attach = xdg
+        .as_pairs()
+        .into_iter()
+        .fold(attach, |command, (key, value)| {
+            command.env(key, value.to_string_lossy().to_string())
+        });
+    let mut tui = PtySession::spawn(attach).unwrap();
+    assert!(wait_until(|| tui.screen_text().contains("expiry-pane"), WAIT_TIMEOUT).await);
+    let row = tui.with_screen(|screen| rows_containing_before_column(screen, "expiry-pane", 64)[0]);
+    tui.write(&sgr_mouse_down(0, 8, row)).unwrap();
+    tui.write(&sgr_mouse_up(8, row)).unwrap();
+    tui.write(b"\r").unwrap();
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("busy-expiry-output-"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "busy pane not displayed: {}",
+        tui.screen_text()
+    );
+
+    let report_path = temp_root.path().join("terminal-report.json");
+    std::fs::write(&report_path,
+        r#"{"job_id":"pty-expiry-proof","status":"done","percent":100,"message":"unique completed footer evidence"}"#
+    ).unwrap();
+    let probe = ilium_test_fixtures::install(
+        temp_root.path(),
+        "expiry-probe",
+        &ilium_test_fixtures::FixtureBehavior::PrintFile { path: report_path },
+    )
+    .path;
+    control
+        .requests
+        .send(ClientRequest::SetPaneProgressMonitor {
+            request_id: 9871,
+            pane_id,
+            command: probe.to_string_lossy().to_string(),
+            interval_seconds: 1,
+        })
+        .await
+        .unwrap();
+    let accepted = tokio::time::timeout(WAIT_TIMEOUT, async {
+        while let Some(event) = control.events.recv().await {
+            if let ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 9871,
+                result,
+                ..
+            } = event
+            {
+                return result.expect("monitor accepted");
+            }
+        }
+        panic!("server closed before acceptance");
+    })
+    .await
+    .unwrap();
+    assert!(
+        wait_until(
+            || tui
+                .screen_text()
+                .contains("unique completed footer evidence"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "footer never rendered: {}",
+        tui.screen_text()
+    );
+    let counter = |screen: String| {
+        screen
+            .split("busy-expiry-output-")
+            .nth(1)
+            .unwrap()
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u64>()
+            .unwrap()
+    };
+    let busy_before = counter(tui.screen_text());
+    assert!(
+        wait_until(
+            || !tui
+                .screen_text()
+                .contains("unique completed footer evidence"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "footer did not expire during output: {}",
+        tui.screen_text()
+    );
+    assert!(tui.screen_text().contains("busy-expiry-output-"));
+    assert!(
+        counter(tui.screen_text()) > busy_before,
+        "output must keep advancing"
+    );
+    control
+        .requests
+        .send(ClientRequest::GetPaneProgressMonitorStatus {
+            request_id: 9872,
+            pane_id,
+        })
+        .await
+        .unwrap();
+    let retained = tokio::time::timeout(WAIT_TIMEOUT, async {
+        while let Some(event) = control.events.recv().await {
+            if let ServerEvent::ProgressMonitorStatusReported {
+                request_id: 9872,
+                result,
+                ..
+            } = event
+            {
+                return result.unwrap().progress.expect("retained terminal result");
+            }
+        }
+        panic!("server closed before retained-result readback");
+    })
+    .await
+    .unwrap();
+    assert_eq!(retained.monitor_id, accepted.monitor_id);
+    assert_eq!(retained.report, accepted.progress.report);
+    assert_eq!(
+        retained.last_observed_unix_millis,
+        accepted.progress.last_observed_unix_millis
+    );
+    let killed = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+    assert!(killed.status.success());
+    cleanup_guard.already_cleaned_up = true;
+    assert!(wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await);
+}
+
 #[tokio::test]
 async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
@@ -1101,13 +1277,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // focus on the (empty) pane panel, so phase 1's idle pane isn't
     // actually listed yet -- expand it to also prove out tree navigation
     // (`ilium_client::app::App::handle_tree_key`), not just leader-key
-    // dispatch: `Ctrl+B then t` (`Action::FocusTree`) moves focus to the
+    // dispatch: `Ctrl+B then w` (`Action::FocusTree`) moves focus to the
     // tree, Down selects its first entry (the "default" group -- see
     // `tui_tree_widget::TreeState::key_down`'s "nothing selected ->
     // select the first item" behavior), and Right expands it
     // (`TreeState::key_right`).
-    tui.write(b"\x02t")
-        .expect("writing Ctrl+B then t (FocusTree)");
+    tui.write(b"\x02w")
+        .expect("writing Ctrl+B then w (FocusTree)");
     tui.write(b"j").expect("selecting the first tree entry");
     tui.write(b"l").expect("expanding the selected tree entry");
     let pane_listed = wait_until(
@@ -2253,7 +2429,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
 
     // Expansion state is intentionally client-local and resets on restart;
     // expanding again must reveal the same server-owned terminal pane.
-    tui.write(b"\x02t\x1b[B\x1b[C")
+    tui.write(b"\x02w\x1b[B\x1b[C")
         .expect("focus tree and expand restored group");
     assert!(
         wait_until(|| tui.screen_text().contains(IDLE_PANE_LABEL), WAIT_TIMEOUT).await,
@@ -2320,7 +2496,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
 
     // The project and its default group are restored expanded, so select the
     // default group directly before opening the split dialog.
-    tui.write(b"\x02t").expect("focus tree");
+    tui.write(b"\x02w").expect("focus tree");
     tui.write(b"\x1b[B").expect("select default group");
     let both_fixture_panes = wait_until(
         || tui.screen_text().matches(IDLE_PANE_LABEL).count() >= 2,
@@ -2410,7 +2586,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     let first_routed = wait_until(|| tui.screen_text().contains("left-route"), WAIT_TIMEOUT).await;
     assert!(first_routed, "first split child did not receive input");
 
-    tui.write(b"\x02t").expect("return focus to split tree");
+    tui.write(b"\x02w").expect("return focus to split tree");
     tui.write(&sgr_mouse_down(0, 8, split_child_rows[1]))
         .expect("focus second split child");
     tui.write(&sgr_mouse_up(8, split_child_rows[1]))
@@ -2936,8 +3112,8 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 
     // The restored project/default hierarchy is already expanded, so select
     // the default group without toggling it closed.
-    tui.write(b"\x02t")
-        .expect("writing Ctrl+B then t (FocusTree)");
+    tui.write(b"\x02w")
+        .expect("writing Ctrl+B then w (FocusTree)");
     tui.write(b"\x1b[B").expect("writing Down arrow");
 
     // Wait for the spatial insertion transition itself to settle, not merely
@@ -4258,7 +4434,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected default group in boundary-move TUI, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x02t\x1b[B\x1b[C")
+    tui.write(b"\x02w\x1b[B\x1b[C")
         .expect("focus tree, select default group, and expand it");
 
     // The selected default group is the create dialog's preselected parent.
@@ -4625,7 +4801,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     // Exercise focus-owned expansion and contraction explicitly instead of
     // relying on pointer hover duration. Waiting past the 180 ms transition
     // ensures both endpoints reached the PTY/server journal before opening it.
-    tui.write(b"\x02t")
+    tui.write(b"\x02w")
         .expect("focus the left tree panel for resize provenance");
     tokio::time::sleep(Duration::from_millis(300)).await;
     tui.write(b"\x02P")
@@ -5776,7 +5952,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         tui.screen_text()
     );
 
-    tui.write(b"\x02t")
+    tui.write(b"\x02w")
         .expect("expand sidebar for footer icons");
     assert!(
         wait_until(|| tui.screen_text().contains("🦀"), WAIT_TIMEOUT).await,

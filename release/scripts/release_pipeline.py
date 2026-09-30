@@ -25,6 +25,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import build_linux_packages as linux_packages
+import build_windows_installers as windows_installers
 import pages
 import release_tool
 
@@ -381,6 +383,33 @@ def asset_hashes(files):
     return hashes
 
 
+def windows_installer_inventory(directory, tag, archive_sha256, package_files):
+    """Bind the MSI/EXE receipt to the audited Windows ZIP and return every asset hash."""
+    directory = Path(directory)
+    receipt = release_tool.read_json(directory / windows_installers.RECEIPT_NAME)
+    require(receipt.get('schema') == 1 and receipt.get('tag') == tag and receipt.get('source_archive_sha256') == archive_sha256, 'Windows installer receipt is not bound to the qualified ZIP')
+    require(receipt.get('package_files') == package_files, 'Windows installers do not repackage the exact audited files')
+    installers = receipt.get('installers')
+    require(isinstance(installers, dict) and set(installers) == set(windows_installers.INSTALLER_NAMES), 'Windows installer receipt inventory differs')
+    for name, digest in installers.items():
+        require(sha(directory / name) == digest, 'Windows installer bytes differ from their receipt: ' + name)
+    return {**installers, windows_installers.RECEIPT_NAME: sha(directory / windows_installers.RECEIPT_NAME)}
+
+
+def linux_package_inventory(directory, tag, row, archive_sha256, package_files):
+    """Bind one architecture's deb/rpm/AppImage/Flatpak/Snap receipt to its audited tarball and return every asset hash."""
+    directory = Path(directory)
+    receipt_name = linux_packages.receipt_name(row['arch'])
+    receipt = release_tool.read_json(directory / receipt_name)
+    require(receipt.get('schema') == 1 and receipt.get('tag') == tag and receipt.get('arch') == row['arch'] and receipt.get('source_archive_sha256') == archive_sha256, 'Linux package receipt is not bound to the qualified tarball')
+    require(receipt.get('package_files') == package_files, 'Linux packages do not repackage the exact audited files')
+    built = receipt.get('packages')
+    require(isinstance(built, dict) and set(built) == set(linux_packages.package_names(row['arch'])), 'Linux package receipt inventory differs')
+    for name, digest in built.items():
+        require(sha(directory / name) == digest, 'Linux package bytes differ from their receipt: ' + name)
+    return {**built, receipt_name: sha(directory / receipt_name)}
+
+
 def aggregate(arguments):
     targets = release_tool.load_targets(arguments.manifest)
     root = arguments.workspace.resolve().parent
@@ -453,15 +482,32 @@ def aggregate(arguments):
         suffix = '.exe' if target['os'] == 'windows' else ''
         receipts[target['rust_target']] = {'native_audit_sha256': sha(audit_path), 'candidate_receipt_sha256': sha(bridge_path), 'client_sha256': audit['files']['ilium' + suffix], 'server_sha256': audit['files']['ilium-server' + suffix], 'harness_sha256': harness['sha256'], 'native_test_harness_sha256': sha(native / 'native-test-harness.json'), 'evidence_files': harness['evidence_files'], 'evidence_files_sha256': evidence_files_digest(harness['evidence_files']), 'installed_embedding': {'wrapper_sha256': sha(embedding_wrapper), 'command_sha256': sha(embedding_spec_path), 'model_register_sha256': sha(root / 'release/embedding-model.json'), 'model_files': model_files, 'runtime_files': harness.get('runtime_files', {})}}
         shutil.copyfile(audit_path, output / 'audits' / (target['rust_target'] + '.json'))
+    windows_row = next(row for row in targets if row['os'] == 'windows')
+    installers_directory = arguments.windows_installers.resolve()
+    require(installers_directory.is_dir() and not installers_directory.is_symlink() and {path.name for path in installers_directory.iterdir()} == set(windows_installers.INSTALLER_NAMES) | {windows_installers.RECEIPT_NAME}, 'Windows installer artifact inventory differs')
+    windows_audit = release_tool.audit_receipt(output / 'audits' / (windows_row['rust_target'] + '.json'), windows_row, release_tool.workspace_version(arguments.workspace, arguments.tag), arguments.tag)
+    windows_installer_hashes = windows_installer_inventory(installers_directory, arguments.tag, archives[windows_row['archive']], windows_audit['files'])
+    for name in sorted(windows_installer_hashes):
+        shutil.copyfile(installers_directory / name, output / name)
+    linux_rows = [row for row in targets if row['os'] == 'linux']
+    packages_directory = arguments.linux_packages.resolve()
+    expected_packages = {name for row in linux_rows for name in (*linux_packages.package_names(row['arch']), linux_packages.receipt_name(row['arch']))}
+    require(packages_directory.is_dir() and not packages_directory.is_symlink() and {path.name for path in packages_directory.iterdir()} == expected_packages, 'Linux package artifact inventory differs')
+    linux_package_hashes = {}
+    for row in linux_rows:
+        linux_audit = release_tool.audit_receipt(output / 'audits' / (row['rust_target'] + '.json'), row, release_tool.workspace_version(arguments.workspace, arguments.tag), arguments.tag)
+        linux_package_hashes.update(linux_package_inventory(packages_directory, arguments.tag, row, archives[row['archive']], linux_audit['files']))
+    for name in sorted(linux_package_hashes):
+        shutil.copyfile(packages_directory / name, output / name)
     (output / 'SHA256SUMS').write_text(''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)), encoding='ascii')
     (output / 'VERSION').write_text(version + '\n', encoding='ascii')
     for name in ('install.sh', 'install.ps1'):
         shutil.copyfile(root / 'release' / name, output / name)
     source_inputs = {name: sha(root / name) for name in ('Cargo.toml', 'Cargo.lock', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json')}
-    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}}
+    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes}
     write_json(output / 'candidate.json', metadata)
     pages.build_pages(arguments.manifest, output / 'site', arguments.tag, output / 'SHA256SUMS', source_root=root)
-    gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives)]))
+    gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives) + sorted(windows_installer_hashes) + sorted(linux_package_hashes)]))
     emit('result', command='aggregate', state='passed', output=str(output), archives=archives, commit=commit)
 
 
@@ -474,7 +520,7 @@ def candidate_data(directory, manifest, workspace):
     require(set(metadata.get('source_inputs', {})) == expected_inputs, 'candidate source inventory differs')
     for name, digest in metadata['source_inputs'].items():
         require(sha(Path(workspace).resolve().parent / name) == digest, 'candidate source input changed: ' + name)
-    expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json'}
+    expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', *windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME, *metadata.get('linux_packages', {})}
     actual_names = {path.name for path in directory.iterdir()}
     require(actual_names in (expected_names, expected_names | {'qualification.json'}), 'candidate aggregate file inventory differs')
     require(metadata.get('schema') == 1 and re.fullmatch('[0-9a-f]{40}', metadata.get('commit', '')), 'candidate source identity is invalid')
@@ -482,6 +528,7 @@ def candidate_data(directory, manifest, workspace):
     require(set(metadata.get('installers', {})) == {'install.sh', 'install.ps1'}, 'candidate installer inventory differs')
     for name, digest in metadata['installers'].items():
         require(sha(directory / name) == digest, 'candidate installer bytes changed')
+    linux_listed = 0
     for target in targets:
         archive = directory / target['archive']
         require(metadata['archives'][target['archive']] == sha(archive), 'candidate archive bytes changed')
@@ -490,6 +537,13 @@ def candidate_data(directory, manifest, workspace):
         audit = release_tool.audit_receipt(audit_path, target, version, metadata['tag'])
         release_tool.verify_content(release_tool.read_archive(archive, target, audit), audit, version)
         release_tool.validate_checksums(directory / 'SHA256SUMS', targets, archive)
+        if target['os'] == 'windows':
+            require(windows_installer_inventory(directory, metadata['tag'], metadata['archives'][target['archive']], audit['files']) == metadata.get('windows_installers'), 'candidate Windows installer inventory differs')
+        if target['os'] == 'linux':
+            inventory = linux_package_inventory(directory, metadata['tag'], target, metadata['archives'][target['archive']], audit['files'])
+            require(all(metadata.get('linux_packages', {}).get(name) == digest for name, digest in inventory.items()), 'candidate Linux package inventory differs')
+            linux_listed += len(inventory)
+    require(linux_listed == len(metadata.get('linux_packages', {})), 'candidate lists Linux packages no target owns')
     pages.verify_pages(directory / 'site', directory / 'SHA256SUMS', source_root=Path(workspace).resolve().parent, manifest=manifest)
     return metadata, targets
 
@@ -782,7 +836,7 @@ def github(path, *, method='GET', payload=None, binary=None):
 def publication_files(candidate):
     candidate = Path(candidate)
     metadata = release_tool.read_json(candidate / 'candidate.json')
-    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json')]
+    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']))]
 
 
 def validate_release(release, tag, files, *, draft, immutable):
@@ -1435,6 +1489,8 @@ def parser():
             command.add_argument('--output', type=Path, required=True)
         if name == 'aggregate':
             command.add_argument('--artifacts', type=Path, required=True)
+            command.add_argument('--windows-installers', type=Path, required=True)
+            command.add_argument('--linux-packages', type=Path, required=True)
             command.add_argument('--output', type=Path, required=True)
         if name in {'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'recovery-ready', 'readback', 'recover'}:
             command.add_argument('--candidate', type=Path, required=True)

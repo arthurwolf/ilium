@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / 'release/scripts'))
 import release_tool
 import release_pipeline as pipeline
 import pages
+import build_linux_packages as linux_packages
 
 
 class WorkflowTests(unittest.TestCase):
@@ -55,6 +56,27 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(actual['strategy']['fail-fast'], 'false')
         steps = self.workflow['jobs']['source']['steps']
         self.assertTrue(any('release_pipeline.py source' in step.get('run', '') for step in steps))
+
+    def test_linux_package_job_follows_the_manifest_and_feeds_the_candidate(self):
+        targets = [row for row in release_tool.load_targets(ROOT / 'release/targets.toml') if row['os'] == 'linux']
+        job = self.workflow['jobs']['linux-packages']
+        self.assertEqual(sorted(job['needs']), ['native', 'source'])
+        self.assertEqual(job['runs-on'], '${{ matrix.runner }}')
+        self.assertEqual(job['strategy']['fail-fast'], 'false')
+        self.assertEqual(sorted((row['arch'], row['rust_target'], row['runner']) for row in job['strategy']['matrix']['include']),
+                         sorted((row['arch'], row['rust_target'], row['runner']) for row in targets))
+        self.assertIn('linux-packages', self.workflow['jobs']['aggregate']['needs'])
+        runs = '\n'.join(step.get('run', '') for step in job['steps'])
+        for command in ('build_linux_packages.py build', 'smoke_linux_packages.py inspect', 'smoke_linux_packages.py containers', 'smoke_linux_packages.py host'):
+            self.assertIn(command, runs)
+        host = next(step['run'] for step in job['steps'] if 'smoke_linux_packages.py host' in step.get('run', ''))
+        for package_format in ('snap', 'flatpak', 'deb', 'appimage'):
+            self.assertIn(package_format, host)
+        aggregate = '\n'.join(step.get('run', '') for step in self.workflow['jobs']['aggregate']['steps'])
+        self.assertIn('--linux-packages linux-packages', aggregate)
+        subjects = next(step['with']['subject-path'] for step in self.workflow['jobs']['attest']['steps'] if 'subject-path' in step.get('with', {}))
+        for pattern in ('candidate/*.deb', 'candidate/*.rpm', 'candidate/*.AppImage', 'candidate/*.flatpak', 'candidate/*.snap', 'candidate/linux-packages-*.json'):
+            self.assertIn(pattern, subjects)
 
     def test_actual_cli_dispatches_hyphenated_and_baseline_commands(self):
         with patch.object(pipeline, 'capture_baseline') as baseline:
@@ -184,6 +206,20 @@ class PipelineTests(unittest.TestCase):
                 audit['windows_ort'] = {'state': 'passed', 'source_tag': 'v1.24.2', 'source_commit': '058787ceead760166e3c50a0a4cba8a833a6f53f', 'source_sha256': 'a' * 64, 'built_runtime_sha256': 'c' * 64, 'rust_crt': 'static', 'ort_crt': 'static', 'build_receipt_sha256': pipeline.sha(windows_receipt_path)}
             pipeline.write_json(directory / 'native-audit.json', audit)
             archive = directory / target['archive']; release_tool.write_archive(archive, target, content)
+            if target['os'] == 'windows':
+                installers_directory = self.root / 'windows-installers'; installers_directory.mkdir()
+                installer_hashes = {}
+                for name in pipeline.windows_installers.INSTALLER_NAMES:
+                    (installers_directory / name).write_bytes(b'synthetic fixture ' + name.encode())
+                    installer_hashes[name] = pipeline.sha(installers_directory / name)
+                pipeline.write_json(installers_directory / pipeline.windows_installers.RECEIPT_NAME, {'schema': 1, 'tag': 'v0.1.0', 'source_archive_sha256': pipeline.sha(archive), 'package_files': hashes, 'installers': installer_hashes})
+            if target['os'] == 'linux':
+                packages_directory = self.root / 'linux-packages'; packages_directory.mkdir(exist_ok=True)
+                package_hashes = {}
+                for name in linux_packages.package_names(target['arch']):
+                    (packages_directory / name).write_bytes(b'synthetic fixture ' + name.encode())
+                    package_hashes[name] = pipeline.sha(packages_directory / name)
+                pipeline.write_json(packages_directory / linux_packages.receipt_name(target['arch']), {'schema': 1, 'tag': 'v0.1.0', 'arch': target['arch'], 'source_archive_sha256': pipeline.sha(archive), 'package_files': hashes, 'packages': package_hashes})
             model_directory = directory / 'evidence/model'; model_directory.mkdir()
             model_hashes = {}
             for name in ('model.onnx', 'tokenizer.json', 'config.json', 'special_tokens_map.json', 'tokenizer_config.json'):
@@ -218,7 +254,7 @@ class PipelineTests(unittest.TestCase):
                 bridge['windows_ort_build_receipt'] = {'path': 'evidence/windows-ort-build-receipt.json', 'sha256': pipeline.sha(directory / 'evidence/windows-ort-build-receipt.json')}
                 bridge['windows_ort_cmake_cache'] = {'path': 'evidence/windows-ort-CMakeCache.txt', 'sha256': pipeline.sha(directory / 'evidence/windows-ort-CMakeCache.txt')}
             pipeline.write_json(directory / 'native-candidate-receipt.json', bridge)
-        return SimpleNamespace(manifest=source / 'release/targets.toml', workspace=source / 'Cargo.toml', tag='v0.1.0', artifacts=artifacts, output=self.root / 'aggregate')
+        return SimpleNamespace(manifest=source / 'release/targets.toml', workspace=source / 'Cargo.toml', tag='v0.1.0', artifacts=artifacts, windows_installers=installers_directory, linux_packages=self.root / 'linux-packages', output=self.root / 'aggregate')
 
     def test_windows_native_uses_pinned_source_builder_without_crt_pool_arguments(self):
         arguments = pipeline.parser().parse_args(['native', '--tag', 'v0.1.0', '--target', 'x86_64-pc-windows-msvc', '--runner-identity', 'windows-2022', '--work', str(self.root / 'work'), '--output', str(self.root / 'output')])
@@ -246,6 +282,63 @@ class PipelineTests(unittest.TestCase):
         archive = arguments.output / self.targets[0]['archive']; archive.write_bytes(archive.read_bytes() + b'changed')
         with self.assertRaises(ValueError):
             pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    def test_aggregate_publishes_bound_windows_installers_and_rejects_tamper(self):
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        metadata, _targets = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        names = set(pipeline.windows_installers.INSTALLER_NAMES) | {pipeline.windows_installers.RECEIPT_NAME}
+        self.assertEqual(set(metadata['windows_installers']), names)
+        (arguments.output / 'qualification.json').write_text('{}')
+        published = {path.name for path in pipeline.publication_files(arguments.output)}
+        self.assertTrue(names <= published)
+        self.assertEqual(len(published), 5 + 6 + 3 + 12)
+        installer = arguments.output / pipeline.windows_installers.MSI_NAME
+        installer.write_bytes(installer.read_bytes() + b'changed')
+        with self.assertRaises(ValueError):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    def test_aggregate_publishes_bound_linux_packages_and_rejects_tamper(self):
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        metadata, _targets = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        names = {name for arch in ('x86_64', 'aarch64') for name in (*linux_packages.package_names(arch), linux_packages.receipt_name(arch))}
+        self.assertEqual(set(metadata['linux_packages']), names)
+        (arguments.output / 'qualification.json').write_text('{}')
+        self.assertTrue(names <= {path.name for path in pipeline.publication_files(arguments.output)})
+        package = arguments.output / linux_packages.package_name('aarch64', 'snap')
+        package.write_bytes(package.read_bytes() + b'changed')
+        with self.assertRaises(ValueError):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    def test_aggregate_rejects_linux_packages_built_from_other_files(self):
+        arguments = self.create_native_fixture()
+        receipt = arguments.linux_packages / linux_packages.receipt_name('x86_64')
+        value = json.loads(receipt.read_text())
+        value['package_files']['ilium'] = 'f' * 64
+        receipt.write_text(json.dumps(value))
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            with self.assertRaises(ValueError):
+                pipeline.aggregate(arguments)
+
+    def test_aggregate_rejects_a_missing_or_extra_linux_package(self):
+        arguments = self.create_native_fixture()
+        (arguments.linux_packages / linux_packages.package_name('aarch64', 'rpm')).unlink()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            with self.assertRaises(ValueError):
+                pipeline.aggregate(arguments)
+
+    def test_aggregate_rejects_installers_built_from_other_files(self):
+        arguments = self.create_native_fixture()
+        receipt = arguments.windows_installers / pipeline.windows_installers.RECEIPT_NAME
+        value = json.loads(receipt.read_text())
+        value['package_files']['ilium.exe'] = 'f' * 64
+        receipt.write_text(json.dumps(value))
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            with self.assertRaises(ValueError):
+                pipeline.aggregate(arguments)
 
     def test_install_rejects_changed_adjacent_harness_runtime_before_execution(self):
         arguments = self.create_native_fixture()

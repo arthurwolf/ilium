@@ -18,13 +18,19 @@ Windows PowerShell:
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-Open a new terminal in your project and run `ilium`. Re-run the install command
-to upgrade. The installer downloads a matching client/server pair; no Rust
-toolchain is needed. [Install from release packages](#install-from-release-packages) · [Build from source](#building-from-source).
+Prefer a download-and-run installer on Windows? Get the latest release as a
+[setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe)
+or an [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi).
+Both install for your user without administrator rights, add Ilium to your `PATH`,
+and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
 
-Use a UTF-8 terminal with 256-colour support. Install your agent CLI separately.
+Open a new terminal in your project and run `ilium`. Re-run the installer to upgrade.
 
-> **Network by default:** fresh installs send automatic title and tree-organization requests to Kilo Gateway. Disable those triggers or choose a local provider before entering sensitive content. [See the inference settings](#inference-and-privacy).
+No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately.
+
+[Release packages](#install-from-release-packages) · [Build from source](#building-from-source)
+
+> **Network by default:** AI titles and tree organization send prompts to Kilo Gateway. Choose a local provider or disable these features before entering sensitive content. [Inference settings](#inference-and-privacy).
 
 ## See it in action
 
@@ -357,7 +363,9 @@ Prefix: `Ctrl+B`.
 | `:` / `?` | Settings / key reference |
 | `d` / `&` | Detach / kill the session |
 
-Reattach: run `ilium` in the project directory. In tmux, double the prefix to pass it through. Remap it in Settings.
+Run `ilium` in the project directory to reattach.
+
+In tmux, double the prefix to pass it through. Remap it in Settings.
 
 ## What Ilium does
 
@@ -374,98 +382,143 @@ Reattach: run `ilium` in the project directory. In tmux, double the prefix to pa
 </tbody>
 </table>
 
-Also included: workspace search, Smart Copy, scheduled input, prompt queues, Chatroom, and transcript-backed Costs &amp; stats for Claude Code and Codex. The stats popover shows what the agent CLI reported; the snapshot can lag live use. The tree can also show estimated spend (see Agent cost below).
+Also included: workspace search, Smart Copy, scheduled input, prompt queues, and Chatroom.
 
 ### Agent monitoring
 
-Normal mode separates agent identity, longer-running work, and current activity. Attention mode shows the highest-priority status. Hover for the reason. When nothing needs attention, a working agent can still show a running indicator (working icon, spinner, pulsing dot, steady dot, title accent, or off), chosen in Settings > Agent Monitoring. A live progress monitor can suppress the finished-turn alert while the agent is idle. A `/goal` badge reports observed state; Ilium does not control the agent.
+See agent identity, activity, and longer-running work in the tree. Attention mode highlights the highest-priority status. Hover for the reason.
+
+Choose running indicators in **Settings → Agent Monitoring**. A live progress monitor can suppress finished-turn alerts while work continues.
+
+The `/goal` badge reports observed activity; Ilium does not control the agent.
 
 ### Agent cost
 
-Settings > Agent Cost puts a spend indicator on each agent row. Figures are estimates from the agent's transcript and its sub-agent transcripts at API list prices (Claude Code's own recorded total wins when larger, which matters for advisor-model calls that no transcript records); a leading `~` means a model had no known price, and subscription plans are not billed this amount. By default a five-cell meter `▰▰▰▱▱` appears while you hover an agent, just left of the row's buttons.
+**Settings → Agent Cost** adds spend indicators, totals, and cost sorting to the tree. The default meter appears when you hover an agent.
 
-Pick how "a lot" is decided: fixed dollar bands, relative to the agents open now, relative to your own past sessions (the default), a per-agent budget, or current burn rate. Then switch on any of: a level glyph, glyph and dollars, the meter, a burn sparkline (six hours by default, any window), group and project totals, a detail card beside the tree, a total in the tree title, and a spike marker. Each one is visible always or only while hovering that entry. The tab can also sort the tree by cost. Unknown models can be priced under `[cost.prices]` in `config.toml`.
+Costs estimate API list prices from agent and sub-agent transcripts. They can lag live use and do not represent subscription charges. A leading `~` flags an unknown model price.
+
+Choose thresholds based on past sessions, current agents, a budget, or burn rate. Add unknown model prices under `[cost.prices]` in `config.toml`.
 
 ## Worktrees and session recovery
 
-Start an agent from the tree, a project menu, `Ctrl+B W`, or the CLI:
+Start an agent with `Ctrl+B W`, the tree menus, or the CLI:
 
 ```sh
 ilium new-pane --worktree --branch agent/fix-login -- codex
 ```
 
-Use an unused branch; `--base <ref>` overrides the repository default. Creation runs Git hooks and filters and reports JSONL progress. Settings → Git has a Linux post-create command for submodules and LFS.
+Use an unused branch. Set `--base <ref>` to choose a different starting point.
 
-Ilium removes only worktrees it created. It keeps branches by default; discarding files requires the full path, and branch deletion is separate. Cleanup is offered only for clean, merged worktrees with no other pane or unresolved ownership claim. Unclear file or process state blocks removal. If creation fails after Git leaves a checkout behind, Ilium reports its path.
+**Settings → Git** offers a Linux post-create command for submodules and LFS. Creation runs Git hooks and filters.
 
-Snapshots live at `<project>/.ilium/sessions/<name>.json`; rolling snapshot backups live under `.ilium/backups/`. Add `.ilium/` to `.gitignore` if session data should stay out of the repository. Backups do not include files edited inside pane applications.
+Ilium offers cleanup for worktrees it created when they are clean, merged, and unused. Unclear ownership or process state blocks removal.
 
-After a server restart or reboot, Ilium rebuilds the tree and relaunches pane programs. It can request a verified Claude Code, Codex, or Antigravity session when that provider's data still exists; the original processes and unsaved in-process state do not survive. `--restart-server` keeps the snapshot, `--reset-session` deletes it, and `ilium kill-session <name>` ends the session and its panes.
+Branch deletion is separate; discarding files requires the full path.
+
+Snapshots live in `<project>/.ilium/sessions/`; rolling backups live in `.ilium/backups/`. Add `.ilium/` to `.gitignore` to keep session data out of Git. Backups exclude files edited inside pane applications.
+
+After a restart, Ilium restores the layout and relaunches pane programs. It can resume verified Claude Code, Codex, or Antigravity sessions when provider data remains.
+
+Unsaved process state does not survive.
+
+- `--restart-server` keeps the snapshot.
+- `--reset-session` deletes the snapshot.
+- `ilium kill-session <name>` ends the session and its panes.
 
 ## Full reference
 
 ### Install and platform support
 
-Ilium is version `0.1.0`. Linux is the primary platform; macOS and Windows have platform-specific transport, process, and PTY implementations. The current CI workflow builds and tests the full workspace, with different coverage and results by OS:
+Linux is the primary platform. macOS and Windows support is implemented, with different test coverage. Worktree post-create commands are Linux-only.
 
-| Platform | Implementation and limits | Automated checks | Latest public CI for `ed82eb0` |
-| --- | --- | --- | --- |
-| Linux | Primary platform. Worktree post-create setup is available. | Workspace build and tests, plus formatting and Clippy. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597492305): formatting and Clippy passed; workspace tests failed. |
-| macOS | Platform support is implemented; worktree post-create setup is Linux-only. | Workspace build and tests on pushes to `master` and manual runs; skipped on pull requests. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597491928): build passed; workspace tests failed. |
-| Windows | Platform support is implemented; worktree post-create setup is Linux-only. Most PTY integration tests are Unix-only; one ConPTY smoke test runs on Windows. | Workspace build and tests. | [Run #102](https://github.com/arthurwolf/ilium/actions/runs/36311258075/job/108597492028): build failed, so tests did not run. |
-
-Run #102 is the latest public CI result checked on 2026-09-27. Check [CI](https://github.com/arthurwolf/ilium/actions) for newer results.
+Ilium is early software. Check [CI results](https://github.com/arthurwolf/ilium/actions) for your platform.
 
 ### Install from release packages
 
-Download prebuilt packages from [GitHub Releases](https://github.com/arthurwolf/ilium/releases). No Rust toolchain is needed. As checked on 2026-09-30, no releases are published yet; use [Building from source](#building-from-source) until packages are available.
+Download packages from [GitHub Releases](https://github.com/arthurwolf/ilium/releases). No Rust toolchain is needed.
 
-The [release workflow](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) builds five native targets. Actions artifacts are candidate builds and diagnostics; a successful build step alone does not mean a package has passed the release gates. For a manual download, choose the archive below and its matching `SHA256SUMS` from the same release. Verify the checksum before extracting, then keep the complete extracted directory together: it includes the client, server, notices and required runtime libraries. Add that directory to `PATH` and run `ilium` from your project.
+No releases were published when checked on 2026-09-30. Until then, [build from source](#building-from-source). [Actions artifacts](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases.
+
+Download your archive and `SHA256SUMS` from the same release. Verify the checksum before extracting.
+
+Keep the client, server, and runtime libraries together. Add the extracted package directory to `PATH`, then run `ilium` in your project.
 
 #### Linux packages
 
-Choose `ilium-linux-x86_64.tar.gz` for Intel/AMD or `ilium-linux-aarch64.tar.gz` for ARM64. In the download directory, verify the selected archive against the release's `SHA256SUMS`:
+Choose your archive:
+
+- Intel/AMD: `ilium-linux-x86_64.tar.gz`
+- ARM64: `ilium-linux-aarch64.tar.gz`
+
+Verify it in the download directory:
 
 ```sh
 sha256sum --ignore-missing --check SHA256SUMS
 ```
 
-Confirm the selected archive reports `OK`, then extract it with `tar -xzf <archive>` into a new directory. Add the extracted package directory to `PATH`.
+Confirm the selected archive reports `OK`. Extract with `tar -xzf <archive>` into a new directory, then add the package directory to `PATH`.
 
-Once releases are available, the [Quick start](#quick-start) installer selects the architecture, verifies the download and installs versioned packages under `${XDG_DATA_HOME:-$HOME/.local/share}/ilium`, with launchers in `${XDG_BIN_HOME:-$HOME/.local/bin}`.
+The [installer](#quick-start) selects your architecture and verifies downloads. It stores packages under `~/.local/share/ilium` and launchers in `~/.local/bin`, respecting XDG overrides.
+
+Each release also carries native Linux packages for both architectures. They hold the same audited files as the archive, under stable names: `ilium-linux-<arch>.<extension>` with `<arch>` of `x86_64` or `aarch64`. Every package needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 41 or later) and is unsigned; check the asset digest on the release page.
+
+| Format | Install | Notes |
+| --- | --- | --- |
+| `.deb` | `sudo apt install ./ilium-linux-x86_64.deb` | Debian, Ubuntu, Mint. Installs to `/usr/lib/ilium`, links `ilium` into `/usr/bin`. |
+| `.rpm` | `sudo dnf install ./ilium-linux-x86_64.rpm` | Fedora, openSUSE (`zypper install`). Same layout as the deb. |
+| `.AppImage` | `chmod +x ilium-linux-x86_64.AppImage && ./ilium-linux-x86_64.AppImage` | Needs FUSE. The first run copies Ilium to `~/.local/share/ilium/appimage` so the session server outlives the mount. |
+| `.snap` | `sudo snap install --dangerous --classic ilium-linux-x86_64.snap` | Classic confinement, so it is not on the Snap Store. Commands: `ilium` and `ilium.server`. |
+| `.flatpak` | `flatpak install --user ilium-linux-x86_64.flatpak` | Experimental. Panes run inside the sandbox, so your host `git`, `claude` and `codex` are not visible. |
+
+Packages are installed, run and removed in containers or disposable virtual machines before a release is published. To remove one, use your package manager (`apt remove ilium`, `dnf remove ilium`, `snap remove ilium`, `flatpak uninstall io.github.arthurwolf.Ilium`) or delete the AppImage and `~/.local/share/ilium/appimage`.
 
 #### macOS packages
 
-Choose `ilium-macos-aarch64.tar.gz` for Apple Silicon or `ilium-macos-x86_64.tar.gz` for Intel. Compare the output below with the archive's entry in the release's `SHA256SUMS`:
+Choose your archive:
+
+- Apple Silicon: `ilium-macos-aarch64.tar.gz`
+- Intel: `ilium-macos-x86_64.tar.gz`
+
+Compare this output with the archive's entry in `SHA256SUMS`:
 
 ```sh
 shasum -a 256 <archive>
 ```
 
-After the hashes match, extract with `tar -xzf <archive>` into a new directory and add the extracted package directory to `PATH`. The [Quick start](#quick-start) installer also selects the architecture and uses the same per-user version and launcher layout as Linux.
+After the hashes match, extract with `tar -xzf <archive>` into a new directory. Add the package directory to `PATH`.
+
+The [installer](#quick-start) selects your architecture and uses the same layout as Linux.
 
 #### Windows packages
 
-Choose `ilium-windows-x86_64.zip` for native x86-64 Windows. Compare this PowerShell output with the ZIP's entry in the release's `SHA256SUMS`:
+For a guided install use `ilium-windows-x86_64-setup.exe` or `ilium-windows-x86_64.msi` from the same release. To unpack by hand, choose `ilium-windows-x86_64.zip`. Compare this output with its entry in `SHA256SUMS`:
 
 ```powershell
 Get-FileHash .\ilium-windows-x86_64.zip -Algorithm SHA256
+```
+
+After the hashes match, extract into a new directory:
+
+```powershell
 Expand-Archive .\ilium-windows-x86_64.zip -DestinationPath .\ilium-package
 ```
 
-Run `Expand-Archive` only after the hashes match, using a new destination. Add the extracted directory containing `ilium.exe`, `ilium-server.exe` and the runtime DLLs to your user `PATH`. Open a new terminal and run `ilium` in your project.
+Add the directory containing both executables and runtime DLLs to your user `PATH`.
 
-The [Quick start](#quick-start) installer supports Windows PowerShell 5.1 and newer, installs under `%LOCALAPPDATA%\ilium` and adds its launcher directory to the user `PATH` without administrator rights.
+The [installer](#quick-start) supports PowerShell 5.1+, installs under `%LOCALAPPDATA%\ilium`, and updates your user `PATH`. Open a new terminal after installing.
 
 ### Building from source
 
-Install Git, [rustup](https://rustup.rs/) and the native tools for your OS below. Clone the repository rather than using `cargo install ilium`: the checkout includes Ilium's [patched `vt100`](ARCHITECTURE.md#a-note-on-the-vendored-vt100) and other workspace dependencies. The manifest requires Rust 1.89; `rust-toolchain.toml` selects 1.96.1 automatically. Cargo downloads dependencies, including native inference inputs, on the first build.
+Install Git, [rustup](https://rustup.rs/), and the native tools below. Clone the repository: it includes patched dependencies needed for the build.
 
-These commands build a local client/server pair. Producing the audited, portable release packages also requires the platform-specific ONNX Runtime preparation and packaging described in [the release guide](release/RELEASING.md); a local Cargo build does not establish those release gates.
+`rust-toolchain.toml` selects the Rust version. Cargo downloads dependencies on the first build.
+
+These commands build a local client/server pair. For portable release packages, follow [the release guide](release/RELEASING.md).
 
 #### Linux source build
 
-On Debian/Ubuntu, install the compiler and native headers:
+On Debian/Ubuntu:
 
 ```sh
 sudo apt-get update
@@ -476,17 +529,19 @@ cargo build --locked --release -p ilium -p ilium-server
 ./target/release/ilium
 ```
 
-On other distributions, install the equivalent C/C++ toolchain, Make, pkg-config, ALSA and OpenSSL development packages. To install both binaries into `~/.cargo/bin` (or `$CARGO_HOME/bin`), run `make install`. A custom destination is supported:
+On other distributions, install equivalent C/C++ tools, Make, pkg-config, ALSA, and OpenSSL development packages.
+
+Run `make install` to install both binaries into `~/.cargo/bin` (or `$CARGO_HOME/bin`). For another destination:
 
 ```sh
 make install BIN_DIR="$HOME/.local/bin"
 ```
 
-Add your chosen directory to `PATH`, then run `ilium` from your project.
+Add your chosen directory to `PATH`.
 
 #### macOS source build
 
-Install Xcode Command Line Tools (`xcode-select --install`), Git and rustup. Use a native terminal for your architecture, then:
+Install Xcode Command Line Tools (`xcode-select --install`), Git, and rustup. Use a native terminal for your architecture:
 
 ```sh
 git clone https://github.com/arthurwolf/ilium.git
@@ -495,11 +550,13 @@ cargo build --locked --release -p ilium -p ilium-server
 ./target/release/ilium
 ```
 
-Run `make install` to install the pair into `~/.cargo/bin` (or `$CARGO_HOME/bin`), or use `make install BIN_DIR="$HOME/.local/bin"`. Add that directory to `PATH`. The release workflow uses a source-built ONNX Runtime on Intel and a pinned shared runtime on Apple Silicon; see [the release guide](release/RELEASING.md) if reproducing those packages.
+Run `make install` to install both binaries into `~/.cargo/bin` (or `$CARGO_HOME/bin`). Choose another directory with `make install BIN_DIR="$HOME/.local/bin"`. Add it to `PATH`.
 
 #### Windows source build
 
-Install Git, rustup with the MSVC toolchain, and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK. Build from a Developer PowerShell for Visual Studio:
+Install Git, rustup with the MSVC toolchain, and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK.
+
+In Developer PowerShell for Visual Studio:
 
 ```powershell
 git clone https://github.com/arthurwolf/ilium.git
@@ -508,53 +565,67 @@ cargo build --locked --release -p ilium -p ilium-server
 .\target\release\ilium.exe
 ```
 
-Run the pair directly from `target\release`, or copy both `ilium.exe` and `ilium-server.exe` into one directory on your user `PATH`, together with any runtime DLLs required by your build. Open a new terminal before launching from your project. Windows release packages use a separately source-built ONNX Runtime and static CRT configuration; see [the release guide](release/RELEASING.md) for that workflow.
+Run from `target\release`, or copy both executables and required runtime DLLs into one directory on your user `PATH`.
+
+Open a new terminal before running `ilium` in your project.
 
 ### Settings, inference, and privacy
 
-Open Settings with `Ctrl+B :`. On Linux, global settings are in `~/.config/ilium/config.toml`; `[keyboard]` sets prefixes and `[keybindings]` remaps actions. `Ctrl+B ?` shows the active map.
+Open Settings with `Ctrl+B :` and the active key map with `Ctrl+B ?`.
+
+On Linux, global settings live in `~/.config/ilium/config.toml`. Use `[keyboard]` for prefixes and `[keybindings]` for action remapping.
 
 #### Inference and privacy
 
-The multiplexer, detection, and session storage work without an LLM. AI titles, tree organization, and optional Smart Copy suggestions use the selected provider. New installs enable title and tree triggers and use Kilo Gateway's `stepfun/step-3.7-flash:free`. Disable the triggers or choose a local provider such as Ollama before entering sensitive content.
+Terminals, agent detection, and session storage work without an LLM. AI titles, tree organization, and optional Smart Copy suggestions use your selected provider.
 
-Kilo's [authentication guide](https://kilo.ai/docs/gateway/authentication) says anonymous free models need no key and are limited by public IP. Its [2026-09-27 model catalog](https://api.kilo.ai/api/gateway/models) marked the default model free and `mayTrainOnYourPrompts: true`; check [current guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free) because availability and data handling can change. OpenAI-compatible, Anthropic, and OpenRouter providers are also available. MongoDB paid-proxy egress is an advanced hand-edited setting, not the default.
+New installs enable AI titles and tree organization through Kilo Gateway. Choose a local provider such as Ollama or disable the triggers before entering sensitive content.
 
-File logging is off by default. When enabled, logs can retain HTTP/LLM request bodies and project prompts; credential headers and URL parameters are redacted. Treat logs as sensitive.
+Kilo's default free model was marked as permitting prompt training when checked on 2026-09-27. Review its [data and usage guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free). You can also select OpenAI-compatible, Anthropic, or OpenRouter providers.
+
+File logging is off by default. Enabled logs can retain project prompts and request bodies, with credentials redacted. Treat logs as sensitive.
 
 ### Automation and agent setup
 
-Scheduled input and text triggers can send commands to panes. Check the target and result when using them around confirmation prompts. Reset planning follows public Claude and Codex announcements and possible-reset forecasts; it cannot know private rolling limits or promise that a forecast will happen.
+Scheduled input and text triggers send commands to panes. Check the target before using them around confirmation prompts.
 
-Optional setup writes marked Chatroom or progress instructions to Claude and Codex files, preserving text outside those blocks. Chatroom setup also creates or repairs `CHATROOM.md` and agent hooks. The files are `~/.claude/CLAUDE.md`, `<project>/CLAUDE.md`, `~/.codex/AGENTS.md`, and `<project>/AGENTS.md`.
+Reset forecasts use public Claude and Codex announcements. They cannot predict private rolling limits or guarantee a reset.
 
-For long jobs, an agent can validate a JSON probe with `ilium progress check`, register it with `ilium progress set`, then wait for Ilium's result. The detached server polls from the project root. Probes need a stable `job_id`, status, percentage, and bounded details; use absolute paths. See `ilium progress --help` for flags. Progress monitoring does not manage an agent's `/goal`.
+Optional agent setup adds marked Chatroom and progress instructions to Claude and Codex configuration files, preserving surrounding text. Chatroom setup also creates `CHATROOM.md` and hooks.
 
-The server also listens on `127.0.0.1:8872` for unauthenticated `POST /create_agent`. Any local process that can reach the port can submit a request. Change `[http_api].port` if sessions collide; do not expose the listener through a port forward or reverse proxy without protection. A bind failure disables the listener while the session continues.
+For long jobs, validate a JSON probe with `ilium progress check`, then register it with `ilium progress set`. Ilium polls from the project root and reports the result. Use absolute paths; see `ilium progress --help`.
+
+The server accepts unauthenticated `POST /create_agent` requests on `127.0.0.1:8872`. Any local process can submit one. Keep this listener private; change `[http_api].port` if sessions collide.
 
 ### Voice
 
-Voice control is off until configured. It needs an OpenAI Realtime key, network access, and an attached client; microphone use also needs audio devices. Use `F8` or Settings → Voice control. Check the selected target before sending text to a terminal or agent. Destructive semantic actions require confirmation; terminal submission includes Enter unless its optional confirmation is enabled.
+Enable voice control with `F8` or **Settings → Voice control**. It needs an OpenAI Realtime key, network access, and an attached client. Microphone input also needs audio devices.
 
-`ilium voice say` sends typed text to the live voice conversation:
+Check the target before sending text. Destructive semantic actions require confirmation. Terminal submission includes Enter unless you enable its confirmation option.
+
+Send typed text to the live voice conversation:
 
 ```sh
 ilium voice say --start "what agents are running?"
 printf '%s\n' "focus the first agent" "say hello to it" | ilium voice say -
 ```
 
-`--start` saves the voice-on setting. A lone `-` reads nonempty input lines; `--` protects text starting with `-`. Each request accepts up to 32 sentences of 4,000 characters each. From outside Ilium, use `--cwd` and `--session-name`; an attached client is required. A JSONL `result` confirms the text was queued, not that the remote model acted. Errors include a code and hint.
+`--start` saves the voice-on setting; `-` reads input lines.
+
+Outside Ilium, pass `--cwd` and `--session-name`. An attached client is required. A JSONL result confirms queuing; check the target for the outcome. See `ilium voice say --help`.
 
 ### Ambient backgrounds
 
-Settings → Animations draws a Braille animation behind the workspace, with a live full-screen preview (press `f` to hide the controls). Scenes: waves, moonlit water, ridges, hillside, tea steam, kelp, caustics, clouds, ripples, lily pond, 3D pipes, stars overhead, Earth at night, satellite clouds, video, audio spectrum and images. The choice is saved per project in `.ilium/config.yaml`; the background is off by default.
+**Settings → Animations** adds a Braille background, with a full-screen preview (`f`). Choose landscapes, space scenes, video, images, or an audio spectrum.
 
-- **Stars overhead** shows the real sky above the shared location, right now, with optional time acceleration, planets, the Moon and constellation lines.
-- **Location** is set once and shared by Stars, Earth at night and Satellite clouds: type an address, type `lat, lon`, or click a world map in the location dialog.
-- **Earth at night** and **Satellite clouds** download imagery from NASA GIBS and EUMETSAT (Copyright EUMETSAT) and cache it under the platform cache directory; address search uses Open-Meteo (GeoNames data, CC BY 4.0). These scenes need network access.
-- **Video** plays files, folders, globs or URLs through an installed `ffmpeg` (and `ffprobe` for random scenes).
-- **Audio spectrum** captures the system output: `pw-record` or `parec` on Linux, WASAPI loopback on Windows; macOS needs a loopback device such as BlackHole.
-- **Images** shows one image, a folder (recursive) or URLs as a slideshow with optional slow pan and zoom.
+Backgrounds are off by default. Ilium saves your choice per project in `.ilium/config.yaml`.
+
+- **Stars, Earth, and satellite clouds** share a location set by address, coordinates, or map. Earth and cloud imagery need network access.
+- **Video** needs `ffmpeg`; random scenes also need `ffprobe`.
+- **Audio spectrum** uses `pw-record` or `parec` on Linux and WASAPI on Windows. macOS needs a loopback device such as BlackHole.
+- **Images** accepts files, folders, or URLs, with slideshow and pan/zoom options.
+
+Imagery comes from NASA GIBS and EUMETSAT (Copyright EUMETSAT). Address search uses Open-Meteo and GeoNames data (CC BY 4.0).
 
 ### Command-line reference
 
@@ -567,24 +638,36 @@ Settings → Animations draws a Braille animation behind the workspace, with a l
 | `ilium chat --help` / `ilium progress --help` | Show Chatroom and progress commands. |
 | `ilium voice say --help` | Show typed voice input. |
 
-Run commands from the intended project directory or pass `--cwd`. Angle brackets mark placeholders. `ilium --help` has the full CLI reference.
+Run from your project directory or pass `--cwd`. Angle brackets mark placeholders. See `ilium --help` for all commands.
 
 ### Editors, boards, and Smart Copy
 
-Mouse actions focus panes, move tree entries, open context menus, and scroll terminal history. The editor saves files, renders Markdown, and supports line numbers, a minimap, and autosave. Boards store cards in a Markdown file or folder you choose.
+Use the mouse to focus panes, move entries, and scroll history.
 
-Smart Copy freezes the visible terminal screen and offers regions to copy. An inference model may suggest coordinates; it does not provide replacement clipboard text.
+The editor supports Markdown previews and autosave. Boards store cards in a Markdown file or folder you choose.
+
+Smart Copy freezes the visible screen and offers regions to copy. AI suggestions select coordinates; clipboard text comes from the captured screen.
 
 ### How it works
 
-One `ilium-server` per project session owns the PTYs, tree, scheduled input, and snapshot. The client renders state over local IPC: a Unix socket on Unix or a named pipe on Windows. Detaching the client leaves the server and pane processes running. Agent identity comes from child processes; activity comes from terminal screens, so the two observations can briefly disagree. See [ARCHITECTURE.md](ARCHITECTURE.md) for crate boundaries and design choices.
+One `ilium-server` per project session owns pane processes and session state. Detaching leaves them running.
+
+The client connects over local IPC. Ilium identifies agents from processes and reads activity from terminal screens.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ### Project, help, and licence
 
-Ilium is early software. Check [CI](https://github.com/arthurwolf/ilium/actions) and report failures or installation problems in [issues](https://github.com/arthurwolf/ilium/issues). Include the version, OS, terminal, command, and observed behaviour; remove private content from logs. [AGENTS.md](AGENTS.md) covers contributions; [ARCHITECTURE.md](ARCHITECTURE.md) covers design.
+Report problems in [issues](https://github.com/arthurwolf/ilium/issues). Include your version, OS, terminal, command, and observed behaviour. Remove private content from logs.
 
-Workspace checks: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace --no-fail-fast`.
+See [AGENTS.md](AGENTS.md) for contribution rules and [ARCHITECTURE.md](ARCHITECTURE.md) for design and prior art.
 
-For an established multiplexer, see [tmux](https://github.com/tmux/tmux) or [Zellij](https://github.com/zellij-org/zellij). [claude-squad](https://github.com/smtg-ai/claude-squad) combines tmux with worktrees; [prior art](ARCHITECTURE.md#prior-art--why-not-just-use-x) explains Ilium's choices.
+Workspace checks:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --no-fail-fast
+```
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).

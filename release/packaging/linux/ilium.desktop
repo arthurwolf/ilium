@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ilium
+GenericName=Terminal multiplexer
+Comment=Terminal workspace for AI coding agents
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=true
+Categories=Development;System;TerminalEmulator;
+Keywords=terminal;multiplexer;tmux;agents;claude;codex;

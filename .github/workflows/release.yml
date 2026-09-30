@@ -105,10 +105,118 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
+  windows-installers:
+    needs:
+    - source
+    - native
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-x86_64-pc-windows-msvc
+        path: native-windows
+    - name: Pinned installer toolchain
+      run: |
+        dotnet tool install --global wix --version 5.0.2
+        choco install innosetup --version=6.5.4 --no-progress -y
+        echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
+    - name: Build per-user MSI and setup EXE from the audited ZIP
+      run: python release/scripts/build_windows_installers.py build --tag "${{ needs.source.outputs.tag }}" --archive
+        native-windows/ilium-windows-x86_64.zip --work "$RUNNER_TEMP/installer-work" --output windows-installers
+    - name: Silent install, run and uninstall both packages
+      run: python release/scripts/build_windows_installers.py smoke --tag "${{ needs.source.outputs.tag }}" --installers
+        windows-installers --log "$RUNNER_TEMP/installer-smoke"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: windows-installers
+        path: windows-installers/
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain installer logs
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-windows-installers
+        path: ${{ runner.temp }}/installer-smoke/
+        if-no-files-found: warn
+        retention-days: 30
+  linux-packages:
+    needs:
+    - source
+    - native
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - arch: x86_64
+          rust_target: x86_64-unknown-linux-gnu
+          runner: ubuntu-22.04
+        - arch: aarch64
+          rust_target: aarch64-unknown-linux-gnu
+          runner: ubuntu-22.04-arm
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-linux
+    - name: Packaging toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y rpm squashfs-tools flatpak fuse3
+    - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
+      run: python release/scripts/build_linux_packages.py build --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch
+        }}" --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --work "$RUNNER_TEMP/package-work" --output linux-packages
+    - name: Unpack every package and compare its payload with the audited files
+      run: python release/scripts/smoke_linux_packages.py inspect --arch "${{ matrix.arch }}" --packages linux-packages
+    - name: Install and run deb, rpm and AppImage in distribution containers
+      run: python release/scripts/smoke_linux_packages.py containers --arch "${{ matrix.arch }}" --packages linux-packages
+        --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke"
+    - name: Install and run Snap, Flatpak, deb and the AppImage FUSE mount on the disposable runner
+      run: python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages
+        --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: linux-packages-${{ matrix.arch }}
+        path: linux-packages/
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain package logs
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-linux-packages-${{ matrix.arch }}
+        path: |
+          ${{ runner.temp }}/package-smoke/
+          ${{ runner.temp }}/package-smoke-host/
+        if-no-files-found: warn
+        retention-days: 30
   aggregate:
     needs:
     - source
     - native
+    - windows-installers
+    - linux-packages
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -125,9 +233,18 @@ jobs:
       with:
         pattern: native-*
         path: native-artifacts
-    - name: Assemble exact five archives and installer/site bytes
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: windows-installers
+        path: windows-installers
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: linux-packages-*
+        path: linux-packages
+        merge-multiple: true
+    - name: Assemble exact five archives, Windows installers, Linux packages and installer/site bytes
       run: python release/scripts/release_pipeline.py aggregate --tag "${{ needs.source.outputs.tag }}" --artifacts
-        native-artifacts --output candidate
+        native-artifacts --windows-installers windows-installers --linux-packages linux-packages --output candidate
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: candidate
@@ -234,6 +351,24 @@ jobs:
         subject-path: 'candidate/*.tar.gz
 
           candidate/*.zip
+
+          candidate/*.msi
+
+          candidate/*.exe
+
+          candidate/windows-installers.json
+
+          candidate/*.deb
+
+          candidate/*.rpm
+
+          candidate/*.AppImage
+
+          candidate/*.flatpak
+
+          candidate/*.snap
+
+          candidate/linux-packages-*.json
 
           candidate/SHA256SUMS
 

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "appimage_runtime": {
+    "source": "https://github.com/AppImage/type2-runtime/releases/download/20251108/",
+    "x86_64": {
+      "name": "runtime-x86_64",
+      "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+      "bytes": 944632
+    },
+    "aarch64": {
+      "name": "runtime-aarch64",
+      "sha256": "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
+      "bytes": 936456
+    }
+  },
+  "flatpak": {
+    "runtime": "org.freedesktop.Platform",
+    "runtime_version": "24.08",
+    "runtime_repository": "https://dl.flathub.org/repo/flathub.flatpakrepo"
+  },
+  "snap": {
+    "base": "core22"
+  }
+}

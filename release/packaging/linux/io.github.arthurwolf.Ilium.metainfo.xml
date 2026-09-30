@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.arthurwolf.Ilium</id>
+  <name>Ilium</name>
+  <summary>Terminal multiplexer for AI coding agents</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>Arthur Wolf</developer_name>
+  <url type="homepage">https://github.com/arthurwolf/ilium</url>
+  <url type="bugtracker">https://github.com/arthurwolf/ilium/issues</url>
+  <description>
+    <p>Ilium is a tmux-like terminal multiplexer that keeps every pane, project session and AI coding agent in one tree, and shows which agents are working, idle or waiting for approval.</p>
+  </description>
+  <launchable type="desktop-id">io.github.arthurwolf.Ilium.desktop</launchable>
+  <provides>
+    <binary>ilium</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>
