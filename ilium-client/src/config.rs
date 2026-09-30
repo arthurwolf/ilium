@@ -35,6 +35,7 @@ use crate::layout::{
     DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
     MIN_TREE_WIDTH,
 };
+use crate::cost_settings::CostSettings;
 use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
@@ -87,6 +88,8 @@ pub struct ClientConfig {
     pub api: ApiSettings,
     /// Public reset-announcement polling and status-bar presentation.
     pub reset_planning: ResetPlanningSettings,
+    /// Agent-spend indicators and how "expensive" is decided.
+    pub cost: CostSettings,
 }
 
 impl Default for ClientConfig {
@@ -110,6 +113,7 @@ impl Default for ClientConfig {
             debug: DebugSettings::default(),
             api: ApiSettings::default(),
             reset_planning: ResetPlanningSettings::default(),
+            cost: CostSettings::default(),
         }
     }
 }
@@ -790,6 +794,9 @@ pub enum TreeOrder {
     AgeDescending,
     NameAscending,
     NameDescending,
+    /// Most expensive first. Driven by the Agent Cost tab's "sort by cost"
+    /// switch rather than chosen here, so it is not part of [`Self::ALL`].
+    CostDescending,
 }
 
 impl TreeOrder {
@@ -813,6 +820,7 @@ impl TreeOrder {
             Self::AgeDescending => "Age down (oldest first)",
             Self::NameAscending => "Name A-Z",
             Self::NameDescending => "Name Z-A",
+            Self::CostDescending => "Cost high-low",
         }
     }
 
@@ -963,6 +971,8 @@ pub struct UiSettings {
     pub last_prompt_max_lines: u8,
     /// Client-side presentation policy for pane activity and goal signals.
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    /// How Attention mode keeps showing that an agent is working.
+    pub attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     /// Live mirror of the server's `progress_monitor_enabled` setting (see
     /// `ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled`) -- whether
     /// the server accepts `ilium progress set` requests at all. Toggling
@@ -975,6 +985,8 @@ pub struct UiSettings {
     /// gauge -- same role as `last_prompt_max_lines`, see
     /// `crate::progress_bar::reserved_height`.
     pub progress_max_lines: u8,
+    /// Hide completed task footers after this delay; zero keeps them visible.
+    pub completed_progress_hide_after_seconds: u32,
     /// Claims left-button drag over a terminal pane's content as a local
     /// text selection (highlight plus clipboard copy) instead of forwarding
     /// the raw mouse event to the pane's PTY. On by default because the
@@ -1013,8 +1025,11 @@ impl Default for UiSettings {
             last_prompt_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+            attention_running_indicator:
+                crate::agent_monitoring::AttentionRunningIndicator::default(),
             progress_monitor_enabled: true,
             progress_max_lines: DEFAULT_PROGRESS_MAX_LINES,
+            completed_progress_hide_after_seconds: 60,
             terminal_text_selection_enabled: true,
             lock_closed_enabled: true,
             icons: IconSettings::default(),
@@ -1070,6 +1085,8 @@ struct RawClientConfig {
     api: ApiSettings,
     #[serde(default)]
     reset_planning: ResetPlanningSettings,
+    #[serde(default)]
+    cost: CostSettings,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -1115,8 +1132,10 @@ struct RawUiConfig {
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
+    attention_running_indicator: Option<String>,
     progress_monitor_enabled: Option<bool>,
     progress_max_lines: Option<u8>,
+    completed_progress_hide_after_seconds: Option<u32>,
     terminal_text_selection_enabled: Option<bool>,
     lock_closed_enabled: Option<bool>,
     #[serde(default)]
@@ -1217,6 +1236,9 @@ pub enum ConfigLoadError {
     /// `ui.agent_monitoring_mode` is outside the closed display-mode set.
     #[error("ui.agent_monitoring_mode = {0:?} must be \"normal\" or \"attention\"")]
     InvalidAgentMonitoringMode(String),
+    /// `ui.attention_running_indicator` is outside the closed indicator set.
+    #[error("ui.attention_running_indicator = {0:?} must be \"off\", \"icon\", \"spinner\", \"pulsing_dot\", \"steady_dot\", or \"title_accent\"")]
+    InvalidAttentionRunningIndicator(String),
     /// `ui.claude_agent_icon` is not one of the curated Claude choices.
     #[error("ui.claude_agent_icon = {0:?} is not a supported Claude icon")]
     InvalidClaudeAgentIcon(String),
@@ -1374,6 +1396,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         debug: raw.debug,
         api: raw.api,
         reset_planning: raw.reset_planning,
+        cost: raw.cost.sanitized(),
     })
 }
 
@@ -1502,6 +1525,11 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             .ok_or(ConfigLoadError::InvalidAgentMonitoringMode(value))?,
         None => defaults.agent_monitoring_mode,
     };
+    let attention_running_indicator = match raw.attention_running_indicator {
+        Some(value) => crate::agent_monitoring::AttentionRunningIndicator::parse(&value)
+            .ok_or(ConfigLoadError::InvalidAttentionRunningIndicator(value))?,
+        None => defaults.attention_running_indicator,
+    };
     let motion_level = raw
         .motion_level
         .as_deref()
@@ -1588,6 +1616,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             None => defaults.last_prompt_max_lines,
         },
         agent_monitoring_mode,
+        attention_running_indicator,
         progress_monitor_enabled: raw
             .progress_monitor_enabled
             .unwrap_or(defaults.progress_monitor_enabled),
@@ -1598,6 +1627,8 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             Some(lines) => return Err(ConfigLoadError::InvalidProgressMaxLines(lines)),
             None => defaults.progress_max_lines,
         },
+        completed_progress_hide_after_seconds: raw.completed_progress_hide_after_seconds
+            .unwrap_or(defaults.completed_progress_hide_after_seconds),
         terminal_text_selection_enabled: raw
             .terminal_text_selection_enabled
             .unwrap_or(defaults.terminal_text_selection_enabled),
@@ -1876,6 +1907,8 @@ fn tree_order_name(tree_order: TreeOrder) -> &'static str {
         TreeOrder::AgeDescending => "age_descending",
         TreeOrder::NameAscending => "name_ascending",
         TreeOrder::NameDescending => "name_descending",
+        // Never persisted: the effective order is derived from [cost].sort_by_cost.
+        TreeOrder::CostDescending => "manual",
     }
 }
 
@@ -2035,6 +2068,14 @@ pub fn save_reset_planning_settings(
     })?;
     save_table(config_dir, "reset_planning", value)
 }
+pub fn save_cost_settings(config_dir: &Path, settings: &CostSettings) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "cost", value)
+}
+
 pub fn save_editor_settings(
     config_dir: &Path,
     settings: &EditorSettings,
@@ -2524,6 +2565,14 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_monitoring_mode".to_string(),
         toml::Value::String(ui.agent_monitoring_mode.key().to_string()),
+    );
+    table.insert(
+        "attention_running_indicator".to_string(),
+        toml::Value::String(ui.attention_running_indicator.key().to_string()),
+    );
+    table.insert(
+        "completed_progress_hide_after_seconds".to_string(),
+        toml::Value::Integer(i64::from(ui.completed_progress_hide_after_seconds)),
     );
     table.insert(
         "progress_monitor_enabled".to_string(),
@@ -3535,6 +3584,52 @@ mod tests {
     }
 
     #[test]
+    fn cost_settings_default_to_a_hover_meter_and_round_trip_beside_other_tables() {
+        use crate::cost_model::Calibration;
+        use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
+
+        let dir = scratch_dir();
+        let defaults = load(&dir).unwrap().cost;
+        assert_eq!(defaults, CostSettings::default());
+        assert_eq!(defaults.calibration, Calibration::OwnHistory);
+        assert!(defaults.meter.enabled);
+        assert_eq!(defaults.meter.visibility, CostVisibility::Hover);
+        assert_eq!(defaults.sparkline_window_minutes, 360);
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_context_menu_icons = false\n",
+        )
+        .unwrap();
+        let mut settings = CostSettings::default();
+        settings.adjust(CostRow::Calibration(Calibration::Budget), 0);
+        settings.adjust(CostRow::Display(CostDisplay::Sparkline), 0);
+        settings.adjust(CostRow::Visibility(CostDisplay::Sparkline), 0);
+        settings.adjust(CostRow::SortByCost, 0);
+        settings.sparkline_window_minutes = 90;
+        save_cost_settings(&dir, &settings).unwrap();
+
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.cost, settings);
+        assert!(!loaded.ui.show_context_menu_icons, "other tables survive the save");
+    }
+
+    #[test]
+    fn hand_edited_cost_settings_are_repaired_on_load() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[cost]\nbudget_usd = -5.0\nsparkline_window_minutes = 0\nfixed_cuts = [9.0, 1.0, 2.0, 3.0]\n",
+        )
+        .unwrap();
+        let loaded = load(&dir).unwrap().cost;
+        let defaults = CostSettings::default();
+        assert_eq!(loaded.budget_usd, defaults.budget_usd);
+        assert_eq!(loaded.sparkline_window_minutes, 1);
+        assert_eq!(loaded.fixed_cuts, defaults.fixed_cuts);
+    }
+
+    #[test]
     fn agent_monitoring_mode_defaults_to_normal_and_round_trips() {
         let dir = scratch_dir();
         assert_eq!(
@@ -3551,6 +3646,63 @@ mod tests {
             load(&dir).unwrap().ui.agent_monitoring_mode,
             settings.agent_monitoring_mode
         );
+    }
+
+    #[test]
+    fn completed_progress_expiry_defaults_and_config_survive_ui_save() {
+        let directory = scratch_dir();
+        let default_settings = load(&directory).unwrap();
+        assert_eq!(
+            ui_settings_to_toml(&default_settings.ui)
+                .get("completed_progress_hide_after_seconds")
+                .and_then(toml::Value::as_integer),
+            Some(60)
+        );
+        for seconds in [0, 17, 60, 3600] {
+            std::fs::write(
+                directory.join("config.toml"),
+                format!("[ui]\ncompleted_progress_hide_after_seconds = {seconds}\n"),
+            ).unwrap();
+            let settings = load(&directory).unwrap();
+            save_ui_settings(&directory, &settings.ui).unwrap();
+            let reloaded = load(&directory).unwrap();
+            assert_eq!(
+                ui_settings_to_toml(&reloaded.ui)
+                    .get("completed_progress_hide_after_seconds")
+                    .and_then(toml::Value::as_integer),
+                Some(seconds)
+            );
+        }
+    }
+
+    #[test]
+    fn attention_running_indicator_defaults_round_trips_and_rejects_unknown() {
+        use crate::agent_monitoring::AttentionRunningIndicator as Indicator;
+        let dir = scratch_dir();
+        assert_eq!(
+            load(&dir).unwrap().ui.attention_running_indicator,
+            Indicator::Icon
+        );
+        for option in Indicator::ALL {
+            let settings = UiSettings {
+                attention_running_indicator: option,
+                ..UiSettings::default()
+            };
+            save_ui_settings(&dir, &settings).unwrap();
+            assert_eq!(load(&dir).unwrap().ui.attention_running_indicator, option);
+        }
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nattention_running_indicator = \"blink\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load(&dir),
+            Err(ClientError::ConfigLoad {
+                source: ConfigLoadError::InvalidAttentionRunningIndicator(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -3604,8 +3756,11 @@ mod tests {
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            attention_running_indicator:
+                crate::agent_monitoring::AttentionRunningIndicator::Spinner,
             progress_monitor_enabled: false,
             progress_max_lines: 9,
+            completed_progress_hide_after_seconds: 17,
             terminal_text_selection_enabled: false,
             lock_closed_enabled: false,
             use_stable_glyphs: true,

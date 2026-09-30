@@ -2424,6 +2424,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-ambient"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "directories",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
 name = "ilium-client"
 version = "0.1.0"
 dependencies = [
@@ -2435,14 +2450,16 @@ dependencies = [
  "directories",
  "emoji",
  "fastembed",
- "handlebars",
  "ilium-agent-debug",
  "ilium-agent-session",
+ "ilium-ambient",
  "ilium-core",
  "ilium-inference",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
+ "ilium-prompts",
+ "ilium-session-convert",
  "ilium-sound",
  "ilium-transport",
  "ilium-voice",
@@ -2510,6 +2527,7 @@ version = "0.1.0"
 dependencies = [
  "ilium-kilo-gateway",
  "ilium-logging",
+ "ilium-prompts",
  "serde",
  "serde_json",
  "tempfile",
@@ -2568,6 +2586,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-prompts"
+version = "0.1.0"
+dependencies = [
+ "handlebars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ilium-pty"
 version = "0.1.0"
 dependencies = [
@@ -2599,6 +2628,7 @@ dependencies = [
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
+ "ilium-prompts",
  "ilium-pty",
  "ilium-sound",
  "ilium-test-fixtures",
@@ -2617,6 +2647,21 @@ dependencies = [
  "uuid",
  "vt100",
  "walkdir",
+]
+
+[[package]]
+name = "ilium-session-convert"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ilium-agent-session",
+ "ilium-core",
+ "ilium-platform",
+ "ilium-prompts",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

@@ -296,7 +296,7 @@ pub struct InferenceRequest {
 impl InferenceRequest {
     pub fn json_only(user_prompt: impl Into<String>) -> Self {
         Self {
-            system_prompt: "Return concise, valid JSON only.".to_string(),
+            system_prompt: ilium_prompts::naming::JSON_ONLY.to_string(),
             user_prompt: user_prompt.into(),
             max_tokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
         }

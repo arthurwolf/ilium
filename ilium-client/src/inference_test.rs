@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use ilium_inference::{provider_from_settings, InferenceRequest, InferenceSettings};
 use serde::Deserialize;
 
-const TEST_PROMPT: &str = r#"Please title and organize this synthetic work sample: fix login validation, add a regression test, and update the release notes. Return exactly JSON: {"groups":[{"name":"...","panes":["..."]}]} where each group has a concise name and 1-4 concise pane titles."#;
+const TEST_PROMPT: &str = ilium_prompts::naming::INFERENCE_TEST;
 const TEST_MAXIMUM_ATTEMPTS: u8 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

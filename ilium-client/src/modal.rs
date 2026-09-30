@@ -421,7 +421,7 @@ pub fn create_board_dialog_layout_for_size(width: u16, height: u16) -> CreateBoa
 }
 
 /// Insets a rectangle without underflow on very small terminals.
-fn inset_rect(area: Rect, margin: u16) -> Rect {
+pub(crate) fn inset_rect(area: Rect, margin: u16) -> Rect {
     Rect::new(
         area.x.saturating_add(margin),
         area.y.saturating_add(margin),
@@ -432,7 +432,7 @@ fn inset_rect(area: Rect, margin: u16) -> Rect {
 
 /// Gives each button nearly half of the available row, separated by a
 /// deliberate two-cell gutter that remains usable on narrow screens.
-fn dialog_action_layout(row: Rect) -> DialogActionLayout {
+pub(crate) fn dialog_action_layout(row: Rect) -> DialogActionLayout {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -460,6 +460,28 @@ pub fn render_text_prompt(
     state: &TextPromptState,
     confirm_label: &str,
 ) {
+    render_text_prompt_with_hint(
+        frame,
+        screen_area,
+        title,
+        state,
+        confirm_label,
+        "Click a button or use the shown keyboard shortcut",
+        Style::new().add_modifier(Modifier::DIM),
+    );
+}
+
+/// [`render_text_prompt`] with its own bottom line: a placeholder hint, or a
+/// validation message in an alert style.
+pub fn render_text_prompt_with_hint(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    state: &TextPromptState,
+    confirm_label: &str,
+    hint: &str,
+    hint_style: Style,
+) {
     let layout = text_prompt_dialog_layout(screen_area);
     frame.render_widget(Clear, layout.popup);
 
@@ -475,11 +497,7 @@ pub fn render_text_prompt(
         layout.actions,
         DialogActions::form("Cancel", confirm_label),
     );
-    frame.render_widget(
-        Paragraph::new("Click a button or use the shown keyboard shortcut")
-            .style(Style::new().add_modifier(Modifier::DIM)),
-        layout.hint_row,
-    );
+    frame.render_widget(Paragraph::new(hint).style(hint_style), layout.hint_row);
 
     // `state.cursor` is a *char* index, but `Paragraph` gives wide (CJK/
     // emoji) characters two cells -- the cursor column must be the rendered
@@ -502,7 +520,7 @@ pub fn render_text_prompt(
 /// exclusive (the first column *outside* the rect), so clamping to it
 /// directly would let the cursor land on the block's right border instead of
 /// the last real cell of the input row.
-fn single_line_cursor_position(input_area: Rect, display_columns: usize) -> Position {
+pub(crate) fn single_line_cursor_position(input_area: Rect, display_columns: usize) -> Position {
     let cursor_x = input_area
         .x
         .saturating_add(u16::try_from(display_columns).unwrap_or(u16::MAX));

@@ -492,11 +492,14 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::BoardRenamePrompt(..) => "board_rename_prompt",
         Mode::BoardDeleteConfirm(..) => "board_delete_confirm",
         Mode::ConfirmClose(_) => "confirm_close",
+        Mode::ConvertSession => "convert_session",
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
         Mode::SettingsHelp(_) => "settings_help",
         Mode::Search(_) => "search",
+        Mode::AnimationTextPrompt(_, _) => "animation_text_prompt",
+        Mode::LocationPicker(_) => "location_picker",
     }
 }
 

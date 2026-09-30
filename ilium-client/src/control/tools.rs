@@ -22,7 +22,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
     vec![
         tool(
             GET_STATE_TOOL_NAME,
-            "Inspect the current ilium session, tree, focus, visible right panel, and optionally pane content. Call this before acting when a target is ambiguous.",
+            ilium_prompts::voice::VOICE_TOOLS_INSPECT_THE_CURRENT_ILIUM_SESSION_TREE_FOCUS,
             json!({
                 "type": "object",
                 "properties": {
@@ -34,7 +34,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             STOP_VOICE_MODE_TOOL_NAME,
-            "Immediately stop and disable the current ilium voice mode when the user asks to stop, disable, turn off, exit, or end voice mode. This ends the voice session, so do not merely acknowledge the request in speech.",
+            ilium_prompts::voice::VOICE_TOOLS_IMMEDIATELY_STOP_AND_DISABLE_THE_CURRENT_ILIUM,
             json!({
                 "type": "object",
                 "properties": {},
@@ -43,7 +43,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             UI_TOOL_NAME,
-            "Navigate global UI surfaces: focus tree or panes, move through a split, show a split, open settings/search/help, choose a settings tab, or close the current overlay.",
+            ilium_prompts::voice::VOICE_TOOLS_NAVIGATE_GLOBAL_UI_SURFACES_FOCUS_TREE_OR,
             json!({
                 "type": "object",
                 "properties": {
@@ -58,7 +58,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             TREE_TOOL_NAME,
-            "Create, open, organize, rename, move, reparent, split, or close any left-panel object. Structural changes are queued to ilium-server and confirmed by a later state snapshot.",
+            ilium_prompts::voice::VOICE_TOOLS_CREATE_OPEN_ORGANIZE_RENAME_MOVE_REPARENT_SPLIT,
             json!({
                 "type": "object",
                 "properties": {
@@ -90,12 +90,12 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SEND_TO_TERMINAL_TOOL_NAME,
-            "Primary voice-dictation action. Send the exact dictated text to a terminal or coding-agent pane and submit it with a final Enter key. Omit target for the currently active/open pane. When the live context identifies that pane as a detected coding agent, this is also the default for any utterance that is not clearly an ilium-control command, even when the user never says type, send, agent, or a destination. Every call submits; this tool cannot leave text staged or unsent. Never merely say the text as a substitute for calling this tool.",
+            ilium_prompts::voice::VOICE_TOOLS_PRIMARY_VOICE_DICTATION_ACTION_SEND_THE_EXACT,
             json!({
                 "type": "object",
                 "properties": {
                     "target": target_schema(),
-                    "text": { "type": "string", "description": "Exact text to type, preserving slash commands, punctuation, paths, and code." },
+                    "text": { "type": "string", "description": ilium_prompts::voice::VOICE_TOOLS_EXACT_TEXT_TO_TYPE_PRESERVING_SLASH_COMMANDS },
                 },
                 "required": ["text"],
                 "additionalProperties": false,
@@ -103,12 +103,12 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             TYPE_IN_TERMINAL_TOOL_NAME,
-            "Type exact text into a terminal without pressing Enter. Use only when the user explicitly asks to type, write, or stage text without sending it. If the user asks to send, submit, or press Enter afterward, use ilium_send_to_terminal instead.",
+            ilium_prompts::voice::VOICE_TOOLS_TYPE_EXACT_TEXT_INTO_A_TERMINAL_WITHOUT,
             json!({
                 "type": "object",
                 "properties": {
                     "target": target_schema(),
-                    "text": { "type": "string", "description": "Exact text to leave visible and unsubmitted in the terminal." },
+                    "text": { "type": "string", "description": ilium_prompts::voice::VOICE_TOOLS_EXACT_TEXT_TO_LEAVE_VISIBLE_AND_UNSUBMITTED },
                 },
                 "required": ["text"],
                 "additionalProperties": false,
@@ -116,7 +116,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             TERMINAL_TOOL_NAME,
-            "Control non-dictation terminal behavior: press a supported key, scroll, schedule future submitted input, or manage the durable completion prompt queue. Scheduled and queued text is always submitted with Enter. Use ilium_send_to_terminal for immediate dictated text.",
+            ilium_prompts::voice::VOICE_TOOLS_CONTROL_NON_DICTATION_TERMINAL_BEHAVIOR_PRESS_A,
             json!({
                 "type": "object",
                 "properties": {
@@ -135,7 +135,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             EDITOR_TOOL_NAME,
-            "Operate a built-in editor pane: save, save as, insert, replace the full document, jump to a location, or toggle its toolbar modes.",
+            ilium_prompts::voice::VOICE_TOOLS_OPERATE_A_BUILT_IN_EDITOR_PANE_SAVE,
             json!({
                 "type": "object",
                 "properties": {
@@ -152,7 +152,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             BOARD_TOOL_NAME,
-            "Operate every kanban surface: select/open cards, add/update/rename/move/delete items, close details, and toggle task checkboxes. Column and card indices are zero-based and available from full state.",
+            ilium_prompts::voice::VOICE_TOOLS_OPERATE_EVERY_KANBAN_SURFACE_SELECT_OPEN_CARDS,
             json!({
                 "type": "object",
                 "properties": {
@@ -172,7 +172,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SETTINGS_TOOL_NAME,
-            "Get, set, or adjust any persisted setting by dotted path, test inference, refresh provider models, or preview sound. Call get to inspect redacted values and the complete writable path catalog before changing an unfamiliar setting.",
+            ilium_prompts::voice::VOICE_TOOLS_GET_SET_OR_ADJUST_ANY_PERSISTED_SETTING,
             json!({
                 "type": "object",
                 "properties": {
@@ -187,7 +187,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SEARCH_TOOL_NAME,
-            "Search all retained terminal output, open editor buffers, and Kanban content; inspect results, move the selection, or open an exact result.",
+            ilium_prompts::voice::VOICE_TOOLS_SEARCH_ALL_RETAINED_TERMINAL_OUTPUT_OPEN_EDITOR,
             json!({
                 "type": "object",
                 "properties": {
@@ -201,7 +201,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             SESSION_TOOL_NAME,
-            "Detach, restart the TUI client, restart the detached server while preserving recovery state, or permanently kill the entire session.",
+            ilium_prompts::voice::VOICE_TOOLS_DETACH_RESTART_THE_TUI_CLIENT_RESTART_THE,
             json!({
                 "type": "object",
                 "properties": {
@@ -213,7 +213,7 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
         ),
         tool(
             CONFIRM_ACTION_TOOL_NAME,
-            "Confirm or cancel one pending ilium action. For staged terminal text, yes presses Enter in the original terminal and no leaves the visible text unsubmitted. Only call after the user explicitly answers the preceding confirmation question.",
+            ilium_prompts::voice::VOICE_TOOLS_CONFIRM_OR_CANCEL_ONE_PENDING_ILIUM_ACTION,
             json!({
                 "type": "object",
                 "properties": {
@@ -241,7 +241,7 @@ fn target_schema() -> Value {
         "properties": {
             "id": { "type": "integer", "minimum": 0 },
             "name": { "type": "string" },
-            "path": { "type": "string", "description": "Slash-separated node-name path from the session root" }
+            "path": { "type": "string", "description": ilium_prompts::voice::VOICE_TOOLS_SLASH_SEPARATED_NODE_NAME_PATH_FROM_THE }
         },
         "additionalProperties": false,
     })

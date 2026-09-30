@@ -1,19 +1,34 @@
 //! Deterministic dot scenes. Decoration never enters PTY/source state.
 
+use ilium_ambient::{AmbientKind, AmbientSettings};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+mod cache;
+mod controls;
+mod host;
 mod parameters;
 mod raster;
 mod scenes;
+mod shoreline;
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 
+pub use cache::{AnimationCacheStatus, AnimationLoopCache};
+#[cfg(test)]
+pub(crate) use controls::test_controls;
+pub use controls::{common_control_ids, LEGACY_CONTROL_IDS};
+pub use host::{AmbientHost, SceneFactory};
+pub use ilium_ambient::raster::DitherMode;
+
 pub use parameters::{
-    CloudletSettings, KelpSettings, MoonlitWaterSettings, QuietPondSettings, ShorelineSettings,
-    SleepingRidgeSettings, Slider, StoneCausticsSettings, TeaSteamSettings, TwoRipplesSettings,
-    WindyHillsideSettings,
+    slider_thumb_offset, slider_value_at, CloudletSettings, KelpSettings, MoonlitWaterSettings,
+    QuietPondSettings, SleepingRidgeSettings, Slider, StoneCausticsSettings, TeaSteamSettings,
+    TwoRipplesSettings, WindyHillsideSettings,
 };
+pub use shoreline::{ShorelineSettings, ShorelineStyle};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,10 +45,25 @@ pub enum AnimationKind {
     TwoRipples,
     #[serde(alias = "breathing_mountain")]
     QuietPond,
+    Pipes,
+    Stars,
+    NightLights,
+    Clouds,
+    Video,
+    Spectrum,
+    Images,
+    DitherWater,
+    AtlanticDusk,
+    CubeClock,
+    BoxMachine,
+    MachineScreen,
+    FbmClouds,
+    DitheredWaves,
+    DithrPatterns,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 25] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -44,9 +74,65 @@ impl AnimationKind {
         Self::Cloudlets,
         Self::TwoRipples,
         Self::QuietPond,
+        Self::Pipes,
+        Self::Stars,
+        Self::NightLights,
+        Self::Clouds,
+        Self::Video,
+        Self::Spectrum,
+        Self::Images,
+        Self::DitherWater,
+        Self::AtlanticDusk,
+        Self::CubeClock,
+        Self::BoxMachine,
+        Self::MachineScreen,
+        Self::FbmClouds,
+        Self::DitheredWaves,
+        Self::DithrPatterns,
     ];
 
+    /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
+    /// deterministic built-in scenes rendered by `scenes.rs`.
+    pub const fn ambient(self) -> Option<AmbientKind> {
+        match self {
+            Self::Pipes => Some(AmbientKind::Pipes),
+            Self::Stars => Some(AmbientKind::Stars),
+            Self::NightLights => Some(AmbientKind::NightLights),
+            Self::Clouds => Some(AmbientKind::Clouds),
+            Self::Video => Some(AmbientKind::Video),
+            Self::Spectrum => Some(AmbientKind::Spectrum),
+            Self::Images => Some(AmbientKind::Images),
+            Self::DitherWater => Some(AmbientKind::DitherWater),
+            Self::AtlanticDusk => Some(AmbientKind::AtlanticDusk),
+            Self::CubeClock => Some(AmbientKind::CubeClock),
+            Self::BoxMachine => Some(AmbientKind::BoxMachine),
+            Self::MachineScreen => Some(AmbientKind::MachineScreen),
+            Self::FbmClouds => Some(AmbientKind::FbmClouds),
+            Self::DitheredWaves => Some(AmbientKind::DitheredWaves),
+            Self::DithrPatterns => Some(AmbientKind::DithrPatterns),
+            _ => None,
+        }
+    }
+
+    /// URLs that inspired the scene, shown only in the Animations demo.
+    pub fn inspired_by(self) -> &'static [&'static str] {
+        self.ambient().map_or(&[], AmbientKind::inspired_by)
+    }
+
+    pub const fn is_ambient(self) -> bool {
+        self.ambient().is_some()
+    }
+
+    /// Live-only scenes are never precomputed into the loop cache: their
+    /// output depends on data, processes or the wall clock, not just time.
+    pub fn is_live_only(self) -> bool {
+        self.ambient().is_some_and(AmbientKind::is_live_only)
+    }
+
     pub fn label(self) -> &'static str {
+        if let Some(kind) = self.ambient() {
+            return kind.label();
+        }
         match self {
             Self::Shoreline => "Wave washing up sand",
             Self::MoonlitWater => "Moon over moving water",
@@ -58,10 +144,14 @@ impl AnimationKind {
             Self::Cloudlets => "Drifting cloud islands",
             Self::TwoRipples => "Two gentle wave sources",
             Self::QuietPond => "Lily pads on a quiet pond",
+            _ => unreachable!("ambient kinds return before this match"),
         }
     }
 
     pub fn description(self) -> &'static str {
+        if let Some(kind) = self.ambient() {
+            return kind.description();
+        }
         match self {
             Self::Shoreline => "A diagonal wash with fine foam, wet sand and scattered grains.",
             Self::MoonlitWater => "Crossing wavelets fracture a widening moonlit reflection.",
@@ -81,23 +171,26 @@ impl AnimationKind {
             Self::QuietPond => {
                 "Notched lily pads rest on a pond while fine reflections pass beneath."
             }
+            _ => unreachable!("ambient kinds return before this match"),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum DitherMode {
+pub enum AnimationPlaybackMode {
     #[default]
-    Ordered,
-    Stippled,
+    Loop,
+    Live,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AnimationSettings {
     pub enabled: bool,
     pub kind: AnimationKind,
+    pub playback_mode: AnimationPlaybackMode,
+    pub loop_seconds: u16,
     pub speed_percent: u16,
     pub density_percent: u16,
     pub dither: DitherMode,
@@ -114,6 +207,10 @@ pub struct AnimationSettings {
     pub cloudlets: CloudletSettings,
     pub two_ripples: TwoRipplesSettings,
     pub quiet_pond: QuietPondSettings,
+    /// Settings of the hosted `ilium-ambient` scenes and the shared observer
+    /// location. Flattened so the project YAML stays one flat mapping.
+    #[serde(flatten)]
+    pub ambient: AmbientSettings,
 }
 
 impl Default for AnimationSettings {
@@ -121,6 +218,8 @@ impl Default for AnimationSettings {
         Self {
             enabled: false,
             kind: AnimationKind::default(),
+            playback_mode: AnimationPlaybackMode::Loop,
+            loop_seconds: 60,
             speed_percent: 100,
             density_percent: 60,
             dither: DitherMode::default(),
@@ -137,13 +236,15 @@ impl Default for AnimationSettings {
             cloudlets: Default::default(),
             two_ripples: Default::default(),
             quiet_pond: Default::default(),
+            ambient: Default::default(),
         }
     }
 }
 
 impl AnimationSettings {
-    pub fn normalized(self) -> Self {
+    pub fn normalized(&self) -> Self {
         Self {
+            loop_seconds: self.loop_seconds.clamp(1, 120),
             speed_percent: self.speed_percent.clamp(25, 300),
             density_percent: self.density_percent.clamp(25, 100),
             lightness_percent: self.lightness_percent.min(100),
@@ -159,11 +260,22 @@ impl AnimationSettings {
             cloudlets: self.cloudlets.normalized(),
             two_ripples: self.two_ripples.normalized(),
             quiet_pond: self.quiet_pond.normalized(),
-            ..self
+            ambient: self.ambient.normalized(),
+            ..self.clone()
         }
     }
 
-    pub fn scene_sliders(self) -> [Slider; 4] {
+    pub fn estimated_loop_bytes(&self, width: u16, height: u16) -> usize {
+        usize::from(width)
+            .saturating_mul(usize::from(height))
+            .saturating_mul(12)
+            .saturating_mul(usize::from(self.loop_seconds.clamp(1, 120)))
+    }
+
+    /// The four named sliders of a built-in scene. Hosted ambient kinds have
+    /// no such sliders (their rows come from `AmbientSettings::controls`), so
+    /// they report four inert placeholders that never enter a cache key.
+    pub fn scene_sliders(&self) -> [Slider; 4] {
         match self.kind {
             AnimationKind::Shoreline => self.shoreline.sliders(),
             AnimationKind::MoonlitWater => self.moonlit_water.sliders(),
@@ -175,93 +287,25 @@ impl AnimationSettings {
             AnimationKind::Cloudlets => self.cloudlets.sliders(),
             AnimationKind::TwoRipples => self.two_ripples.sliders(),
             AnimationKind::QuietPond => self.quiet_pond.sliders(),
+            _ => [Slider::new("", 0, 0, 0, 1, ""); 4],
         }
     }
 
-    pub fn slider(self, row: usize) -> Option<Slider> {
-        match row {
-            11 => Some(Slider::new("Speed", self.speed_percent, 25, 300, 5, "%")),
-            12 => Some(Slider::new(
-                "Dot density",
-                self.density_percent,
-                25,
-                100,
-                5,
-                "%",
-            )),
-            14 => Some(Slider::new(
-                "Lightness",
-                self.lightness_percent,
-                0,
-                100,
-                1,
-                "%",
-            )),
-            15 => Some(Slider::new("Hue", self.hue_degrees, 0, 359, 1, "°")),
-            16 => Some(Slider::new(
-                "Saturation",
-                self.saturation_percent,
-                0,
-                100,
-                1,
-                "%",
-            )),
-            17..=20 => Some(self.scene_sliders()[row - 17]),
-            _ => None,
-        }
+    /// The full shoreline block when it is the selected scene: its Rich
+    /// controls are more than the four sliders a render key otherwise holds.
+    pub(super) fn scene_shoreline_key(&self) -> Option<ShorelineSettings> {
+        (self.kind == AnimationKind::Shoreline).then_some(self.shoreline)
     }
 
-    pub fn set_slider_value(&mut self, row: usize, value: u16) -> bool {
-        let Some(slider) = self.slider(row) else {
-            return false;
-        };
-        let value = value.clamp(slider.minimum, slider.maximum);
-        let before = *self;
-        match row {
-            11 => self.speed_percent = value,
-            12 => self.density_percent = value,
-            14 => self.lightness_percent = value,
-            15 => self.hue_degrees = value,
-            16 => self.saturation_percent = value,
-            17..=20 => match self.kind {
-                AnimationKind::Shoreline => self.shoreline.set(row - 17, value),
-                AnimationKind::MoonlitWater => self.moonlit_water.set(row - 17, value),
-                AnimationKind::SleepingRidge => self.sleeping_ridge.set(row - 17, value),
-                AnimationKind::WindyHillside => self.windy_hillside.set(row - 17, value),
-                AnimationKind::TeaSteam => self.tea_steam.set(row - 17, value),
-                AnimationKind::Kelp => self.kelp.set(row - 17, value),
-                AnimationKind::StoneCaustics => self.stone_caustics.set(row - 17, value),
-                AnimationKind::Cloudlets => self.cloudlets.set(row - 17, value),
-                AnimationKind::TwoRipples => self.two_ripples.set(row - 17, value),
-                AnimationKind::QuietPond => self.quiet_pond.set(row - 17, value),
-            },
-            _ => return false,
-        }
-        *self != before
-    }
-
-    pub fn adjust_row(&mut self, row: usize, direction: i32) -> bool {
-        if let Some(slider) = self.slider(row) {
-            return self.set_slider_value(row, slider.adjusted(direction));
-        }
-        let before = *self;
-        match row {
-            0..=9 => self.kind = AnimationKind::ALL[row],
-            10 => self.enabled = !self.enabled,
-            13 => {
-                self.dither = match self.dither {
-                    DitherMode::Ordered => DitherMode::Stippled,
-                    DitherMode::Stippled => DitherMode::Ordered,
-                }
-            }
-            _ => return false,
-        }
-        *self != before
+    /// True when the loop cache may serve this configuration: Loop playback
+    /// of a deterministic built-in scene. Live-only kinds always render live.
+    pub fn uses_loop_cache(&self) -> bool {
+        self.playback_mode == AnimationPlaybackMode::Loop && !self.kind.is_live_only()
     }
 
     /// Both visible surfaces use exactly the same HSL ink. Palette changes
     /// never change dot coverage, geometry, dithering or terminal source text.
-    pub fn foreground_rgb(self) -> (u8, u8, u8) {
+    pub fn foreground_rgb(&self) -> (u8, u8, u8) {
         let lightness = f32::from(self.lightness_percent.min(100)) / 100.0;
         let saturation = f32::from(self.saturation_percent.min(100)) / 100.0;
         let sector = f32::from(self.hue_degrees.min(359)) / 60.0;
@@ -285,12 +329,28 @@ impl AnimationSettings {
 struct FrameKey {
     kind: AnimationKind,
     controls: [u16; 4],
+    shoreline: Option<ShorelineSettings>,
     speed_percent: u16,
     width: u16,
     height: u16,
     elapsed: Duration,
 }
 
+/// Identity of the last hosted-scene render. An input redraw inside one frame
+/// bucket reuses the rendered raster instead of advancing the scene twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AmbientRenderKey {
+    generation: u64,
+    speed_percent: u16,
+    width: u16,
+    height: u16,
+    elapsed: Duration,
+}
+
+/// One screen-sized field: a Braille cell grid plus, for hosted scenes that
+/// supply them, one RGB color per cell. It also owns the hosted scene (through
+/// `AmbientHost`), so the ambient background and the Settings preview render
+/// the very same scene instance.
 #[derive(Debug, Default)]
 pub struct AnimationFrame {
     width: u16,
@@ -302,6 +362,10 @@ pub struct AnimationFrame {
     last_pack: Option<(u16, DitherMode)>,
     thresholds: Vec<f32>,
     threshold_key: Option<(u16, u16, DitherMode)>,
+    colors: Vec<[u8; 3]>,
+    has_cell_colors: bool,
+    host: AmbientHost,
+    last_ambient: Option<AmbientRenderKey>,
 }
 
 impl AnimationFrame {
@@ -312,6 +376,15 @@ impl AnimationFrame {
         self.height
     }
 
+    /// The scene host shared by every surface that shows this field.
+    pub fn host(&self) -> &AmbientHost {
+        &self.host
+    }
+
+    pub fn host_mut(&mut self) -> &mut AmbientHost {
+        &mut self.host
+    }
+
     fn resize(&mut self, width: u16, height: u16) {
         self.width = width;
         self.height = height;
@@ -319,6 +392,8 @@ impl AnimationFrame {
             .resize(usize::from(width) * 2, usize::from(height) * 4);
         self.cells
             .resize(usize::from(width) * usize::from(height), 0);
+        self.colors
+            .resize(usize::from(width) * usize::from(height), [0; 3]);
     }
 
     /// `enabled` is a compositor concern. Presentation-only changes reuse
@@ -331,9 +406,19 @@ impl AnimationFrame {
         elapsed: Duration,
     ) {
         let settings = settings.normalized();
+        if let Some(kind) = settings.kind.ambient() {
+            self.render_ambient(kind, &settings, width, height, elapsed);
+            return;
+        }
+        // A built-in scene owns nothing: drop any hosted scene (and with it
+        // its threads and child processes) the moment the kind changes.
+        self.host.release();
+        self.has_cell_colors = false;
+        self.last_ambient = None;
         let key = FrameKey {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
+            shoreline: settings.scene_shoreline_key(),
             speed_percent: settings.speed_percent,
             width,
             height,
@@ -361,6 +446,61 @@ impl AnimationFrame {
         }
     }
 
+    /// Renders a hosted `ilium-ambient` scene. `elapsed` is the shared,
+    /// already-quantized session clock; the host converts it to scene time.
+    fn render_ambient(
+        &mut self,
+        kind: AmbientKind,
+        settings: &AnimationSettings,
+        width: u16,
+        height: u16,
+        elapsed: Duration,
+    ) {
+        // The raster is about to hold hosted-scene pixels, not the built-in
+        // scene the geometry key describes.
+        self.last_geometry = None;
+        let generation = self.host.sync(kind, &settings.ambient, elapsed);
+        let key = AmbientRenderKey {
+            generation,
+            speed_percent: settings.speed_percent,
+            width,
+            height,
+            elapsed,
+        };
+        let is_reused = self.last_ambient == Some(key);
+        if !is_reused {
+            if width != self.width || height != self.height {
+                self.resize(width, height);
+            } else {
+                self.raster.dots.fill(0.0);
+            }
+            self.colors.fill([0; 3]);
+            if width > 0 && height > 0 {
+                let wall = self.host.wall(elapsed);
+                let time = wall.mul_f64(f64::from(settings.speed_percent) / 100.0);
+                let mut frame = ilium_ambient::Frame {
+                    raster: &mut self.raster,
+                    cell_colors: &mut self.colors,
+                    width,
+                    height,
+                    time,
+                    wall,
+                    now: SystemTime::now(),
+                };
+                self.host.render(&mut frame);
+            }
+            self.last_ambient = Some(key);
+        }
+        self.has_cell_colors = self.host.uses_cell_colors();
+        if width == 0 || height == 0 {
+            return;
+        }
+        if !is_reused || self.last_pack != Some((settings.density_percent, settings.dither)) {
+            self.pack(settings.density_percent, settings.dither);
+            self.last_pack = Some((settings.density_percent, settings.dither));
+        }
+    }
+
     pub fn glyph(&self, x: u16, y: u16) -> char {
         if x >= self.width || y >= self.height {
             return ' ';
@@ -371,6 +511,39 @@ impl AnimationFrame {
         } else {
             char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ')
         }
+    }
+
+    /// True when the current field carries scene-supplied per-cell colors.
+    pub fn has_cell_colors(&self) -> bool {
+        self.has_cell_colors
+    }
+
+    /// The scene-supplied color of one cell; `None` when the scene paints in
+    /// the user's palette instead (the compositor then uses that palette).
+    pub fn cell_color(&self, x: u16, y: u16) -> Option<(u8, u8, u8)> {
+        if !self.has_cell_colors || x >= self.width || y >= self.height {
+            return None;
+        }
+        self.colors
+            .get(usize::from(y) * usize::from(self.width) + usize::from(x))
+            .map(|[red, green, blue]| (*red, *green, *blue))
+    }
+
+    pub(crate) fn packed_cells(&self) -> &[u8] {
+        &self.cells
+    }
+
+    pub(crate) fn load_packed_cells(&mut self, width: u16, height: u16, cells: &[u8]) {
+        if width != self.width || height != self.height {
+            self.resize(width, height);
+        }
+        self.cells.fill(0);
+        let count = self.cells.len().min(cells.len());
+        self.cells[..count].copy_from_slice(&cells[..count]);
+        self.has_cell_colors = false;
+        self.last_geometry = None;
+        self.last_pack = None;
+        self.last_ambient = None;
     }
 
     fn pack(&mut self, density_percent: u16, dither: DitherMode) {

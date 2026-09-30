@@ -108,6 +108,11 @@ impl Default for SessionStatsStore {
 }
 
 impl SessionStatsStore {
+    /// Transcript readers currently running.
+    pub fn in_flight_count(&self) -> usize {
+        self.entries.values().filter(|entry| entry.in_flight).count()
+    }
+
     pub fn entry(&self, pane_id: NodeId) -> Option<&StatsEntry> {
         self.entries.get(&pane_id)
     }
@@ -245,6 +250,32 @@ impl SessionStatsStore {
     }
 }
 
+/// Sub-agent transcripts of a Claude Code session: every `.jsonl` below
+/// `<project dir>/<session id>/subagents/`, including per-workflow folders.
+fn claude_subagent_files(main_transcript: &std::path::Path) -> Vec<PathBuf> {
+    const MAX_DEPTH: usize = 6;
+    let mut files = Vec::new();
+    let mut pending = vec![(main_transcript.with_extension("").join("subagents"), 0_usize)];
+    while let Some((directory, depth)) = pending.pop() {
+        let Ok(children) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            let Ok(kind) = child.file_type() else {
+                continue;
+            };
+            if kind.is_dir() && depth < MAX_DEPTH {
+                pending.push((path, depth + 1));
+            } else if path.extension().is_some_and(|extension| extension == "jsonl") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
 fn run_pass(
     pane_id: NodeId,
     request: StatsRequest,
@@ -278,7 +309,8 @@ fn run_pass(
         fail("No verified transcript file for this session yet.".to_string());
         return;
     };
-    let mut accumulator = accumulator.unwrap_or_else(|| Box::new(StatsAccumulator::new(class)));
+    let mut accumulator =
+        accumulator.unwrap_or_else(|| Box::new(StatsAccumulator::new(class.clone())));
     let result = accumulator.ingest_file(&path, |partial, done, total| {
         if done >= total {
             return;
@@ -291,6 +323,12 @@ fn run_pass(
             total,
         });
     });
+    if result.is_ok() && class == AgentClass::Claude {
+        // Sub-agent calls are billed to this session but live in their own files.
+        for extra in claude_subagent_files(&path) {
+            let _ = accumulator.ingest_extra_file(&extra);
+        }
+    }
     match result {
         Ok(()) => {
             let stats = accumulator.snapshot();
@@ -388,6 +426,68 @@ mod tests {
         assert!(store.request_refresh(pane_id, request, started + REFRESH_INTERVAL));
         wait_for(&mut store, pane_id);
         assert_eq!(store.entry(pane_id).unwrap().state, LoadState::Ready);
+    }
+
+    #[test]
+    fn claude_subagent_files_count_toward_the_session_and_are_read_incrementally() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let project_path = ilium_platform::paths::canonicalize(project.path()).unwrap();
+        let id = "33333333-3333-4333-8333-333333333333";
+        write_claude_transcript(home.path(), &project_path, id);
+        let main_transcript = TranscriptLocator::new(home.path(), &project_path)
+            .transcript_for_session(&AgentClass::Claude, id)
+            .unwrap()
+            .path;
+        // Workflow runs nest their agents one folder deeper.
+        let nested = main_transcript
+            .with_extension("")
+            .join("subagents")
+            .join("workflows")
+            .join("wf_1");
+        std::fs::create_dir_all(&nested).unwrap();
+        let side_call = |message_id: &str, output: u64| {
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "assistant", "sessionId": id, "isSidechain": true,
+                    "timestamp": "2026-09-25T10:01:00.000Z",
+                    "message": {"id": message_id, "model": "claude-sonnet-5", "content": [],
+                        "usage": {"input_tokens": 1, "output_tokens": output,
+                            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}
+                })
+            )
+        };
+        let agent_file = nested.join("agent-a1.jsonl");
+        std::fs::write(&agent_file, side_call("msg_side_1", 1000)).unwrap();
+
+        let files = claude_subagent_files(&main_transcript);
+        assert_eq!(files, vec![agent_file.clone()]);
+
+        let request = StatsRequest {
+            class: AgentClass::Claude,
+            session_id: id.to_string(),
+            project_path,
+            home: home.path().to_path_buf(),
+        };
+        let mut store = SessionStatsStore::default();
+        let pane_id = NodeId(9);
+        let started = Instant::now();
+        store.request_refresh(pane_id, request.clone(), started);
+        wait_for(&mut store, pane_id);
+        let stats = store.entry(pane_id).unwrap().stats.clone().unwrap();
+        assert_eq!(stats.tokens.output, 9 + 1000, "main file plus the sub-agent");
+
+        // A second pass reads only what the sub-agent file gained, and never
+        // counts the same message id twice.
+        let mut grown = std::fs::read_to_string(&agent_file).unwrap();
+        grown.push_str(&side_call("msg_side_1", 1000));
+        grown.push_str(&side_call("msg_side_2", 500));
+        std::fs::write(&agent_file, grown).unwrap();
+        assert!(store.request_refresh(pane_id, request, started + REFRESH_INTERVAL));
+        wait_for(&mut store, pane_id);
+        let stats = store.entry(pane_id).unwrap().stats.clone().unwrap();
+        assert_eq!(stats.tokens.output, 9 + 1000 + 500);
     }
 
     #[test]

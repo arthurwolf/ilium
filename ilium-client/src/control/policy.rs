@@ -37,10 +37,8 @@ pub fn confirmation_plan(
                     .command_line
                     .as_deref()
                     .filter(|command_line| !command_line.trim().is_empty())
-                    .ok_or_else(|| "command_line is required".to_owned())?;
-                Some(format!(
-                    "Run the shell command {command_line:?} in a new terminal pane?"
-                ))
+                    .ok_or_else(|| ilium_prompts::voice::VOICE_POLICY_COMMAND_LINE_IS_REQUIRED.to_owned())?;
+                Some(ilium_prompts::render_value("voice/policy/run-the-shell-command-v0-in-a", &serde_json::json!({"v0": format!("{:?}", command_line)})))
             }
             TreeAction::Close => return pinned_close_plan(app, command),
             _ => None,
@@ -48,7 +46,7 @@ pub fn confirmation_plan(
         ControlCommand::Editor(command)
             if matches!(command.action, EditorAction::ReplaceDocument) =>
         {
-            Some("Replace the editor's entire current document?".to_owned())
+            Some(ilium_prompts::voice::VOICE_POLICY_REPLACE_THE_EDITOR_S_ENTIRE_CURRENT_DOCUMENT.to_owned())
         }
         ControlCommand::TerminalSubmission(command)
             if app.voice_settings.confirm_terminal_submissions =>
@@ -58,17 +56,17 @@ pub fn confirmation_plan(
         ControlCommand::Terminal(command) if app.voice_settings.confirm_terminal_submissions => {
             match command.action {
                 TerminalAction::PressKey if matches!(command.key, Some(TerminalKey::Enter)) => {
-                    Some("Press Enter and submit what you see in the target terminal?".to_owned())
+                    Some(ilium_prompts::voice::VOICE_POLICY_PRESS_ENTER_AND_SUBMIT_WHAT_YOU_SEE.to_owned())
                 }
                 TerminalAction::ScheduleInput => {
-                    Some("Schedule this terminal input for automatic submission?".to_owned())
+                    Some(ilium_prompts::voice::VOICE_POLICY_SCHEDULE_THIS_TERMINAL_INPUT_FOR_AUTOMATIC_SUBMISSION.to_owned())
                 }
                 // Queuing a prompt is at least as consequential as scheduling one:
                 // `Forever`/`Times` delivery keeps auto-submitting into the pane
                 // long after this call returns, so it must be guarded the same way.
                 TerminalAction::QueuePrompt => Some(match command.delivery {
                     Some(PromptDeliveryChoice::Forever) => {
-                        "Queue this prompt to be submitted automatically after every future completion, indefinitely?".to_owned()
+                        ilium_prompts::voice::VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY_2.to_owned()
                     }
                     Some(PromptDeliveryChoice::Times) => {
                         // Mirror the executor's own validation (see
@@ -76,15 +74,13 @@ pub fn confirmation_plan(
                         // so the confirmation question never promises a run
                         // count the execution step will then reject.
                         let runs = command.runs.filter(|runs| *runs > 0).ok_or_else(|| {
-                            "runs is required and must be positive when delivery is times"
+                            ilium_prompts::voice::VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE
                                 .to_owned()
                         })?;
-                        format!(
-                            "Queue this prompt to be submitted automatically for the next {runs} completions?"
-                        )
+                        ilium_prompts::render_value("voice/policy/queue-this-prompt-to-be-submitted-automatically", &serde_json::json!({"v0": format!("{}", runs)}))
                     }
                     Some(PromptDeliveryChoice::Once) | None => {
-                        "Queue this prompt for automatic submission after the agent's next completion?".to_owned()
+                        ilium_prompts::voice::VOICE_POLICY_QUEUE_THIS_PROMPT_FOR_AUTOMATIC_SUBMISSION_AFTER.to_owned()
                     }
                 }),
                 _ => None,
@@ -100,10 +96,10 @@ pub fn confirmation_plan(
         }
         ControlCommand::Session(command) => match command.action {
             SessionAction::KillSession => Some(
-                "Kill the entire ilium session and every process running in its panes?".to_owned(),
+                ilium_prompts::voice::VOICE_POLICY_KILL_THE_ENTIRE_ILIUM_SESSION_AND_EVERY.to_owned(),
             ),
             SessionAction::RestartServer => Some(
-                "Restart the detached ilium server and temporarily disconnect this client?"
+                ilium_prompts::voice::VOICE_POLICY_RESTART_THE_DETACHED_ILIUM_SERVER_AND_TEMPORARILY
                     .to_owned(),
             ),
             SessionAction::Detach | SessionAction::RestartClient => None,
@@ -116,7 +112,8 @@ pub fn confirmation_plan(
         question,
         preparation: None,
         confirmed_command: command.clone(),
-        cancellation_message: "Cancelled the pending action".to_owned(),
+        cancellation_message: ilium_prompts::voice::VOICE_POLICY_CANCELLED_THE_PENDING_ACTION
+            .to_owned(),
     }))
 }
 
@@ -144,7 +141,8 @@ fn pinned_close_plan(app: &App, command: &TreeCommand) -> Result<Option<Confirma
             },
             ..command.clone()
         }),
-        cancellation_message: "Cancelled the pending action".to_owned(),
+        cancellation_message: ilium_prompts::voice::VOICE_POLICY_CANCELLED_THE_PENDING_ACTION
+            .to_owned(),
     }))
 }
 
@@ -161,31 +159,36 @@ fn pinned_board_delete_plan(
 ) -> Result<Option<ConfirmationPlan>, String> {
     let pane_id = resolve_node(app, &command.target)?;
     let Some(PaneRuntime::Board(board)) = app.panes.get(&pane_id) else {
-        return Err("Target is not a board pane".to_owned());
+        return Err(ilium_prompts::voice::VOICE_POLICY_TARGET_IS_NOT_A_BOARD_PANE.to_owned());
     };
 
-    let column_index = command.column.ok_or("column is required")?;
-    let column = board
-        .columns
-        .get(column_index)
-        .ok_or_else(|| format!("Board has no column {column_index}"))?;
+    let column_index = command
+        .column
+        .ok_or(ilium_prompts::voice::VOICE_POLICY_COLUMN_IS_REQUIRED)?;
+    let column = board.columns.get(column_index).ok_or_else(|| {
+        ilium_prompts::render_value(
+            "voice/policy/board-has-no-column",
+            &serde_json::json!({"v0": format!("{}", column_index)}),
+        )
+    })?;
 
     let question = match command.action {
         BoardAction::DeleteCard => {
-            let card_index = command.card.ok_or("card is required")?;
+            let card_index = command
+                .card
+                .ok_or(ilium_prompts::voice::VOICE_POLICY_CARD_IS_REQUIRED)?;
             let card = column
                 .cards
                 .get(card_index)
-                .ok_or_else(|| format!("Board has no card {card_index} in column {column_index}"))?;
-            format!(
-                "Permanently delete the card {:?} from column {:?} and the board's backing storage?",
-                card.title, column.title
+                .ok_or_else(|| ilium_prompts::render_value("voice/policy/board-has-no-card-v0-in-column", &serde_json::json!({"v0": format!("{}", card_index), "v1": format!("{}", column_index)})))?;
+            ilium_prompts::render_value(
+                "voice/policy/permanently-delete-the-card-v0-from-column",
+                &serde_json::json!({"v0": format!("{:?}", card.title), "v1": format!("{:?}", column.title)}),
             )
         }
-        BoardAction::DeleteColumn => format!(
-            "Permanently delete the column {:?} and its {} card(s) from the board's backing storage?",
-            column.title,
-            column.cards.len()
+        BoardAction::DeleteColumn => ilium_prompts::render_value(
+            "voice/policy/permanently-delete-the-column-v0-and-its",
+            &serde_json::json!({"v0": format!("{:?}", column.title), "v1": format!("{}", column.cards.len())}),
         ),
         // `confirmation_plan` only routes DeleteCard/DeleteColumn here.
         _ => return Ok(None),
@@ -202,7 +205,8 @@ fn pinned_board_delete_plan(
             },
             ..command.clone()
         }),
-        cancellation_message: "Cancelled the pending action".to_owned(),
+        cancellation_message: ilium_prompts::voice::VOICE_POLICY_CANCELLED_THE_PENDING_ACTION
+            .to_owned(),
     }))
 }
 
@@ -218,7 +222,7 @@ fn staged_terminal_submission_plan(
     };
 
     Ok(Some(ConfirmationPlan {
-        question: "I typed it into the target terminal without pressing Enter. Send what you see on screen?".to_owned(),
+        question: ilium_prompts::voice::VOICE_POLICY_I_TYPED_IT_INTO_THE_TARGET_TERMINAL.to_owned(),
         preparation: Some(ControlCommand::TerminalTyping(TerminalTypingCommand {
             target: target.clone(),
             text: command.text.clone(),
@@ -233,7 +237,8 @@ fn staged_terminal_submission_plan(
             delivery: None,
             runs: None,
         }),
-        cancellation_message: "Left the staged terminal text visible and unsubmitted".to_owned(),
+        cancellation_message:
+            ilium_prompts::voice::VOICE_POLICY_LEFT_THE_STAGED_TERMINAL_TEXT_VISIBLE_AND.to_owned(),
     }))
 }
 

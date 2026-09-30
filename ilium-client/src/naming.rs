@@ -6,7 +6,6 @@
 //! retries provider failures. A malformed structured reply gets one fresh
 //! semantic attempt because free routers can select a different model.
 
-use handlebars::Handlebars;
 use ilium_inference::{
     provider_from_settings, InferenceError, InferenceRequest, InferenceSettings,
 };
@@ -97,14 +96,7 @@ fn render_prompt<T: Serialize>(
     template: &str,
     context: &T,
 ) -> anyhow::Result<String> {
-    let mut handlebars = Handlebars::new();
-    // The rendered output is a plain-text LLM prompt, not HTML -- Handlebars'
-    // default escape fn would otherwise mangle README/CLAUDE.md content and
-    // user prompts (turning `=`, backticks, quotes, `<`/`>` into HTML
-    // entities) before the model ever sees it.
-    handlebars.register_escape_fn(handlebars::no_escape);
-    handlebars.register_template_string(template_name, template)?;
-    Ok(handlebars.render(template_name, context)?)
+    Ok(ilium_prompts::render_source(template_name, template, context)?)
 }
 
 /// Bounds one independently meaningful LLM context value by keeping its first
@@ -126,7 +118,7 @@ pub fn clip_llm_context_value(value: &str) -> String {
         .skip(character_count - LLM_CONTEXT_EDGE_CHARS)
         .collect();
     let omitted_character_count = character_count - retained_character_count;
-    format!("{head}\n… [{omitted_character_count} characters omitted] …\n{tail}")
+    ilium_prompts::render_value("naming/naming/v0-v1-characters-omitted", &serde_json::json!({"v0": format!("{}", head), "v1": format!("{}", omitted_character_count), "v2": format!("{}", tail)}))
 }
 
 /// Encodes untrusted prompt data as one JSON string literal and neutralizes
@@ -223,11 +215,11 @@ pub fn extract_icon_field(
         .get(field)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            anyhow::anyhow!("{context_label} response missing string field \"{field}\"")
+            anyhow::anyhow!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_MISSING_STRING_FIELD_FIELD)
         })?;
     normalize_icon(raw_value).ok_or_else(|| {
         anyhow::anyhow!(
-            "{context_label} response field \"{field}\" must be one compact UTF-8 icon or emoticon"
+            ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_FIELD_FIELD_MUST_BE_ONE_COMPACT_UTF_8_ICON_OR_EMOTICON
         )
     })
 }
@@ -275,7 +267,7 @@ pub fn normalize_command_hint(value: Option<&str>) -> Option<String> {
 /// on-screen command alongside its title.
 pub fn format_with_command_hint(title: String, command_hint: Option<&str>) -> String {
     match normalize_command_hint(command_hint) {
-        Some(command) => format!("[{command}] {title}"),
+        Some(command) => ilium_prompts::render_value("naming/naming/v0", &serde_json::json!({"v0": format!("{}", command), "v1": format!("{}", title)})),
         None => title,
     }
 }
@@ -304,10 +296,10 @@ pub fn parse_structured_json_object(
     context_label: &str,
 ) -> anyhow::Result<serde_json::Value> {
     let Some((object, consumed_end)) = first_complete_json_object(response) else {
-        anyhow::bail!("{context_label} response did not contain one complete JSON object");
+        anyhow::bail!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_DID_NOT_CONTAIN_ONE_COMPLETE_JSON_OBJECT);
     };
     if first_complete_json_object(&response[consumed_end..]).is_some() {
-        anyhow::bail!("{context_label} response contained multiple JSON objects");
+        anyhow::bail!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_CONTAINED_MULTIPLE_JSON_OBJECTS);
     }
     Ok(object)
 }
@@ -338,11 +330,11 @@ fn extract_bounded_word_field(
         .get(field)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            anyhow::anyhow!("{context_label} response missing string field \"{field}\"")
+            anyhow::anyhow!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_MISSING_STRING_FIELD_FIELD)
         })?;
     normalize_word_bounded(raw_value, min_words, max_words).ok_or_else(|| {
         anyhow::anyhow!(
-            "{context_label} response field \"{field}\" must contain {min_words} to {max_words} short, non-empty words"
+            ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_FIELD_FIELD_MUST_CONTAIN_MIN_WORDS_TO_MAX_WORDS_SHORT_NON_EMPT
         )
     })
 }

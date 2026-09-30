@@ -41,21 +41,52 @@ impl Slider {
         if track_width < 2 {
             return self.value.clamp(self.minimum, self.maximum);
         }
-        let offset = u32::from(offset.min(track_width - 1));
-        let span = u32::from(self.maximum - self.minimum);
-        let denominator = u32::from(track_width - 1);
-        let raw = u32::from(self.minimum) + (span * offset + denominator / 2) / denominator;
-        let step = u32::from(self.step.max(1));
-        let rounded =
-            u32::from(self.minimum) + ((raw - u32::from(self.minimum) + step / 2) / step) * step;
-        rounded.min(u32::from(self.maximum)) as u16
+        slider_value_at(
+            i32::from(self.minimum),
+            i32::from(self.maximum),
+            i32::from(self.step),
+            offset,
+            track_width,
+        ) as u16
     }
 
     pub fn thumb_offset(self, track_width: u16) -> u16 {
-        let span = u32::from(self.maximum - self.minimum).max(1);
-        let value = u32::from(self.value.clamp(self.minimum, self.maximum) - self.minimum);
-        ((value * u32::from(track_width.saturating_sub(1)) + span / 2) / span) as u16
+        slider_thumb_offset(
+            i32::from(self.minimum),
+            i32::from(self.maximum),
+            i32::from(self.value),
+            track_width,
+        )
     }
+}
+
+/// The value under track cell `offset` of a `track_width`-cell slider. Both
+/// track endpoints map exactly to `minimum` and `maximum`, including ranges
+/// that are not a multiple of `step`.
+pub fn slider_value_at(
+    minimum: i32,
+    maximum: i32,
+    step: i32,
+    offset: u16,
+    track_width: u16,
+) -> i32 {
+    if track_width < 2 || maximum <= minimum {
+        return minimum;
+    }
+    let offset = i64::from(offset.min(track_width - 1));
+    let span = i64::from(maximum) - i64::from(minimum);
+    let denominator = i64::from(track_width - 1);
+    let raw = i64::from(minimum) + (span * offset + denominator / 2) / denominator;
+    let step = i64::from(step.max(1));
+    let rounded = i64::from(minimum) + ((raw - i64::from(minimum) + step / 2) / step) * step;
+    rounded.min(i64::from(maximum)) as i32
+}
+
+/// The track cell that shows `value` on a `track_width`-cell slider.
+pub fn slider_thumb_offset(minimum: i32, maximum: i32, value: i32, track_width: u16) -> u16 {
+    let span = (i64::from(maximum) - i64::from(minimum)).max(1);
+    let value = i64::from(value.clamp(minimum, maximum)) - i64::from(minimum);
+    ((value * i64::from(track_width.saturating_sub(1)) + span / 2) / span) as u16
 }
 
 // A scene always supplies four named controls. The macro keeps each field's
@@ -89,13 +120,6 @@ macro_rules! scene_parameters {
         }
     };
 }
-
-scene_parameters!(ShorelineSettings {
-    reach_percent: ("Tide reach", 100, 50, 150, 5, "%"),
-    foam_width_percent: ("Foam width", 75, 25, 200, 5, "%"),
-    grain_percent: ("Sand grains", 20, 0, 100, 5, "%"),
-    cycle_seconds: ("Wash cycle", 12, 6, 30, 1, "s"),
-});
 
 scene_parameters!(MoonlitWaterSettings {
     wave_strength_percent: ("Wave strength", 100, 0, 200, 5, "%"),

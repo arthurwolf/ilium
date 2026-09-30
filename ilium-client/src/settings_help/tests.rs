@@ -109,8 +109,10 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 25);
-    add_range(&mut ids, "AN", 1, crate::animation_settings_ui::ROW_COUNT);
-    add_range(&mut ids, "AM", 1, 21);
+    for id in crate::animation_rows::help_ids() {
+        ids.insert(id);
+    }
+    add_range(&mut ids, "AM", 1, 22);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 2);
@@ -121,6 +123,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "RESET", 1, 3);
+    add_range(&mut ids, "COST", 1, 20);
     add_range(&mut ids, "SETUP", 1, 2);
     ids.insert("DEBUG-01".to_owned());
     ids.insert("API-01".to_owned());
@@ -139,20 +142,29 @@ fn add_range(ids: &mut BTreeSet<String>, prefix: &str, start: usize, end: usize)
 
 #[test]
 fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
+    use crate::animation_rows::{AnimationRow, RowContext};
     use crate::background_animation::{AnimationKind, AnimationSettings};
 
     let settings = AnimationSettings::default();
-    for (id, phrase) in [("AN-15", "60%"), ("AN-16", "359"), ("AN-17", "0%")] {
+    for (id, phrase) in [("AN-30", "60%"), ("AN-31", "359"), ("AN-32", "0%")] {
         let topic = catalog::by_id(id).expect("palette help topic exists");
         assert!(
             topic.explanation.contains(phrase),
             "{id} explains its range/default"
         );
     }
-    for kind in AnimationKind::ALL {
-        let selected = AnimationSettings { kind, ..settings };
+    // Every built-in scene's four named controls are explained by the shared
+    // numbered scene-control topics AN-39..AN-42.
+    for kind in AnimationKind::ALL
+        .into_iter()
+        .filter(|kind| !kind.is_ambient())
+    {
+        let selected = AnimationSettings {
+            kind,
+            ..settings.clone()
+        };
         for (index, slider) in selected.scene_sliders().iter().enumerate() {
-            let id = format!("AN-{:02}", index + 18);
+            let id = format!("AN-{:02}", index + 39);
             let topic = catalog::by_id(&id).expect("scene-control help topic exists");
             assert!(
                 topic.specimen.contains(slider.label),
@@ -162,14 +174,47 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             );
         }
     }
-    assert_eq!(
-        catalog::by_id("AN-08").unwrap().title,
-        AnimationKind::Cloudlets.label()
-    );
-    assert_eq!(
-        catalog::by_id("AN-10").unwrap().title,
-        AnimationKind::QuietPond.label()
-    );
+    // Scene rows map one-to-one onto AN-01.. in catalog order and name their scene.
+    for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
+        let id = format!("AN-{:02}", index + 1);
+        assert_eq!(
+            AnimationRow::Scene(kind).help_id(&[]),
+            id,
+            "scene row help id"
+        );
+        assert_eq!(catalog::by_id(&id).unwrap().title, kind.label());
+    }
+    // Every row of every scene's list resolves to an existing topic, whatever
+    // controls a scene adds later.
+    for kind in AnimationKind::ALL {
+        for colored in [false, true] {
+            let selected = AnimationSettings {
+                kind,
+                ..settings.clone()
+            };
+            let context = RowContext {
+                scene_uses_cell_colors: colored,
+                ..Default::default()
+            };
+            let controls = selected.scene_controls();
+            for row in crate::animation_rows::rows(&selected, &context) {
+                let id = row.help_id(&controls);
+                assert!(catalog::by_id(&id).is_some(), "{kind:?} {row:?} -> {id}");
+            }
+        }
+    }
+    for (id, phrase) in [
+        ("AN-36", "Location"),
+        ("AN-38", "Full screen"),
+        ("AN-37", "status"),
+    ] {
+        let topic = catalog::by_id(id).unwrap();
+        let text = format!("{} {} {}", topic.title, topic.explanation, topic.specimen);
+        assert!(
+            text.to_lowercase().contains(&phrase.to_lowercase()),
+            "{id} mentions {phrase}"
+        );
+    }
 }
 
 #[test]
@@ -183,22 +228,31 @@ fn narrow_animation_settings_help_anchors_reach_every_lower_control() {
         project.path().to_path_buf(),
     );
     let layout = crate::settings_ui::compute_layout(Rect::new(0, 0, 80, 24));
-    for row in 0..crate::animation_settings_ui::ROW_COUNT {
+    let model = app.animation_row_model();
+    let scene_controls = app.animation_settings.scene_controls();
+    for row in 0..model.len() {
         let state = SettingsState {
             tab: SettingsTab::Animations,
             selected_row: row,
-            scroll: crate::animation_settings_ui::scroll_for_selection(layout.content_area, row, 0),
+            scroll: crate::animation_settings_ui::scroll_for_selection(
+                layout.content_area,
+                model.len(),
+                row,
+                0,
+            ),
             ..SettingsState::default()
         };
         let anchors = crate::settings_ui::settings_help_anchors(&layout, &app, &state);
-        let expected_id = format!("AN-{:02}", row + 1);
+        let expected_id = model.row(row).unwrap().help_id(&scene_controls);
         assert!(
             catalog::by_id(&expected_id).is_some(),
             "{expected_id} resolves"
         );
         assert!(
-            anchors.iter().any(|anchor| anchor.topic_id == expected_id),
-            "selected row's help anchor remains reachable when scrolled"
+            anchors
+                .iter()
+                .any(|anchor| anchor.topic_id == expected_id && anchor.selected),
+            "selected row {row}'s help anchor remains reachable when scrolled"
         );
     }
 }

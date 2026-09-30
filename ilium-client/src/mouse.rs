@@ -352,6 +352,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    if matches!(app.mode, Mode::LocationPicker(_)) {
+        handle_location_picker_mouse(app, mouse);
+        return;
+    }
+
     if matches!(app.mode, Mode::Settings(_)) {
         let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Settings above");
@@ -367,6 +372,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
 
     if is_shared_action_dialog(&app.mode) {
         handle_shared_action_dialog_mouse(app, mouse);
+        return;
+    }
+
+    // The conversion dialog is keyboard-only; pointer events must not reach
+    // the frozen pane or the tree while it runs.
+    if matches!(app.mode, Mode::ConvertSession) {
         return;
     }
 
@@ -455,6 +466,7 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::ApiSettingPrompt(_)
             | Mode::GitSettingPrompt(_, _)
+            | Mode::AnimationTextPrompt(_, _)
             | Mode::AgentSetupPathPrompt(_, _)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
@@ -528,6 +540,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::VoiceSettingPrompt(_, state)
         | Mode::ApiSettingPrompt(state)
         | Mode::GitSettingPrompt(_, state)
+        | Mode::AnimationTextPrompt(_, state)
         | Mode::AgentSetupPathPrompt(_, state)
         | Mode::SaveAs(_, state)
         | Mode::AgentDebugSavePath(_, state)
@@ -625,6 +638,28 @@ fn handle_terminal_pane_context_menu_mouse(
     };
     menu.selected_index = action_index;
     app.execute_terminal_context_action(action, menu);
+}
+
+/// Left clicks inside the location picker: fields, results, map and buttons
+/// are resolved through the same `location_picker::layout` the renderer uses.
+fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
+    use crate::location_picker::PickerOutcome;
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let screen = app.layout.screen_area;
+    let Mode::LocationPicker(picker) = &mut app.mode else {
+        return;
+    };
+    match picker.click(position, screen) {
+        PickerOutcome::Continue => {}
+        PickerOutcome::Cancel => app.pop_modal(),
+        PickerOutcome::Confirm(location) => {
+            app.pop_modal();
+            app.settings_set_location(location);
+        }
+    }
 }
 
 fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
@@ -1709,6 +1744,43 @@ fn handle_create_board_mouse(
 /// per-notch amount elsewhere in this crate.
 const SETTINGS_WHEEL_SCROLL_LINES: u16 = 3;
 
+/// Keeps the Animations disabled-option hover popover in step with the
+/// pointer: a Moved event over a row that has disabled options (re)starts the
+/// rest timer, anything else (other rows, clicks, wheel, other tabs)
+/// dismisses it. The tick reveals it once the pointer has rested.
+fn update_animation_hover(
+    app: &mut App,
+    state: &crate::app::SettingsState,
+    layout: &crate::settings_ui::SettingsLayout,
+    mouse: MouseEvent,
+    position: Position,
+) {
+    let is_animations_controls =
+        state.tab == crate::app::SettingsTab::Animations && !state.animation_fullscreen;
+    if !is_animations_controls || !matches!(mouse.kind, MouseEventKind::Moved) {
+        app.clear_animation_hover();
+        return;
+    }
+    let model = app.animation_row_model();
+    let row = match crate::animation_settings_ui::hit(
+        layout.content_area,
+        &model,
+        state.scroll,
+        position,
+    ) {
+        Some(
+            crate::animation_settings_ui::AnimationHit::Select(row)
+            | crate::animation_settings_ui::AnimationHit::Activate(row)
+            | crate::animation_settings_ui::AnimationHit::DisabledOption(row),
+        ) => model
+            .view(row)
+            .filter(|view| !view.disabled_options.is_empty())
+            .map(|_| row),
+        _ => None,
+    };
+    app.set_animation_hover(row, Instant::now());
+}
+
 /// Mouse handling for the full-screen settings view (`Mode::Settings`):
 /// clicking the header's close button closes the screen, clicking a tab
 /// switches to it, clicking a row's `‹`/value control decrements/increments
@@ -1718,6 +1790,17 @@ const SETTINGS_WHEEL_SCROLL_LINES: u16 = 3;
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+
+    // The full-screen animation preview hides every control: any click returns.
+    if state.tab == crate::app::SettingsTab::Animations && state.animation_fullscreen {
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            state.animation_fullscreen = false;
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
+    update_animation_hover(app, &state, &layout, mouse, position);
 
     if let Some(action) = state.keyboard_picker.take() {
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
@@ -1847,6 +1930,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             .unwrap_or(0);
                         state.scroll = crate::animation_settings_ui::scroll_for_selection(
                             layout.content_area,
+                            app.animation_row_model().len(),
                             state.selected_row,
                             0,
                         );
@@ -1856,22 +1940,42 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.trigger_action_cursor = 0;
                 }
             } else if state.tab == crate::app::SettingsTab::Animations {
+                use crate::animation_rows::AnimationRowOutcome;
                 use crate::animation_settings_ui::AnimationHit;
+                let model = app.animation_row_model();
                 match crate::animation_settings_ui::hit(
                     layout.content_area,
+                    &model,
                     state.scroll,
                     position,
-                    &app.animation_settings,
                 ) {
                     Some(AnimationHit::Select(row)) => {
                         state.selected_row = row;
-                        if row < 10 {
-                            app.settings_adjust_animation_row(row, 1);
-                        }
+                        app.settings_preview_select_animation_row(row);
                     }
-                    Some(AnimationHit::Toggle(row)) => {
+                    Some(AnimationHit::Activate(row)) => {
                         state.selected_row = row;
-                        app.settings_adjust_animation_row(row, 1);
+                        match app.settings_activate_animation_row(row) {
+                            AnimationRowOutcome::Done => {}
+                            AnimationRowOutcome::FullScreenPreview => {
+                                state.animation_fullscreen = true;
+                            }
+                            AnimationRowOutcome::LocationPicker => {
+                                app.mode = Mode::Settings(state);
+                                app.open_location_picker();
+                                return;
+                            }
+                            AnimationRowOutcome::TextPrompt {
+                                control,
+                                label,
+                                hint,
+                                current,
+                            } => {
+                                app.mode = Mode::Settings(state);
+                                app.begin_animation_text_prompt(control, label, hint, current);
+                                return;
+                            }
+                        }
                     }
                     Some(AnimationHit::Slider { row, value }) => {
                         state.selected_row = row;
@@ -1879,6 +1983,14 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_set_animation_slider(row, value);
                     }
                     Some(AnimationHit::ScrollTo(scroll)) => state.scroll = scroll,
+                    Some(AnimationHit::DisabledOption(row)) => {
+                        state.selected_row = row;
+                        if let Some(notice) =
+                            model.view(row).and_then(|view| view.disabled_notice())
+                        {
+                            app.status_message = Some(notice);
+                        }
+                    }
                     None => {}
                 }
             } else if state.tab == crate::app::SettingsTab::Setup {
@@ -2048,6 +2160,18 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_adjust_voice_row(row, direction);
                         return;
                     }
+                }
+            } else if state.tab == crate::app::SettingsTab::Cost {
+                if let Some(hit) = crate::cost_settings_ui::hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app,
+                ) {
+                    state.selected_row = hit.index;
+                    app.mode = Mode::Settings(state);
+                    app.settings_adjust_cost_row(hit.row, hit.direction);
+                    return;
                 }
             } else if state.tab == crate::app::SettingsTab::ResetPlanning {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
@@ -2257,10 +2381,10 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 if let Some(row) = state.animation_slider_drag {
                     if let Some(value) = crate::animation_settings_ui::slider_value_at(
                         layout.content_area,
+                        &app.animation_row_model(),
                         row,
                         state.scroll,
                         mouse.column,
-                        &app.animation_settings,
                     ) {
                         app.settings_set_animation_slider(row, value);
                     }
@@ -2279,6 +2403,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         _ => {}
     }
 
+    if state.tab == crate::app::SettingsTab::Animations {
+        // A scene switch can change the row count under the selection.
+        let last_row = app.animation_row_model().len().saturating_sub(1);
+        state.selected_row = state.selected_row.min(last_row);
+    }
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);
     state.scroll = state.scroll.min(max_scroll);
@@ -3169,7 +3298,7 @@ mod row_action_click_tests {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
     /// Locates `id`'s on-screen row (via the same hit-test path rendering
-    /// uses) and clicks the row-action strip's `Retitle` slot on it, through
+    /// uses) and clicks the row-action strip's rightmost (`Retitle`) slot on it, through
     /// the real `handle_mouse_event` mouse
     /// pipeline -- a `Moved` event to set hover, then a `Down` click,
     /// mirroring what crossterm actually delivers.
@@ -3182,16 +3311,9 @@ mod row_action_click_tests {
             })
             .expect("row must be visible in the rendered tree list");
 
+        // The strip is flush right and `Retitle` is always its last slot.
         let list = tree_ui::list_area(area);
-        let controls_start = list.right() - tree_ui::ROW_ACTION_WIDTH * tree_ui::ROW_ACTION_COUNT;
-        let retitle_index = TreeRowAction::ALL
-            .iter()
-            .position(|action| *action == TreeRowAction::Retitle)
-            .expect("retitle action is registered") as u16;
-        let click_pos = ratatui::layout::Position::new(
-            controls_start + retitle_index * tree_ui::ROW_ACTION_WIDTH,
-            row,
-        );
+        let click_pos = ratatui::layout::Position::new(list.right() - 1, row);
 
         for kind in [
             MouseEventKind::Moved,
@@ -3745,5 +3867,82 @@ mod smart_copy_mouse_tests {
             app.status_message.as_deref(),
             Some("Move over a highlighted Smart Copy selection")
         );
+    }
+}
+
+#[cfg(test)]
+mod cost_settings_mouse_tests {
+    use super::*;
+    use crate::app::{App, SettingsState, SettingsTab};
+    use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    fn cost_app() -> (App, ratatui::layout::Rect) {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 130, 260));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        });
+        let content = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+        (app, content)
+    }
+
+    fn click(app: &mut App, column: u16, row: u16) {
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                modifiers: KeyModifiers::empty(),
+            },
+        );
+    }
+
+    fn span_of(app: &App, content: ratatui::layout::Rect, row: CostRow) -> crate::cost_settings_ui::RowSpan {
+        *crate::cost_settings_ui::view(app, 0, content.width)
+            .rows
+            .iter()
+            .find(|span| span.row == row)
+            .expect("the row is on the page")
+    }
+
+    #[test]
+    fn clicks_toggle_options_choose_calibrations_and_step_values() {
+        use crate::cost_model::Calibration;
+        let (mut app, content) = cost_app();
+
+        // Checkbox line of an option.
+        let sparkline = span_of(&app, content, CostRow::Display(CostDisplay::Sparkline));
+        click(&mut app, content.x + 8, content.y + sparkline.first_line);
+        assert!(app.cost_settings.sparkline.enabled);
+
+        // Its visibility selector.
+        let visibility = span_of(&app, content, CostRow::Visibility(CostDisplay::Sparkline));
+        click(&mut app, content.x + 8, content.y + visibility.first_line);
+        assert_eq!(app.cost_settings.sparkline.visibility, CostVisibility::Always);
+
+        // A radio card anywhere inside it.
+        let budget = span_of(&app, content, CostRow::Calibration(Calibration::Budget));
+        click(&mut app, content.x + 10, content.y + budget.first_line + 1);
+        assert_eq!(app.cost_settings.calibration, Calibration::Budget);
+
+        // The parameter row that appeared: increment and decrement halves.
+        let amount = span_of(&app, content, CostRow::Budget);
+        assert_eq!(app.cost_settings.budget_usd, 10.0);
+        click(&mut app, content.x + amount.control_x + 6, content.y + amount.control_line);
+        assert_eq!(app.cost_settings.budget_usd, 20.0);
+        click(&mut app, content.x + amount.control_x, content.y + amount.control_line);
+        assert_eq!(app.cost_settings.budget_usd, 10.0);
+
+        // A click on a stepper's description changes nothing.
+        click(&mut app, content.x + amount.control_x + 6, content.y + amount.control_line + 1);
+        assert_eq!(app.cost_settings.budget_usd, 10.0);
+
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings stay open");
+        };
+        assert!(state.selected_row > 0, "a click moves the selection");
     }
 }

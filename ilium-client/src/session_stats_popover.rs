@@ -164,7 +164,7 @@ impl App {
 
     /// Everything the worker needs to read this pane's transcript, `None`
     /// until the agent's session id is known.
-    fn session_stats_request(&self, pane_id: NodeId) -> Option<StatsRequest> {
+    pub(crate) fn session_stats_request(&self, pane_id: NodeId) -> Option<StatsRequest> {
         let (class, session_id, project_path) = self.last_prompt_transcript_context(pane_id)?;
         if !self.stats_agent_is_supported(pane_id) {
             return None;

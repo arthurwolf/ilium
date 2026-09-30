@@ -28,36 +28,58 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             let data = serde_json::to_value(snapshot).map_err(|error| error.to_string())?;
             Ok(ExecutionReceipt {
                 status: "ok",
-                message: "Current redacted ilium settings".to_owned(),
+                message: ilium_prompts::voice::VOICE_SETTINGS_CURRENT_REDACTED_ILIUM_SETTINGS
+                    .to_owned(),
                 data: data.get("settings").cloned().unwrap_or(Value::Null),
                 terminate_session_after_delivery: false,
             })
         }
         SettingsAction::Set => {
-            let path = command.path.as_deref().ok_or("path is required")?;
-            let value = command.value.ok_or("value is required")?;
+            let path = command
+                .path
+                .as_deref()
+                .ok_or(ilium_prompts::voice::VOICE_SETTINGS_PATH_IS_REQUIRED)?;
+            let value = command
+                .value
+                .ok_or(ilium_prompts::voice::VOICE_SETTINGS_VALUE_IS_REQUIRED)?;
             set_setting(app, path, value)?;
-            Ok(ExecutionReceipt::immediate(format!("Updated {path}")))
+            Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
+                "voice/settings/updated",
+                &serde_json::json!({"v0": format!("{}", path)}),
+            )))
         }
         SettingsAction::Adjust => {
-            let path = command.path.as_deref().ok_or("path is required")?;
-            let direction = command.direction.ok_or("direction is required")?.sign();
+            let path = command
+                .path
+                .as_deref()
+                .ok_or(ilium_prompts::voice::VOICE_SETTINGS_PATH_IS_REQUIRED)?;
+            let direction = command
+                .direction
+                .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_DIRECTION_IS_REQUIRED)?
+                .sign();
             adjust_setting(app, path, direction)?;
-            Ok(ExecutionReceipt::immediate(format!("Adjusted {path}")))
+            Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
+                "voice/settings/adjusted",
+                &serde_json::json!({"v0": format!("{}", path)}),
+            )))
         }
         SettingsAction::TestInference => {
             app.request_inference_test();
             Ok(ExecutionReceipt::immediate(
-                "Started the inference provider test",
+                ilium_prompts::voice::VOICE_SETTINGS_STARTED_THE_INFERENCE_PROVIDER_TEST,
             ))
         }
         SettingsAction::RefreshModels => {
             app.request_model_refresh();
-            Ok(ExecutionReceipt::immediate("Started model discovery"))
+            Ok(ExecutionReceipt::immediate(
+                ilium_prompts::voice::VOICE_SETTINGS_STARTED_MODEL_DISCOVERY,
+            ))
         }
         SettingsAction::PreviewSound => {
             app.settings_preview_sound();
-            Ok(ExecutionReceipt::queued("Requested a sound preview"))
+            Ok(ExecutionReceipt::queued(
+                ilium_prompts::voice::VOICE_SETTINGS_REQUESTED_A_SOUND_PREVIEW,
+            ))
         }
     }
 }
@@ -74,24 +96,28 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "ui.left_panel_unfocused_width" => {
             let target = left_panel_width(&value)?;
             if target > app.ui_settings.left_panel_sizing.focused_width {
-                return Err("unfocused width cannot exceed focused width".to_owned());
+                return Err(ilium_prompts::voice::VOICE_SETTINGS_UNFOCUSED_WIDTH_CANNOT_EXCEED_FOCUSED_WIDTH.to_owned());
             }
             app.settings_set_unfocused_panel_width(target);
         }
         "ui.left_panel_focused_width" => {
             let target = left_panel_width(&value)?;
             if target < app.ui_settings.left_panel_sizing.unfocused_width {
-                return Err("focused width cannot be smaller than unfocused width".to_owned());
+                return Err(ilium_prompts::voice::VOICE_SETTINGS_FOCUSED_WIDTH_CANNOT_BE_SMALLER_THAN_UNFOCUSED.to_owned());
             }
             app.settings_set_focused_panel_width(target);
         }
         "ui.left_panel_minimum_terminal_width" => {
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "minimum terminal width is outside ilium's allowed range")?;
+            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_MINIMUM_TERMINAL_WIDTH_IS_OUTSIDE_ILIUM_S
+            })?;
             if !(crate::layout::MINIMUM_TERMINAL_WIDTH..=crate::layout::MAXIMUM_TERMINAL_WIDTH)
                 .contains(&target)
             {
-                return Err("minimum terminal width is outside ilium's allowed range".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_MINIMUM_TERMINAL_WIDTH_IS_OUTSIDE_ILIUM_S
+                        .to_owned(),
+                );
             }
             app.settings_set_minimum_terminal_width(target);
         }
@@ -117,7 +143,12 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let target = match normalized(string(&value)?).as_str() {
                 "dark" => ColorScheme::Dark,
                 "light" => ColorScheme::Light,
-                _ => return Err("color scheme must be dark or light".to_owned()),
+                _ => {
+                    return Err(
+                        ilium_prompts::voice::VOICE_SETTINGS_COLOR_SCHEME_MUST_BE_DARK_OR_LIGHT
+                            .to_owned(),
+                    )
+                }
             };
             if app.ui_settings.color_scheme != target {
                 app.settings_toggle_color_scheme();
@@ -148,7 +179,9 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let target = crate::icon_settings::TASK_PROGRESS_STYLE_NAMES
                 .iter()
                 .position(|candidate| normalized(candidate) == name)
-                .ok_or("task progress style must be braille, blocks, moons, or quarters")?;
+                .ok_or(
+                    ilium_prompts::voice::VOICE_SETTINGS_TASK_PROGRESS_STYLE_MUST_BE_BRAILLE_BLOCKS,
+                )?;
             for _ in 0..=crate::icon_settings::TASK_PROGRESS_STYLE_NAMES.len() {
                 if crate::icon_settings::task_progress_preset_index(
                     &app.ui_settings.icons.task_progress_frames,
@@ -179,19 +212,27 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let key = path
                 .strip_prefix("ui.icons.")
                 .expect("guarded by starts_with(\"ui.icons.\") above");
-            let target = IconTarget::from_key(key)
-                .ok_or_else(|| format!("Unknown configurable icon {key:?}"))?;
+            let target = IconTarget::from_key(key).ok_or_else(|| {
+                ilium_prompts::render_value(
+                    "voice/settings/unknown-configurable-icon",
+                    &serde_json::json!({"v0": format!("{:?}", key)}),
+                )
+            })?;
             app.settings_set_icon(target, string(&value)?.to_owned());
         }
         "terminal.scrollback_budget_mib" => {
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "scrollback budget is too large".to_owned())?;
+            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_SCROLLBACK_BUDGET_IS_TOO_LARGE.to_owned()
+            })?;
             if !(crate::config::TerminalSettings::MIN_SCROLLBACK_BUDGET_MIB
                 ..=crate::config::TerminalSettings::MAX_SCROLLBACK_BUDGET_MIB)
                 .contains(&target)
                 || target % 4 != 0
             {
-                return Err("scrollback budget must be 4-512 MiB in 4 MiB increments".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_SCROLLBACK_BUDGET_MUST_BE_4_512_MIB
+                        .to_owned(),
+                );
             }
             // Stepping moves the value by a fixed 4 MiB per adjustment (see
             // `stepped_scrollback_budget_mib`), but a value loaded from a hand-edited
@@ -254,10 +295,14 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             boolean(&value)?,
         ),
         "editor.autosave_delay_ms" => {
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "autosave delay is too large".to_owned())?;
+            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_AUTOSAVE_DELAY_IS_TOO_LARGE.to_owned()
+            })?;
             if ![250, 500, 1000, 2000, 5000].contains(&target) {
-                return Err("autosave delay must be 250, 500, 1000, 2000, or 5000 ms".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_AUTOSAVE_DELAY_MUST_BE_250_500_1000
+                        .to_owned(),
+                );
             }
             for _ in 0..5 {
                 if app.editor_settings.autosave_delay_ms == target {
@@ -285,16 +330,21 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             ensure_reached(app.session_settings.backups_enabled == target)?;
         }
         "keyboard.shortcut_base" => {
-            let shortcut = crate::keymap::ShortcutBase::parse(string(&value)?)
-                .ok_or("shortcut base must be one ASCII letter")?;
+            let shortcut = crate::keymap::ShortcutBase::parse(string(&value)?).ok_or(
+                ilium_prompts::voice::VOICE_SETTINGS_SHORTCUT_BASE_MUST_BE_ONE_ASCII_LETTER,
+            )?;
             app.settings_set_shortcut_base(shortcut);
         }
         "keyboard.preset" => {
-            let preset = match normalized(string(&value)?).as_str() {
-                "screen" | "gnu_screen" => crate::keymap::KeymapPreset::Screen,
-                "tmux" => crate::keymap::KeymapPreset::Tmux,
-                _ => return Err("keyboard preset must be screen or tmux".to_owned()),
-            };
+            let preset =
+                match normalized(string(&value)?).as_str() {
+                    "screen" | "gnu_screen" => crate::keymap::KeymapPreset::Screen,
+                    "tmux" => crate::keymap::KeymapPreset::Tmux,
+                    _ => return Err(
+                        ilium_prompts::voice::VOICE_SETTINGS_KEYBOARD_PRESET_MUST_BE_SCREEN_OR_TMUX
+                            .to_owned(),
+                    ),
+                };
             app.settings_apply_keymap_preset(preset);
         }
         path if path.starts_with("keyboard.bindings.") => {
@@ -302,10 +352,14 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let action_name = path
                 .strip_prefix("keyboard.bindings.")
                 .expect("guarded by starts_with(\"keyboard.bindings.\") above");
-            let action = crate::keymap::action_from_name(action_name)
-                .ok_or_else(|| format!("Unknown keyboard action {action_name:?}"))?;
+            let action = crate::keymap::action_from_name(action_name).ok_or_else(|| {
+                ilium_prompts::render_value(
+                    "voice/settings/unknown-keyboard-action",
+                    &serde_json::json!({"v0": format!("{:?}", action_name)}),
+                )
+            })?;
             let key = crate::keymap::BindingKey::parse_config_value(string(&value)?).ok_or(
-                "keyboard binding must be one printable key, up, down, page_up, or page_down",
+                ilium_prompts::voice::VOICE_SETTINGS_KEYBOARD_BINDING_MUST_BE_ONE_PRINTABLE_KEY,
             )?;
             app.settings_assign_key(action, key);
             let reached = app
@@ -313,17 +367,20 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 .iter()
                 .any(|binding| binding.action == action && binding.key == key);
             if !reached {
-                return Err(app
-                    .status_message
-                    .clone()
-                    .unwrap_or_else(|| "keyboard binding was rejected".to_owned()));
+                return Err(app.status_message.clone().unwrap_or_else(|| {
+                    ilium_prompts::voice::VOICE_SETTINGS_KEYBOARD_BINDING_WAS_REJECTED.to_owned()
+                }));
             }
         }
         "kanban_board.card_preview_lines" => {
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "card preview line count is too large".to_owned())?;
+            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_CARD_PREVIEW_LINE_COUNT_IS_TOO_LARGE.to_owned()
+            })?;
             if !(MIN_CARD_PREVIEW_LINES..=MAX_CARD_PREVIEW_LINES).contains(&target) {
-                return Err("card preview lines must be between 1 and 10".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_CARD_PREVIEW_LINES_MUST_BE_BETWEEN_1
+                        .to_owned(),
+                );
             }
             while app.kanban_board_settings.card_preview_lines != target {
                 let direction = if app.kanban_board_settings.card_preview_lines < target {
@@ -335,10 +392,14 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
         }
         "kanban_board.minimum_column_width" => {
-            let target = u16::try_from(unsigned(&value)?)
-                .map_err(|_| "column width is too large".to_owned())?;
+            let target = u16::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_COLUMN_WIDTH_IS_TOO_LARGE.to_owned()
+            })?;
             if !(MIN_BOARD_COLUMN_WIDTH..=MAX_BOARD_COLUMN_WIDTH).contains(&target) {
-                return Err("minimum column width must be between 10 and 80".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_MINIMUM_COLUMN_WIDTH_MUST_BE_BETWEEN_10
+                        .to_owned(),
+                );
             }
             while app.kanban_board_settings.minimum_column_width != target {
                 let direction = if app.kanban_board_settings.minimum_column_width < target {
@@ -350,11 +411,15 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
         }
         "sound.source" => {
-            let target = match normalized(string(&value)?).as_str() {
-                "system_beep" | "beep" => SoundSourceKind::SystemBeep,
-                "sound_file" | "file" => SoundSourceKind::SoundFile,
-                _ => return Err("sound source must be system_beep or sound_file".to_owned()),
-            };
+            let target =
+                match normalized(string(&value)?).as_str() {
+                    "system_beep" | "beep" => SoundSourceKind::SystemBeep,
+                    "sound_file" | "file" => SoundSourceKind::SoundFile,
+                    _ => return Err(
+                        ilium_prompts::voice::VOICE_SETTINGS_SOUND_SOURCE_MUST_BE_SYSTEM_BEEP_OR
+                            .to_owned(),
+                    ),
+                };
             if app.sound_settings.source != target {
                 app.settings_toggle_sound_source();
             }
@@ -366,7 +431,9 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 .sounds
                 .iter()
                 .position(|sound| sound.path.to_string_lossy() == requested)
-                .ok_or_else(|| "sound file is not in ilium's discovered catalog".to_owned())?;
+                .ok_or_else(|| {
+                    ilium_prompts::voice::VOICE_SETTINGS_SOUND_FILE_IS_NOT_IN_ILIUM_S.to_owned()
+                })?;
             app.settings_select_sound_file(index);
         }
         "sound.events.agent_finished" => {
@@ -392,16 +459,24 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let event_key = path
                 .strip_prefix("triggers.")
                 .expect("guarded by starts_with(\"triggers.\") above");
-            let event = TriggerEvent::from_key(event_key)
-                .ok_or_else(|| format!("Unknown trigger event {event_key:?}"))?;
+            let event = TriggerEvent::from_key(event_key).ok_or_else(|| {
+                ilium_prompts::render_value(
+                    "voice/settings/unknown-trigger-event",
+                    &serde_json::json!({"v0": format!("{:?}", event_key)}),
+                )
+            })?;
             let values = value
                 .as_array()
-                .ok_or("trigger actions must be an array of action names")?;
+                .ok_or(ilium_prompts::voice::VOICE_SETTINGS_TRIGGER_ACTIONS_MUST_BE_AN_ARRAY_OF)?;
             let mut actions = Vec::with_capacity(values.len());
             for value in values {
                 let action_key = string(value)?;
-                let action = TriggerAction::from_key(action_key)
-                    .ok_or_else(|| format!("Unknown trigger action {action_key:?}"))?;
+                let action = TriggerAction::from_key(action_key).ok_or_else(|| {
+                    ilium_prompts::render_value(
+                        "voice/settings/unknown-trigger-action",
+                        &serde_json::json!({"v0": format!("{:?}", action_key)}),
+                    )
+                })?;
                 actions.push(action);
             }
             let mut settings = app.trigger_settings.clone();
@@ -422,8 +497,9 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 .iter()
                 .any(|candidate| candidate == model)
             {
-                return Err(format!(
-                    "Kilo Gateway model {model:?} is not in the current free-model catalog"
+                return Err(ilium_prompts::render_value(
+                    "voice/settings/kilo-gateway-model-v0-is-not-in",
+                    &serde_json::json!({"v0": format!("{:?}", model)}),
                 ));
             }
             update_inference(
@@ -516,10 +592,15 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             Ok(())
         })?,
         "voice.output_volume_percent" => update_voice(app, |settings| {
-            settings.output_volume_percent = u8::try_from(unsigned(&value)?)
-                .map_err(|_| "voice output volume must be between 0 and 100".to_owned())?;
+            settings.output_volume_percent = u8::try_from(unsigned(&value)?).map_err(|_| {
+                ilium_prompts::voice::VOICE_SETTINGS_VOICE_OUTPUT_VOLUME_MUST_BE_BETWEEN_0
+                    .to_owned()
+            })?;
             if settings.output_volume_percent > 100 {
-                return Err("voice output volume must be between 0 and 100".to_owned());
+                return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_VOICE_OUTPUT_VOLUME_MUST_BE_BETWEEN_0
+                        .to_owned(),
+                );
             }
             Ok(())
         })?,
@@ -549,7 +630,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let target = match normalized(string(&value)?).as_str() {
                 "exact" => crate::reset_planning::ResetTimeStyle::Exact,
                 "human" => crate::reset_planning::ResetTimeStyle::Human,
-                _ => return Err("reset planning time style must be exact or human".to_owned()),
+                _ => return Err(
+                    ilium_prompts::voice::VOICE_SETTINGS_RESET_PLANNING_TIME_STYLE_MUST_BE_EXACT
+                        .to_owned(),
+                ),
             };
             if app.reset_planning_settings.time_style != target {
                 app.settings_adjust_reset_planning_row(2);
@@ -569,7 +653,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                         "new_worktree" => GitDefaultWhere::NewWorktree,
                         "existing_worktree" => GitDefaultWhere::ExistingWorktree,
                         _ => return Err(
-                            "git.default_where must be here, new_worktree, or existing_worktree"
+                            ilium_prompts::voice::VOICE_SETTINGS_GIT_DEFAULT_WHERE_MUST_BE_HERE_NEW
                                 .into(),
                         ),
                     };
@@ -583,7 +667,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                         "current" => GitDefaultBase::Current,
                         "default_branch" => GitDefaultBase::DefaultBranch,
                         _ => {
-                            return Err("git.default_base must be current or default_branch".into())
+                            return Err(ilium_prompts::voice::VOICE_SETTINGS_GIT_DEFAULT_BASE_MUST_BE_CURRENT_OR.into())
                         }
                     };
                 }
@@ -591,7 +675,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                     settings.branch_line = match normalized(string(&value)?).as_str() {
                         "worktree_only" => GitBranchLine::WorktreeOnly,
                         "off" => GitBranchLine::Off,
-                        _ => return Err("git.branch_line must be worktree_only or off".into()),
+                        _ => return Err(ilium_prompts::voice::VOICE_SETTINGS_GIT_BRANCH_LINE_MUST_BE_WORKTREE_ONLY.into()),
                     };
                 }
                 "git.setup_command" => settings.setup_command = string(&value)?.to_owned(),
@@ -601,16 +685,26 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                             "keep" => GitClosePolicy::Keep,
                             "offer_removal_when_safe" => GitClosePolicy::OfferRemovalWhenSafe,
                             _ => return Err(
-                                "git.default_close_policy must be keep or offer_removal_when_safe"
+                                ilium_prompts::voice::VOICE_SETTINGS_GIT_DEFAULT_CLOSE_POLICY_MUST_BE_KEEP
                                     .into(),
                             ),
                         };
                 }
-                _ => return Err(format!("Unknown or read-only setting path {path:?}")),
+                _ => {
+                    return Err(ilium_prompts::render_value(
+                        "voice/settings/unknown-or-read-only-setting-path",
+                        &serde_json::json!({"v0": format!("{:?}", path)}),
+                    ))
+                }
             }
             app.apply_and_persist_git_settings(settings)?;
         }
-        _ => return Err(format!("Unknown or read-only setting path {path:?}")),
+        _ => {
+            return Err(ilium_prompts::render_value(
+                "voice/settings/unknown-or-read-only-setting-path",
+                &serde_json::json!({"v0": format!("{:?}", path)}),
+            ))
+        }
     }
     Ok(())
 }
@@ -686,7 +780,12 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "reset_planning.monitor_claude" => app.settings_adjust_reset_planning_row(0),
         "reset_planning.monitor_codex" => app.settings_adjust_reset_planning_row(1),
         "reset_planning.time_style" => app.settings_adjust_reset_planning_row(2),
-        _ => return Err(format!("Setting {path:?} is not adjustable; use set")),
+        _ => {
+            return Err(ilium_prompts::render_value(
+                "voice/settings/setting-v0-is-not-adjustable-use-set",
+                &serde_json::json!({"v0": format!("{:?}", path)}),
+            ))
+        }
     }
     Ok(())
 }
@@ -729,27 +828,28 @@ fn update_voice(
 }
 
 fn ensure_reached(was_reached: bool) -> Result<(), String> {
-    was_reached
-        .then_some(())
-        .ok_or_else(|| "setting registry could not reach the requested value".to_owned())
+    was_reached.then_some(()).ok_or_else(|| {
+        ilium_prompts::voice::VOICE_SETTINGS_SETTING_REGISTRY_COULD_NOT_REACH_THE_REQUESTED
+            .to_owned()
+    })
 }
 
 fn boolean(value: &Value) -> Result<bool, String> {
     value
         .as_bool()
-        .ok_or_else(|| "value must be a boolean".to_owned())
+        .ok_or_else(|| ilium_prompts::voice::VOICE_SETTINGS_VALUE_MUST_BE_A_BOOLEAN.to_owned())
 }
 
 fn unsigned(value: &Value) -> Result<u64, String> {
-    value
-        .as_u64()
-        .ok_or_else(|| "value must be a non-negative integer".to_owned())
+    value.as_u64().ok_or_else(|| {
+        ilium_prompts::voice::VOICE_SETTINGS_VALUE_MUST_BE_A_NON_NEGATIVE_INTEGER.to_owned()
+    })
 }
 
 fn string(value: &Value) -> Result<&str, String> {
     value
         .as_str()
-        .ok_or_else(|| "value must be a string".to_owned())
+        .ok_or_else(|| ilium_prompts::voice::VOICE_SETTINGS_VALUE_MUST_BE_A_STRING.to_owned())
 }
 
 fn optional_string(value: &Value) -> Result<Option<String>, String> {
@@ -765,10 +865,13 @@ fn normalized(value: &str) -> String {
 }
 
 fn left_panel_width(value: &Value) -> Result<u16, String> {
-    let width = u16::try_from(unsigned(value)?)
-        .map_err(|_| "left panel width is outside ilium's allowed range".to_owned())?;
+    let width = u16::try_from(unsigned(value)?).map_err(|_| {
+        ilium_prompts::voice::VOICE_SETTINGS_LEFT_PANEL_WIDTH_IS_OUTSIDE_ILIUM_S.to_owned()
+    })?;
     if !(crate::layout::MIN_TREE_WIDTH..=crate::layout::MAX_TREE_WIDTH).contains(&width) {
-        return Err("left panel width is outside ilium's allowed range".to_owned());
+        return Err(
+            ilium_prompts::voice::VOICE_SETTINGS_LEFT_PANEL_WIDTH_IS_OUTSIDE_ILIUM_S.to_owned(),
+        );
     }
     Ok(width)
 }
@@ -781,7 +884,7 @@ fn parse_left_panel_sizing_mode(value: &str) -> Result<LeftPanelSizingMode, Stri
             Ok(LeftPanelSizingMode::TerminalWidthDependent)
         }
         _ => Err(
-            "left panel sizing mode must be fixed, focus-dependent, or width-dependent".to_owned(),
+            ilium_prompts::voice::VOICE_SETTINGS_LEFT_PANEL_SIZING_MODE_MUST_BE_FIXED.to_owned(),
         ),
     }
 }
@@ -794,7 +897,7 @@ fn parse_tree_order(value: &str) -> Result<TreeOrder, String> {
         "age_descending" => Ok(TreeOrder::AgeDescending),
         "name_ascending" | "name_a_z" => Ok(TreeOrder::NameAscending),
         "name_descending" | "name_z_a" => Ok(TreeOrder::NameDescending),
-        _ => Err("invalid tree order".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_TREE_ORDER.to_owned()),
     }
 }
 
@@ -804,7 +907,7 @@ fn parse_agent_identifier_mode(value: &str) -> Result<AgentIdentifierMode, Strin
         "letter" => Ok(AgentIdentifierMode::Letter),
         "icon" => Ok(AgentIdentifierMode::Icon),
         "hidden" => Ok(AgentIdentifierMode::Hidden),
-        _ => Err("invalid agent identifier mode".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_AGENT_IDENTIFIER_MODE.to_owned()),
     }
 }
 
@@ -813,7 +916,9 @@ fn parse_motion_level(value: &str) -> Result<MotionLevel, String> {
         "full" => Ok(MotionLevel::Full),
         "reduced" => Ok(MotionLevel::Reduced),
         "off" => Ok(MotionLevel::Off),
-        _ => Err("motion level must be full, reduced, or off".to_owned()),
+        _ => Err(
+            ilium_prompts::voice::VOICE_SETTINGS_MOTION_LEVEL_MUST_BE_FULL_REDUCED_OR.to_owned(),
+        ),
     }
 }
 
@@ -822,7 +927,10 @@ fn parse_sidebar_density(value: &str) -> Result<SidebarDensity, String> {
         "compact" => Ok(SidebarDensity::Compact),
         "standard" => Ok(SidebarDensity::Standard),
         "comfortable" => Ok(SidebarDensity::Comfortable),
-        _ => Err("sidebar density must be compact, standard, or comfortable".to_owned()),
+        _ => Err(
+            ilium_prompts::voice::VOICE_SETTINGS_SIDEBAR_DENSITY_MUST_BE_COMPACT_STANDARD_OR
+                .to_owned(),
+        ),
     }
 }
 
@@ -831,7 +939,7 @@ fn parse_new_pane_directory(value: &str) -> Result<NewPaneDirectory, String> {
         "project_root" => Ok(NewPaneDirectory::ProjectRoot),
         "focused_terminal" => Ok(NewPaneDirectory::FocusedTerminal),
         "last_used" => Ok(NewPaneDirectory::LastUsed),
-        _ => Err("invalid new-pane directory policy".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_NEW_PANE_DIRECTORY_POLICY.to_owned()),
     }
 }
 
@@ -840,7 +948,7 @@ fn parse_recovery_policy(value: &str) -> Result<SessionRecoveryPolicy, String> {
         "restore_automatically" => Ok(SessionRecoveryPolicy::RestoreAutomatically),
         "ask_before_restore" => Ok(SessionRecoveryPolicy::AskBeforeRestore),
         "start_fresh" => Ok(SessionRecoveryPolicy::StartFresh),
-        _ => Err("invalid session recovery policy".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_SESSION_RECOVERY_POLICY.to_owned()),
     }
 }
 
@@ -851,7 +959,7 @@ fn parse_inference_provider(value: &str) -> Result<InferenceProviderKind, String
         "openai" => Ok(InferenceProviderKind::OpenAi),
         "anthropic" => Ok(InferenceProviderKind::Anthropic),
         "openrouter" => Ok(InferenceProviderKind::OpenRouter),
-        _ => Err("invalid inference provider".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_INFERENCE_PROVIDER.to_owned()),
     }
 }
 
@@ -859,7 +967,7 @@ fn parse_title_style(value: &str) -> Result<TitleStyle, String> {
     match normalized(value).as_str() {
         "labeling" | "labelling" => Ok(TitleStyle::Labeling),
         "summarization" | "summarisation" => Ok(TitleStyle::Summarization),
-        _ => Err("invalid title style".to_owned()),
+        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_TITLE_STYLE.to_owned()),
     }
 }
 
@@ -868,7 +976,7 @@ fn parse_voice_model(value: &str) -> Result<VoiceModel, String> {
     VoiceModel::ALL
         .into_iter()
         .find(|model| normalized(model.api_name()) == value || normalized(model.label()) == value)
-        .ok_or_else(|| "invalid Realtime voice model".to_owned())
+        .ok_or_else(|| ilium_prompts::voice::VOICE_SETTINGS_INVALID_REALTIME_VOICE_MODEL.to_owned())
 }
 
 fn parse_voice_name(value: &str) -> Result<VoiceName, String> {
@@ -876,7 +984,7 @@ fn parse_voice_name(value: &str) -> Result<VoiceName, String> {
     VoiceName::ALL
         .into_iter()
         .find(|voice| normalized(voice.api_name()) == value || normalized(voice.label()) == value)
-        .ok_or_else(|| "invalid Realtime voice".to_owned())
+        .ok_or_else(|| ilium_prompts::voice::VOICE_SETTINGS_INVALID_REALTIME_VOICE.to_owned())
 }
 
 fn parse_reasoning_effort(value: &str) -> Result<ReasoningEffort, String> {
@@ -884,14 +992,18 @@ fn parse_reasoning_effort(value: &str) -> Result<ReasoningEffort, String> {
     ReasoningEffort::ALL
         .into_iter()
         .find(|effort| normalized(effort.api_name()) == value)
-        .ok_or_else(|| "reasoning effort must be minimal, low, or medium".to_owned())
+        .ok_or_else(|| {
+            ilium_prompts::voice::VOICE_SETTINGS_REASONING_EFFORT_MUST_BE_MINIMAL_LOW_OR.to_owned()
+        })
 }
 
 fn parse_voice_input_mode(value: &str) -> Result<VoiceInputMode, String> {
     match normalized(value).as_str() {
         "semantic_vad" | "vad" => Ok(VoiceInputMode::SemanticVad),
         "push_to_talk" | "ptt" => Ok(VoiceInputMode::PushToTalk),
-        _ => Err("voice input mode must be semantic_vad or push_to_talk".to_owned()),
+        _ => Err(
+            ilium_prompts::voice::VOICE_SETTINGS_VOICE_INPUT_MODE_MUST_BE_SEMANTIC_VAD.to_owned(),
+        ),
     }
 }
 
@@ -900,7 +1012,9 @@ fn parse_vad_eagerness(value: &str) -> Result<VadEagerness, String> {
     VadEagerness::ALL
         .into_iter()
         .find(|eagerness| normalized(eagerness.api_name()) == value)
-        .ok_or_else(|| "VAD eagerness must be auto, low, medium, or high".to_owned())
+        .ok_or_else(|| {
+            ilium_prompts::voice::VOICE_SETTINGS_VAD_EAGERNESS_MUST_BE_AUTO_LOW_MEDIUM.to_owned()
+        })
 }
 
 #[cfg(test)]

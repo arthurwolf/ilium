@@ -157,7 +157,7 @@ fn colour_controls_survive_scene_switch_and_project_reload() {
     let saved = crate::project_config::load(project.path())
         .unwrap()
         .animation;
-    let value = serde_json::to_value(saved).unwrap();
+    let value = serde_json::to_value(&saved).unwrap();
     assert_eq!(value["lightness_percent"], 35);
     assert_eq!(value["hue_degrees"], 275);
     assert_eq!(value["saturation_percent"], 40);
@@ -176,12 +176,13 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
     let project = tempfile::tempdir().unwrap();
     let mut app = App::new("slider keyboard".into(), project.path().to_path_buf());
     app.set_screen_area(Rect::new(0, 0, 80, 24));
+    let lightness_row = lightness_row(&app);
     app.mode = Mode::Settings(SettingsState {
         tab: SettingsTab::Animations,
-        selected_row: 14,
+        selected_row: lightness_row,
         ..Default::default()
     });
-    let expected_lightness = app.animation_settings.slider(14).unwrap().adjusted(1);
+    let expected_lightness = app.animation_settings.lightness_percent + 1;
     crate::keys::handle_event(
         &mut app,
         Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
@@ -189,14 +190,25 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
     let saved = crate::project_config::load(project.path())
         .unwrap()
         .animation;
-    let value = serde_json::to_value(saved).unwrap();
+    let value = serde_json::to_value(&saved).unwrap();
     assert_eq!(value["lightness_percent"], expected_lightness);
     assert_eq!(saved.kind, AnimationKind::Shoreline);
     let Mode::Settings(state) = &app.mode else {
         panic!("slider keeps Settings open")
     };
     let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
-    assert!(crate::animation_settings_ui::row_y(area, 14, state.scroll).is_some());
+    let count = app.animation_row_model().len();
+    assert!(
+        crate::animation_settings_ui::row_y(area, count, lightness_row, state.scroll).is_some()
+    );
+}
+
+fn lightness_row(app: &App) -> usize {
+    app.animation_row_model()
+        .rows()
+        .iter()
+        .position(|row| *row == crate::animation_rows::AnimationRow::Common("lightness"))
+        .expect("the palette rows are listed for a built-in scene")
 }
 
 #[test]
@@ -204,8 +216,9 @@ fn colour_slider_adjustment_failure_keeps_effective_ink_and_scene() {
     let project = tempfile::tempdir().unwrap();
     let mut app = App::new("failed colour save".into(), project.path().to_path_buf());
     std::fs::create_dir_all(project.path().join(".ilium/config.yaml")).unwrap();
-    let prior = app.animation_settings;
-    app.settings_adjust_animation_row(14, 1);
+    let prior = app.animation_settings.clone();
+    let lightness_row = lightness_row(&app);
+    app.settings_adjust_animation_row(lightness_row, 1);
     assert_eq!(app.animation_settings, prior);
     assert!(app
         .status_message

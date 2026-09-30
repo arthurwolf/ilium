@@ -253,13 +253,25 @@
     ]
   },
   {
+    "id": "AM-22",
+    "title": "Attention running indicator",
+    "explanation": "“Choose how Attention mode still shows that an agent is working when it has no approval request, failure, goal, or unread result to report.”",
+    "specimen": "Working agent with nothing needing attention:\n\nOff            Codex  parser\nWorking icon   [W] Codex  parser\nSpinner        [⠋] Codex  parser\nPulsing dot    [●] Codex  parser\nSteady dot     [●] Codex  parser\nTitle accent       Codex  parser   (title in accent color, italic)\n\nAny higher-priority Attention status replaces the indicator.",
+    "states": "Off, Working icon, Spinner, Pulsing dot, Steady dot, and Title accent. Only the presentation of a working agent changes; the detected state and every Attention priority are unchanged.",
+    "motion": "The working icon and spinner animate continuously; the pulsing dot alternates bright and dim; the steady dot and title accent do not move.",
+    "caveat": "Normal mode always shows the working animation and ignores this setting. The indicator appears only while the agent is working and no higher-priority Attention status is selected.",
+    "frames": [
+      "Off            Codex  parser\nWorking icon   [W] Codex  parser\nSpinner        [⠋] Codex  parser\nPulsing dot    [●] Codex  parser"
+    ]
+  },
+  {
     "id": "AN-01",
     "title": "Wave washing up sand",
     "explanation": "A diagonal tide leaves narrow foam and sparse wet-sand detail. Adjust tide reach, foam width, sand grains and wash-cycle length for this scene. Changes save immediately to this project.",
-    "specimen": "Wave washing up sand\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Wave washing up sand\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Wave washing up sand\n\n● Selected scene → live preview"
+      "Wave washing up sand\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -268,10 +280,10 @@
     "id": "AN-02",
     "title": "Moon over moving water",
     "explanation": "Crossing fine wavelets break the moon reflection into irregular horizontal fragments that widen towards the viewer. Adjust wave strength, ripple scale, reflection width and moon size. Changes save immediately to this project.",
-    "specimen": "Moon over moving water\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Moon over moving water\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Moon over moving water\n\n● Selected scene → live preview"
+      "Moon over moving water\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -280,10 +292,10 @@
     "id": "AN-03",
     "title": "Clouds over a sleeping ridge",
     "explanation": "Cloud banks and layered valley mist drift over a stationary ridge. Adjust cloud cover, valley mist, ridge height and cloud drift. Changes save immediately to this project.",
-    "specimen": "Clouds over a sleeping ridge\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Clouds over a sleeping ridge\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Clouds over a sleeping ridge\n\n● Selected scene → live preview"
+      "Clouds over a sleeping ridge\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -292,10 +304,10 @@
     "id": "AN-04",
     "title": "Hillside brushed by wind",
     "explanation": "Many fine, irregularly placed stems and seed heads follow shared gusts across a rounded hillside. Adjust plant density, wind strength, plant height and gust breadth. Changes save immediately to this project.",
-    "specimen": "Hillside brushed by wind\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Hillside brushed by wind\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Hillside brushed by wind\n\n● Selected scene → live preview"
+      "Hillside brushed by wind\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -304,10 +316,10 @@
     "id": "AN-05",
     "title": "Steam above a tea cup",
     "explanation": "A smooth porcelain cup, hollow handle and fine rim sit beneath curling steam filaments. Adjust cup size, steam wisps, curl and steam height. Changes save immediately to this project.",
-    "specimen": "Steam above a tea cup\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Steam above a tea cup\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Steam above a tea cup\n\n● Selected scene → live preview"
+      "Steam above a tea cup\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -316,10 +328,10 @@
     "id": "AN-06",
     "title": "Kelp in a gentle current",
     "explanation": "Uneven clusters of tapered kelp ribbons twist and sway, with varied lengths and stronger motion near their tips. No ground line is drawn. Adjust plant density, current strength, ribbon length and clustering. Changes save immediately to this project.",
-    "specimen": "Kelp in a gentle current\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Kelp in a gentle current\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Kelp in a gentle current\n\n● Selected scene → live preview"
+      "Kelp in a gentle current\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -328,10 +340,10 @@
     "id": "AN-07",
     "title": "Water caustics on stone",
     "explanation": "A moving light web bends over domed stone normals. Large and small stones gather in irregular clusters with sparse sand between them. Adjust stone relief, light-web scale, small stones and sand grains. Changes save immediately to this project.",
-    "specimen": "Water caustics on stone\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Water caustics on stone\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Water caustics on stone\n\n● Selected scene → live preview"
+      "Water caustics on stone\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -340,10 +352,10 @@
     "id": "AN-08",
     "title": "Drifting cloud islands",
     "explanation": "Soft rounded islands drift, join and separate. Adjust cloud-island count, island size, joining softness and drift breadth. Changes save immediately to this project.",
-    "specimen": "Drifting cloud islands\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Drifting cloud islands\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Drifting cloud islands\n\n● Selected scene → live preview"
+      "Drifting cloud islands\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -352,10 +364,10 @@
     "id": "AN-09",
     "title": "Two gentle wave sources",
     "explanation": "Faster radial wave crests cross and interfere while remaining visible through destructive interference. Adjust source separation, wavelength, interference and damping. Changes save immediately to this project.",
-    "specimen": "Two gentle wave sources\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Two gentle wave sources\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Two gentle wave sources\n\n● Selected scene → live preview"
+      "Two gentle wave sources\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -364,16 +376,196 @@
     "id": "AN-10",
     "title": "Lily pads on a quiet pond",
     "explanation": "Notched lily pads and fine veins float above a gently moving water surface. Adjust lily-pad count, pad size, water ripples and surface drift. Changes save immediately to this project.",
-    "specimen": "Lily pads on a quiet pond\n\n● Selected scene → live preview",
-    "states": "Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Use Up/Down to select a scene. Press Enter to jump to its sliders; the active scene stays selected while you adjust. Each scene retains its four named controls when another scene is selected. Shared color, speed, density and dithering apply to every scene. The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "specimen": "Lily pads on a quiet pond\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Lily pads on a quiet pond\n\n● Selected scene → live preview"
+      "Lily pads on a quiet pond\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
   },
   {
     "id": "AN-11",
+    "title": "3D pipes",
+    "explanation": "Dithered black-and-white pipes grow through 3D space like the classic screensaver, restarting when the screen fills. Its own controls appear below the Background row. Changes save immediately to this project.",
+    "specimen": "3D pipes\n\n● Pipes grow and turn → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "3D pipes\n\n● Pipes grow and turn → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Pipes draw in the shared dot color. Live only: never precomputed into the loop cache."
+  },
+  {
+    "id": "AN-12",
+    "title": "Stars overhead",
+    "explanation": "The real night sky above your location right now, drawn as a star map. Set the place with the Location row. Its controls appear below the Background row.",
+    "specimen": "Stars overhead\n\n● Your sky, tonight → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Stars overhead\n\n● Your sky, tonight → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Uses the shared Location. Redraws about once a second. Live only."
+  },
+  {
+    "id": "AN-13",
+    "title": "Earth at night",
+    "explanation": "City lights seen from orbit on a borderless map of the dark Earth, centered on your Location. Data may download on first use; the Scene status row shows progress.",
+    "specimen": "Earth at night\n\n● Lights of the world → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Earth at night\n\n● Lights of the world → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Uses the shared Location and paints its own cell colors, so the palette rows are hidden. Live only."
+  },
+  {
+    "id": "AN-14",
+    "title": "Satellite clouds",
+    "explanation": "Live weather-satellite cloud cover, global or over your Location. Data download in the background; the Scene status row shows progress or an offline message.",
+    "specimen": "Satellite clouds\n\n● Clouds from orbit → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Satellite clouds\n\n● Clouds from orbit → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Needs network access for fresh imagery; the last good image stays visible. Live only."
+  },
+  {
+    "id": "AN-15",
+    "title": "Video",
+    "explanation": "Plays a video file, folder or URL as dithered Braille. Point its source row at a path or URL. Requires ffmpeg; the Scene status row says when it is missing.",
+    "specimen": "Video\n\n● A file, folder or URL → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Video\n\n● A file, folder or URL → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Runs a helper process that stops when the scene changes or the preview closes. Live only."
+  },
+  {
+    "id": "AN-16",
+    "title": "Audio spectrum",
+    "explanation": "A spectrum analyzer of whatever your system is playing. The Scene status row reports a missing audio input.",
+    "specimen": "Audio spectrum\n\n● Bars follow the sound → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Audio spectrum\n\n● Bars follow the sound → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Reads the default audio input only while the scene is shown. Live only."
+  },
+  {
+    "id": "AN-17",
+    "title": "Images",
+    "explanation": "Colored Braille images from files, folders or URLs with slow pan and zoom. Point its source row at a path or URL; press Enter on the row to edit it.",
+    "specimen": "Images\n\n● Colors from your pictures → live preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Images\n\n● Colors from your pictures → live preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Paints its own cell colors, so the palette rows are hidden. Live only."
+  },
+  {
+    "id": "AN-18",
+    "title": "Dithered water",
+    "explanation": "Bayer-dithered 1-bit water: drifting caustic bands, a fading horizon and slow ripple rings. Adjust wave scale, flow speed, caustic sharpness, dot density, brightness, perspective, dither matrix, ripples, stepped time, tint and seed. Changes save immediately to this project.",
+    "specimen": "Dithered water\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Dithered water\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-19",
+    "title": "Atlantic dusk",
+    "explanation": "A dithered sea and sky through a full day: drifting clouds, a sinking sun, then moon, stars and sparse wave glints. Adjust time of day, day length, cloud coverage and speed, wave speed and scale, star density, contrast, twinkle and dither. Changes save immediately to this project.",
+    "specimen": "Atlantic dusk\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Atlantic dusk\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-20",
+    "title": "Cube clock",
+    "explanation": "A quiet clock beside a slowly turning dotted cube. Adjust clock format, seconds, cube size, spin speed, layout, brightness and more. Changes save immediately to this project.",
+    "specimen": "Cube clock\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Cube clock\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-21",
+    "title": "Box machine",
+    "explanation": "A generative machine of boxes, rails and tiny screens that slowly builds and rearranges itself. Adjust density, speed, box and rail styling, brightness and seed. Changes save immediately to this project.",
+    "specimen": "Box machine\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Box machine\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-22",
+    "title": "Machine screen",
+    "explanation": "A generative machine display of scanning patterns and glyph-like blocks. Adjust pattern, speed, scale, brightness and seed. Changes save immediately to this project.",
+    "specimen": "Machine screen\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Machine screen\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-23",
+    "title": "Dithered fBm clouds",
+    "explanation": "Domain-warped noise clouds thresholded into one-bit dots. Runs in software with slow-motion defaults; a GPU choice is offered for future acceleration. Adjust scale, drift, warp, octaves, contrast, block size, dither pattern and seed. Changes save immediately to this project.",
+    "specimen": "Dithered fBm clouds\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Dithered fBm clouds\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-24",
+    "title": "Dithered waves",
+    "explanation": "Layered wave shader rendered on the CPU with ordered dithering, slow-motion by default. A GPU choice is offered for future acceleration. Adjust wave amplitude, frequency, speed, dither and brightness. Changes save immediately to this project.",
+    "specimen": "Dithered waves\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Dithered waves\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-25",
+    "title": "Dithr patterns",
+    "explanation": "Many dithr-style animated patterns to choose from, with selectable dither algorithms. Runs in software with slow-motion defaults; a GPU choice is offered for future acceleration. Changes save immediately to this project.",
+    "specimen": "Dithr patterns\n\n● Selected scene → live full-screen preview",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Dithr patterns\n\n● Selected scene → live full-screen preview"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-26",
     "title": "Background animation",
     "explanation": "Enable a screen-wide Braille scene behind eligible blank cells. Changes save immediately to this project.",
     "specimen": "Background animation\n\nBackground ‹ Off / On ›",
@@ -385,7 +577,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
   },
   {
-    "id": "AN-12",
+    "id": "AN-27",
     "title": "Animation speed",
     "explanation": "Change scene motion from 25% to 300% using the visible slider. Left/Right adjusts by 5 percentage points; clicking or dragging the track chooses a value directly. Changes save immediately to this project.",
     "specimen": "Animation speed\n\nSpeed       ─────●──────── 100%\nRange 25%..300%; default 100%",
@@ -397,7 +589,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
   },
   {
-    "id": "AN-13",
+    "id": "AN-28",
     "title": "Animation density",
     "explanation": "Change visible dot density from 25% to 100%. Left/Right adjusts by 5 percentage points; clicking or dragging the track chooses a value directly. Geometry stays at the full Braille dot resolution. Changes save immediately to this project.",
     "specimen": "Animation density\n\nDensity     ─────●────────  60%\nRange 25%..100%; default 60%",
@@ -409,7 +601,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
   },
   {
-    "id": "AN-14",
+    "id": "AN-29",
     "title": "Animation dithering",
     "explanation": "Choose a repeating ordered pattern or stable irregular stippling. Changes save immediately to this project.",
     "specimen": "Animation dithering\n\nDither ‹ Ordered / Stippled ›",
@@ -421,7 +613,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
   },
   {
-    "id": "AN-15",
+    "id": "AN-30",
     "title": "Animation lightness",
     "explanation": "Set shared HSL lightness from 0% to 100%. The discreet default is 60%, which produces neutral RGB 153,153,153 at zero saturation.",
     "specimen": "Animation lightness\n\nLightness   ───────●──────  60%\nRange 0%..100%",
@@ -433,7 +625,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-16",
+    "id": "AN-31",
     "title": "Animation hue",
     "explanation": "Choose shared HSL hue from 0° to 359°. Hue becomes visible when saturation is above zero.",
     "specimen": "Animation hue\n\nHue         ───────●────── 210°\nRange 0°..359°",
@@ -445,7 +637,7 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-17",
+    "id": "AN-32",
     "title": "Animation saturation",
     "explanation": "Set shared HSL saturation from 0% to 100%. The default is 0%, keeping every scene neutral light grey.",
     "specimen": "Animation saturation\n\nSaturation  ●─────────────   0%\nRange 0%..100%",
@@ -457,10 +649,82 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-18",
+    "id": "AN-33",
+    "title": "Animation playback mode",
+    "explanation": "Choose Loop to play the precomputed cache from RAM, or Live to evaluate the selected scene at each frame. Hosted scenes (pipes, stars, night lights, clouds, video, spectrum, images) are always live, so this row is hidden for them.",
+    "specimen": "Playback [ Loop / Live ]",
+    "frames": [
+      "Playback [ Loop / Live ]"
+    ],
+    "states": "Changing mode applies to the current project immediately.",
+    "motion": "Loop playback uses the completed cache; Live evaluates directly.",
+    "caveat": "A cache rebuild may use the live renderer until the replacement is complete."
+  },
+  {
+    "id": "AN-34",
+    "title": "Animation loop duration",
+    "explanation": "Choose a loop duration from 1 to 120 seconds. The settings panel previews the corresponding RAM estimate. The row appears only while Playback is Loop.",
+    "specimen": "Loop seconds ─────●──── 60s",
+    "frames": [
+      "Loop seconds ─────●──── 60s"
+    ],
+    "states": "Changing duration starts a new incremental cache build.",
+    "motion": "The completed cache wraps at the selected duration.",
+    "caveat": "The estimate uses the current terminal geometry and 12 frames per second."
+  },
+  {
+    "id": "AN-35",
+    "title": "Animation cache status",
+    "explanation": "The cache status line shows the recomputation progress bar, elapsed work, ETA and estimated RAM. It appears only while Playback is Loop for a built-in scene.",
+    "specimen": "Cache [=====.....] 50% building ETA 4s RAM 1.7 MiB",
+    "frames": [
+      "Cache [=====.....] 50% building ETA 4s RAM 1.7 MiB"
+    ],
+    "states": "The previous completed cache or a live frame remains visible while a replacement builds.",
+    "motion": "A completed loop plays directly from memory.",
+    "caveat": "Live mode does not build a loop cache."
+  },
+  {
+    "id": "AN-36",
+    "title": "Location",
+    "explanation": "Where on Earth the sky, weather and city lights are shown for. One place is shared by every location scene (stars, night lights, clouds). Press Enter or click the row to open the picker: type an address and press Enter to search, type \"lat, lon\" such as 48.857, 2.352 to use coordinates directly, or click the world map. The change saves immediately to this project.",
+    "specimen": "Location  [ Greenwich, London (51.478N 0.002W) ]\n\nAddress or lat, lon: Lisbon_\n  Lisbon, Portugal (38.722N 9.139W)\n  ┼ crosshair on the world map",
+    "states": "Tab moves between the address field, results and map. Up/Down chooses a result; Enter chooses it and moves to the map. Arrow keys move the crosshair (Shift takes big steps); Enter confirms, Esc cancels. A click on the map sets the point; \"Use location\" confirms. An address search runs in the background and needs network access; coordinates never do.",
+    "frames": [
+      "Location  [ Greenwich, London (51.478N 0.002W) ]\n\nAddress or lat, lon: Lisbon_\n  Lisbon, Portugal (38.722N 9.139W)\n  ┼ crosshair on the world map"
+    ],
+    "motion": "The map and controls are still; the live scene behind Settings keeps running.",
+    "caveat": "Address search sends the typed text to the geocoding service. Nothing is saved until you confirm; Esc leaves the previous location untouched."
+  },
+  {
+    "id": "AN-37",
+    "title": "Scene status",
+    "explanation": "One line reporting what the running scene says about itself: a download in progress, a missing ffmpeg, no audio input, an unreadable folder. OK means nothing is wrong. The row is shown for every hosted scene so the rows below it never shift when a message appears.",
+    "specimen": "Scene status  Downloading tiles 40%",
+    "states": "The row is read-only; select it to see this help. It never changes a setting.",
+    "frames": [
+      "Scene status  Downloading tiles 40%"
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. The message is the scene's own; Ilium does not interpret it."
+  },
+  {
+    "id": "AN-38",
+    "title": "Full screen preview",
+    "explanation": "Hides the controls so the live animation fills the whole terminal, exactly as it appears behind the workspace. Press f, or click the row, to enter. Any key or click returns to the controls; the returning key does nothing else.",
+    "specimen": "Full screen preview  [ f ]\n\nThe field fills the terminal · any key or click returns",
+    "states": "While the controls are hidden a one-line hint stays at the bottom. The preview never creates a second scene: it is the same instance the background uses.",
+    "frames": [
+      "Full screen preview  [ f ]\n\nThe field fills the terminal · any key or click returns"
+    ],
+    "motion": "The full-screen preview stays live even with Background disabled or Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
+  },
+  {
+    "id": "AN-39",
     "title": "Scene control 1",
-    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the first named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
-    "specimen": "Current scene → named slider\n\n 1. Tide reach (50..150%)\n 2. Wave strength (0..200%)\n 3. Cloud cover (0..100%)\n 4. Plant density (25..200%)\n 5. Cup size (60..140%)\n 6. Plant density (25..200%)\n 7. Stone relief (25..200%)\n 8. Cloud islands (2..10)\n 9. Source separation (10..90%)\n10. Lily pads (3..14)",
+    "explanation": "Adjust the first control of the selected scene. Its label names it and the help line under the list explains it. Select a scene row and press Enter to jump to its controls. Every scene keeps its own saved value when you select another scene. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Built-in scenes: four named sliders. Hosted scenes list their own controls (sources, folders, toggles, choices) in the same slots.\n\nCurrent scene → named slider\n\n 1. Tide reach (50..150%)\n 2. Wave strength (0..200%)\n 3. Cloud cover (0..100%)\n 4. Plant density (25..200%)\n 5. Cup size (60..140%)\n 6. Plant density (25..200%)\n 7. Stone relief (25..200%)\n 8. Cloud islands (2..10)\n 9. Source separation (10..90%)\n10. Lily pads (3..14)",
     "frames": [
       "Current scene → named slider\n\n 1. Tide reach (50..150%)\n 2. Wave strength (0..200%)\n 3. Cloud cover (0..100%)\n 4. Plant density (25..200%)\n 5. Cup size (60..140%)\n 6. Plant density (25..200%)\n 7. Stone relief (25..200%)\n 8. Cloud islands (2..10)\n 9. Source separation (10..90%)\n10. Lily pads (3..14)"
     ],
@@ -469,10 +733,10 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-19",
+    "id": "AN-40",
     "title": "Scene control 2",
-    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the second named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
-    "specimen": "Current scene → named slider\n\n 1. Foam width (25..200%)\n 2. Ripple scale (50..200%)\n 3. Valley mist (0..100%)\n 4. Wind strength (0..200%)\n 5. Steam wisps (1..6)\n 6. Current strength (0..200%)\n 7. Light web scale (50..200%)\n 8. Island size (50..175%)\n 9. Wavelength (50..200%)\n10. Pad size (50..175%)",
+    "explanation": "Adjust the second control of the selected scene. Its label names it and the help line under the list explains it. Select a scene row and press Enter to jump to its controls. Every scene keeps its own saved value when you select another scene. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Built-in scenes: four named sliders. Hosted scenes list their own controls (sources, folders, toggles, choices) in the same slots.\n\nCurrent scene → named slider\n\n 1. Foam width (25..200%)\n 2. Ripple scale (50..200%)\n 3. Valley mist (0..100%)\n 4. Wind strength (0..200%)\n 5. Steam wisps (1..6)\n 6. Current strength (0..200%)\n 7. Light web scale (50..200%)\n 8. Island size (50..175%)\n 9. Wavelength (50..200%)\n10. Pad size (50..175%)",
     "frames": [
       "Current scene → named slider\n\n 1. Foam width (25..200%)\n 2. Ripple scale (50..200%)\n 3. Valley mist (0..100%)\n 4. Wind strength (0..200%)\n 5. Steam wisps (1..6)\n 6. Current strength (0..200%)\n 7. Light web scale (50..200%)\n 8. Island size (50..175%)\n 9. Wavelength (50..200%)\n10. Pad size (50..175%)"
     ],
@@ -481,10 +745,10 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-20",
+    "id": "AN-41",
     "title": "Scene control 3",
-    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the third named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
-    "specimen": "Current scene → named slider\n\n 1. Sand grains (0..100%)\n 2. Reflection width (25..200%)\n 3. Ridge height (50..150%)\n 4. Plant height (50..150%)\n 5. Steam curl (25..200%)\n 6. Ribbon length (50..175%)\n 7. Small stones (0..100%)\n 8. Joining softness (25..200%)\n 9. Interference (0..100%)\n10. Water ripples (0..100%)",
+    "explanation": "Adjust the third control of the selected scene. Its label names it and the help line under the list explains it. Select a scene row and press Enter to jump to its controls. Every scene keeps its own saved value when you select another scene. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Built-in scenes: four named sliders. Hosted scenes list their own controls (sources, folders, toggles, choices) in the same slots.\n\nCurrent scene → named slider\n\n 1. Sand grains (0..100%)\n 2. Reflection width (25..200%)\n 3. Ridge height (50..150%)\n 4. Plant height (50..150%)\n 5. Steam curl (25..200%)\n 6. Ribbon length (50..175%)\n 7. Small stones (0..100%)\n 8. Joining softness (25..200%)\n 9. Interference (0..100%)\n10. Water ripples (0..100%)",
     "frames": [
       "Current scene → named slider\n\n 1. Sand grains (0..100%)\n 2. Reflection width (25..200%)\n 3. Ridge height (50..150%)\n 4. Plant height (50..150%)\n 5. Steam curl (25..200%)\n 6. Ribbon length (50..175%)\n 7. Small stones (0..100%)\n 8. Joining softness (25..200%)\n 9. Interference (0..100%)\n10. Water ripples (0..100%)"
     ],
@@ -493,16 +757,88 @@
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
   },
   {
-    "id": "AN-21",
+    "id": "AN-42",
     "title": "Scene control 4",
-    "explanation": "Focus a scene row and press Enter to jump to its sliders. Focus a scene row and press Enter to jump to its sliders. Adjust the fourth named slider for the currently selected scene. The visible label gives its meaning; the numbered list follows the ten scene rows above. Every scene keeps its own saved value when you select another scene.",
-    "specimen": "Current scene → named slider\n\n 1. Wash cycle (6..30s)\n 2. Moon size (50..150%)\n 3. Cloud drift (25..200%)\n 4. Gust breadth (50..200%)\n 5. Steam height (50..150%)\n 6. Clustering (0..100%)\n 7. Sand grains (0..100%)\n 8. Drift breadth (25..150%)\n 9. Damping (0..100%)\n10. Surface drift (25..200%)",
+    "explanation": "Adjust the fourth control of the selected scene. Its label names it and the help line under the list explains it. Select a scene row and press Enter to jump to its controls. Every scene keeps its own saved value when you select another scene. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Built-in scenes: four named sliders. Hosted scenes list their own controls (sources, folders, toggles, choices) in the same slots.\n\nCurrent scene → named slider\n\n 1. Wash cycle (6..30s)\n 2. Moon size (50..150%)\n 3. Cloud drift (25..200%)\n 4. Gust breadth (50..200%)\n 5. Steam height (50..150%)\n 6. Clustering (0..100%)\n 7. Sand grains (0..100%)\n 8. Drift breadth (25..150%)\n 9. Damping (0..100%)\n10. Surface drift (25..200%)",
     "frames": [
       "Current scene → named slider\n\n 1. Wash cycle (6..30s)\n 2. Moon size (50..150%)\n 3. Cloud drift (25..200%)\n 4. Gust breadth (50..200%)\n 5. Steam height (50..150%)\n 6. Clustering (0..100%)\n 7. Sand grains (0..100%)\n 8. Drift breadth (25..150%)\n 9. Damping (0..100%)\n10. Surface drift (25..200%)"
     ],
     "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
     "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+  },
+  {
+    "id": "AN-43",
+    "title": "Scene control 5",
+    "explanation": "Adjust the fifth control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 5\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 5\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-44",
+    "title": "Scene control 6",
+    "explanation": "Adjust the sixth control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 6\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 6\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-45",
+    "title": "Scene control 7",
+    "explanation": "Adjust the seventh control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 7\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 7\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-46",
+    "title": "Scene control 8",
+    "explanation": "Adjust the eighth control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 8\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 8\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-47",
+    "title": "Scene control 9",
+    "explanation": "Adjust the ninth control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 9\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 9\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-48",
+    "title": "Scene control 10",
+    "explanation": "Adjust the tenth control of the selected scene. Its label names it and the help line under the list explains it. Sliders take Left/Right or a click on the track; choices and toggles cycle with Left/Right; a text row opens a prompt on Enter. Changes save immediately to this project. A greyed-out choice, such as the GPU renderer when no usable GPU exists, is marked unavailable: Left/Right, Enter and clicks skip it, and resting the pointer on its row explains why and how to fix it.",
+    "specimen": "Scene control 10\n\nSelected control → Left/Right, Enter or click",
+    "states": "Left/Right adjusts a slider, choice or toggle. Enter opens a text prompt or activates the row. A rejected value shows its reason and changes nothing.",
+    "frames": [
+      "Scene control 10\n\nSelected control → Left/Right, Enter or click"
+    ],
+    "motion": "The live preview follows the selected value.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
   },
   {
     "id": "AP-01",
@@ -818,6 +1154,248 @@
     "caveat": "no listener starts now; never depict non-loopback access or a real user port.",
     "frames": [
       "`127.0.0.1:<synthetic port A>` → `127.0.0.1:<synthetic port B>` under “next server start.”"
+    ]
+  },
+  {
+    "id": "COST-01",
+    "title": "Fixed bands",
+    "explanation": "“Rate every agent against the same fixed dollar thresholds, so a given amount always reads the same.”",
+    "specimen": "The five-level ladder with its cut points, e.g.\n\n▁ <$1   ▂ ≥$1   ▄ ≥$5   ▆ ≥$20   █ ≥$50\n\nand two agents, $0.80 and $22, landing on ▁ and ▆.",
+    "states": "Selected and unselected radio card; the ladder shows the current preset.",
+    "motion": "static.",
+    "caveat": "Predictable but arbitrary: pick the preset under the card to match how much you usually spend. Custom cut points are set as fixed_cuts in config.toml.",
+    "frames": [
+      "FIXED BANDS\n▁ <$1   ▂ ≥$1   ▄ ≥$5   ▆ ≥$20   █ ≥$50\n$0.80 → ▁     $22 → ▆\n"
+    ]
+  },
+  {
+    "id": "COST-02",
+    "title": "Relative to open agents",
+    "explanation": "“Rate each agent against the median of the agents open right now, so the outlier stands out.”",
+    "specimen": "Three agents at $2, $4 and $6 (median $4):\n\n$2 → ▂   $4 → ▄   $6 → ▄\n\nand a fourth at $30 → █. The ladder is drawn as multiples of the median (0.25x, 0.75x, 1.5x, 3x).",
+    "states": "Ladder recomputed whenever agents open, close or spend.",
+    "motion": "static; the ladder moves as the open agents change.",
+    "caveat": "Says nothing about absolute size: if every agent is expensive, none looks expensive. Agents that have spent nothing are ignored when taking the median.",
+    "frames": [
+      "PEERS: $2 $4 $6 (median $4)\n$2 → ▂   $4 → ▄   $6 → ▄\nadd one at $30 → █\n"
+    ]
+  },
+  {
+    "id": "COST-03",
+    "title": "Relative to your history",
+    "explanation": "“Rate each agent against percentiles of your own past sessions, so the scale fits how you actually work. This is the default.”",
+    "specimen": "Your sessions over the last 90 days form a distribution; the ladder steps up at its 25th, 50th, 80th and 95th percentile:\n\n▁ <$0.40   ▂ ≥$0.40   ▄ ≥$1.30   ▆ ≥$5.20   █ ≥$16",
+    "states": "Scanning (fixed bands stand in), ready, and too little history (fewer than eight sessions, fixed bands stand in).",
+    "motion": "the first scan runs in the background at lowest priority; later scans reuse a cache.",
+    "caveat": "Only a bounded tail of each transcript is read: Claude Code's own recorded total, or Codex's cumulative token count priced at list prices. Sessions without a recorded total are skipped.",
+    "frames": [
+      "HISTORY (90 days)\n▁ <$0.40   ▂ ≥$0.40   ▄ ≥$1.30   ▆ ≥$5.20   █ ≥$16\n",
+      "HISTORY\nscanning your sessions… fixed bands for now\n"
+    ]
+  },
+  {
+    "id": "COST-04",
+    "title": "Budget",
+    "explanation": "“Indicators fill toward a dollar budget for each agent, and a red ! appears once an agent passes it.”",
+    "specimen": "Budget $10: the ladder steps at 20%, 40%, 60% and 80% of it.\n\n$1 → ▰▱▱▱▱   $5 → ▰▰▰▱▱   $9 → ▰▰▰▰▰   $12 → ▰▰▰▰▰ !",
+    "states": "Under budget and over budget.",
+    "motion": "static.",
+    "caveat": "The budget is per agent session, not per day or per project.",
+    "frames": [
+      "BUDGET $10\n$1 → ▰▱▱▱▱   $5 → ▰▰▰▱▱\n$9 → ▰▰▰▰▰   $12 → ▰▰▰▰▰ !\n"
+    ]
+  },
+  {
+    "id": "COST-05",
+    "title": "Burn rate",
+    "explanation": "“Rate how fast an agent is spending right now in dollars per hour, instead of its running total.”",
+    "specimen": "An old $40 session that is idle reads ▁, while a new session burning $12 per hour reads █:\n\n▁ <$0.50/h   ▂ ≥$0.50/h   ▄ ≥$2/h   ▆ ≥$5/h   █ ≥$15/h",
+    "states": "Idle versus actively spending.",
+    "motion": "updates as the agent spends; measured over the last 15 minutes.",
+    "caveat": "Total and burn-rate calibration use different numbers, so the dollar figure shown beside the level is still the running total.",
+    "frames": [
+      "BURN RATE\nidle $40 session → ▁\nnew session at $12/h → █\n"
+    ]
+  },
+  {
+    "id": "COST-06",
+    "title": "Fixed bands preset",
+    "explanation": "“Choose the dollar totals at which the fixed-band level steps up.”",
+    "specimen": "`‹ $1 · $5 · $20 · $50 ›` stepping through five presets from `$0.25 · $1 · $4 · $10` to `$5 · $25 · $100 · $250`.",
+    "states": "preset changes; a hand-edited set shows (custom).",
+    "motion": "static.",
+    "caveat": "Only used while Fixed bands is the selected calibration, and as the fallback while history or peers are unavailable.",
+    "frames": [
+      "`‹ $1 · $5 · $20 · $50 ›` → `‹ $2 · $10 · $40 · $100 ›`\n"
+    ]
+  },
+  {
+    "id": "COST-07",
+    "title": "History window",
+    "explanation": "“Choose how many days of past sessions are read to learn what is normal for you.”",
+    "specimen": "`‹ 90 days ›` with a status line such as `214 sessions found`.",
+    "states": "window changes; scanning and ready.",
+    "motion": "changing it starts a new background scan.",
+    "caveat": "Longer windows read more files on the first scan; results are cached by file size and modification time.",
+    "frames": [
+      "`‹ 30 days ›` → `‹ 90 days ›` · `214 sessions found`\n"
+    ]
+  },
+  {
+    "id": "COST-08",
+    "title": "Budget per agent",
+    "explanation": "“Set the dollar budget one agent may spend before it counts as over budget.”",
+    "specimen": "`‹ $10 ›` stepping 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000.",
+    "states": "budget changes.",
+    "motion": "static.",
+    "caveat": "Any other amount can be set as budget_usd under [cost] in config.toml.",
+    "frames": [
+      "`‹ $5 ›` → `‹ $10 ›`\n"
+    ]
+  },
+  {
+    "id": "COST-09",
+    "title": "Burn-rate bands",
+    "explanation": "“Choose the dollars-per-hour rates at which the burn-rate level steps up.”",
+    "specimen": "`‹ $0.5/h · $2/h · $5/h · $15/h ›` stepping through four presets.",
+    "states": "preset changes; a hand-edited set shows (custom).",
+    "motion": "static.",
+    "caveat": "Only used while Burn rate is the selected calibration.",
+    "frames": [
+      "`‹ $0.5/h · $2/h · $5/h · $15/h ›` → `‹ $1/h · $4/h · $10/h · $30/h ›`\n"
+    ]
+  },
+  {
+    "id": "COST-10",
+    "title": "Level glyph",
+    "explanation": "“Show one coloured height glyph per agent, green for cheap to red for expensive.”",
+    "specimen": "`▁ ▂ ▄ ▆ █` in five colours beside an agent row; the height carries the level so it stays readable without colour.",
+    "states": "Off or on; visible always or only while hovering the entry.",
+    "motion": "static.",
+    "caveat": "The glyph-and-dollars option already contains this glyph, so enabling both shows it once.",
+    "frames": [
+      "ROW  ● auth-refactor                ▄\n"
+    ]
+  },
+  {
+    "id": "COST-11",
+    "title": "Level glyph and dollars",
+    "explanation": "“Show the level glyph followed by the estimated dollars spent.”",
+    "specimen": "`▂ $1.30`, `▆ $9.80`, `█ ~$41.0` (a leading ~ marks a lower bound because a model had no known price).",
+    "states": "Off or on; visible always or only while hovering the entry.",
+    "motion": "static.",
+    "caveat": "Dollars are estimated from the transcript at API list prices (Claude Code's own recorded total wins when larger); subscription plans are not billed this amount.",
+    "frames": [
+      "ROW  ● migrate-db              ▆ $9.80\n"
+    ]
+  },
+  {
+    "id": "COST-12",
+    "title": "Five-cell meter",
+    "explanation": "“Show five cells that fill as an agent gets more expensive. This is the default, visible while hovering.”",
+    "specimen": "`▰▱▱▱▱` (cheapest) through `▰▰▰▰▰` (most expensive) just left of the row's buttons.",
+    "states": "Off or on; visible always or only while hovering the entry.",
+    "motion": "static.",
+    "caveat": "While an agent's transcript is still loading the meter shows an empty track `▱▱▱▱▱`.",
+    "frames": [
+      "ROW  ● perf-hunt                ▰▰▰▰▰\n",
+      "ROW  ● docs-pass                 ▰▱▱▱▱\n"
+    ]
+  },
+  {
+    "id": "COST-13",
+    "title": "Burn sparkline",
+    "explanation": "“Show spend over the configured window as a row of bars, one per time slice.”",
+    "specimen": "`▁▂▄▇▅▃▂▁` for eight slices of the last six hours, scaled to the busiest slice.",
+    "states": "Off or on; visible always or only while hovering the entry.",
+    "motion": "static; slides forward with time.",
+    "caveat": "The window and number of slices are set below. Idle stretches show as the lowest bar.",
+    "frames": [
+      "ROW  ● migrate-db        ▁▂▄▇▅▃▂▁\n"
+    ]
+  },
+  {
+    "id": "COST-14",
+    "title": "Group and project totals",
+    "explanation": "“Project and group rows show the sum of everything beneath them.”",
+    "specimen": "`▾ backend   ▆ $11.3` above `● auth-refactor ▂ $1.3` and `● migrate-db ▆ $9.8`.",
+    "states": "Off or on; visible always or only while hovering the group row.",
+    "motion": "static.",
+    "caveat": "A group is rated on the same scale as a single agent, so totals trend high. A group with an agent still loading shows ·.",
+    "frames": [
+      "▾ backend            ▆ $11.3\n  ● auth-refactor     ▂ $1.3\n  ● migrate-db        ▆ $9.8\n"
+    ]
+  },
+  {
+    "id": "COST-15",
+    "title": "Detail card",
+    "explanation": "“Show a card beside the tree with one agent's full cost breakdown: dollars, what it was rated against, burn rate, token classes, cost per model and quota.”",
+    "specimen": "A card anchored to the agent's row:\n\n╭ migrate-db ─────────────────────────╮\n│ Cost   ~$9.80  ▄ ▰▰▰▱▱               │\n│        vs your history: p84 of 214 … │\n│ Burn   $3.10/h last 15 min           │\n│ Tokens fresh 210k · cache-read 4.1M  │\n╰──────────────────────────────────────╯",
+    "states": "Off or on. Visible while hovering shows the card for the hovered agent; always keeps it on the selected agent whenever nothing else is hovered.",
+    "motion": "static.",
+    "caveat": "The card covers part of the pane area while it is shown; move the pointer off the row to dismiss a hover card. Groups and non-agent rows have no card.",
+    "frames": [
+      "╭ migrate-db ──────────────╮\n│ Cost   ~$9.80  ▄ ▰▰▰▱▱   │\n│ Burn   $3.10/h           │\n╰──────────────────────────╯\n"
+    ]
+  },
+  {
+    "id": "COST-16",
+    "title": "Total line above the tree",
+    "explanation": "“Show the total estimated spend of every agent in the tree's title.”",
+    "specimen": "`Ilium · Σ $52.3` in the panel border.",
+    "states": "Off or on; visible always or only while the pointer is over the tree.",
+    "motion": "static.",
+    "caveat": "Counts agents whose transcripts could be read; a leading ~ marks a lower bound.",
+    "frames": [
+      "╭ Ilium · Σ $52.3 ───────╮\n"
+    ]
+  },
+  {
+    "id": "COST-17",
+    "title": "Burn spike marker",
+    "explanation": "“Show ↑ beside an agent's indicator while it spends at least twice as fast as it has lately.”",
+    "specimen": "`▰▰▰▱▱ ↑` for an agent that burned $2 in the last ten minutes after a quiet hour.",
+    "states": "Off or on; visible always or only while hovering the entry.",
+    "motion": "appears and disappears as spending changes.",
+    "caveat": "Needs another indicator to be visible on the row, and ignores spending below $1 per hour.",
+    "frames": [
+      "ROW  ● perf-hunt           ▰▰▰▱▱ ↑\n"
+    ]
+  },
+  {
+    "id": "COST-18",
+    "title": "Sparkline window",
+    "explanation": "“Choose how much time the burn sparkline covers.”",
+    "specimen": "`‹ 6 h ›` stepping from 5 minutes up to 30 days (6 hours by default).",
+    "states": "window changes.",
+    "motion": "static.",
+    "caveat": "Any number of minutes can be set as sparkline_window_minutes under [cost] in config.toml; each cell covers window ÷ width.",
+    "frames": [
+      "`‹ 6 h ›` → `‹ 8 h ›`\n"
+    ]
+  },
+  {
+    "id": "COST-19",
+    "title": "Sparkline width",
+    "explanation": "“Choose how many time slices the burn sparkline has.”",
+    "specimen": "`‹ 8 cells ›` from 4 to 24.",
+    "states": "width changes.",
+    "motion": "static.",
+    "caveat": "Wider sparklines need a wider sidebar; bars are dropped from the left first when space runs out.",
+    "frames": [
+      "`‹ 8 cells ›` → `‹ 12 cells ›`\n"
+    ]
+  },
+  {
+    "id": "COST-20",
+    "title": "Sort tree by cost",
+    "explanation": "“Order every group and project by descending spend.”",
+    "specimen": "Siblings listed most expensive first; groups by their total.",
+    "states": "Off or on.",
+    "motion": "rows reorder as spending changes.",
+    "caveat": "Overrides the order chosen in the User Interface tab while on; the manual order is untouched and returns when this is off.",
+    "frames": [
+      "perf-hunt $41.0\nmigrate-db $9.8\nauth-refactor $1.3\n"
     ]
   },
   {

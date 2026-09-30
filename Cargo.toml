@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "ilium-ambient",
     "ilium-agent-debug",
     "ilium-agent-session",
     "ilium-client",
@@ -12,10 +13,12 @@ members = [
     "ilium-kilo-gateway",
     "ilium-logging",
     "ilium-platform",
+    "ilium-prompts",
     "ilium-pty",
     "ilium-test-fixtures",
     "ilium-transport",
     "ilium-server",
+    "ilium-session-convert",
     "ilium-sound",
     "ilium-voice",
     "ilium",

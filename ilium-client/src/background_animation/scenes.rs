@@ -4,9 +4,10 @@
 
 use super::{
     raster::{hash, smoothstep, Raster},
+    shoreline::{rich_columns, shoreline_rich, RichColumn},
     AnimationKind, AnimationSettings, KelpSettings, MoonlitWaterSettings, QuietPondSettings,
-    SleepingRidgeSettings, StoneCausticsSettings, TeaSteamSettings, TwoRipplesSettings,
-    WindyHillsideSettings,
+    ShorelineSettings, ShorelineStyle, SleepingRidgeSettings, StoneCausticsSettings,
+    TeaSteamSettings, TwoRipplesSettings, WindyHillsideSettings,
 };
 use std::f32::consts::{PI, TAU};
 
@@ -14,6 +15,7 @@ use std::f32::consts::{PI, TAU};
 struct SceneKey {
     kind: AnimationKind,
     controls: [u16; 4],
+    shoreline: Option<ShorelineSettings>,
     width: usize,
     height: usize,
 }
@@ -33,6 +35,10 @@ enum PreparedScene {
     Shoreline {
         sand: Vec<f32>,
         columns: Vec<ShoreColumn>,
+    },
+    ShorelineRich {
+        sand: Vec<f32>,
+        columns: Vec<RichColumn>,
     },
     Moon {
         base: Vec<f32>,
@@ -192,6 +198,7 @@ impl SceneCache {
         let key = SceneKey {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
+            shoreline: settings.scene_shoreline_key(),
             width: raster.width,
             height: raster.height,
         };
@@ -208,19 +215,26 @@ impl SceneCache {
                         sand.push(if seed > 0.985 { grains * 0.42 } else { 0.012 });
                     }
                 }
-                let columns = (0..raster.width)
-                    .map(|x| {
-                        let u = (x as f32 + 0.5) / raster.width as f32;
-                        ShoreColumn {
-                            slope: -0.17 * (u - 0.5),
-                            shape_a: (u * 11.0).sin_cos(),
-                            shape_b: (u * 23.0).sin_cos(),
-                            foam: (u * 41.0).sin_cos(),
-                            ripple: (u * 8.0).sin_cos(),
-                        }
-                    })
-                    .collect();
-                PreparedScene::Shoreline { sand, columns }
+                if settings.shoreline.style == ShorelineStyle::Rich {
+                    PreparedScene::ShorelineRich {
+                        sand,
+                        columns: rich_columns(raster.width),
+                    }
+                } else {
+                    let columns = (0..raster.width)
+                        .map(|x| {
+                            let u = (x as f32 + 0.5) / raster.width as f32;
+                            ShoreColumn {
+                                slope: -0.17 * (u - 0.5),
+                                shape_a: (u * 11.0).sin_cos(),
+                                shape_b: (u * 23.0).sin_cos(),
+                                foam: (u * 41.0).sin_cos(),
+                                ripple: (u * 8.0).sin_cos(),
+                            }
+                        })
+                        .collect();
+                    PreparedScene::Shoreline { sand, columns }
+                }
             }
             AnimationKind::MoonlitWater => {
                 prepare_moon(raster, settings.moonlit_water);
@@ -296,7 +310,8 @@ impl SceneCache {
                     water: water_columns(raster.width, 13.0, 35.0),
                 }
             }
-            AnimationKind::Cloudlets => PreparedScene::Empty,
+            // Cloudlets draw directly, and hosted kinds never reach this cache.
+            _ => PreparedScene::Empty,
         };
         self.key = Some(key);
         #[cfg(test)]
@@ -317,6 +332,9 @@ pub(super) fn render(
     match &cache.prepared {
         PreparedScene::Shoreline { sand, columns } => {
             shoreline(raster, settings, time, sand, columns)
+        }
+        PreparedScene::ShorelineRich { sand, columns } => {
+            shoreline_rich(raster, &settings.shoreline, time, sand, columns)
         }
         PreparedScene::Moon { base, columns } => {
             moonlit_water(raster, settings.moonlit_water, time, base, columns)

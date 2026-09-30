@@ -7,6 +7,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 #[cfg(test)]
 use ilium_core::AgentClass;
@@ -18,6 +19,18 @@ use crate::config::TreeOrder;
 /// Missing/non-container parents fail soft to an empty list, matching the
 /// tree renderer's existing recursive-walk contract.
 pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> Cow<'_, [NodeId]> {
+    ordered_children_ranked(tree, parent, tree_order, &HashMap::new())
+}
+
+/// [`ordered_children`] with the per-node spend that `CostDescending` sorts
+/// by. A node missing from `cost_ranks` ranks as free, so it sinks below
+/// every agent that has spent something; ties keep the manual order.
+pub fn ordered_children_ranked<'a>(
+    tree: &'a Tree,
+    parent: NodeId,
+    tree_order: TreeOrder,
+    cost_ranks: &HashMap<NodeId, f64>,
+) -> Cow<'a, [NodeId]> {
     let Ok(children) = tree.children_of(parent) else {
         return Cow::Borrowed(&[]);
     };
@@ -34,7 +47,9 @@ pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> C
     }
 
     let mut ordered = children.to_vec();
-    ordered.sort_by(|left_id, right_id| compare_nodes(tree, *left_id, *right_id, tree_order));
+    ordered.sort_by(|left_id, right_id| {
+        compare_nodes(tree, *left_id, *right_id, tree_order, cost_ranks)
+    });
     Cow::Owned(ordered)
 }
 
@@ -45,6 +60,7 @@ fn compare_nodes(
     left_id: NodeId,
     right_id: NodeId,
     tree_order: TreeOrder,
+    cost_ranks: &HashMap<NodeId, f64>,
 ) -> Ordering {
     let (left, right) = match (tree.get(left_id), tree.get(right_id)) {
         (Some(left), Some(right)) => (left, right),
@@ -66,6 +82,11 @@ fn compare_nodes(
         TreeOrder::AgeDescending => left.id.cmp(&right.id),
         TreeOrder::NameAscending => compare_names(left, right),
         TreeOrder::NameDescending => compare_names(right, left),
+        TreeOrder::CostDescending => {
+            let rank = |id: NodeId| cost_ranks.get(&id).copied().unwrap_or(0.0);
+            // `sort_by` is stable, so equal spend keeps the manual order.
+            rank(right_id).total_cmp(&rank(left_id))
+        }
     }
 }
 
@@ -117,6 +138,30 @@ mod tests {
         ids.iter()
             .filter_map(|id| tree.get(*id).map(|node| node.name.clone()))
             .collect()
+    }
+
+    #[test]
+    fn cost_descending_sorts_by_rank_and_keeps_manual_order_for_ties() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let cheap = tree.add_pane(group, "cheap", PaneContentKind::Terminal).unwrap();
+        let free_first = tree.add_pane(group, "free-a", PaneContentKind::Terminal).unwrap();
+        let pricey = tree.add_pane(group, "pricey", PaneContentKind::Terminal).unwrap();
+        let free_second = tree.add_pane(group, "free-b", PaneContentKind::Terminal).unwrap();
+        let ranks = HashMap::from([(cheap, 1.5), (pricey, 40.0)]);
+
+        let ordered = ordered_children_ranked(&tree, group, TreeOrder::CostDescending, &ranks);
+        assert_eq!(
+            names(&tree, &ordered),
+            ["pricey", "cheap", "free-a", "free-b"],
+            "unranked nodes keep their manual order after every ranked one"
+        );
+        let _ = (free_first, free_second);
+        // Without ranks the mode degrades to the manual order.
+        assert_eq!(
+            names(&tree, &ordered_children(&tree, group, TreeOrder::CostDescending)),
+            ["cheap", "free-a", "pricey", "free-b"]
+        );
     }
 
     #[test]

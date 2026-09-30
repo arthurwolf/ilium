@@ -36,6 +36,8 @@ pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
 pub mod agent_toolbar;
+mod animation_hover;
+mod animation_rows;
 mod animation_settings_ui;
 pub mod app;
 pub mod ascii_chart;
@@ -51,6 +53,13 @@ pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
 pub mod control;
+pub mod cost_app;
+pub mod cost_model;
+pub mod cost_overlay;
+pub mod cost_history;
+pub mod cost_settings;
+pub mod cost_settings_ui;
+pub mod cost_tracker;
 pub mod editor_chrome;
 pub mod editor_highlight;
 pub mod editor_line_path;
@@ -66,6 +75,7 @@ pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
 pub mod layout;
+mod location_picker;
 pub mod markdown;
 pub mod media_control;
 pub mod minimap;
@@ -73,12 +83,14 @@ pub mod modal;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+pub mod session_conversion;
 pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;
 pub mod popover;
 pub mod progress_bar;
+pub mod progress_display;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
@@ -552,6 +564,7 @@ async fn run_inner(
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
     app.apply_reset_planning_settings(config.reset_planning);
+    app.apply_cost_settings(config.cost);
     app.apply_debug_settings(config.debug);
     app.apply_api_settings(config.api);
     app.request_debug_logging_reconciliation();
@@ -573,6 +586,9 @@ async fn run_inner(
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
+    let (conversion_events_tx, mut conversion_events_rx) = mpsc::channel(256);
+    let mut conversion_workers =
+        crate::session_conversion::ConversionWorkers::new(conversion_events_tx);
     let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
     let mut search_workers = SearchWorkers::new(search_events_tx);
     let (smart_copy_events_tx, mut smart_copy_events_rx) = mpsc::channel(64);
@@ -727,6 +743,11 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
+            Some(conversion_event) = conversion_events_rx.recv() => {
+                app.apply_conversion_worker_event(conversion_event);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
             Some(search_event) = search_events_rx.recv() => {
                 search_workers.finish();
                 app.apply_workspace_search_result(search_event);
@@ -860,6 +881,13 @@ async fn run_inner(
             last_streamed_pane_slots = Some(streamed_pane_slots);
         }
 
+        if let Some(job) = app.take_pending_conversion_start() {
+            conversion_workers.spawn(job);
+        }
+        if app.take_pending_conversion_cancel() {
+            conversion_workers.cancel();
+        }
+
         let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
         for request in outbound_requests {
             // The writer queue is deliberately bounded. Awaiting its capacity
@@ -902,8 +930,9 @@ async fn run_inner(
         );
 
         // Check every branch so ready PTY/input channels cannot postpone a due frame.
-        let animation_elapsed = crate::background_composition::quantized_elapsed(
+        let animation_elapsed = crate::background_composition::quantized_elapsed_at(
             Instant::now().saturating_duration_since(app.started_at),
+            app.animation_frames_per_second(),
         );
         let animation_frame_bucket =
             crate::background_composition::animation_frame_bucket(&app, animation_elapsed);

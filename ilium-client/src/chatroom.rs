@@ -16,7 +16,7 @@ pub const CHATROOM_FILE_NAME: &str = "CHATROOM.md";
 const CHATROOM_MARKER: &str = "<!-- ilium-chatroom: v1 -->";
 const HOOK_COMMAND: &str = "ilium chat context --limit 40";
 
-const COORDINATION_POSTING_GUIDANCE: &str = "Use the chatroom sparingly. Do not post routine progress narration, acknowledgements, tool-by-tool updates, or messages that only say you are working. Post only when another agent could act differently or avoid duplicated/conflicting work because of it: claiming or releasing a shared area; a blocker, dependency, or question requiring action; a material discovery, risk, or decision; or a handoff/completion with the outcome and relevant location. Combine related information into one brief message. Before sending, ask: \"Will another agent act differently or avoid a mistake because of this?\" If not, keep working without posting.";
+const COORDINATION_POSTING_GUIDANCE: &str = ilium_prompts::agent::COORDINATION_GUIDANCE;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {

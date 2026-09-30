@@ -27,6 +27,8 @@ ilium/                     # workspace root
 │   └── src/{secure_fs,file_lock,runtime_dir,process_info,process_control,detached,thread_priority}.rs
 ├── ilium-transport/         # adapter: the local client/server channel --
 │   └── src/{endpoint,stream,unix,windows}.rs   # UDS on Unix, named pipe on Windows
+├── ilium-ambient/           # pure ambient-background scene engines (pipes, stars, night lights, clouds, video, spectrum, images); no ratatui, hosted by ilium-client
+│   └── src/{scene,control,registry,raster,source,location,geocode,worldmap,debug}.rs, scenes/*
 ├── ilium-kilo-gateway/      # adapter: Kilo Gateway (OpenAI-compatible) HTTP client, used only by ilium-client's background naming workers
 │   └── src/lib.rs
 ├── ilium-server/            # owns PTYs + tree, IPC server, adaptive detection loop -- one process per session

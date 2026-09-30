@@ -77,6 +77,8 @@ pub fn handle_event(app: &mut App, event: Event) {
                 | Mode::CreateAgentWorkspace(_)
                 | Mode::WorktreeManager(_)
                 | Mode::AgentSetupPathPrompt(_, _)
+                | Mode::AnimationTextPrompt(_, _)
+                | Mode::LocationPicker(_)
                 | Mode::AgentSetupPrompt(_)
         );
         if !has_native_paste_handler {
@@ -107,6 +109,10 @@ pub fn handle_event(app: &mut App, event: Event) {
         Mode::GitSettingPrompt(field, state) => {
             handle_git_setting_prompt(app, field, state, &event)
         }
+        Mode::AnimationTextPrompt(target, state) => {
+            handle_animation_text_prompt_event(app, target, state, &event)
+        }
+        Mode::LocationPicker(picker) => handle_location_picker_event(app, picker, &event),
         Mode::AgentSetupPathPrompt(feature, state) => {
             handle_agent_setup_path_prompt(app, feature, state, &event)
         }
@@ -186,6 +192,14 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_board_delete_confirm(app, pane_id, target, &event)
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
+        Mode::ConvertSession => {
+            app.mode = Mode::ConvertSession;
+            if let Event::Key(key) = &event {
+                if is_press(key) {
+                    app.handle_conversion_key(key.code);
+                }
+            }
+        }
         Mode::ConfirmRemoveWorkspace(target) => {
             let Event::Key(key) = &event else {
                 app.mode = Mode::ConfirmRemoveWorkspace(target);
@@ -1191,6 +1205,70 @@ fn handle_git_setting_prompt(
     }
 }
 
+fn handle_animation_text_prompt_event(
+    app: &mut App,
+    mut target: crate::app::AnimationPromptTarget,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    if let Event::Paste(pasted) = event {
+        let normalized = pasted.trim_end_matches(['\r', '\n']);
+        for character in normalized.chars() {
+            text_prompt::handle_key(&mut state, KeyCode::Char(character));
+        }
+        app.mode = Mode::AnimationTextPrompt(target, state);
+        return;
+    }
+    let Event::Key(key) = event else {
+        app.mode = Mode::AnimationTextPrompt(target, state);
+        return;
+    };
+    if !is_press(key) {
+        app.mode = Mode::AnimationTextPrompt(target, state);
+        return;
+    }
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            match app.apply_animation_text_input(target.control, state.buf.clone()) {
+                Ok(()) => app.pop_modal(),
+                // The value stays editable: the message shows in the prompt.
+                Err(message) => {
+                    target.error = Some(message);
+                    app.mode = Mode::AnimationTextPrompt(target, state);
+                }
+            }
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
+        PromptOutcome::Continue => app.mode = Mode::AnimationTextPrompt(target, state),
+    }
+}
+
+fn handle_location_picker_event(
+    app: &mut App,
+    mut picker: Box<crate::location_picker::LocationPickerState>,
+    event: &Event,
+) {
+    use crate::location_picker::PickerOutcome;
+    let outcome = match event {
+        Event::Paste(pasted) => {
+            picker.paste(pasted);
+            PickerOutcome::Continue
+        }
+        Event::Key(key) if is_press(key) => {
+            picker.handle_key(key.code, key.modifiers, app.layout.screen_area)
+        }
+        _ => PickerOutcome::Continue,
+    };
+    match outcome {
+        PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
+        PickerOutcome::Cancel => app.pop_modal(),
+        PickerOutcome::Confirm(location) => {
+            app.pop_modal();
+            app.settings_set_location(location);
+        }
+    }
+}
+
 fn handle_agent_setup_path_prompt(
     app: &mut App,
     feature: crate::agent_feature_setup::AgentFeature,
@@ -2094,6 +2172,39 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
     state.animation_slider_drag = None;
+    app.clear_animation_hover();
+
+    // The full-screen animation preview hides every control: any key returns.
+    if state.tab == SettingsTab::Animations && state.animation_fullscreen {
+        state.animation_fullscreen = false;
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
+    if state.tab == SettingsTab::Cost && app.cost_window_input.is_some() {
+        match key.code {
+            KeyCode::Esc => app.settings_cancel_cost_window_input(),
+            KeyCode::Backspace => {
+                if let Some(input) = &mut app.cost_window_input {
+                    input.pop();
+                }
+            }
+            KeyCode::Enter => app.settings_submit_cost_window_input(),
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && (character.is_ascii_alphanumeric() || matches!(character, '.' | ' ')) =>
+            {
+                if let Some(input) = &mut app.cost_window_input {
+                    if input.chars().count() < 16 {
+                        input.push(character);
+                    }
+                }
+            }
+            _ => {}
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
 
     if state.tab == SettingsTab::AgentMonitoring && app.agent_detection_signature_input.is_some() {
         match key.code {
@@ -2280,34 +2391,55 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
+        KeyCode::Char('f') if state.tab == SettingsTab::Animations => {
+            state.animation_fullscreen = true;
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Animations => {
-            state.animation_slider_drag = None;
             state.selected_row = state.selected_row.saturating_sub(1);
-            if state.selected_row < 10 {
-                app.settings_adjust_animation_row(state.selected_row, 1);
-            }
+            app.settings_preview_select_animation_row(state.selected_row);
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Animations => {
-            state.animation_slider_drag = None;
-            state.selected_row =
-                (state.selected_row + 1).min(crate::animation_settings_ui::ROW_COUNT - 1);
-            if state.selected_row < 10 {
-                app.settings_adjust_animation_row(state.selected_row, 1);
-            }
+            let last_row = app.animation_row_model().len().saturating_sub(1);
+            state.selected_row = (state.selected_row + 1).min(last_row);
+            app.settings_preview_select_animation_row(state.selected_row);
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Animations => {
-            state.animation_slider_drag = None;
             app.settings_adjust_animation_row(state.selected_row, -1);
         }
-        KeyCode::Enter if state.tab == SettingsTab::Animations && state.selected_row < 10 => {
+        // Enter on a scene selects it and jumps to that scene's controls.
+        KeyCode::Enter
+            if state.tab == SettingsTab::Animations
+                && matches!(
+                    app.animation_row_model().row(state.selected_row),
+                    Some(crate::animation_rows::AnimationRow::Scene(_))
+                ) =>
+        {
             app.settings_adjust_animation_row(state.selected_row, 1);
-            state.selected_row = 17;
+            state.selected_row = app.animation_row_model().first_control_index();
         }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ')
             if state.tab == SettingsTab::Animations =>
         {
-            state.animation_slider_drag = None;
-            app.settings_adjust_animation_row(state.selected_row, 1);
+            use crate::animation_rows::AnimationRowOutcome;
+            match app.settings_activate_animation_row(state.selected_row) {
+                AnimationRowOutcome::Done => {}
+                AnimationRowOutcome::FullScreenPreview => state.animation_fullscreen = true,
+                AnimationRowOutcome::LocationPicker => {
+                    app.mode = Mode::Settings(state);
+                    app.open_location_picker();
+                    return;
+                }
+                AnimationRowOutcome::TextPrompt {
+                    control,
+                    label,
+                    hint,
+                    current,
+                } => {
+                    app.mode = Mode::Settings(state);
+                    app.begin_animation_text_prompt(control, label, hint, current);
+                    return;
+                }
+            }
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Setup => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -2597,6 +2729,48 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 return;
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Cost => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Cost => {
+            let last = crate::cost_settings_ui::rows(app).len().saturating_sub(1);
+            state.selected_row = (state.selected_row + 1).min(last);
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::Cost =>
+        {
+            let direction = match key.code {
+                KeyCode::Left | KeyCode::Char('h') => -1,
+                KeyCode::Right | KeyCode::Char('l') => 1,
+                _ => 0,
+            };
+            if let Some(row) = crate::cost_settings_ui::rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                if row == crate::cost_settings::CostRow::SparklineWindow
+                    && matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+                {
+                    // Enter types an exact value; the arrows step the ladder.
+                    app.settings_begin_cost_window_input();
+                    app.mode = Mode::Settings(state);
+                    return;
+                }
+                app.settings_adjust_cost_row(row, direction);
+                // Choosing a calibration swaps which parameter row follows
+                // it; keep the selection on the row the user acted on.
+                let rows = crate::cost_settings_ui::rows(app);
+                state.selected_row = rows
+                    .iter()
+                    .position(|candidate| *candidate == row)
+                    .unwrap_or_else(|| state.selected_row.min(rows.len().saturating_sub(1)));
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::ResetPlanning => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -2882,7 +3056,20 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
     if state.tab == SettingsTab::Animations {
+        let row_count = app.animation_row_model().len();
+        state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
         state.scroll = crate::animation_settings_ui::scroll_for_selection(
+            content_area,
+            row_count,
+            state.selected_row,
+            state.scroll,
+        );
+    }
+    if state.tab == SettingsTab::Cost {
+        let row_count = crate::cost_settings_ui::rows(app).len();
+        state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
+        state.scroll = crate::cost_settings_ui::scroll_for_selection(
+            app,
             content_area,
             state.selected_row,
             state.scroll,
@@ -3489,6 +3676,116 @@ mod indent_outdent_tests {
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
         assert!(app.trigger_settings.agent_finished_work.is_empty());
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view() {
+        use crate::cost_model::Calibration;
+        use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
+
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        });
+        let row_index = |app: &App, row: CostRow| {
+            crate::cost_settings_ui::rows(app)
+                .iter()
+                .position(|candidate| *candidate == row)
+                .unwrap()
+        };
+        let selected = |app: &App| match &app.mode {
+            Mode::Settings(state) => state.selected_row,
+            _ => panic!("settings should stay open"),
+        };
+
+        // Enter on a radio card chooses it and reveals its parameter row
+        // without moving the selection off the card.
+        let budget_card = row_index(&app, CostRow::Calibration(Calibration::Budget));
+        for _ in 0..budget_card {
+            press(&mut app, KeyCode::Down);
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.cost_settings.calibration, Calibration::Budget);
+        assert_eq!(selected(&app), budget_card);
+        assert!(crate::cost_settings_ui::rows(&app).contains(&CostRow::Budget));
+
+        // Space toggles an option; Right on its visibility row flips it.
+        let sparkline = row_index(&app, CostRow::Display(CostDisplay::Sparkline));
+        while selected(&app) < sparkline {
+            press(&mut app, KeyCode::Down);
+        }
+        press(&mut app, KeyCode::Char(' '));
+        assert!(app.cost_settings.sparkline.enabled);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.cost_settings.sparkline.visibility, CostVisibility::Always);
+
+        // Right/Left step a numeric row through its ladder.
+        let window = row_index(&app, CostRow::SparklineWindow);
+        while selected(&app) < window {
+            press(&mut app, KeyCode::Down);
+        }
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 480);
+        press(&mut app, KeyCode::Left);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 240);
+
+        // Moving that far down scrolled the page so the row is visible.
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings should stay open");
+        };
+        assert!(state.scroll > 0, "the selection is below the first screen");
+    }
+
+    #[test]
+    fn cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo() {
+        use crate::cost_settings::CostRow;
+
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
+        let window_row = crate::cost_settings_ui::rows(&app)
+            .iter()
+            .position(|row| *row == CostRow::SparklineWindow)
+            .unwrap();
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            selected_row: window_row,
+            ..SettingsState::default()
+        });
+
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.cost_window_input.as_deref(), Some(""));
+        for character in "5x".chars() {
+            press(&mut app, KeyCode::Char(character));
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.cost_window_input.as_deref(), Some("5x"), "typo keeps the field");
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
+
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Backspace);
+        for character in "10h".chars() {
+            press(&mut app, KeyCode::Char(character));
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.cost_window_input, None);
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 600);
+        assert!(matches!(app.mode, Mode::Settings(_)), "settings stay open");
+
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('9'));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.cost_window_input, None);
+        assert_eq!(app.cost_settings.sparkline_window_minutes, 600, "Esc cancels");
+        assert!(matches!(app.mode, Mode::Settings(_)), "Esc closed only the field");
     }
 
     #[test]

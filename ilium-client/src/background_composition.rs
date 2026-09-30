@@ -14,16 +14,25 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{App, Mode, PaneRuntime, RightPanelTarget};
 use crate::config::MotionLevel;
 
-const FRAMES_PER_SECOND: u128 = 12;
+/// Cadence of the built-in scenes and of any hosted scene that has not
+/// declared its own (`Scene::frames_per_second`).
+pub const DEFAULT_FRAMES_PER_SECOND: u32 = 12;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
-/// One absolute clock shared by the session compositor and Settings preview.
-/// Integer boundaries alternate 83_333_333/83_333_334 ns and do not accumulate
-/// the drift of an 83 ms interval. An input redraw inside a bucket reuses its
-/// exact engine cache key rather than advancing motion.
+/// One absolute clock shared by the session compositor and Settings preview,
+/// at the default 12 frames per second. See [`quantized_elapsed_at`].
 pub fn quantized_elapsed(elapsed: Duration) -> Duration {
-    let bucket = elapsed_bucket(elapsed);
-    let nanos = (bucket * NANOS_PER_SECOND).div_ceil(FRAMES_PER_SECOND);
+    quantized_elapsed_at(elapsed, DEFAULT_FRAMES_PER_SECOND)
+}
+
+/// The start of the frame bucket containing `elapsed` at `frames_per_second`.
+/// Integer boundaries (`ceil(bucket * 1e9 / fps)` ns) do not accumulate the
+/// drift of a rounded interval: at 12 fps they alternate 83_333_333 and
+/// 83_333_334 ns. An input redraw inside a bucket reuses its exact engine
+/// cache key rather than advancing motion.
+pub fn quantized_elapsed_at(elapsed: Duration, frames_per_second: u32) -> Duration {
+    let bucket = elapsed_bucket(elapsed, frames_per_second);
+    let nanos = bucket_start_nanos(bucket, frames_per_second);
     // The bucket boundary never exceeds `elapsed`, which is a Duration, so
     // its whole seconds and fractional nanoseconds fit their respective types.
     Duration::new(
@@ -32,9 +41,18 @@ pub fn quantized_elapsed(elapsed: Duration) -> Duration {
     )
 }
 
-fn elapsed_bucket(elapsed: Duration) -> u128 {
-    // Even Duration::MAX's nanoseconds times 12 fit comfortably in u128.
-    elapsed.as_nanos() * FRAMES_PER_SECOND / NANOS_PER_SECOND
+fn frames_per_second_or_default(frames_per_second: u32) -> u128 {
+    u128::from(frames_per_second.max(1))
+}
+
+fn bucket_start_nanos(bucket: u128, frames_per_second: u32) -> u128 {
+    (bucket * NANOS_PER_SECOND).div_ceil(frames_per_second_or_default(frames_per_second))
+}
+
+/// Index of the frame bucket containing `elapsed`.
+pub fn elapsed_bucket(elapsed: Duration, frames_per_second: u32) -> u128 {
+    // Even Duration::MAX's nanoseconds times 30 fit comfortably in u128.
+    elapsed.as_nanos() * frames_per_second_or_default(frames_per_second) / NANOS_PER_SECOND
 }
 
 /// Ambient composition owns only the ordinary workspace. Suspended settings,
@@ -56,46 +74,91 @@ fn live_animation_is_visible(app: &App) -> bool {
 
 /// `None` means animation contributes no recurring deadline. Preview remains
 /// live when deliberately opened, even with ambient disabled or Motion Off.
+/// The bucket size follows the field on screen (`App::animation_frames_per_second`).
 pub fn animation_frame_bucket(app: &App, elapsed: Duration) -> Option<u128> {
-    live_animation_is_visible(app).then(|| elapsed_bucket(elapsed))
+    live_animation_is_visible(app)
+        .then(|| elapsed_bucket(elapsed, app.animation_frames_per_second()))
 }
 
 /// Positive delay to the next absolute frame boundary. This must be minimized
 /// with existing maintenance/output delays rather than replacing those clocks.
+/// A scene at 1 frame per second wakes the loop once a second, not twelve times.
 pub fn animation_frame_delay(app: &App, elapsed: Duration) -> Option<Duration> {
     if !live_animation_is_visible(app) {
         return None;
     }
-    let next_bucket = elapsed_bucket(elapsed) + 1;
-    let next_nanos = (next_bucket * NANOS_PER_SECOND).div_ceil(FRAMES_PER_SECOND);
+    let frames_per_second = app.animation_frames_per_second();
+    let next_bucket = elapsed_bucket(elapsed, frames_per_second) + 1;
+    let next_nanos = bucket_start_nanos(next_bucket, frames_per_second);
     let delay_nanos = next_nanos - elapsed.as_nanos();
-    // A single frame is at most 83_333_334 ns, including Duration::MAX input.
+    // A single frame is at most one second, including Duration::MAX input.
     Some(Duration::from_nanos(delay_nanos as u64))
+}
+
+/// Renders the field for the current settings into the shared frame, through
+/// the loop cache when the configuration allows it.
+fn render_field(
+    app: &mut App,
+    settings: &crate::background_animation::AnimationSettings,
+    area: Rect,
+    elapsed: Duration,
+) {
+    let cache_ready = if settings.uses_loop_cache() {
+        let mut cache = app.animation_cache.borrow_mut();
+        cache.step(settings, area.width, area.height, 8);
+        cache.status().is_ready && cache.copy_frame_into(elapsed, &mut app.animation_frame)
+    } else {
+        false
+    };
+    if !cache_ready {
+        app.animation_frame
+            .render(settings, area.width, area.height, elapsed);
+    }
 }
 
 /// Render one screen-wide field, then reveal it only through safe workspace
 /// blanks. Coordinates stay relative to the whole buffer, never each pane.
 /// Motion Off uses a stable zero-time scene and has no animation timer.
+///
+/// The same field also backs the Settings -> Animations preview: identical
+/// dimensions, coordinates, clock and hosted scene, revealed through every
+/// safe blank of the settings screen (its controls panel is opaque). The
+/// hosted scene is dropped whenever neither surface is visible.
 pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
-    if !ambient_is_visible(app) || buffer.area.is_empty() {
+    let is_preview = app.is_animation_preview_visible();
+    if buffer.area.is_empty() || !(is_preview || ambient_is_visible(app)) {
+        app.animation_frame.host_mut().release();
         return;
     }
     let settings = app.animation_settings.normalized();
-    let elapsed = if app.ui_settings.motion_level == MotionLevel::Off {
+    // Motion Off freezes the ambient background; the explicit preview stays live.
+    let elapsed = if !is_preview && app.ui_settings.motion_level == MotionLevel::Off {
         Duration::ZERO
     } else {
-        quantized_elapsed(elapsed)
+        quantized_elapsed_at(elapsed, app.animation_frames_per_second())
     };
-    app.animation_frame
-        .render(&settings, buffer.area.width, buffer.area.height, elapsed);
+    render_field(app, &settings, buffer.area, elapsed);
     let (red, green, blue) = settings.foreground_rgb();
     let foreground = Color::Rgb(red, green, blue);
-    paint_region(
+    if is_preview {
+        let area = buffer.area;
+        paint_region_with_colors(
+            buffer,
+            area,
+            None,
+            foreground,
+            |column, row| app.animation_frame.glyph(column, row),
+            |column, row| field_color(app, column, row),
+        );
+        return;
+    }
+    paint_region_with_colors(
         buffer,
         panel_inner(app.layout.tree_area),
         None,
         foreground,
         |column, row| app.animation_frame.glyph(column, row),
+        |column, row| field_color(app, column, row),
     );
 
     if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {
@@ -105,12 +168,13 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     if viewports.is_empty() {
         // This is draw_pane's known empty/loading placeholder, not an unknown
         // editor, board, search, settings, or chatroom surface.
-        paint_region(
+        paint_region_with_colors(
             buffer,
             panel_inner(app.layout.pane_area),
             None,
             foreground,
             |column, row| app.animation_frame.glyph(column, row),
+            |column, row| field_color(app, column, row),
         );
         return;
     }
@@ -122,11 +186,23 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             .completed_agent_close_action(viewport)
             .map_or(viewport.content_area, |action| action.terminal_area);
         terminal.with_screen(|screen| {
-            paint_region(buffer, area, Some(screen), foreground, |column, row| {
-                app.animation_frame.glyph(column, row)
-            });
+            paint_region_with_colors(
+                buffer,
+                area,
+                Some(screen),
+                foreground,
+                |column, row| app.animation_frame.glyph(column, row),
+                |column, row| field_color(app, column, row),
+            );
         });
     }
+}
+
+/// The scene-supplied color of one field cell; `None` paints the user palette.
+fn field_color(app: &App, column: u16, row: u16) -> Option<Color> {
+    app.animation_frame
+        .cell_color(column, row)
+        .map(|(red, green, blue)| Color::Rgb(red, green, blue))
 }
 
 fn panel_inner(area: Rect) -> Rect {
@@ -157,12 +233,24 @@ fn visible_cursor(screen: &vt100::Screen, area: Rect) -> Option<Position> {
         .then(|| Position::new(area.x.saturating_add(column), area.y.saturating_add(row)))
 }
 
+#[cfg(test)]
 fn paint_region(
     buffer: &mut Buffer,
     region: Rect,
     screen: Option<&vt100::Screen>,
     foreground: Color,
+    glyph: impl FnMut(u16, u16) -> char,
+) {
+    paint_region_with_colors(buffer, region, screen, foreground, glyph, |_, _| None);
+}
+
+fn paint_region_with_colors(
+    buffer: &mut Buffer,
+    region: Rect,
+    screen: Option<&vt100::Screen>,
+    foreground: Color,
     mut glyph: impl FnMut(u16, u16) -> char,
+    mut cell_color: impl FnMut(u16, u16) -> Option<Color>,
 ) {
     let clipped = region.intersection(buffer.area);
     if clipped.is_empty() {
@@ -200,8 +288,10 @@ fn paint_region(
             if !('\u{2801}'..='\u{28ff}').contains(&character) {
                 continue;
             }
+            let color =
+                cell_color(column - buffer.area.x, row - buffer.area.y).unwrap_or(foreground);
             let cell = &mut buffer[(column, row)];
-            cell.set_char(character).set_fg(foreground);
+            cell.set_char(character).set_fg(color);
         }
     }
 }
@@ -482,12 +572,12 @@ mod tests {
         let mut app = App::new("clock".to_owned(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, 80, 24));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
+        app.ui_settings.motion_level = MotionLevel::Reduced;
+        assert_eq!(animation_frame_bucket(&app, Duration::ZERO), None);
         app.animation_settings.enabled = true;
         app.ui_settings.motion_level = MotionLevel::Off;
         assert!(ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
-        app.ui_settings.motion_level = MotionLevel::Reduced;
-        assert!(animation_frame_delay(&app, Duration::ZERO).is_some());
         app.mode = Mode::Help;
         assert!(!ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
@@ -497,8 +587,324 @@ mod tests {
         });
         app.animation_settings.enabled = false;
         app.ui_settings.motion_level = MotionLevel::Off;
-        assert!(animation_frame_delay(&app, Duration::ZERO).is_some());
+        assert!(
+            animation_frame_delay(&app, Duration::ZERO).is_some(),
+            "the opened preview stays live even with ambient disabled and Motion Off"
+        );
         app.modal_stack.push(Mode::Help);
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
+    }
+
+    #[test]
+    fn loop_composition_starts_cache_build_while_live_mode_does_not() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("cache".to_owned(), project.path().to_path_buf());
+        app.set_screen_area(Rect::new(0, 0, 40, 12));
+        app.animation_settings.enabled = true;
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
+        compose(&mut buffer, &mut app, Duration::ZERO);
+        assert!(app.animation_cache.borrow().status().total_frames > 0);
+        app.animation_settings.playback_mode =
+            crate::background_animation::AnimationPlaybackMode::Live;
+        app.animation_cache = Default::default();
+        compose(&mut buffer, &mut app, Duration::ZERO);
+        assert_eq!(app.animation_cache.borrow().status().total_frames, 0);
+    }
+
+    fn ambient_app() -> (
+        App,
+        std::sync::Arc<crate::background_animation::test_support::FakeProbe>,
+        tempfile::TempDir,
+    ) {
+        use crate::background_animation::test_support::{fake_host, FakeProbe};
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("host".to_owned(), project.path().to_path_buf());
+        app.set_screen_area(Rect::new(0, 0, 40, 12));
+        let probe = FakeProbe::new();
+        *app.animation_frame.host_mut() = fake_host(&probe);
+        app.animation_settings.enabled = true;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Stars;
+        app.animation_settings.density_percent = 100;
+        (app, probe, project)
+    }
+
+    fn compose_at(app: &mut App, seconds: u64) -> Buffer {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
+        compose(&mut buffer, app, Duration::from_secs(seconds));
+        buffer
+    }
+
+    fn braille_cells(buffer: &Buffer) -> usize {
+        buffer
+            .content()
+            .iter()
+            .filter(|cell| {
+                cell.symbol()
+                    .chars()
+                    .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+            })
+            .count()
+    }
+
+    #[test]
+    fn per_scene_frame_rates_use_exact_absolute_boundaries() {
+        for frames_per_second in [1_u32, 2, 5, 12, 24, 30] {
+            let fps = u128::from(frames_per_second);
+            for second in [0_u64, 1, 2, 59, 3600] {
+                let elapsed = Duration::from_secs(second);
+                assert_eq!(quantized_elapsed_at(elapsed, frames_per_second), elapsed);
+                assert_eq!(
+                    elapsed_bucket(elapsed, frames_per_second),
+                    u128::from(second) * fps,
+                    "{frames_per_second} fps at {second}s"
+                );
+            }
+            // Boundaries are ceil(bucket * 1e9 / fps): no accumulated drift.
+            for bucket in [1_u128, 2, 3, 7, fps, fps * 60 + 1] {
+                let boundary = (bucket * 1_000_000_000).div_ceil(fps);
+                let at = Duration::from_nanos(boundary as u64);
+                let before = Duration::from_nanos(boundary as u64 - 1);
+                assert_eq!(elapsed_bucket(at, frames_per_second), bucket);
+                assert_eq!(elapsed_bucket(before, frames_per_second), bucket - 1);
+                assert_eq!(quantized_elapsed_at(at, frames_per_second), at);
+                assert!(quantized_elapsed_at(before, frames_per_second) < at);
+            }
+            let maximum = quantized_elapsed_at(Duration::MAX, frames_per_second);
+            assert_eq!(quantized_elapsed_at(maximum, frames_per_second), maximum);
+        }
+        // The default helper is the 12 fps clock.
+        let sample = Duration::from_millis(1234);
+        assert_eq!(quantized_elapsed(sample), quantized_elapsed_at(sample, 12));
+    }
+
+    #[test]
+    fn a_slow_scene_wakes_the_loop_once_per_frame_not_twelve_times_a_second() {
+        use crate::background_animation::AnimationKind;
+        let (mut app, probe, _project) = ambient_app();
+        app.animation_settings.kind = AnimationKind::Stars;
+        app.ui_settings.motion_level = MotionLevel::Reduced;
+        compose_at(&mut app, 0);
+        for (frames_per_second, expected_wakeups) in [(1_u32, 10_u32), (2, 20), (12, 120)] {
+            probe
+                .fps
+                .store(frames_per_second, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(app.animation_frames_per_second(), frames_per_second);
+            let mut now = Duration::ZERO;
+            let mut wakeups = 0;
+            while now < Duration::from_secs(10) {
+                let delay = animation_frame_delay(&app, now).unwrap();
+                assert!(delay > Duration::ZERO);
+                assert!(
+                    delay <= Duration::from_secs(1) / frames_per_second + Duration::from_nanos(1)
+                );
+                now += delay;
+                wakeups += 1;
+            }
+            assert_eq!(wakeups, expected_wakeups, "{frames_per_second} fps");
+        }
+        probe.fps.store(1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            animation_frame_delay(&app, Duration::from_millis(250)),
+            Some(Duration::from_millis(750))
+        );
+        assert_eq!(
+            animation_frame_bucket(&app, Duration::from_millis(2999)),
+            Some(2)
+        );
+        assert_eq!(
+            animation_frame_bucket(&app, Duration::from_secs(3)),
+            Some(3)
+        );
+        // A hosted scene's rate is clamped to 1..=30.
+        probe.fps.store(500, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(app.animation_frames_per_second(), 30);
+        probe.fps.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(app.animation_frames_per_second(), 1);
+    }
+
+    #[test]
+    fn built_in_scenes_and_unhosted_kinds_keep_the_twelve_fps_clock() {
+        let (mut app, probe, _project) = ambient_app();
+        probe.fps.store(1, std::sync::atomic::Ordering::SeqCst);
+        // No scene is hosted yet: the default cadence applies.
+        assert_eq!(app.animation_frames_per_second(), 12);
+        compose_at(&mut app, 0);
+        assert_eq!(app.animation_frames_per_second(), 1);
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Kelp;
+        assert_eq!(app.animation_frames_per_second(), 12);
+    }
+
+    #[test]
+    fn compose_hosts_one_scene_and_reuses_the_render_inside_a_frame_bucket() {
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        let first = compose_at(&mut app, 3);
+        assert!(braille_cells(&first) > 0);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        assert_eq!(probe.rendered.load(Ordering::SeqCst), 1);
+        compose_at(&mut app, 3);
+        assert_eq!(probe.rendered.load(Ordering::SeqCst), 1, "same bucket");
+        compose_at(&mut app, 4);
+        assert_eq!(probe.rendered.load(Ordering::SeqCst), 2);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        assert_eq!(probe.alive(), 1);
+    }
+
+    #[test]
+    fn a_color_scene_paints_its_own_cell_colors_and_others_use_the_palette() {
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        let plain = compose_at(&mut app, 0);
+        let (red, green, blue) = app.animation_settings.foreground_rgb();
+        assert!(plain
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() != " ")
+            .all(|cell| cell.fg == Color::Rgb(red, green, blue)));
+        probe.uses_colors.store(true, Ordering::SeqCst);
+        let colored = compose_at(&mut app, 1);
+        let colors: std::collections::HashSet<_> = colored
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() != " ")
+            .map(|cell| cell.fg)
+            .collect();
+        assert!(colors.contains(&Color::Rgb(200, 20, 40)), "{colors:?}");
+        assert!(colors.contains(&Color::Rgb(20, 40, 200)), "{colors:?}");
+    }
+
+    #[test]
+    fn the_hosted_scene_is_rebuilt_on_key_change_and_dropped_when_not_shown() {
+        use crate::background_animation::AnimationKind;
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        compose_at(&mut app, 0);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        // Same settings: no rebuild.
+        compose_at(&mut app, 1);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        // A location change rebuilds a location scene (the crate's scene key).
+        app.animation_settings.ambient.location =
+            ilium_ambient::GeoLocation::new("Nairobi", -1.29, 36.82);
+        compose_at(&mut app, 2);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            probe.alive(),
+            1,
+            "the old scene was dropped before the new one"
+        );
+        // A different kind rebuilds.
+        app.animation_settings.kind = AnimationKind::Spectrum;
+        compose_at(&mut app, 3);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 3);
+        assert_eq!(probe.alive(), 1);
+        // A built-in scene owns no hosted scene.
+        app.animation_settings.kind = AnimationKind::Kelp;
+        compose_at(&mut app, 4);
+        assert_eq!(probe.alive(), 0);
+        // Back to a hosted kind builds again; hiding drops it.
+        app.animation_settings.kind = AnimationKind::Spectrum;
+        compose_at(&mut app, 5);
+        assert_eq!(probe.alive(), 1);
+        app.mode = Mode::Help;
+        compose_at(&mut app, 6);
+        assert_eq!(probe.alive(), 0, "no surface shows the field");
+        app.mode = Mode::Normal;
+        compose_at(&mut app, 7);
+        assert_eq!(probe.alive(), 1);
+        app.animation_settings.enabled = false;
+        compose_at(&mut app, 8);
+        assert_eq!(probe.alive(), 0);
+        drop(app);
+        assert_eq!(probe.alive(), 0, "exit leaves nothing running");
+    }
+
+    #[test]
+    fn the_preview_and_the_ambient_background_share_one_scene_instance() {
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        compose_at(&mut app, 0);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Animations,
+            ..SettingsState::default()
+        });
+        let preview = compose_at(&mut app, 1);
+        assert!(braille_cells(&preview) > 0, "the preview shows the field");
+        assert_eq!(
+            probe.constructed.load(Ordering::SeqCst),
+            1,
+            "shared instance"
+        );
+        assert_eq!(probe.alive(), 1);
+        app.mode = Mode::Normal;
+        compose_at(&mut app, 2);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        // The preview alone (ambient disabled) also hosts exactly one scene.
+        app.animation_settings.enabled = false;
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Animations,
+            ..SettingsState::default()
+        });
+        compose_at(&mut app, 3);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        assert_eq!(probe.alive(), 1);
+    }
+
+    #[test]
+    fn preview_field_matches_the_screen_and_covers_it_entirely() {
+        let (mut app, _probe, _project) = ambient_app();
+        app.animation_settings.enabled = false;
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Animations,
+            ..SettingsState::default()
+        });
+        let buffer = compose_at(&mut app, 2);
+        assert_eq!(
+            (app.animation_frame.width(), app.animation_frame.height()),
+            (buffer.area.width, buffer.area.height)
+        );
+        // The fake scene lights the whole top row: the preview reaches every
+        // column of the screen, not a smaller rectangle.
+        for column in 0..buffer.area.width {
+            assert!(
+                buffer[(column, 0)].symbol() != " ",
+                "column {column} of the top row shows the field"
+            );
+        }
+    }
+
+    #[test]
+    fn a_panicking_scene_is_replaced_by_a_message_and_the_client_survives() {
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        compose_at(&mut app, 0);
+        probe.panic_next_render.store(true, Ordering::SeqCst);
+        let buffer = compose_at(&mut app, 1);
+        assert_eq!(braille_cells(&buffer), 0, "the failed frame is blank");
+        let status = app.animation_frame.host().status().unwrap();
+        assert!(status.contains("fake scene exploded"), "{status}");
+        // Later frames keep running the message scene: no panic, no rebuild loop.
+        compose_at(&mut app, 2);
+        assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
+        // Changing the settings key starts a fresh scene.
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Spectrum;
+        let recovered = compose_at(&mut app, 3);
+        assert!(braille_cells(&recovered) > 0);
+    }
+
+    #[test]
+    fn motion_off_freezes_the_ambient_scene_at_time_zero() {
+        use std::sync::atomic::Ordering;
+        let (mut app, probe, _project) = ambient_app();
+        app.ui_settings.motion_level = MotionLevel::Off;
+        compose_at(&mut app, 9);
+        assert_eq!(probe.last_time_ms.load(Ordering::SeqCst), 0);
+        compose_at(&mut app, 20);
+        assert_eq!(
+            probe.rendered.load(Ordering::SeqCst),
+            1,
+            "no motion, no re-render"
+        );
     }
 }

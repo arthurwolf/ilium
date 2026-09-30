@@ -32,7 +32,11 @@ pub struct ProjectConfig {
     pub project_icon: Option<String>,
     #[serde(rename = "show project separators", default)]
     pub show_project_separators: bool,
-    #[serde(default, skip_serializing_if = "animation_is_default")]
+    #[serde(
+        default,
+        skip_serializing_if = "animation_is_default",
+        deserialize_with = "deserialize_animation"
+    )]
     pub animation: crate::background_animation::AnimationSettings,
     // `serde_norway::Value`, not `serde_json::Value`: the JSON data model has
     // no representation for YAML-only values (non-finite floats like `.inf`,
@@ -40,6 +44,44 @@ pub struct ProjectConfig {
     // and violated the "unknown fields preserved" contract above.
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
+}
+
+/// Reads the `animation` mapping. The hosted scenes' settings are flattened
+/// into it, and serde buffers flattened content untyped, which serde_norway
+/// cannot do for YAML-tagged enums (`source: !Builtin 0`). So the mapping is
+/// split by key first and each half is deserialized from the YAML value
+/// directly, tags intact.
+fn deserialize_animation<'de, D>(
+    deserializer: D,
+) -> Result<crate::background_animation::AnimationSettings, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = Value::deserialize(deserializer)?;
+    animation_from_value(value).map_err(D::Error::custom)
+}
+
+fn animation_from_value(
+    value: Value,
+) -> Result<crate::background_animation::AnimationSettings, serde_norway::Error> {
+    use crate::background_animation::AnimationSettings;
+    use ilium_ambient::AmbientSettings;
+    let Value::Mapping(mut mapping) = value else {
+        return serde_norway::from_value(value);
+    };
+    let mut ambient_mapping = serde_norway::Mapping::new();
+    if let Value::Mapping(defaults) = serde_norway::to_value(AmbientSettings::default())? {
+        for (key, _) in defaults {
+            if let Some(entry) = mapping.remove(&key) {
+                ambient_mapping.insert(key, entry);
+            }
+        }
+    }
+    let ambient: AmbientSettings = serde_norway::from_value(Value::Mapping(ambient_mapping))?;
+    let mut settings: AnimationSettings = serde_norway::from_value(Value::Mapping(mapping))?;
+    settings.ambient = ambient;
+    Ok(settings)
 }
 
 fn animation_is_default(settings: &crate::background_animation::AnimationSettings) -> bool {
@@ -152,7 +194,7 @@ mod tests {
             speed_percent: 150,
             ..Default::default()
         };
-        set_animation(first.path(), settings).unwrap();
+        set_animation(first.path(), settings.clone()).unwrap();
         let reloaded = load(first.path()).unwrap();
         assert_eq!(reloaded.animation, settings);
         assert_eq!(reloaded.project_name.as_deref(), Some("Beach"));
@@ -274,6 +316,48 @@ mod tests {
     }
 
     #[test]
+    fn shoreline_style_defaults_rich_but_an_old_four_key_mapping_stays_classic() {
+        use crate::background_animation::{AnimationKind, ShorelineStyle};
+
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
+        // Written by a build that only knew the four sliders.
+        std::fs::write(
+            project.path().join(RELATIVE_PATH),
+            "animation:\n  enabled: true\n  kind: shoreline\n  shoreline:\n    reach_percent: 120\n    foam_width_percent: 75\n    grain_percent: 20\n    cycle_seconds: 12\n",
+        )
+        .unwrap();
+        let old = load(project.path()).unwrap().animation;
+        assert_eq!(old.kind, AnimationKind::Shoreline);
+        assert_eq!(old.shoreline.style, ShorelineStyle::Classic);
+        assert_eq!(old.shoreline.reach_percent, 120);
+
+        // A configuration without any shoreline mapping is a fresh one.
+        std::fs::write(
+            project.path().join(RELATIVE_PATH),
+            "animation:\n  enabled: true\n  speed_percent: 125\n",
+        )
+        .unwrap();
+        let fresh = load(project.path()).unwrap().animation;
+        assert_eq!(fresh.shoreline.style, ShorelineStyle::Rich);
+
+        // Both styles and their Rich controls survive a save and reload.
+        let mut rich = fresh;
+        rich.shoreline.chop_percent = 80;
+        rich.shoreline.stick_amount_percent = 95;
+        set_animation(project.path(), rich.clone()).unwrap();
+        assert_eq!(load(project.path()).unwrap().animation, rich);
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("style: rich"), "{saved}");
+        let mut classic = rich;
+        classic.shoreline.style = ShorelineStyle::Classic;
+        set_animation(project.path(), classic.clone()).unwrap();
+        assert_eq!(load(project.path()).unwrap().animation, classic);
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("style: classic"), "{saved}");
+    }
+
+    #[test]
     fn animation_palette_and_named_parameters_survive_yaml_reload_and_metadata_updates() {
         use crate::background_animation::{AnimationKind, AnimationSettings};
 
@@ -297,19 +381,19 @@ mod tests {
         };
         for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
             settings.kind = kind;
-            for row in 17..=20 {
-                let slider = settings.slider(row).unwrap();
-                settings.set_slider_value(
-                    row,
-                    if index % 2 == 0 {
-                        slider.minimum
-                    } else {
-                        slider.maximum
-                    },
+            // Hosted scenes keep their values in the flattened ambient block;
+            // built-in scenes edit their four named sliders.
+            for control in settings.scene_controls() {
+                let ilium_ambient::ControlKind::Slider { min, max, .. } = control.kind else {
+                    continue;
+                };
+                let _ = settings.set_scene_control(
+                    control.id,
+                    ilium_ambient::ControlValue::Number(if index % 2 == 0 { min } else { max }),
                 );
             }
         }
-        set_animation(project.path(), settings).unwrap();
+        set_animation(project.path(), settings.clone()).unwrap();
         update(project.path(), |config| {
             config.project_icon = Some("🧭".into())
         })
@@ -320,9 +404,74 @@ mod tests {
         assert_eq!(reloaded.project_name.as_deref(), Some("Pond"));
         assert_eq!(reloaded.project_icon.as_deref(), Some("🧭"));
         let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: quiet_pond"));
+        assert!(saved.contains("kind: dithr_patterns"));
         assert!(!saved.contains("breathing_mountain"));
         assert!(saved.contains("custom: keep-me"));
         assert!(saved.contains("ratio: .inf"));
+    }
+
+    #[test]
+    fn hosted_scene_settings_and_location_round_trip_flat_in_the_animation_block() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+
+        let project = tempfile::tempdir().unwrap();
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::Stars,
+            enabled: true,
+            ..Default::default()
+        };
+        settings.ambient.location = ilium_ambient::GeoLocation::new("Tromso, Norway", 69.65, 18.96);
+        set_animation(project.path(), settings.clone()).unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("kind: stars"), "{saved}");
+        assert!(saved.contains("Tromso, Norway"), "{saved}");
+        // Flattened: the location sits directly under `animation`, not under
+        // an `ambient` key.
+        assert!(!saved.contains("ambient:"), "{saved}");
+        assert!(saved.contains("\n  location:"), "{saved}");
+        let reloaded = load(project.path()).unwrap().animation;
+        assert_eq!(reloaded, settings);
+        assert!((reloaded.ambient.location.latitude - 69.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn animation_block_tolerates_unknown_keys_and_default_config_serializes_to_nothing() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
+        std::fs::write(
+            project.path().join(RELATIVE_PATH),
+            "animation:\n  kind: night_lights\n  future_key: 7\n  night_lights:\n    tomorrow: true\n  location:\n    label: Lima\n    latitude: -12.05\n    longitude: -77.04\n",
+        )
+        .unwrap();
+        let loaded = load(project.path()).unwrap().animation;
+        assert_eq!(loaded.kind, AnimationKind::NightLights);
+        assert_eq!(loaded.ambient.location.label, "Lima");
+        assert!((loaded.ambient.location.longitude + 77.04).abs() < 1e-9);
+
+        // Back to defaults: the block disappears from the file entirely.
+        set_animation(project.path(), AnimationSettings::default()).unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(!saved.contains("animation"), "{saved}");
+        assert!(!saved.contains("location"), "{saved}");
+        assert_eq!(
+            load(project.path()).unwrap().animation,
+            AnimationSettings::default()
+        );
+    }
+
+    #[test]
+    fn a_default_animation_config_never_reaches_disk() {
+        let project = tempfile::tempdir().unwrap();
+        update(project.path(), |config| {
+            config.project_name = Some("Plain".into())
+        })
+        .unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert_eq!(
+            saved,
+            "project name: Plain\nshow project separators: false\n"
+        );
     }
 }

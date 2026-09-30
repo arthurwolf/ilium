@@ -228,6 +228,7 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         .map(tree_ui::shell_output_phase);
     let signals = crate::agent_monitoring::displayed_pane_signals(
         app.ui_settings.agent_monitoring_mode,
+        app.ui_settings.attention_running_indicator,
         status,
         progress.as_deref(),
         scheduled_input.is_some(),
@@ -404,6 +405,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
     draw_pane(frame, layout.pane_area, app);
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
     let focused_pane_id = app.focused_pane_id();
+    let tree_order = app.effective_tree_order();
     tree_ui::render(
         frame,
         layout.tree_area,
@@ -434,12 +436,14 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             workspace_git_statuses: &app.workspace_git_statuses,
             show_worktree_branch_line: app.git_settings.branch_line
                 != crate::config::GitBranchLine::Off,
-            tree_order: app.ui_settings.tree_order,
+            tree_order,
             show_project_separators: app.ui_settings.show_project_separators,
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
+            attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
+            cost: Some(app.cost_tracker.overlay().as_ref()),
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
@@ -449,7 +453,34 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
             panes: &app.panes,
         },
     );
+    draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
+}
+
+/// Draws the per-agent cost card beside its tree entry when the detail-card
+/// option makes it visible (see `App::cost_card_target`).
+fn draw_cost_card(frame: &mut Frame, app: &App) {
+    let Some((pane_id, row)) = app.cost_card_target() else {
+        return;
+    };
+    let overlay = app.cost_tracker.overlay();
+    let (Some(cost), Some(view)) = (overlay.details.get(&pane_id), overlay.rows.get(&pane_id))
+    else {
+        return;
+    };
+    let title = app
+        .tree
+        .get(pane_id)
+        .map(|node| node.name.clone())
+        .unwrap_or_default();
+    crate::cost_overlay::draw_detail_card(
+        frame,
+        frame.area(),
+        app.layout.tree_area.right(),
+        row,
+        &title,
+        crate::cost_overlay::detail_card_lines(cost, view, overlay),
+    );
 }
 
 /// Draws one non-root layer without deciding which layer owns input. Input
@@ -581,6 +612,28 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::GitSettingPrompt(field, state) => {
             modal::render_text_prompt(frame, area, field.label(), state, "Apply");
         }
+        Mode::AnimationTextPrompt(target, state) => {
+            let (hint, style) = match &target.error {
+                Some(message) => (
+                    message.clone(),
+                    Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                None => (
+                    format!("{} \u{2014} Enter applies, Esc cancels", target.hint),
+                    Style::new().add_modifier(Modifier::DIM),
+                ),
+            };
+            modal::render_text_prompt_with_hint(
+                frame,
+                area,
+                &target.label,
+                state,
+                "Apply",
+                &hint,
+                style,
+            );
+        }
+        Mode::LocationPicker(picker) => crate::location_picker::render(frame, area, picker),
         Mode::AgentSetupPathPrompt(feature, state) => {
             modal::render_text_prompt(
                 frame,
@@ -602,6 +655,18 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             modal::render_text_prompt(frame, area, "Save As", state, "Save");
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
+        Mode::ConvertSession => {
+            if let Some(state) = &app.conversion {
+                let pane_area = app
+                    .pane_viewport(state.pane_id)
+                    .map(|viewport| viewport.outer_area);
+                crate::session_conversion::render(
+                    frame,
+                    crate::session_conversion::dialog_area(pane_area, area),
+                    state,
+                );
+            }
+        }
         Mode::WaitingWorkspaceCloseOffer { .. } => {
             let popup = modal::centered_fixed_rect(56, 5, area);
             frame.render_widget(Clear, popup);
@@ -2154,6 +2219,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
         Mode::ApiSettingPrompt(_) => "HTTP API PORT",
         Mode::GitSettingPrompt(_, _) => "GIT SETTING",
+        Mode::AnimationTextPrompt(_, _) => "ANIMATION SETTING",
+        Mode::LocationPicker(_) => "LOCATION",
         Mode::AgentSetupPathPrompt(_, _) => "AGENT SETUP FILE",
         Mode::AgentSetupPrompt(_) => "AGENT SETUP",
         Mode::VoicePromptEditor(_) => "VOICE PROMPT",
@@ -2188,6 +2255,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
+        Mode::ConvertSession => "CONVERTING SESSION",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",

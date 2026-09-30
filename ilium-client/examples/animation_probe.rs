@@ -67,7 +67,7 @@ fn run() -> Result<(), String> {
         let mut frame = AnimationFrame::default();
         let settings = AnimationSettings {
             kind,
-            ..baseline_settings
+            ..baseline_settings.clone()
         };
         let initial_started = Instant::now();
         frame.render(&settings, width, height, Duration::ZERO);

@@ -56,12 +56,20 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        ServerEvent::PaneProcessTerminated { pane_id, result } => {
+            app.apply_pane_process_terminated(pane_id, result);
+            None
+        }
         ServerEvent::ScreenUpdate {
             pane_id,
             first_sequence,
             sequence,
             bytes,
         } => {
+            // A pane being converted keeps its last screen on display.
+            if app.frozen_panes.contains(&pane_id) {
+                return None;
+            }
             let should_track_visible_text_change = app.tree.get(pane_id).is_some_and(|node| {
                 matches!(
                     node.kind,
@@ -610,6 +618,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         app.tree.panes().map(|node| node.id).collect();
     app.panes
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.frozen_panes
+        .retain(|pane_id| live_pane_ids.contains(pane_id));
     app.terminal_activity.retain_panes(&live_pane_ids);
     app.retain_requested_pane_sizes(&live_pane_ids);
     // Latches every pane currently showing a detected agent so its toolbar
@@ -829,10 +839,11 @@ fn selection_reconciliation(app: &App, new_tree: &ilium_core::Tree) -> Selection
         return SelectionReconciliation::Unchanged;
     }
 
-    let visible_node_ids = crate::tree_ui::visible_tree_node_ids(
+    let visible_node_ids = crate::tree_ui::visible_tree_node_ids_ranked(
         &app.tree,
         &app.tree_state,
-        app.ui_settings.tree_order,
+        app.effective_tree_order(),
+        &app.cost_tracker.overlay().ranks,
     );
     let Some(selected_index) = visible_node_ids
         .iter()

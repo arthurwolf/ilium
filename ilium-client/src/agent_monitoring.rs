@@ -17,6 +17,89 @@ pub enum AgentMonitoringMode {
     Attention,
 }
 
+/// How Attention mode still shows that an agent is actively working while it
+/// has no attention-worthy status. Normal mode always shows the working
+/// animation, so this only applies when Attention would otherwise be blank.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionRunningIndicator {
+    /// Nothing: a working agent looks identical to a quiet one.
+    Off,
+    /// The configurable Working icon, animated as in Normal mode.
+    #[default]
+    Icon,
+    /// A braille spinner in the status slot.
+    Spinner,
+    /// A dot that breathes between bright and dim.
+    PulsingDot,
+    /// A steady dim dot: running, without motion.
+    SteadyDot,
+    /// No glyph; the title text takes an accent color and italics.
+    TitleAccent,
+}
+
+impl AttentionRunningIndicator {
+    pub const ALL: [Self; 6] = [
+        Self::Off,
+        Self::Icon,
+        Self::Spinner,
+        Self::PulsingDot,
+        Self::SteadyDot,
+        Self::TitleAccent,
+    ];
+
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Icon => "icon",
+            Self::Spinner => "spinner",
+            Self::PulsingDot => "pulsing_dot",
+            Self::SteadyDot => "steady_dot",
+            Self::TitleAccent => "title_accent",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Icon => "Working icon",
+            Self::Spinner => "Spinner",
+            Self::PulsingDot => "Pulsing dot",
+            Self::SteadyDot => "Steady dot",
+            Self::TitleAccent => "Title accent",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|option| option.key() == value)
+    }
+
+    /// Moves one step through [`Self::ALL`], wrapping at both ends.
+    pub fn step(self, direction: i32) -> Self {
+        let count = Self::ALL.len() as i32;
+        let index = Self::ALL
+            .iter()
+            .position(|option| *option == self)
+            .unwrap_or(0) as i32;
+        Self::ALL[(index + direction.signum()).rem_euclid(count) as usize]
+    }
+
+    /// Whether the indicator occupies the current-activity glyph slot (and so
+    /// needs a hover explanation) rather than only restyling the title.
+    pub const fn uses_status_slot(self) -> bool {
+        !matches!(self, Self::Off | Self::TitleAccent)
+    }
+}
+
+/// True while the agent is actively working and Attention has nothing
+/// higher-priority to show.
+pub fn is_running_quietly(status: &PaneStatus, attention: Option<IconTarget>) -> bool {
+    attention.is_none()
+        && status
+            .agent_state()
+            .is_some_and(|state| state.turn == AgentTurn::Working)
+}
+
 pub const STATUS_ICON_TARGETS: [IconTarget; 17] = [
     IconTarget::Working,
     IconTarget::WaitingBackground,
@@ -128,6 +211,7 @@ pub fn attention_status_signals(
 /// use one mode-specific decision, including the Attention priority rule.
 pub fn displayed_pane_signals(
     mode: AgentMonitoringMode,
+    running_indicator: AttentionRunningIndicator,
     status: &PaneStatus,
     progress: Option<&PaneProgress>,
     has_scheduled_input: bool,
@@ -138,7 +222,10 @@ pub fn displayed_pane_signals(
     }
 
     let target = attention_status_target(status, progress);
-    let (objective, now) = attention_signals_for_target(status, progress, target);
+    let (objective, mut now) = attention_signals_for_target(status, progress, target);
+    if running_indicator.uses_status_slot() && is_running_quietly(status, target) {
+        now = NowSignal::Working;
+    }
     let selection_rule = attention_selection_rule(target);
     PaneSignals {
         objective,
@@ -148,7 +235,9 @@ pub fn displayed_pane_signals(
         } else {
             selection_rule
         },
-        now_rule: if now == NowSignal::None {
+        now_rule: if now == NowSignal::Working && target.is_none() {
+            "Attention running indicator: no higher-priority status applies and the agent is working"
+        } else if now == NowSignal::None {
             "A9"
         } else {
             selection_rule
@@ -226,7 +315,11 @@ mod tests {
 
     use crate::icon_settings::IconTarget;
 
-    use super::attention_status_target;
+    use super::{
+        attention_status_target, displayed_pane_signals, AgentMonitoringMode,
+        AttentionRunningIndicator,
+    };
+    use ilium_core::NowSignal;
 
     fn agent(activity: AgentActivity, goal: Option<GoalState>) -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Codex, activity, goal)
@@ -363,5 +456,66 @@ mod tests {
             attention_status_target(&agent(AgentActivity::Idle, None), Some(&monitor)),
             Some(IconTarget::MonitorFailed)
         );
+    }
+
+    #[test]
+    fn running_indicator_keys_round_trip_and_step_wraps() {
+        for option in AttentionRunningIndicator::ALL {
+            assert_eq!(AttentionRunningIndicator::parse(option.key()), Some(option));
+        }
+        assert_eq!(AttentionRunningIndicator::parse("blink"), None);
+        assert_eq!(
+            AttentionRunningIndicator::Off.step(-1),
+            AttentionRunningIndicator::TitleAccent
+        );
+        assert_eq!(
+            AttentionRunningIndicator::TitleAccent.step(1),
+            AttentionRunningIndicator::Off
+        );
+    }
+
+    #[test]
+    fn attention_shows_running_only_when_nothing_higher_applies() {
+        let working = agent(AgentActivity::Working, None);
+        for (indicator, expected) in [
+            (AttentionRunningIndicator::Off, NowSignal::None),
+            (AttentionRunningIndicator::Icon, NowSignal::Working),
+            (AttentionRunningIndicator::Spinner, NowSignal::Working),
+            (AttentionRunningIndicator::PulsingDot, NowSignal::Working),
+            (AttentionRunningIndicator::SteadyDot, NowSignal::Working),
+            (AttentionRunningIndicator::TitleAccent, NowSignal::None),
+        ] {
+            let signals = displayed_pane_signals(
+                AgentMonitoringMode::Attention,
+                indicator,
+                &working,
+                None,
+                false,
+                None,
+            );
+            assert_eq!(signals.now, expected, "{indicator:?}");
+        }
+        // Higher-priority status wins over the running indicator.
+        let approval = agent(AgentActivity::WaitingApproval, None);
+        let signals = displayed_pane_signals(
+            AgentMonitoringMode::Attention,
+            AttentionRunningIndicator::Spinner,
+            &approval,
+            None,
+            false,
+            None,
+        );
+        assert_eq!(signals.now, NowSignal::NeedsApproval);
+        // Idle agents never show it.
+        let idle = agent(AgentActivity::Idle, None);
+        let signals = displayed_pane_signals(
+            AgentMonitoringMode::Attention,
+            AttentionRunningIndicator::Spinner,
+            &idle,
+            None,
+            false,
+            None,
+        );
+        assert_eq!(signals.now, NowSignal::None);
     }
 }

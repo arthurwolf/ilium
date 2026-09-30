@@ -19,10 +19,10 @@
 //! objects, and cost is shown only where the CLI recorded it (Claude Code's
 //! `cost-state` snapshot); otherwise the field stays `None`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::Path;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use ilium_core::AgentClass;
 use regex::bytes::{Regex, RegexSet};
@@ -45,7 +45,7 @@ const CODEX_PREFIX_BYTES: usize = 640;
 /// Token counts normalised across providers so the two never disagree on what
 /// a column means. `input` is uncached prompt input, `cache_read` and
 /// `cache_write` are prompt-cache traffic, `output` includes `reasoning`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenTotals {
     pub input: u64,
     pub cache_read: u64,
@@ -151,6 +151,19 @@ pub struct ReportedCost {
     pub model_costs: Vec<(String, f64)>,
 }
 
+/// Tokens one model consumed during one minute. The dollar cost is derived
+/// later from a price table, so a changed price override reprices history
+/// without re-reading the transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendBucket {
+    /// Start of the minute, in Unix milliseconds.
+    pub minute_ms: i64,
+    pub model: Arc<str>,
+    pub tokens: TokenTotals,
+}
+
+const MINUTE_MS: i64 = 60_000;
+
 /// Everything the popover shows about one session.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SessionStats {
@@ -194,6 +207,9 @@ pub struct SessionStats {
     pub rate_limits: Vec<(String, RateLimitWindow)>,
 
     pub samples: Vec<TokenSample>,
+    /// Per-minute, per-model token spend including sub-agent calls; the
+    /// source of the cost sparkline and burn rate.
+    pub spend: Vec<SpendBucket>,
     pub activity_ms: Vec<i64>,
 
     pub bytes_read: u64,
@@ -290,6 +306,9 @@ pub struct StatsAccumulator {
     claude_calls: Vec<ClaudeCall>,
     claude_call_index: HashMap<String, usize>,
     claude_tool_errors: u32,
+    /// Bytes consumed so far from each sub-agent transcript that belongs to
+    /// this session (see [`Self::ingest_extra_file`]).
+    extra_offsets: HashMap<PathBuf, u64>,
 
     codex_last_total: TokenTotals,
     codex_model_usage: HashMap<String, (u32, TokenTotals)>,
@@ -297,6 +316,7 @@ pub struct StatsAccumulator {
     codex_current_model: Option<String>,
     codex_rate_limits: Vec<(String, RateLimitWindow)>,
     codex_samples: Vec<TokenSample>,
+    codex_spend: BTreeMap<(i64, String), TokenTotals>,
 }
 
 impl StatsAccumulator {
@@ -318,12 +338,14 @@ impl StatsAccumulator {
             claude_calls: Vec::new(),
             claude_call_index: HashMap::new(),
             claude_tool_errors: 0,
+            extra_offsets: HashMap::new(),
             codex_last_total: TokenTotals::default(),
             codex_model_usage: HashMap::new(),
             codex_totals: TokenTotals::default(),
             codex_current_model: None,
             codex_rate_limits: Vec::new(),
             codex_samples: Vec::new(),
+            codex_spend: BTreeMap::new(),
         }
     }
 
@@ -374,6 +396,37 @@ impl StatsAccumulator {
             }
         }
         on_progress(self, self.offset, length);
+        Ok(())
+    }
+
+    /// Feeds another transcript that belongs to the same session, namely a
+    /// Claude Code sub-agent file under `<session>/subagents/`. Claude keeps
+    /// those calls out of the main file, yet they are real spend: a session's
+    /// main transcript can hold a fiftieth of what the CLI billed. Every line
+    /// is sidechain-flagged by the CLI, so the calls count toward totals and
+    /// spend but never redefine the current model or context. Like the main
+    /// file it resumes at its remembered offset and leaves a partial last line
+    /// for the next pass. A file that shrank is skipped rather than re-read.
+    pub fn ingest_extra_file(&mut self, path: &Path) -> std::io::Result<()> {
+        let file = std::fs::File::open(path)?;
+        let length = file.metadata()?.len();
+        let mut offset = self.extra_offsets.get(path).copied().unwrap_or(0);
+        if length <= offset {
+            return Ok(());
+        }
+        let mut reader = BufReader::with_capacity(1 << 20, file);
+        reader.seek(SeekFrom::Start(offset))?;
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            let read = reader.read_until(b'\n', &mut line)?;
+            if read == 0 || line.last() != Some(&b'\n') {
+                break;
+            }
+            offset += read as u64;
+            self.feed_line(&line);
+        }
+        self.extra_offsets.insert(path.to_path_buf(), offset);
         Ok(())
     }
 
@@ -747,6 +800,12 @@ impl StatsAccumulator {
             .codex_current_model
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
+        if let Some(at_ms) = at_ms {
+            self.codex_spend
+                .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), model.clone()))
+                .or_default()
+                .add(&delta);
+        }
         let usage = self.codex_model_usage.entry(model).or_default();
         usage.0 += 1;
         usage.1.add(&delta);
@@ -862,6 +921,16 @@ impl StatsAccumulator {
         stats.models = model_list(by_model.into_iter().map(|(m, v)| (m.to_string(), v)));
         stats.samples = decimate(samples);
         stats.cost = self.cost_snapshot.clone();
+        let mut spend: BTreeMap<(i64, &str), TokenTotals> = BTreeMap::new();
+        for call in &self.claude_calls {
+            if let Some(at_ms) = call.at_ms {
+                spend
+                    .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), call.model.as_str()))
+                    .or_default()
+                    .add(&call.tokens);
+            }
+        }
+        stats.spend = spend_buckets(spend.into_iter());
     }
 
     fn finish_codex(&self, stats: &mut SessionStats) {
@@ -882,6 +951,11 @@ impl StatsAccumulator {
         );
         stats.rate_limits = self.codex_rate_limits.clone();
         stats.samples = decimate(self.codex_samples.clone());
+        stats.spend = spend_buckets(
+            self.codex_spend
+                .iter()
+                .map(|((minute_ms, model), tokens)| ((*minute_ms, model.as_str()), *tokens)),
+        );
         if self.response_prompt_count > 0 {
             stats.recent_prompts = recent(&self.prompts);
             stats.prompt_count = self.response_prompt_count;
@@ -893,6 +967,18 @@ impl StatsAccumulator {
 }
 
 // --------------------------------------------------------------------- helpers
+
+/// Collects per-minute spend, sharing one allocation per distinct model name.
+fn spend_buckets<'a>(entries: impl Iterator<Item = ((i64, &'a str), TokenTotals)>) -> Vec<SpendBucket> {
+    let mut names: HashMap<&'a str, Arc<str>> = HashMap::new();
+    entries
+        .map(|((minute_ms, model), tokens)| SpendBucket {
+            minute_ms,
+            model: Arc::clone(names.entry(model).or_insert_with(|| Arc::from(model))),
+            tokens,
+        })
+        .collect()
+}
 
 fn recent(prompts: &[PromptRecord]) -> Vec<PromptRecord> {
     let start = prompts.len().saturating_sub(RECENT_PROMPT_LIMIT);
@@ -1007,7 +1093,7 @@ fn claude_tokens(usage: &Value) -> TokenTotals {
 
 /// Codex counts `input_tokens` *including* cached ones; the shared shape keeps
 /// them apart so the two providers add up the same way.
-fn codex_tokens(usage: &Value) -> TokenTotals {
+pub(crate) fn codex_tokens(usage: &Value) -> TokenTotals {
     let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
     let cached = field("cached_input_tokens");
     TokenTotals {

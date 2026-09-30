@@ -44,6 +44,7 @@ use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
 use crate::popover::AgentPopover;
 use crate::prompt_queue::PromptQueueDialogState;
+use crate::cost_settings::{CostRow, CostSettings};
 use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeStyle};
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
@@ -250,6 +251,11 @@ pub enum Mode {
     ApiSettingPrompt(TextPromptState),
     /// Edits one free-text Git worktree default from Settings.
     GitSettingPrompt(GitTextField, TextPromptState),
+    /// Edits one Text control of the selected animation scene (a path, glob,
+    /// URL or address) through the shared single-line prompt.
+    AnimationTextPrompt(AnimationPromptTarget, TextPromptState),
+    /// Modal picker for the shared observer location of the ambient scenes.
+    LocationPicker(Box<crate::location_picker::LocationPickerState>),
     /// Edits one feature's global Claude-instruction file. Empty input resets
     /// that feature to `~/.claude/CLAUDE.md`.
     AgentSetupPathPrompt(AgentFeature, TextPromptState),
@@ -337,6 +343,22 @@ pub enum Mode {
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
     /// Full-screen finder over terminal replay and locally-open buffers.
     Search(Box<SearchState>),
+    /// Step/progress/log dialog over a frozen agent pane while its session is
+    /// converted to the other provider. State lives in `App::conversion`.
+    ConvertSession,
+}
+
+/// Which animation control a `Mode::AnimationTextPrompt` edits, and what to
+/// tell the user about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimationPromptTarget {
+    /// Stable id of the scene control (`AmbientSettings::set_control` id).
+    pub control: &'static str,
+    pub label: String,
+    /// Placeholder wording of the control, shown in the prompt hint.
+    pub hint: &'static str,
+    /// The validation message of the last rejected value, shown in the prompt.
+    pub error: Option<String>,
 }
 
 /// Why the interactive client event loop should return to the CLI wrapper.
@@ -403,6 +425,8 @@ pub enum SettingsTab {
     VoiceControl,
     ResetPlanning,
     AgentMonitoring,
+    /// Agent spend indicators and how "expensive" is decided.
+    Cost,
     Debug,
     Api,
     About,
@@ -562,11 +586,12 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 21] = [
+    pub const ALL: [SettingsTab; 22] = [
         Self::Appearance,
         Self::Animations,
         Self::Icons,
         Self::AgentMonitoring,
+        Self::Cost,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -606,6 +631,7 @@ impl SettingsTab {
             Self::VoiceControl => "Voice control",
             Self::ResetPlanning => "Reset planning",
             Self::AgentMonitoring => "Agent Monitoring",
+            Self::Cost => "Agent Cost",
             Self::Debug => "Debug",
             Self::Api => "API",
             Self::About => "About",
@@ -711,8 +737,10 @@ impl AppearanceRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentMonitoringRow {
     Mode,
+    AttentionRunningIndicator,
     ProgressMonitor,
     ProgressMonitorMaxLines,
+    CompletedProgressHideAfter,
     ProgressFillStyle,
     WorkingPollSeconds,
     IdlePollSeconds,
@@ -726,8 +754,10 @@ impl AgentMonitoringRow {
     pub fn all(custom_signature_count: usize) -> Vec<Self> {
         let mut rows = vec![
             Self::Mode,
+            Self::AttentionRunningIndicator,
             Self::ProgressMonitor,
             Self::ProgressMonitorMaxLines,
+            Self::CompletedProgressHideAfter,
             Self::ProgressFillStyle,
             Self::WorkingPollSeconds,
             Self::IdlePollSeconds,
@@ -934,6 +964,9 @@ pub struct SettingsState {
     pub scroll: u16,
     /// An Animations slider owns its left-button gesture until release.
     pub animation_slider_drag: Option<usize>,
+    /// The Animations tab hides its controls so the live field fills the
+    /// screen; any key or click restores them.
+    pub animation_fullscreen: bool,
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
@@ -1046,6 +1079,7 @@ impl SettingsState {
             selected_row: 0,
             scroll: 0,
             animation_slider_drag: None,
+            animation_fullscreen: false,
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
@@ -1093,6 +1127,9 @@ pub enum ContextMenuAction {
     /// pane, every such pane in a project, or every such pane in the whole
     /// tree from `ROOT_ID`.
     AskForUpdate,
+    /// Converts the target agent pane's session to the other built-in
+    /// provider (see `crate::session_conversion`).
+    ConvertTo(BuiltinAgentProvider),
     ShowSplitView,
     ToggleGroup,
     NewTerminal,
@@ -1154,6 +1191,9 @@ impl ContextMenuAction {
             Self::QueuePrompt => IconTarget::GoalActive,
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
             Self::AskForUpdate => IconTarget::AskForUpdate,
+            Self::ConvertTo(BuiltinAgentProvider::Claude) => IconTarget::Claude,
+            Self::ConvertTo(BuiltinAgentProvider::Codex) => IconTarget::Codex,
+            Self::ConvertTo(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
             Self::ToggleGroup | Self::NewGroup => IconTarget::Group,
             Self::NewAgent(BuiltinAgentProvider::Claude) => IconTarget::Claude,
@@ -1184,6 +1224,7 @@ impl ContextMenuAction {
             Self::QueuePrompt => "Queue prompt…".to_string(),
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::AskForUpdate => "Ask for update".to_string(),
+            Self::ConvertTo(provider) => format!("Convert to {}", provider.label()),
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
@@ -1695,8 +1736,10 @@ pub struct App {
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
     pub animation_settings: crate::background_animation::AnimationSettings,
+    /// The one screen-sized field (and hosted scene) shared by the ambient
+    /// background and the Settings preview.
     pub animation_frame: crate::background_animation::AnimationFrame,
-    pub animation_preview_frame: std::cell::RefCell<crate::background_animation::AnimationFrame>,
+    pub animation_cache: std::cell::RefCell<crate::background_animation::AnimationLoopCache>,
     /// Structural row transitions live beside the render-cache mirror, never
     /// in the authoritative server tree or the IPC protocol.
     pub(crate) tree_transitions: TreeTransitions,
@@ -1717,6 +1760,8 @@ pub struct App {
     /// actual values live here). See `apply_ui_settings`/
     /// `apply_and_persist_ui_settings`.
     pub ui_settings: UiSettings,
+    /// One wall-clock sample per maintenance tick keeps footer layout and drawing consistent.
+    progress_display_now_unix_millis: u64,
     /// This session's live shortcut-base setting. Input dispatch and every
     /// displayed shortcut label read this same value.
     pub keyboard_settings: KeyboardSettings,
@@ -1762,6 +1807,13 @@ pub struct App {
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
     pub reset_planning_settings: ResetPlanningSettings,
+    /// Agent-spend indicator settings (the Agent Cost tab).
+    pub cost_settings: CostSettings,
+    /// Text being typed into the sparkline-window field of the Agent Cost
+    /// tab (`Enter` on that row), or `None` while it is not being edited.
+    pub cost_window_input: Option<String>,
+    /// Derived per-agent spend and the overlay the tree draws.
+    pub(crate) cost_tracker: crate::cost_tracker::CostTracker,
     pub reset_monitor_state: ResetMonitorState,
     /// Server-authoritative adaptive detection settings. None until the
     /// attach handshake sends its initial settings event.
@@ -1835,6 +1887,9 @@ pub struct App {
     /// The footer agent icon's hover or pinned worktree actions.
     pub agent_popover: Option<AgentPopover>,
     agent_popover_last_visible: bool,
+    /// Settings -> Animations: the row with disabled options the pointer
+    /// rests on (see `animation_hover`).
+    pub(crate) animation_hover: Option<crate::animation_hover::AnimationHover>,
     next_workspace_request_id: u64,
     active_workspace_dialog_query: Option<(u64, NodeId)>,
     active_workspace_menu_query: Option<(u64, NodeId)>,
@@ -1943,6 +1998,15 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Panes whose agent is being converted: their terminal output is ignored
+    /// so the last screen stays on display behind the conversion dialog.
+    pub frozen_panes: HashSet<NodeId>,
+    /// The active "Convert to" dialog, if any (see `Mode::ConvertSession`).
+    pub conversion: Option<Box<crate::session_conversion::ConversionDialogState>>,
+    /// Conversion the event loop must start on a blocking worker.
+    pub pending_conversion_start: Option<crate::session_conversion::ConversionJob>,
+    /// Set when the user cancels a running conversion.
+    pub pending_conversion_cancel: bool,
     /// Exact detected process owning each verified agent session. Kept beside
     /// `agent_session_ids` because title prompts need the PID while process
     /// discovery remains server-owned.
@@ -1998,7 +2062,7 @@ pub struct App {
     /// `self.tree`. Exists purely so `tree_hit_test_cache` can tell whether
     /// its cached `TreeItem`s are still valid without comparing the whole
     /// tree -- see that field's doc comment.
-    tree_version: u64,
+    pub(crate) tree_version: u64,
     /// Caches the structural `TreeItem` list used for mouse hit-testing
     /// (`tree_node_at`), which -- unlike the labels `tree_ui::render`
     /// builds every frame -- never depends on animation state: hit-testing
@@ -2121,7 +2185,7 @@ impl App {
             started_at,
             animation_settings: Default::default(),
             animation_frame: Default::default(),
-            animation_preview_frame: Default::default(),
+            animation_cache: Default::default(),
             tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             requested_pane_sizes: HashMap::new(),
@@ -2131,6 +2195,7 @@ impl App {
                 UiSettings::default().left_panel_sizing.unfocused_width,
             ),
             ui_settings: UiSettings::default(),
+            progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
@@ -2153,6 +2218,9 @@ impl App {
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
             reset_planning_settings: ResetPlanningSettings::default(),
+            cost_settings: CostSettings::default(),
+            cost_window_input: None,
+            cost_tracker: crate::cost_tracker::CostTracker::default(),
             reset_monitor_state: ResetMonitorState::default(),
             agent_detection_settings: None,
             agent_detection_settings_error: None,
@@ -2197,6 +2265,7 @@ impl App {
             hovered_tree_toolbar_action: None,
             agent_popover: None,
             agent_popover_last_visible: false,
+            animation_hover: None,
             next_workspace_request_id: 1,
             active_workspace_dialog_query: None,
             active_workspace_menu_query: None,
@@ -2230,6 +2299,10 @@ impl App {
             terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            frozen_panes: HashSet::new(),
+            conversion: None,
+            pending_conversion_start: None,
+            pending_conversion_cancel: false,
             agent_process_ids: HashMap::new(),
             restored_editor_paths: HashMap::new(),
             title_inference_attempts: HashMap::new(),
@@ -2884,7 +2957,27 @@ impl App {
     /// immediately rather than lingering until the server's own clearing
     /// broadcast arrives.
     pub fn shows_progress_footer(&self, pane_id: NodeId) -> bool {
-        self.ui_settings.progress_monitor_enabled && self.tree.pane_progress(pane_id).is_some()
+        self.ui_settings.progress_monitor_enabled
+            && crate::progress_display::footer_is_visible(
+                self.tree.pane_progress(pane_id),
+                self.ui_settings.completed_progress_hide_after_seconds,
+                self.progress_display_now_unix_millis,
+            )
+    }
+
+    /// Reclaims footer rows once a retained result expires, even when no
+    /// server event or user input arrives. Never mutates monitor/result state.
+    pub(crate) fn tick_completed_progress_display(&mut self, now_unix_millis: u64) -> bool {
+        let previous = self.displayed_pane_ids().into_iter()
+            .map(|pane_id| (pane_id, self.shows_progress_footer(pane_id)))
+            .collect::<Vec<_>>();
+        self.progress_display_now_unix_millis = now_unix_millis;
+        let changed = previous.into_iter()
+            .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id));
+        if changed {
+            self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        }
+        changed
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -3670,6 +3763,55 @@ impl App {
         self.reset_planning_settings = settings;
     }
 
+    pub fn apply_cost_settings(&mut self, settings: CostSettings) {
+        self.cost_settings = settings;
+    }
+
+    /// Applies one interaction on a Cost tab row (`direction` is `-1`, `0` for
+    /// activate, or `1`) and persists the result immediately.
+    pub fn settings_adjust_cost_row(&mut self, row: CostRow, direction: i32) {
+        let mut settings = self.cost_settings.clone();
+        if !settings.adjust(row, direction) {
+            return;
+        }
+        self.cost_settings = settings;
+        self.persist_cost_settings();
+    }
+
+    fn persist_cost_settings(&mut self) {
+        if let Some(config_dir) = &self.config_dir {
+            if let Err(error) = crate::config::save_cost_settings(config_dir, &self.cost_settings) {
+                self.status_message = Some(format!("Could not save agent cost settings: {error}"));
+            }
+        }
+    }
+
+    /// Starts typing an exact sparkline window (`Enter` on that row).
+    pub fn settings_begin_cost_window_input(&mut self) {
+        self.cost_window_input = Some(String::new());
+    }
+
+    pub fn settings_cancel_cost_window_input(&mut self) {
+        self.cost_window_input = None;
+    }
+
+    /// Commits the typed window. An unparsable value keeps the field open
+    /// and says why, so a typo never silently discards what was typed.
+    pub fn settings_submit_cost_window_input(&mut self) {
+        let Some(input) = self.cost_window_input.clone() else {
+            return;
+        };
+        let Some(minutes) = crate::cost_model::parse_window_minutes(&input) else {
+            self.status_message = Some(
+                "Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).".to_owned(),
+            );
+            return;
+        };
+        self.cost_window_input = None;
+        self.cost_settings.set_window_minutes(minutes);
+        self.persist_cost_settings();
+    }
+
     pub fn settings_adjust_reset_planning_row(&mut self, row: usize) {
         let mut settings = self.reset_planning_settings.clone();
         match row {
@@ -4094,6 +4236,12 @@ impl App {
         self.settings_set_agent_monitoring_mode(mode);
     }
 
+    pub fn settings_adjust_attention_running_indicator(&mut self, direction: i32) {
+        let mut ui = self.ui_settings.clone();
+        ui.attention_running_indicator = ui.attention_running_indicator.step(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     pub fn settings_adjust_agent_monitoring_row(
         &mut self,
         row: AgentMonitoringRow,
@@ -4101,9 +4249,15 @@ impl App {
     ) {
         match row {
             AgentMonitoringRow::Mode => self.settings_adjust_agent_monitoring_mode(direction),
+            AgentMonitoringRow::AttentionRunningIndicator => {
+                self.settings_adjust_attention_running_indicator(direction)
+            }
             AgentMonitoringRow::ProgressMonitor => self.settings_toggle_progress_monitor(),
             AgentMonitoringRow::ProgressMonitorMaxLines => {
                 self.settings_adjust_progress_max_lines(direction)
+            }
+            AgentMonitoringRow::CompletedProgressHideAfter => {
+                self.settings_adjust_completed_progress_hide_after(direction)
             }
             AgentMonitoringRow::ProgressFillStyle => {
                 self.settings_adjust_progress_fill_style(direction)
@@ -5823,30 +5977,274 @@ impl App {
             if state.tab == SettingsTab::Animations && state.icon_picker.is_none() && state.keyboard_picker.is_none())
     }
 
-    /// Apply only after the project write succeeds; failed saves retain the effective scene.
-    pub fn settings_adjust_animation_row(&mut self, row: usize, direction: i32) {
-        let mut settings = self.animation_settings;
-        if !settings.adjust_row(row, direction) {
+    /// Runtime facts (hosted scene colors and status, cache progress) that
+    /// shape the Animations row list.
+    pub fn animation_row_context(&self) -> crate::animation_rows::RowContext {
+        let screen = self.layout.screen_area;
+        crate::animation_rows::RowContext {
+            scene_uses_cell_colors: self.animation_frame.host().uses_cell_colors(),
+            scene_status: self.animation_frame.host().status(),
+            cache: self.animation_cache.borrow().status(),
+            loop_bytes: self
+                .animation_settings
+                .estimated_loop_bytes(screen.width, screen.height),
+        }
+    }
+
+    /// The row list every Animations surface (render, keys, mouse, scroll,
+    /// help anchors) derives from.
+    pub fn animation_row_model(&self) -> crate::animation_rows::RowModel {
+        crate::animation_rows::RowModel::new(
+            &self.animation_settings.normalized(),
+            &self.animation_row_context(),
+        )
+    }
+
+    /// The redraw cadence of the field on screen: the hosted scene's request,
+    /// or 12 frames per second for built-in scenes and before a scene exists.
+    pub fn animation_frames_per_second(&self) -> u32 {
+        if self.animation_settings.kind.is_ambient() {
+            self.animation_frame
+                .host()
+                .frames_per_second()
+                .unwrap_or(crate::background_composition::DEFAULT_FRAMES_PER_SECOND)
+        } else {
+            crate::background_composition::DEFAULT_FRAMES_PER_SECOND
+        }
+    }
+
+    /// Selects and persists a scene. Apply only after the project write
+    /// succeeds; a failed save retains the effective scene.
+    pub fn settings_select_animation_scene(
+        &mut self,
+        kind: crate::background_animation::AnimationKind,
+    ) {
+        if self.animation_settings.kind == kind {
             return;
         }
+        let mut settings = self.animation_settings.clone();
+        settings.kind = kind;
         self.settings_save_animation(settings);
     }
 
-    pub fn settings_set_animation_slider(&mut self, row: usize, value: u16) {
-        let mut settings = self.animation_settings;
-        if !settings.set_slider_value(row, value) {
-            return;
+    /// Applies `edit` to a copy of the settings and persists it when it
+    /// changed something. An `Err` message is shown in the status line and
+    /// nothing changes.
+    fn settings_edit_animation(
+        &mut self,
+        edit: impl FnOnce(&mut crate::background_animation::AnimationSettings) -> Result<bool, String>,
+    ) -> bool {
+        let mut settings = self.animation_settings.clone();
+        match edit(&mut settings) {
+            Ok(true) => {
+                self.settings_save_animation(settings);
+                true
+            }
+            Ok(false) => false,
+            Err(message) => {
+                self.status_message = Some(message);
+                false
+            }
         }
-        self.settings_save_animation(settings);
+    }
+
+    fn settings_apply_animation_row_value(
+        &mut self,
+        row: &crate::animation_rows::AnimationRow,
+        value: ilium_ambient::ControlValue,
+    ) -> bool {
+        use crate::animation_rows::AnimationRow;
+        match row {
+            AnimationRow::Common(id) => {
+                self.settings_edit_animation(|settings| settings.set_common_control(id, value))
+            }
+            AnimationRow::SceneControl(id) => {
+                self.settings_edit_animation(|settings| settings.set_scene_control(id, value))
+            }
+            _ => false,
+        }
+    }
+
+    /// Steps the row at `row` one notch (Left/Right): selects a scene row's
+    /// scene, cycles a choice, flips a toggle, nudges a slider. Rows that
+    /// open a dialog do nothing here; see `settings_activate_animation_row`.
+    pub fn settings_adjust_animation_row(&mut self, row: usize, direction: i32) {
+        use crate::animation_rows::AnimationRow;
+        let model = self.animation_row_model();
+        let Some(animation_row) = model.row(row).cloned() else {
+            return;
+        };
+        let control = match &animation_row {
+            AnimationRow::Scene(kind) => {
+                self.settings_select_animation_scene(*kind);
+                return;
+            }
+            AnimationRow::Common(id) => self.animation_settings.common_control(id),
+            AnimationRow::SceneControl(id) => self.animation_settings.scene_control(id),
+            _ => None,
+        };
+        let Some(control) = control else {
+            return;
+        };
+        let stepped = control.stepped(direction);
+        // A step that could not move (the only other option is disabled)
+        // tells the user why instead of silently doing nothing.
+        if stepped.as_ref() == Some(&control.value) {
+            if let Some(notice) = crate::animation_rows::disabled_notice(&control) {
+                self.status_message = Some(notice);
+            }
+        }
+        if let Some(value) = stepped {
+            self.settings_apply_animation_row_value(&animation_row, value);
+        }
+    }
+
+    /// Moving the selection onto a scene row previews (and persists) it.
+    pub fn settings_preview_select_animation_row(&mut self, row: usize) {
+        if matches!(
+            self.animation_row_model().row(row),
+            Some(crate::animation_rows::AnimationRow::Scene(_))
+        ) {
+            self.settings_adjust_animation_row(row, 1);
+        }
+    }
+
+    /// Sets a slider row to `value` (mouse track, tests).
+    pub fn settings_set_animation_slider(&mut self, row: usize, value: i32) {
+        let model = self.animation_row_model();
+        let Some(animation_row) = model.row(row).cloned() else {
+            return;
+        };
+        self.settings_apply_animation_row_value(
+            &animation_row,
+            ilium_ambient::ControlValue::Number(value),
+        );
+    }
+
+    /// Enter / Space / click on a row: the row's primary action.
+    pub fn settings_activate_animation_row(
+        &mut self,
+        row: usize,
+    ) -> crate::animation_rows::AnimationRowOutcome {
+        use crate::animation_rows::{AnimationRow, AnimationRowOutcome};
+        let model = self.animation_row_model();
+        let Some(animation_row) = model.row(row).cloned() else {
+            return AnimationRowOutcome::Done;
+        };
+        match &animation_row {
+            AnimationRow::Location => AnimationRowOutcome::LocationPicker,
+            AnimationRow::FullScreenPreview => AnimationRowOutcome::FullScreenPreview,
+            AnimationRow::CacheStatus | AnimationRow::SceneStatus => AnimationRowOutcome::Done,
+            AnimationRow::SceneControl(id)
+                if matches!(
+                    model.view(row).map(|view| &view.kind),
+                    Some(crate::animation_rows::RowKind::Text)
+                ) =>
+            {
+                let control = self.animation_settings.scene_control(id);
+                let (hint, current) = match control.as_ref().map(|c| (&c.kind, &c.value)) {
+                    Some((
+                        ilium_ambient::ControlKind::Text { hint },
+                        ilium_ambient::ControlValue::Text(text),
+                    )) => (*hint, text.clone()),
+                    _ => ("", String::new()),
+                };
+                AnimationRowOutcome::TextPrompt {
+                    control: id,
+                    label: model
+                        .view(row)
+                        .map(|view| view.label.clone())
+                        .unwrap_or_default(),
+                    hint,
+                    current,
+                }
+            }
+            _ => {
+                self.settings_adjust_animation_row(row, 1);
+                AnimationRowOutcome::Done
+            }
+        }
+    }
+
+    /// Opens the shared single-line prompt for a Text control. The caller has
+    /// already restored the Settings mode, so the prompt stacks over it.
+    pub fn begin_animation_text_prompt(
+        &mut self,
+        control: &'static str,
+        label: String,
+        hint: &'static str,
+        current: String,
+    ) {
+        self.push_modal(Mode::AnimationTextPrompt(
+            AnimationPromptTarget {
+                control,
+                label,
+                hint,
+                error: None,
+            },
+            TextPromptState::new(current),
+        ));
+    }
+
+    /// Commits a prompt value through `AmbientSettings::set_control`. `Err`
+    /// carries the validation message; nothing changed in that case.
+    pub fn apply_animation_text_input(
+        &mut self,
+        control: &'static str,
+        value: String,
+    ) -> Result<(), String> {
+        let mut settings = self.animation_settings.clone();
+        match settings.set_scene_control(control, ilium_ambient::ControlValue::Text(value)) {
+            Ok(true) => {
+                self.settings_save_animation(settings);
+                Ok(())
+            }
+            Ok(false) => Ok(()),
+            Err(message) => {
+                self.status_message = Some(message.clone());
+                Err(message)
+            }
+        }
+    }
+
+    /// Stores the shared observer location used by every location scene.
+    pub fn settings_set_location(&mut self, location: ilium_ambient::GeoLocation) {
+        self.settings_edit_animation(|settings| {
+            let location = location.normalized();
+            if settings.ambient.location == location {
+                return Ok(false);
+            }
+            settings.ambient.location = location;
+            Ok(true)
+        });
+    }
+
+    /// Opens the location picker over Settings; the caller has restored the
+    /// Settings mode first.
+    pub fn open_location_picker(&mut self) {
+        let picker = crate::location_picker::LocationPickerState::new(
+            self.animation_settings.ambient.location.clone(),
+        );
+        self.push_modal(Mode::LocationPicker(Box::new(picker)));
+    }
+
+    /// Polls the open location picker's geocode worker. Returns whether the
+    /// visible picker state changed.
+    pub fn tick_location_picker(&mut self) -> bool {
+        match &mut self.mode {
+            Mode::LocationPicker(picker) => picker.poll_search(),
+            _ => false,
+        }
     }
 
     fn settings_save_animation(
         &mut self,
         settings: crate::background_animation::AnimationSettings,
     ) {
-        match crate::project_config::set_animation(&self.session_cwd, settings) {
+        match crate::project_config::set_animation(&self.session_cwd, settings.clone()) {
             Ok(()) => {
                 self.animation_settings = settings.normalized();
+                self.animation_cache = Default::default();
                 self.status_message = None;
             }
             Err(error) => {
@@ -5980,6 +6378,21 @@ impl App {
         ) as u8;
         let mut ui = self.ui_settings.clone();
         ui.progress_max_lines = lines;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
+    /// Zero keeps completed footers visible; the row steps in 30-second increments.
+    pub fn settings_adjust_completed_progress_hide_after(&mut self, direction: i32) {
+        if direction == 0 {
+            return;
+        }
+        let mut ui = self.ui_settings.clone();
+        ui.completed_progress_hide_after_seconds = if direction < 0 {
+            ui.completed_progress_hide_after_seconds.saturating_sub(30)
+        } else {
+            ui.completed_progress_hide_after_seconds.saturating_add(30)
+        };
         self.apply_and_persist_ui_settings(ui);
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
@@ -6572,6 +6985,17 @@ impl App {
         let elapsed_ms = now.saturating_duration_since(self.started_at).as_millis();
         let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         let mut requirements = AnimationRequirements::default();
+
+        // An address search answers on its own thread; poll for it at 10 Hz.
+        if let Mode::LocationPicker(picker) = &self.mode {
+            if picker.is_searching() {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_semantic_delay,
+                    Duration::from_millis(100),
+                );
+            }
+        }
 
         if let Some(session) = &self.smart_copy_session {
             use crate::smart_copy::SmartCopyPhase;
@@ -7313,6 +7737,10 @@ impl App {
     fn restore_manual_tree_order_for_mutation(&mut self) {
         if self.ui_settings.tree_order != TreeOrder::Manual {
             self.settings_set_tree_order(TreeOrder::Manual);
+        }
+        // Ordering by cost is an automatic view too, so a direct move leaves it.
+        if self.cost_settings.sort_by_cost {
+            self.settings_adjust_cost_row(CostRow::SortByCost, 0);
         }
     }
 
@@ -9257,6 +9685,10 @@ impl App {
                 }
                 if self.tree.is_agent_pane_idle_for_update(target) {
                     actions.insert(insert_at, ContextMenuAction::AskForUpdate);
+                    insert_at += 1;
+                }
+                if let Some(provider) = self.conversion_target_for(target) {
+                    actions.insert(insert_at, ContextMenuAction::ConvertTo(provider));
                 }
             }
             Some(Node {
@@ -9330,6 +9762,7 @@ impl App {
                 self.status_message = Some("Prompt queue cleared".to_string());
             }
             ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
+            ContextMenuAction::ConvertTo(provider) => self.action_convert_session(target, provider),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
@@ -9383,7 +9816,7 @@ impl App {
     }
 
     /// Fixed status-check prompt sent by the "ask for update" tree action.
-    const ASK_FOR_UPDATE_PROMPT: &'static str = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+    const ASK_FOR_UPDATE_PROMPT: &'static str = ilium_prompts::agent::ASK_FOR_UPDATE;
 
     /// Sends `ASK_FOR_UPDATE_PROMPT` followed by Enter to every eligible pane
     /// under `target` -- see `Tree::panes_eligible_for_update`. `target` may be a
@@ -9895,11 +10328,15 @@ impl App {
         {
             return None;
         }
-        let items = self.tree_hit_test_cache.get_or_build(
+        let tree_order = self.effective_tree_order();
+        let overlay = self.cost_tracker.overlay();
+        let items = self.tree_hit_test_cache.get_or_build_ranked(
             &self.tree,
             self.tree_version,
-            self.ui_settings.tree_order,
+            tree_order,
             self.tree_state.opened(),
+            &overlay.ranks,
+            overlay.rank_epoch,
         );
         tree_ui::status_slot_at_position(
             items,
@@ -9931,11 +10368,15 @@ impl App {
             // window instead of applying a click to a shifted, invisible row.
             return None;
         }
-        let items = self.tree_hit_test_cache.get_or_build(
+        let tree_order = self.effective_tree_order();
+        let overlay = self.cost_tracker.overlay();
+        let items = self.tree_hit_test_cache.get_or_build_ranked(
             &self.tree,
             self.tree_version,
-            self.ui_settings.tree_order,
+            tree_order,
             self.tree_state.opened(),
+            &overlay.ranks,
+            overlay.rank_epoch,
         );
         tree_ui::node_at_position(
             items,
@@ -11990,6 +12431,58 @@ mod tests {
 
     fn app() -> App {
         App::new("test-session".to_string(), std::env::temp_dir())
+    }
+
+    #[test]
+    fn completed_progress_expiry_reclaims_rows_and_preserves_retained_result() {
+        use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "tasks").unwrap();
+        let pane_id = app.tree.add_pane(group, "task", PaneContentKind::Terminal).unwrap();
+        app.panes.insert(pane_id, PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.progress_display_now_unix_millis = 1000;
+        let progress = PaneProgress::new(17, ProgressTaskReport {
+            job_id: "expiry-proof".to_owned(),
+            status: ProgressTaskStatus::Done,
+            percent: 100.0,
+            message: "retained expiry footer marker".to_owned(),
+            error: None,
+        }, 1000).unwrap();
+        app.tree.set_pane_progress(pane_id, Some(progress.clone())).unwrap();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let before = app.pane_viewport(pane_id).unwrap();
+        assert!(before.progress_area.is_some());
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| crate::ui::draw(frame, &mut app)).unwrap();
+        let rendered = terminal.backend().buffer().content().iter()
+            .map(|cell| cell.symbol()).collect::<String>();
+        assert!(rendered.contains("retained expiry footer marker"));
+        app.take_outbound_requests();
+
+        assert!(app.tick_completed_progress_display(61_000));
+        let after = app.pane_viewport(pane_id).unwrap();
+        assert!(after.progress_area.is_none());
+        assert!(after.content_area.height > before.content_area.height);
+        assert!(app.take_outbound_requests().iter().any(|request| matches!(
+            request, ClientRequest::ResizePane { pane_id: resized, rows, .. }
+                if *resized == pane_id && *rows == after.content_area.height
+        )));
+        terminal.draw(|frame| crate::ui::draw(frame, &mut app)).unwrap();
+        let rendered = terminal.backend().buffer().content().iter()
+            .map(|cell| cell.symbol()).collect::<String>();
+        assert!(!rendered.contains("retained expiry footer marker"));
+        assert_eq!(app.tree.pane_progress(pane_id), Some(&progress));
+        assert!(!app.tick_completed_progress_display(62_000));
+        assert!(app.take_outbound_requests().is_empty());
+
+        let mut running = progress.clone();
+        running.monitor_id = 18;
+        running.report.status = ProgressTaskStatus::Running;
+        app.tree.set_pane_progress(pane_id, Some(running)).unwrap();
+        app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        assert!(app.pane_viewport(pane_id).unwrap().progress_area.is_some());
     }
 
     #[test]
@@ -16573,7 +17066,8 @@ mod tests {
         assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Animations);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
-        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Keyboard);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
@@ -16616,6 +17110,48 @@ mod tests {
                 .reset_planning,
             app.reset_planning_settings
         );
+    }
+
+    #[test]
+    fn cost_controls_persist_immediately_and_sorting_follows_the_switch() {
+        use crate::cost_settings::{CostDisplay, CostVisibility};
+
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        app.settings_adjust_cost_row(CostRow::Display(CostDisplay::Sparkline), 0);
+        app.settings_adjust_cost_row(CostRow::Visibility(CostDisplay::Sparkline), 0);
+        assert!(app.cost_settings.sparkline.enabled);
+        assert_eq!(
+            app.cost_settings.sparkline.visibility,
+            CostVisibility::Always
+        );
+        assert_eq!(
+            crate::config::load(config_dir.path()).unwrap().cost,
+            app.cost_settings
+        );
+
+        assert_eq!(app.effective_tree_order(), app.ui_settings.tree_order);
+        app.settings_adjust_cost_row(CostRow::SortByCost, 0);
+        assert_eq!(app.effective_tree_order(), TreeOrder::CostDescending);
+
+        // A direct manual move leaves every automatic view, cost order included.
+        app.restore_manual_tree_order_for_mutation();
+        assert!(!app.cost_settings.sort_by_cost);
+        assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
+        assert!(!crate::config::load(config_dir.path()).unwrap().cost.sort_by_cost);
+    }
+
+    #[test]
+    fn an_unchanged_cost_row_does_not_touch_the_config_file() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        // Selecting the already-selected calibration changes nothing.
+        let current = app.cost_settings.calibration;
+        app.settings_adjust_cost_row(CostRow::Calibration(current), 0);
+        assert!(!config_dir.path().join("config.toml").exists());
     }
 
     #[test]

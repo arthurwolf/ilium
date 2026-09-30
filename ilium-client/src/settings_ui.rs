@@ -243,6 +243,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
 
+    // Full-screen preview: the compositor paints the live field over the whole
+    // screen; only a one-line hint remains. Any key or click returns.
+    if state.tab == SettingsTab::Animations && state.animation_fullscreen {
+        crate::animation_settings_ui::render_fullscreen_hint(frame, area, app);
+        crate::animation_settings_ui::render_inspired_by(frame, area, app, 0);
+        return;
+    }
+
     // The Icons assignment table follows a picker full of wide emoji. Give
     // it its own near-black canvas so returning from either density mode
     // repaints every physical terminal cell before this compact table draws.
@@ -381,6 +389,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             agent_monitoring_view(app, state.selected_row, layout.content_area.width).lines,
             state.scroll,
         ),
+        SettingsTab::Cost => crate::cost_settings_ui::render(
+            frame,
+            layout.content_area,
+            app,
+            state.selected_row,
+            state.scroll,
+        ),
         SettingsTab::Debug => render_scrollable(
             frame,
             layout.content_area,
@@ -448,20 +463,37 @@ pub fn settings_help_anchors(
     };
     match state.tab {
         SettingsTab::About => {}
+        SettingsTab::Cost => {
+            let all_rows = crate::cost_settings_ui::rows(app);
+            for (topic_id, line, row) in
+                crate::cost_settings_ui::help_anchors(app, layout.content_area.width)
+            {
+                let selected = all_rows.get(state.selected_row) == Some(&row);
+                push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
+            }
+        }
         SettingsTab::Animations => {
-            for row in 0..crate::animation_settings_ui::ROW_COUNT {
-                if let Some(y) =
-                    crate::animation_settings_ui::row_y(layout.content_area, row, state.scroll)
-                {
-                    push_help_anchor(
-                        &mut anchors,
-                        layout,
-                        &format!("AN-{:02}", row + 1),
-                        y.saturating_sub(layout.content_area.y),
-                        0,
-                        state.selected_row == row,
-                    );
-                }
+            let model = app.animation_row_model();
+            for row in 0..model.len() {
+                let (Some(y), Some(topic_id)) = (
+                    crate::animation_settings_ui::row_y(
+                        layout.content_area,
+                        model.len(),
+                        row,
+                        state.scroll,
+                    ),
+                    crate::animation_settings_ui::help_id_for_row(&model, app, row),
+                ) else {
+                    continue;
+                };
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &topic_id,
+                    y.saturating_sub(layout.content_area.y),
+                    0,
+                    state.selected_row == row,
+                );
             }
         }
         SettingsTab::Terminal => {
@@ -649,6 +681,7 @@ pub fn settings_help_anchors(
             for (row, line) in view.row_lines {
                 let id = match row {
                     crate::app::AgentMonitoringRow::Mode => "AM-01".to_owned(),
+                    crate::app::AgentMonitoringRow::AttentionRunningIndicator => "AM-22".to_owned(),
                     crate::app::AgentMonitoringRow::WorkingPollSeconds => "AM-02".to_owned(),
                     crate::app::AgentMonitoringRow::IdlePollSeconds => "AM-03".to_owned(),
                     crate::app::AgentMonitoringRow::CustomSignaturesHeading
@@ -656,6 +689,7 @@ pub fn settings_help_anchors(
                     | crate::app::AgentMonitoringRow::AddCustomSignature => "AM-04".to_owned(),
                     crate::app::AgentMonitoringRow::ProgressMonitor => "AP-20".to_owned(),
                     crate::app::AgentMonitoringRow::ProgressMonitorMaxLines => "AP-21".to_owned(),
+                    crate::app::AgentMonitoringRow::CompletedProgressHideAfter => "AM-23".to_owned(),
                     crate::app::AgentMonitoringRow::ProgressFillStyle => "AP-22".to_owned(),
                     crate::app::AgentMonitoringRow::StatusIcon(target) => {
                         let offset = crate::agent_monitoring::STATUS_ICON_TARGETS
@@ -1006,7 +1040,12 @@ fn text_trigger_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, scroll: u16) {
+pub(crate) fn render_scrollable(
+    frame: &mut Frame,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+    scroll: u16,
+) {
     let total_lines = lines.len() as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll, 0));
     frame.render_widget(paragraph, area);
@@ -1028,7 +1067,10 @@ fn render_scrollable(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>, s
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     if tab == SettingsTab::Animations {
-        return crate::animation_settings_ui::max_scroll(content_area);
+        return crate::animation_settings_ui::max_scroll(
+            content_area,
+            app.animation_row_model().len(),
+        );
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
@@ -1101,6 +1143,9 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             agent_monitoring_view(app, selected_row, content_area.width)
                 .lines
                 .len() as u16
+        }
+        SettingsTab::Cost => {
+            return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
         }
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
@@ -1383,7 +1428,9 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 sidebar_density: app.ui_settings.sidebar_density,
                 use_stable_glyphs: app.ui_settings.use_stable_glyphs,
                 agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
+                attention_running_indicator: app.ui_settings.attention_running_indicator,
                 show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
+                cost: None,
                 hover: crate::tree_ui::TreeHoverState::default(),
                 panes: &app.panes,
             },
@@ -4262,8 +4309,10 @@ fn monitoring_row_label(row: crate::app::AgentMonitoringRow) -> String {
     use crate::app::AgentMonitoringRow as Row;
     match row {
         Row::Mode => "Display mode".to_string(),
+        Row::AttentionRunningIndicator => "Attention running indicator".to_string(),
         Row::ProgressMonitor => "Progress monitoring".to_string(),
         Row::ProgressMonitorMaxLines => "Progress footer lines".to_string(),
+        Row::CompletedProgressHideAfter => "Hide completed progress after".to_string(),
         Row::ProgressFillStyle => "Progress fill style".to_string(),
         Row::WorkingPollSeconds => "Working poll interval".to_string(),
         Row::IdlePollSeconds => "Idle poll interval".to_string(),
@@ -4286,8 +4335,21 @@ fn monitoring_row_value(row: crate::app::AgentMonitoringRow, app: &App) -> Strin
     use crate::app::AgentMonitoringRow as Row;
     match row {
         Row::Mode => app.ui_settings.agent_monitoring_mode.label().to_string(),
+        Row::AttentionRunningIndicator => app
+            .ui_settings
+            .attention_running_indicator
+            .label()
+            .to_string(),
         Row::ProgressMonitor => on_off(app.ui_settings.progress_monitor_enabled),
         Row::ProgressMonitorMaxLines => format!("{} lines", app.ui_settings.progress_max_lines),
+        Row::CompletedProgressHideAfter => {
+            let seconds = app.ui_settings.completed_progress_hide_after_seconds;
+            if seconds == 0 {
+                "Never".to_string()
+            } else {
+                format!("{seconds} s")
+            }
+        },
         Row::ProgressFillStyle => crate::icon_settings::task_progress_preset_index(
             &app.ui_settings.icons.task_progress_frames,
         )
@@ -4781,6 +4843,39 @@ mod tests {
                 SettingsTab::Inference => {
                     for provider in ilium_inference::InferenceProviderKind::ALL {
                         app.inference_settings.selected_provider = provider;
+                        let state = SettingsState {
+                            tab,
+                            ..SettingsState::default()
+                        };
+                        reachable.extend(
+                            settings_help_anchors(&layout, &app, &state)
+                                .into_iter()
+                                .map(|anchor| anchor.topic_id),
+                        );
+                    }
+                }
+                SettingsTab::Animations => {
+                    // Ten fake scene controls make every numbered scene-control
+                    // topic reachable; every kind shows its own special rows
+                    // (location, scene status, playback and cache lines).
+                    const IDS: [&str; 10] =
+                        ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"];
+                    crate::background_animation::test_controls::install(
+                        IDS.iter()
+                            .map(|id| {
+                                ilium_ambient::Control::slider(
+                                    id,
+                                    "Fake",
+                                    0,
+                                    (0, 10, 1),
+                                    "",
+                                    "help",
+                                )
+                            })
+                            .collect(),
+                    );
+                    for kind in crate::background_animation::AnimationKind::ALL {
+                        app.animation_settings.kind = kind;
                         let state = SettingsState {
                             tab,
                             ..SettingsState::default()
