@@ -143,7 +143,7 @@ impl ActivityEvidence {
             Self::CodexLiveStatus => {
                 "Codex present-tense working status line contains an elapsed-time token"
             }
-            Self::BackgroundWait => "one line contains waiting for, background, and agent or task",
+            Self::BackgroundWait => "newest eligible status line starts with waiting for and contains background and agent or task",
             Self::BackgroundTaskWait => {
                 "completed-turn summary line contains a numbered still running suffix"
             }
@@ -182,9 +182,11 @@ const WORKING_MARKER: &str = "esc to interrupt";
 /// Scans a pane's plain-text screen contents (as returned by
 /// `vt100::Screen::contents()`) for activity markers and classifies it.
 ///
-/// Precedence: a "working" signal is checked first because a confirmation
-/// prompt never coexists with it in practice, but checking it first keeps
-/// the rule unambiguous either way. Next, a background-wait line
+/// A bottom-anchored question dialog wins over stale activity chrome.
+/// Otherwise working signals precede background waits. A recognized Claude
+/// completed-turn summary supersedes earlier activity rows while retaining
+/// its own still-running suffix and every later row. Approval checks retain
+/// the whole screen. Next, a background-wait line
 /// (`looks_like_background_wait_line`) means the agent dispatched
 /// subagents/background tasks and is actively blocked mid-turn waiting on
 /// them, not streaming foreground output. Distinct from that,
@@ -334,7 +336,9 @@ fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Opti
         ActivityEvidence::FolderTrustPrompt => is_claude_folder_trust_choice_line,
         ActivityEvidence::NoActiveMarker => return None,
     };
-    let mut matching_lines = screen_text.lines().filter(|line| line_matches_evidence(line));
+    let mut matching_lines = screen_text
+        .lines()
+        .filter(|line| line_matches_evidence(line));
     let matched_line = match evidence {
         ActivityEvidence::ConfirmationPrompt
         | ActivityEvidence::SelectionPrompt
@@ -1177,14 +1181,15 @@ fn is_claude_summary_done_time(segment: &str) -> bool {
     };
     (1..=2).contains(&hour.len())
         && hour.bytes().all(|byte| byte.is_ascii_digit())
-        && hour.parse::<u8>().is_ok_and(|hour| (1..=12).contains(&hour))
+        && hour
+            .parse::<u8>()
+            .is_ok_and(|hour| (1..=12).contains(&hour))
         && minute.len() == 2
         && minute.bytes().all(|byte| byte.is_ascii_digit())
         && minute.parse::<u8>().is_ok_and(|minute| minute < 60)
         && (period.eq_ignore_ascii_case("AM") || period.eq_ignore_ascii_case("PM"))
         && words.next().is_none()
 }
-
 
 /// True if a line reads as "the agent is waiting on background
 /// subagents/tasks it dispatched" -- e.g. Claude Code's
@@ -2155,19 +2160,29 @@ mod tests {
     #[test]
     fn new_background_wait_after_completed_turn_remains_waiting() {
         let screen = "✻ Cooked for 12s · done 4:57 PM\n✻ Waiting for 1 background agent to finish";
-        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::WaitingSubagents);
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::WaitingSubagents
+        );
     }
 
     #[test]
     fn latest_completed_turn_supersedes_historical_running_suffix() {
         let screen = "✻ Cooked for 12s · 1 shell still running\n● Shell finished\n✻ Cooked for 3s · done 5:00 PM";
-        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::Idle);
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::Idle
+        );
     }
 
     #[test]
     fn background_wait_in_explanatory_prose_is_not_live_status() {
-        let screen = "The detector says waiting for background agents when it sees this sentence.\n❯";
-        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::Idle);
+        let screen =
+            "The detector says waiting for background agents when it sees this sentence.\n❯";
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::Idle
+        );
     }
 
     #[test]

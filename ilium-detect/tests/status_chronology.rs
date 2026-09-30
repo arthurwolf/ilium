@@ -4,8 +4,7 @@
 use ilium_core::{AgentClass, AgentTurn, GoalState};
 use ilium_detect::{
     classify_activity, classify_activity_detailed, classify_activity_for_agent,
-    classify_activity_for_agent_detailed, goal_evidence_for_agent, ActivityEvidence,
-    GoalEvidence,
+    classify_activity_for_agent_detailed, goal_evidence_for_agent, ActivityEvidence, GoalEvidence,
 };
 
 const OLD_WAIT: &str = "✻ Waiting for 1 background agent to finish";
@@ -96,9 +95,8 @@ fn still_running_suffix_without_a_done_clock_remains_settling() {
 
 #[test]
 fn a_later_final_summary_supersedes_old_waits_and_old_still_running_suffixes() {
-    let screen = format!(
-        "{OLD_WAIT}\n✻ Cogitated for 3m 11s · 1 shell still running\n{DONE}\n\n{COMPOSER}"
-    );
+    let screen =
+        format!("{OLD_WAIT}\n✻ Cogitated for 3m 11s · 1 shell still running\n{DONE}\n\n{COMPOSER}");
     assert_shared_activity(
         &screen,
         AgentTurn::Idle,
@@ -248,9 +246,8 @@ fn folder_trust_after_completion_is_not_mistaken_for_idle() {
 
 #[test]
 fn goal_evidence_is_not_used_as_an_activity_override() {
-    let screen = format!(
-        "✔ Goal achieved (3m · 2 turns · 2.6k tokens)\n{DONE}\n{NEW_WAIT}\n\n{COMPOSER}"
-    );
+    let screen =
+        format!("✔ Goal achieved (3m · 2 turns · 2.6k tokens)\n{DONE}\n{NEW_WAIT}\n\n{COMPOSER}");
     assert_eq!(
         goal_evidence_for_agent(&AgentClass::Claude, &screen),
         GoalEvidence::State(GoalState::Reached),
