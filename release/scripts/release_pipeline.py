@@ -227,6 +227,8 @@ def native(arguments):
         # Parallel PTY/live-detection tests starve agent detection on the small
         # macOS runners (first execution of each fresh fixture is OS-scanned).
         environment['RUST_TEST_THREADS'] = '1'
+        # /var is a symlink to /private/var; tests compare resolved paths.
+        environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
         # The bundled libonnxruntime sits beside the executables; the installed

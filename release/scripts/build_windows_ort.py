@@ -249,7 +249,11 @@ def build(arguments):
     for variable in ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "ORT_PREFER_DYNAMIC_LINK",
                      "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", TARGET_RUSTFLAGS):
         environment.pop(variable, None)
-    ort_environment = {"CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}
+    # CMake applies CMAKE_GENERATOR_INSTANCE from the environment only when the
+    # generator is also chosen through the environment; ORT's build.py passes
+    # -G on the command line, which would otherwise ignore the instance.
+    ort_environment = {"CMAKE_GENERATOR": GENERATOR,
+                       "CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}
     environment.update(ort_environment)
     # Keep the build command as individual argv entries.  Passing one
     # pre-quoted command-line string after /c makes cmd.exe reinterpret the

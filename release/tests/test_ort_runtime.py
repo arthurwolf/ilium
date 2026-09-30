@@ -84,7 +84,7 @@ class OrtRuntimeTests(unittest.TestCase):
                 self.assertEqual(receipt['state'], 'extracted-not-qualified')
                 self.assertFalse(receipt['publication_allowed'])
                 self.assertEqual(receipt['environment']['ORT_PREFER_DYNAMIC_LINK'], '1')
-                self.assertEqual(receipt['environment']['ORT_LIB_LOCATION'], str(args.output_directory / 'lib'))
+                self.assertEqual(receipt['environment']['ORT_LIB_LOCATION'], str((args.output_directory / 'lib').resolve()))
                 for name, sha in receipt['files'].items():
                     self.assertEqual(adapter.sha(args.output_directory / name), sha)
                     self.assertFalse((args.output_directory / name).is_symlink())

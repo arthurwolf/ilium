@@ -38,6 +38,26 @@ fn installing_a_fixture_writes_an_executable_and_its_behaviour_sidecar() {
     assert!(behavior_file_for(&installed.path).is_file());
 }
 
+/// Spawns, retrying while the kernel reports the freshly written executable as
+/// busy (`ETXTBSY`, os error 26 on Unix). Another test thread forking while
+/// `install` still held the destination open briefly leaks that write
+/// descriptor into its child, and exec of a file open for writing fails until
+/// the child execs or exits. The window is milliseconds wide.
+fn spawn_retrying_text_file_busy(
+    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
+) -> std::io::Result<std::process::Child> {
+    let mut attempts = 0;
+    loop {
+        match spawn() {
+            Err(error) if error.raw_os_error() == Some(26) && attempts < 100 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
 #[test]
 fn an_installed_echo_fixture_reads_a_line_and_answers_with_its_prefix() {
     let directory = tempfile::tempdir().expect("temp dir");
@@ -53,17 +73,19 @@ fn an_installed_echo_fixture_reads_a_line_and_answers_with_its_prefix() {
     // behaviour dispatched, which is the contract every other crate depends
     // on. Pty-specific behaviour is covered where it matters, in the server's
     // own end-to-end tests.
-    let mut child = Command::new(&installed.path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|error| {
-            panic!(
-                "spawn the installed fixture at {}: {error}",
-                installed.path.display()
-            )
-        });
+    let mut child = spawn_retrying_text_file_busy(|| {
+        Command::new(&installed.path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    })
+    .unwrap_or_else(|error| {
+        panic!(
+            "spawn the installed fixture at {}: {error}",
+            installed.path.display()
+        )
+    });
 
     child
         .stdin
