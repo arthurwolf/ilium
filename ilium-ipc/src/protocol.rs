@@ -852,6 +852,22 @@ pub enum ClientRequest {
     UpdateAgentDetectionSettings {
         settings: AgentDetectionSettings,
     },
+    /// Stops the agent process tree inside `pane_id` but keeps the pane node
+    /// and its last screen, so a client can freeze the viewport while it
+    /// converts the agent's transcript. Answered with
+    /// `ServerEvent::PaneProcessTerminated`. Appended for bincode stability.
+    TerminatePaneProcess {
+        pane_id: NodeId,
+    },
+    /// Atomically replaces the terminal pane `pane_id` with a fresh pane
+    /// running `command_line` in the same parent, at the same position and
+    /// launch directory, then tears the old pane down. A failed spawn leaves
+    /// the old pane untouched (`ServerEvent::Error`). Appended for bincode
+    /// stability.
+    ReplacePaneWithCommand {
+        pane_id: NodeId,
+        command_line: String,
+    },
 }
 
 impl ClientRequest {
@@ -916,6 +932,8 @@ impl ClientRequest {
             Self::PruneWorkspace { .. } => "prune_workspace",
             Self::QueryWorkspaceCloseOffer { .. } => "query_workspace_close_offer",
             Self::UpdateAgentDetectionSettings { .. } => "update_agent_detection_settings",
+            Self::TerminatePaneProcess { .. } => "terminate_pane_process",
+            Self::ReplacePaneWithCommand { .. } => "replace_pane_with_command",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
@@ -1267,5 +1285,12 @@ pub enum ServerEvent {
     /// Appended to preserve existing bincode discriminants.
     AgentDetectionSettingsChanged {
         result: Result<AgentDetectionSettings, AgentDetectionSettingsError>,
+    },
+    /// Outcome of `ClientRequest::TerminatePaneProcess`: `Ok` only after the
+    /// pane's process tree is proven stopped. Sent to the requester only.
+    /// Appended to preserve existing bincode discriminants.
+    PaneProcessTerminated {
+        pane_id: NodeId,
+        result: Result<(), String>,
     },
 }

@@ -362,6 +362,17 @@ pub async fn handle_request(
             handle_close_pane(state, pane_id, direct_tx).await;
             false
         }
+        ClientRequest::TerminatePaneProcess { pane_id } => {
+            handle_terminate_pane_process(state, pane_id, direct_tx).await;
+            false
+        }
+        ClientRequest::ReplacePaneWithCommand {
+            pane_id,
+            command_line,
+        } => {
+            handle_replace_pane_with_command(state, pane_id, command_line, direct_tx).await;
+            false
+        }
         ClientRequest::MoveNode { node_id, direction } => {
             handle_tree_mutation(state, direct_tx, |tree| {
                 tree.move_node_one_step(node_id, direction).map(|_moved| ())
@@ -2973,6 +2984,188 @@ async fn handle_new_pane(
         let _completion =
             crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
     }
+}
+
+/// Longest a conversion-triggered termination may hold the pane registry.
+const TERMINATE_PANE_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Stops the process tree behind one terminal pane while keeping its node,
+/// PTY, and last screen registered, so a client can freeze the viewport and
+/// act on the dead session. The requester always receives exactly one
+/// `PaneProcessTerminated`.
+async fn handle_terminate_pane_process(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let blocking_state = Arc::clone(state);
+    // `terminate_process_tree` polls for up to the timeout, so it must not
+    // run on an async worker thread.
+    let outcome = tokio::task::spawn_blocking(move || {
+        let mut panes = blocking_state.panes.blocking_write();
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            return Err(format!("pane {pane_id:?} has no running terminal process"));
+        };
+        match runtime
+            .session
+            .terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT)
+        {
+            Ok(_proof) => Ok(()),
+            Err(tree_error) => {
+                // Platforms without process-tree proof (or a PTY captured
+                // without a birth identity) still get the direct-child kill.
+                tracing::warn!(
+                    "pane {pane_id:?} process-tree termination unavailable ({tree_error}); killing the direct child"
+                );
+                runtime
+                    .session
+                    .kill()
+                    .map_err(|error| format!("failed to stop the pane process: {error}"))
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|join_error| Err(format!("pane termination task failed: {join_error}")));
+    let _ = crate::agent_debug::record(
+        state,
+        pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PaneCreated,
+            "Pane process terminated for session conversion",
+        )
+        .with_fields(vec![AgentDebugField::plain(
+            "result",
+            match &outcome {
+                Ok(()) => "stopped".to_string(),
+                Err(error) => error.clone(),
+            },
+        )]),
+    )
+    .await;
+    let _ = direct_tx
+        .send(ServerEvent::PaneProcessTerminated {
+            pane_id,
+            result: outcome,
+        })
+        .await;
+}
+
+/// Replaces one terminal pane with a new pane running `command_line` in the
+/// same parent, position, and launch directory. The new pane is spawned
+/// before the old one is closed, so a spawn failure leaves the old pane
+/// intact; worktree panes are refused because their custody ticket and
+/// removal policy belong to the original pane.
+async fn handle_replace_pane_with_command(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    command_line: String,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let origin = TerminalOrigin::Command(command_line.clone());
+    let publish_guard = state.workspace_spawn_lock.lock().await;
+    let mut tree = state.tree.write().await;
+    let Some(parent) = tree.parent_of(pane_id) else {
+        drop(tree);
+        drop(publish_guard);
+        send_direct_error(direct_tx, format!("no such pane {pane_id:?}")).await;
+        return;
+    };
+    let is_terminal = tree.get(pane_id).is_some_and(|node| {
+        matches!(
+            node.kind,
+            ilium_core::NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                ..
+            }
+        )
+    });
+    if !is_terminal || tree.pane_workspace(pane_id).is_some() {
+        drop(tree);
+        drop(publish_guard);
+        send_direct_error(
+            direct_tx,
+            "only a plain terminal or agent pane outside a worktree can be replaced".to_string(),
+        )
+        .await;
+        return;
+    }
+    let position = tree
+        .children_of(parent)
+        .ok()
+        .and_then(|children| children.iter().position(|child| *child == pane_id));
+    let cwd = tree
+        .pane_cwd(pane_id)
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| state.session_cwd.clone());
+    let new_pane_id = match tree.add_pane(
+        parent,
+        origin.default_pane_name().to_string(),
+        PaneContentKind::Terminal,
+    ) {
+        Ok(id) => id,
+        Err(error) => {
+            drop(tree);
+            drop(publish_guard);
+            send_direct_error(direct_tx, format!("failed to create replacement pane: {error}"))
+                .await;
+            return;
+        }
+    };
+    let placed = tree
+        .move_node(new_pane_id, parent, position)
+        .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()));
+    if let Err(error) = placed {
+        let _ = tree.remove_node(new_pane_id);
+        drop(tree);
+        drop(publish_guard);
+        send_direct_error(direct_tx, format!("failed to place replacement pane: {error}")).await;
+        return;
+    }
+    drop(tree);
+    drop(publish_guard);
+
+    match spawn_and_register_pane_in_directory(
+        state,
+        new_pane_id,
+        PaneSnapshotKind::Terminal(origin),
+        &cwd,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(RegisterPaneError::NodeRemoved(_)) => return,
+        Err(RegisterPaneError::Spawn(error)) => {
+            let mut tree = state.tree.write().await;
+            let _ = tree.remove_node(new_pane_id);
+            drop(tree);
+            broadcast_and_persist(state).await;
+            send_direct_error(
+                direct_tx,
+                format!("failed to spawn {command_line}: {error}"),
+            )
+            .await;
+            return;
+        }
+    }
+    let _ = crate::agent_debug::record(
+        state,
+        new_pane_id,
+        AgentDebugSource::Server,
+        AgentDebugEventDraft::information(
+            AgentDebugEventKind::PaneCreated,
+            "Pane created by session conversion",
+        )
+        .with_fields(vec![
+            AgentDebugField::plain("replaced pane", format!("{pane_id:?}")),
+            AgentDebugField::plain("command", command_line),
+            AgentDebugField::plain("working directory", cwd.display().to_string()),
+        ]),
+    )
+    .await;
+    // `handle_close_pane` removes the old node and broadcasts one snapshot
+    // containing both the removal and the replacement.
+    handle_close_pane(state, pane_id, direct_tx).await;
 }
 
 /// Creates one built-in coding agent inside the project represented by

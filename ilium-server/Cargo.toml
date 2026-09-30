@@ -11,6 +11,7 @@ name = "ilium-server"
 path = "src/main.rs"
 
 [dependencies]
+ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
 axum = { version = "0.8.8", features = ["json"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 crossterm = "0.29.0"

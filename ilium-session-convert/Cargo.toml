@@ -1,0 +1,21 @@
+[package]
+name = "ilium-session-convert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Converts one agent session between Claude Code and Codex transcript formats"
+
+[dependencies]
+ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
+ilium-core = { version = "0.1.0", path = "../ilium-core" }
+ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+uuid = { version = "1.23.5", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

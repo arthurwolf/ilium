@@ -1,0 +1,28 @@
+{"timestamp":"2026-09-30T10:00:00.000Z","type":"session_meta","payload":{"id":"01a0f000-1111-7222-8333-444444444444","timestamp":"2026-09-30T10:00:00.000Z","cwd":"__CWD__","originator":"codex_cli","cli_version":"0.159.2","git":{"commit_hash":"abc","branch":"feature/x","repository_url":"git@example.com:x/y.git"}}}
+{"timestamp":"2026-09-30T10:00:00.100Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>sandbox rules</permissions instructions>"}]}}
+{"timestamp":"2026-09-30T10:00:00.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>be nice</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-09-30T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}
+{"timestamp":"2026-09-30T10:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files and remember the codeword PINEAPPLE."}]}}
+{"timestamp":"2026-09-30T10:00:01.110Z","type":"event_msg","payload":{"type":"user_message","message":"List the files and remember the codeword PINEAPPLE."}}
+{"timestamp":"2026-09-30T10:00:01.200Z","type":"turn_context","payload":{"cwd":"/work","model":"gpt-x"}}
+{"timestamp":"2026-09-30T10:00:02.000Z","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"gAAAAABsecretsecret"}}
+{"timestamp":"2026-09-30T10:00:02.500Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"I will list the files."}]}}
+{"timestamp":"2026-09-30T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"ls\",\"workdir\":\"/work\"}","call_id":"call_1"}}
+{"timestamp":"2026-09-30T10:00:03.001Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"echo hi\"}","call_id":"call_2"}}
+{"timestamp":"2026-09-30T10:00:03.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_2","output":"hi\n"}}
+{"timestamp":"2026-09-30T10:00:03.600Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Exit code: 0\nOutput:\na.txt\nb.txt\n"}}
+{"timestamp":"2026-09-30T10:00:04.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_3","name":"apply_patch","input":"*** Begin Patch\n*** Add File: c.txt\n+hello\n*** End Patch"}}
+{"timestamp":"2026-09-30T10:00:04.100Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_3","output":"{\"output\":\"Success. Updated the following files:\\nA c.txt\\n\",\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"2026-09-30T10:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"weird.tool/name with spaces","arguments":"{\"query\":\"x\"}","call_id":"call_4"}}
+{"timestamp":"2026-09-30T10:00:06.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_5","name":"exec","input":"text(await tools.exec_command({cmd:\"pwd\"}));"}}
+{"timestamp":"2026-09-30T10:00:06.100Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_5","output":[{"type":"input_text","text":"Script completed\nOutput:\n"},{"type":"input_text","text":"/work"}]}}
+{"timestamp":"2026-09-30T10:00:06.200Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_orphan","output":"nobody asked"}}
+{"timestamp":"2026-09-30T10:00:06.300Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1}}}}
+{"timestamp":"2026-09-30T10:00:06.310Z","type":"token_usage_record","payload":{"usage":{"input_tokens":1}}}
+{"timestamp":"2026-09-30T10:00:06.320Z","type":"world_state","payload":{"full":true,"state":{}}}
+{"timestamp":"2026-09-30T10:00:06.330Z","type":"compacted","payload":{"message":"","replacement_history":[]}}
+{"timestamp":"2026-09-30T10:00:06.340Z","type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{"type":"search","query":"q"}}}
+{"timestamp":"2026-09-30T10:00:06.350Z","type":"response_item","payload":{"type":"ghost_snapshot","ghost_commit":{"id":"x"}}}
+{not valid json at all
+{"timestamp":"2026-09-30T10:00:07.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The files are a.txt and b.txt. The codeword is PINEAPPLE."}]}}
+{"timestamp":"2026-09-30T10:00:07.100Z","type":"event_msg","payload":{"type":"agent_message","message":"The files are a.txt and b.txt. The codeword is PINEAPPLE."}}
