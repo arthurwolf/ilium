@@ -212,18 +212,25 @@ pub fn private_open_options() -> OpenOptions {
 /// A directory handle used to walk one child at a time without following
 /// symbolic links. Worktree include copying uses this instead of resolving a
 /// candidate path and opening it later, which would leave a parent-symlink race.
+///
+/// Unix uses `openat` with `O_NOFOLLOW`; Windows uses handle-relative
+/// `NtCreateFile` and refuses every reparse point (see
+/// `nofollow_windows`).
 #[cfg(unix)]
 pub struct NoFollowDirectory {
     file: std::fs::File,
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub use crate::nofollow_windows::NoFollowDirectory;
+
+#[cfg(not(any(unix, windows)))]
 pub struct NoFollowDirectory;
 
 /// Whether this platform can safely create and verify worktree ownership
 /// markers and copy included files without following substituted paths.
 pub const fn supports_nofollow_directories() -> bool {
-    cfg!(unix)
+    cfg!(any(unix, windows))
 }
 
 /// Returns the device and inode of an exact canonical directory after opening
@@ -240,7 +247,18 @@ pub fn directory_generation(path: &Path) -> io::Result<(u64, u64)> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
-#[cfg(not(unix))]
+/// Windows counterpart of the Unix proof: the volume serial and file ID of the
+/// exact canonical directory, read from a handle opened without following a
+/// substituted final link or junction.
+#[cfg(windows)]
+pub fn directory_generation(path: &Path) -> io::Result<(u64, u64)> {
+    if crate::paths::canonicalize(path)? != path {
+        return Err(io::Error::other("directory path is not canonical"));
+    }
+    NoFollowDirectory::open_root(path)?.generation()
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn directory_generation(_path: &Path) -> io::Result<(u64, u64)> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -255,7 +273,17 @@ pub fn spawn_directory_generation(path: &Path) -> io::Result<Option<(u64, u64)>>
     directory_generation(path).map(Some)
 }
 
-#[cfg(not(unix))]
+/// Best effort on Windows: a launch directory that is not spelled in canonical
+/// form (a pane may start anywhere the user can `cd`, not only in a worktree)
+/// simply has no fence, exactly as every Windows launch did before the fence
+/// existed. A canonical directory that is swapped between the two
+/// observations still changes the answer and refuses the spawn.
+#[cfg(windows)]
+pub fn spawn_directory_generation(path: &Path) -> io::Result<Option<(u64, u64)>> {
+    Ok(directory_generation(path).ok())
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn spawn_directory_generation(_path: &Path) -> io::Result<Option<(u64, u64)>> {
     Ok(None)
 }
@@ -464,7 +492,7 @@ fn unix_child_name(name: &std::ffi::OsStr) -> io::Result<std::ffi::CString> {
     unix_c_string(name)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 impl NoFollowDirectory {
     pub fn sync_all(&self) -> io::Result<()> {
         Err(io::Error::new(

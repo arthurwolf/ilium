@@ -407,7 +407,7 @@ impl MockRealtime {
 }
 
 async fn first_pane_id(dirs: &IsolatedDirs, project_dir: &Path) -> NodeId {
-    let project_root = project_dir.canonicalize().expect("project root");
+    let project_root = ilium_platform::paths::canonicalize(project_dir).expect("project root");
     let socket_path = ilium::session::socket_path_in(&dirs.socket_dir, &project_root, SESSION_NAME);
     let mut connection = Connection::connect(&socket_path, SESSION_NAME.to_owned())
         .await

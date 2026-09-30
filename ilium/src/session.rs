@@ -827,9 +827,11 @@ mod tests {
             resolve_project_session(&second, DEFAULT_SESSION_NAME).expect("second");
         // `resolve_project_session` canonicalizes, and macOS reaches a
         // temporary directory through a `/var` -> `/private/var` symlink, so
-        // the raw tempdir path would never prefix-match the resolved one.
-        let first = first.canonicalize().expect("canonical first project");
-        let second = second.canonicalize().expect("canonical second project");
+        // the raw tempdir path would never prefix-match the resolved one. The
+        // same platform helper must do it here: `std::fs::canonicalize` keeps
+        // Windows' `\\?\` prefix, which the resolved paths deliberately drop.
+        let first = paths::canonicalize(&first).expect("canonical first project");
+        let second = paths::canonicalize(&second).expect("canonical second project");
 
         assert_ne!(first_session.socket_path, second_session.socket_path);
         assert_ne!(first_session.snapshot_path, second_session.snapshot_path);
@@ -874,7 +876,7 @@ mod tests {
         let paths = reset_storage_paths(&default_session);
 
         assert!(paths.contains(&default_session.snapshot_path));
-        let canonical_root = root.path().canonicalize().expect("canonical project root");
+        let canonical_root = paths::canonicalize(root.path()).expect("canonical project root");
         assert!(paths.contains(&canonical_root.join(".ilium").join("sessions.yml")));
     }
 

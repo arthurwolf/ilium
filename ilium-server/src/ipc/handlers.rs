@@ -5712,8 +5712,7 @@ mod tests {
                 ClientRequest::SetPaneProgressMonitor {
                     request_id: 11,
                     pane_id,
-                    command: r#"printf '%s' '{"job_id":"render-11","status":"running","percent":42.5,"message":"frame 10/100"}'"#
-                        .to_string(),
+                    command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"render-11","status":"running","percent":42.5,"message":"frame 10/100"}"#),
                     interval_seconds: 1,
                 },
                 &direct_tx,
@@ -5767,7 +5766,9 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 15,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"kept-job","status":"running","percent":25,"message":"healthy"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(
+                    r#"{"job_id":"kept-job","status":"running","percent":25,"message":"healthy"}"#,
+                ),
                 interval_seconds: 60,
             },
             &direct_tx,
@@ -5786,7 +5787,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 16,
                 pane_id,
-                command: "printf '%s' 'not-json'".to_string(),
+                command: crate::progress_monitor::test_probes::emit_text("not-json"),
                 interval_seconds: 1,
             },
             &direct_tx,
@@ -5851,9 +5852,9 @@ mod tests {
         let (state, pane_id, directory) =
             state_with_one_terminal_pane("progress-monitor-idempotent-set").await;
         let invocation_log = directory.path().join("probe-invocations.log");
-        let command = format!(
-            "printf x >> '{}'; sleep 0.1; printf '%s' '{{\"job_id\":\"idempotent-job\",\"status\":\"running\",\"percent\":12,\"message\":\"running\"}}'",
-            invocation_log.display()
+        let command = crate::progress_monitor::test_probes::append_marker_pause_emit(
+            &invocation_log,
+            r#"{"job_id":"idempotent-job","status":"running","percent":12,"message":"running"}"#,
         );
         let (direct_tx, mut direct_rx) = mpsc::channel(2);
         let request = || ClientRequest::SetPaneProgressMonitor {
@@ -5886,7 +5887,10 @@ mod tests {
         assert_eq!(
             tokio::fs::read_to_string(&invocation_log)
                 .await
-                .expect("probe invocation log"),
+                .expect("probe invocation log")
+                // Windows `echo` terminates the marker with CRLF; a rerun would
+                // still leave a second marker after trimming.
+                .trim(),
             "x",
             "the exact retry must not rerun preflight"
         );
@@ -5896,7 +5900,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 19,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"collision","status":"running","percent":1,"message":"different"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"collision","status":"running","percent":1,"message":"different"}"#),
                 interval_seconds: 60,
             },
             &direct_tx,
@@ -5926,7 +5930,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 20,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"durable-job","status":"running","percent":17,"message":"running"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"durable-job","status":"running","percent":17,"message":"running"}"#),
                 interval_seconds: 60,
             },
             &direct_tx,
@@ -5985,7 +5989,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 23,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"preserved-job","status":"running","percent":23,"message":"running"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"preserved-job","status":"running","percent":23,"message":"running"}"#),
                 interval_seconds: 60,
             },
             &direct_tx,
@@ -6010,7 +6014,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 24,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"unacknowledged-job","status":"running","percent":24,"message":"running"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"unacknowledged-job","status":"running","percent":24,"message":"running"}"#),
                 interval_seconds: 60,
             },
             &direct_tx,
@@ -6054,7 +6058,7 @@ mod tests {
             state_with_one_terminal_pane("progress-monitor-restore-probe-failure").await;
         let persisted = persisted_running_progress_monitor(
             pane_id,
-            "printf '%s' 'probe failed' >&2; exit 7".to_string(),
+            crate::progress_monitor::test_probes::stderr_then_exit_seven(),
         );
 
         restore_persisted_progress_monitor(&state, persisted)
@@ -6101,7 +6105,9 @@ mod tests {
             state_with_one_terminal_pane("progress-monitor-restore-identity-mismatch").await;
         let mut persisted = persisted_running_progress_monitor(
             pane_id,
-            r#"printf '%s' '{"job_id":"replacement-job","status":"running","percent":1,"message":"different process"}'"#.to_string(),
+            crate::progress_monitor::test_probes::emit_text(
+                r#"{"job_id":"replacement-job","status":"running","percent":1,"message":"different process"}"#,
+            ),
         );
         persisted.result_delivery = crate::persistence::PersistedProgressDeliveryState::Attempted;
 
@@ -6151,7 +6157,7 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 21,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"render-21","status":"running","percent":10,"message":"starting"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(r#"{"job_id":"render-21","status":"running","percent":10,"message":"starting"}"#),
                 interval_seconds: 1,
             },
             &direct_tx,
@@ -6309,7 +6315,9 @@ mod tests {
             ClientRequest::SetPaneProgressMonitor {
                 request_id: 41,
                 pane_id,
-                command: r#"printf '%s' '{"job_id":"render-41","status":"running","percent":5,"message":"running"}'"#.to_string(),
+                command: crate::progress_monitor::test_probes::emit_text(
+                    r#"{"job_id":"render-41","status":"running","percent":5,"message":"running"}"#,
+                ),
                 interval_seconds: 1,
             },
             &direct_tx,

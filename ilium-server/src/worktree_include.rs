@@ -114,13 +114,16 @@ pub(crate) fn copy_worktree_includes(
     target_root: &Path,
 ) -> Result<IncludeCopyReport, IncludeCopyError> {
     let mut report = IncludeCopyReport::default();
-    let source = fs::canonicalize(source_root).map_err(|error| {
+    // The platform helper, not `std::fs::canonicalize`: on Windows the latter
+    // returns `\\?\` paths, which would leak into `created_paths` and never
+    // compare equal to the paths Git and the rest of the server use.
+    let source = ilium_platform::paths::canonicalize(source_root).map_err(|error| {
         failure(
             format!("source root unavailable: {error}"),
             IncludeCopyReport::default(),
         )
     })?;
-    let target = fs::canonicalize(target_root).map_err(|error| {
+    let target = ilium_platform::paths::canonicalize(target_root).map_err(|error| {
         failure(
             format!("target root unavailable: {error}"),
             IncludeCopyReport::default(),

@@ -52,11 +52,14 @@ pub enum ServerError {
     /// on its own -- callers fall back to defaults and log a warning --
     /// kept as a typed variant so that fallback decision is explicit
     /// rather than an unwrapped `Result` at the call site.
+    ///
+    /// The source is boxed: with Windows' wider `PathBuf` the unboxed
+    /// variant pushes `ServerError` over clippy's large-`Err` threshold.
     #[error("failed to load config from {path}: {source}")]
     ConfigLoad {
         path: PathBuf,
         #[source]
-        source: ConfigLoadError,
+        source: Box<ConfigLoadError>,
     },
 
     /// Rebuilding the session tree from persisted state (a crash-recovery

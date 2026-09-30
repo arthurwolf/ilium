@@ -128,7 +128,7 @@ const LEGACY_PATH_LIMIT: usize = 260;
 /// Names Win32 hands to a device rather than to the filesystem, whatever
 /// extension follows them. A directory really called `nul` can exist behind an
 /// extended-length prefix, and only there.
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 const RESERVED_DEVICE_NAMES: &[&str] = &[
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
@@ -160,8 +160,8 @@ fn resolves_the_same_without_prefix(path: &Path) -> bool {
 /// are trimmed away by the Win32 layer, and a device name is intercepted
 /// before the filesystem sees it -- in both cases the extended-length spelling
 /// names a file the plain one cannot.
-#[cfg(windows)]
-fn is_ordinary_file_name(name: &str) -> bool {
+#[cfg(any(windows, test))]
+pub(crate) fn is_ordinary_file_name(name: &str) -> bool {
     if name.ends_with('.') || name.ends_with(' ') {
         return false;
     }
@@ -173,6 +173,30 @@ fn is_ordinary_file_name(name: &str) -> bool {
         .iter()
         .copied()
         .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+}
+
+/// Whether `name` is one plain directory entry that a handle-relative open may
+/// use verbatim.
+///
+/// A relative `NtCreateFile` hands the name to the filesystem without Win32's
+/// rewriting, so every rule Win32 would have applied must be enforced here or
+/// `nul` and `foo.` would create entries ordinary tools cannot open or delete.
+/// Separators and `:` are refused too: a separator would walk more than one
+/// component, and `name:stream` addresses an alternate data stream of another
+/// file rather than an entry of this directory.
+#[cfg(any(windows, test))]
+pub(crate) fn is_single_entry_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+    let has_forbidden_character = name.chars().any(|character| {
+        character.is_control()
+            || matches!(
+                character,
+                '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            )
+    });
+    !has_forbidden_character && is_ordinary_file_name(name)
 }
 
 #[cfg(test)]
@@ -264,5 +288,38 @@ mod tests {
         let device = PathBuf::from(r"\\?\C:\project\nul.txt");
 
         assert_eq!(simplify(device.clone()), device);
+    }
+
+    #[test]
+    fn single_entry_names_reject_traversal_streams_and_devices() {
+        for accepted in [
+            "a",
+            ".worktreeinclude",
+            "config",
+            "name with space",
+            "archive.tar.gz",
+        ] {
+            assert!(is_single_entry_name(accepted), "{accepted:?}");
+        }
+        for rejected in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "file:stream",
+            "C:",
+            "nul",
+            "NUL.txt",
+            "com1",
+            "trailing.",
+            "trailing ",
+            "star*",
+            "what?",
+            "pipe|",
+            "line\nbreak",
+        ] {
+            assert!(!is_single_entry_name(rejected), "{rejected:?}");
+        }
     }
 }

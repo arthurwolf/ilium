@@ -556,41 +556,61 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     );
 
     // Wait for one post-input classification to establish the stable Idle
-    // baseline. The input acknowledgement changes status synchronously; this
-    // poll adds the corresponding change-only detector explanation once.
-    let _ = expect_event(&mut client, WAIT_TIMEOUT, |event| {
-        matches!(
-            event,
-            ServerEvent::PaneDebugEntryAppended {
-                pane_id: changed_id,
-                entry,
-            } if *changed_id == pane_id
-                && entry.kind == AgentDebugEventKind::DetectionCycle
-                && entry.context.activity == Some(ilium_core::AgentActivity::Idle)
-        )
-    })
-    .await;
-    write_frame(
-        &mut client,
-        &ClientRequest::GetPaneDebugLog {
-            pane_id,
-            after_sequence: None,
-        },
-    )
-    .await
-    .expect("request the complete live debug history");
-    let debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::PaneDebugLogSnapshot {
-                pane_id: changed_id,
-                ..
-            } if *changed_id == pane_id
-        )
-    })
-    .await;
-    let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
-        unreachable!("predicate only matches PaneDebugLogSnapshot");
+    // baseline. The input acknowledgement changes status synchronously; the
+    // next poll adds the corresponding change-only detector explanation once.
+    //
+    // Asked of the retained history, not of the live stream. That entry is
+    // appended independently of the echoed prompt reaching the screen, and
+    // either can arrive first: a host that delivers screen output later (a
+    // Windows console re-renders it) puts the entry *ahead* of the echo the
+    // wait above consumed, and every event skipped by that wait is gone. The
+    // history keeps it wherever it landed, so polling it cannot miss it.
+    let entries = {
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        loop {
+            write_frame(
+                &mut client,
+                &ClientRequest::GetPaneDebugLog {
+                    pane_id,
+                    after_sequence: None,
+                },
+            )
+            .await
+            .expect("request the complete live debug history");
+            let debug_event = expect_event(&mut client, Duration::from_secs(5), |event| {
+                matches!(
+                    event,
+                    ServerEvent::PaneDebugLogSnapshot {
+                        pane_id: changed_id,
+                        ..
+                    } if *changed_id == pane_id
+                )
+            })
+            .await;
+            let ServerEvent::PaneDebugLogSnapshot { entries, .. } = debug_event else {
+                unreachable!("predicate only matches PaneDebugLogSnapshot");
+            };
+            // An Idle explanation *after* the Done one: the optional leading
+            // Idle made before the agent's first output does not count.
+            let done_position = entries.iter().rposition(|entry| {
+                entry.kind == AgentDebugEventKind::DetectionCycle
+                    && entry.context.activity == Some(ilium_core::AgentActivity::Done)
+            });
+            let has_post_input_idle = done_position.is_some_and(|done_position| {
+                entries[done_position + 1..].iter().any(|entry| {
+                    entry.kind == AgentDebugEventKind::DetectionCycle
+                        && entry.context.activity == Some(ilium_core::AgentActivity::Idle)
+                })
+            });
+            if has_post_input_idle {
+                break entries;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no Idle detection explanation followed the Done one: {entries:#?}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     };
     for expected_kind in [
         AgentDebugEventKind::DetectionCycle,
@@ -603,10 +623,28 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
             "live history should contain {expected_kind:?}: {entries:#?}"
         );
     }
-    let detection_entries: Vec<_> = entries
+    let recorded_detection_entries: Vec<_> = entries
         .iter()
         .filter(|entry| entry.kind == AgentDebugEventKind::DetectionCycle)
         .collect();
+    let mut detection_entries = recorded_detection_entries.clone();
+    // One held classification can be explained twice when a slow runner's poll
+    // lands between the screen clearing and the second Idle sample that
+    // confirms it: first by the interrupt hint, then by the provisional-Idle
+    // hold. The summary -- the classification -- is unchanged, only the rule
+    // that kept it differs, so that pair is one decision. Two entries that
+    // agree on the summary *and* on the rule are still counted: that is the
+    // spam this assertion exists to catch.
+    let activity_rule = |entry: &ilium_agent_debug::AgentDebugEntry| {
+        entry
+            .fields
+            .iter()
+            .find(|field| field.label == "Activity decision")
+            .map(|field| field.value.clone())
+    };
+    detection_entries.dedup_by(|later, earlier| {
+        later.summary == earlier.summary && activity_rule(later) != activity_rule(earlier)
+    });
     // The point is that repeated polls do not spam decisions -- one entry per
     // real change, not one per tick. The Working/Done/input-acknowledged-Idle
     // progression is always recorded; whether a leading Idle precedes it is a
@@ -676,8 +714,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         .iter()
         .filter(|entry| entry.kind == AgentDebugEventKind::DetectionCycle)
         .collect();
+    // Against what was recorded, not the merged decisions counted above: the
+    // journal itself must be byte-for-byte unchanged by further polls.
     assert_eq!(
-        later_detection_entries, detection_entries,
+        later_detection_entries, recorded_detection_entries,
         "unchanged polls must not mutate timestamps, counts, fields, or sequences"
     );
 
@@ -1598,8 +1638,17 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
                     pane_id: changed_id,
                     title_generation,
                 } if changed_id == pane_id => {
-                    assert_eq!(title_generation, 1);
-                    saw_title_clear = true;
+                    // The submitted `/clear` itself is generation 1. The
+                    // detector clears the title again, at a later generation,
+                    // whenever it sees the fresh agent screen *appear* -- and a
+                    // host that paints the cleared screen in two frames (a
+                    // Windows console) shows it a blank one first, so a second
+                    // appearance is legitimate. It is never an earlier one.
+                    assert!(
+                        title_generation >= 1,
+                        "a /clear title reset must advance the generation"
+                    );
+                    saw_title_clear |= title_generation == 1;
                 }
                 _ => {}
             }
@@ -1675,7 +1724,11 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         unreachable!("predicate only matches PaneSessionIdResolved");
     };
     assert_eq!(replacement_process_id, initial_process_id);
-    assert_eq!(replacement_title_generation, 1);
+    assert!(
+        replacement_title_generation >= 1,
+        "the replacement session must carry a generation past the /clear fence, got \
+         {replacement_title_generation}"
+    );
 
     write_frame(
         &mut client,

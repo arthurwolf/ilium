@@ -219,12 +219,23 @@ fn validate_marker_identity(
     Ok(())
 }
 
+/// Canonical form, spelled exactly as `ilium_git` and every saved pane spell
+/// it. `std::fs::canonicalize` would return a `\\?\` extended-length path on
+/// Windows, which never equals the saved (simplified) form and would make every
+/// saved path look non-canonical.
+async fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || ilium_platform::paths::canonicalize(&path))
+        .await
+        .map_err(|error| std::io::Error::other(format!("canonicalize task failed: {error}")))?
+}
+
 pub(crate) async fn validated_marker_path_for(
     repo_common_dir: &Path,
     worktree_root: &Path,
 ) -> Result<PathBuf, WorkspaceOwnerError> {
-    let common_dir = fs::canonicalize(repo_common_dir).await?;
-    let root = fs::canonicalize(worktree_root).await?;
+    let common_dir = canonical(repo_common_dir).await?;
+    let root = canonical(worktree_root).await?;
     if common_dir != repo_common_dir || root != worktree_root {
         return Err(WorkspaceOwnerError::Invalid(
             "saved paths are not canonical",
@@ -242,7 +253,7 @@ pub(crate) async fn validated_marker_path_for(
         .skip(1)
         .filter(|worktree| !worktree.is_bare && !worktree.is_prunable)
     {
-        if fs::canonicalize(&worktree.path).await.ok().as_deref() == Some(root.as_path()) {
+        if canonical(&worktree.path).await.ok().as_deref() == Some(root.as_path()) {
             registered = true;
             break;
         }
@@ -262,13 +273,13 @@ pub(crate) async fn validated_marker_path_for(
             "Git HEAD is not a regular file",
         ));
     }
-    let metadata_dir = fs::canonicalize(
+    let metadata_dir = canonical(
         head_path
             .parent()
             .ok_or(WorkspaceOwnerError::Invalid("Git HEAD has no parent"))?,
     )
     .await?;
-    let worktrees_dir = fs::canonicalize(common_dir.join("worktrees")).await?;
+    let worktrees_dir = canonical(&common_dir.join("worktrees")).await?;
     if worktrees_dir.parent() != Some(common_dir.as_path())
         || metadata_dir.parent() != Some(worktrees_dir.as_path())
     {

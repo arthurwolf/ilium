@@ -297,6 +297,7 @@ impl TerminalPaneRuntime {
                 // status (e.g. "is this actually an agent CLI") is not
                 // yet known and should resolve promptly.
                 next_due: Instant::now(),
+                launched_at: Instant::now(),
                 current_interval: initial_poll_interval,
                 client_focused: false,
                 last_forced: None,
@@ -589,6 +590,10 @@ impl Drop for TerminalPaneRuntime {
 /// describes drifting out of sync under concurrent access.
 pub struct DetectionSchedule {
     pub next_due: Instant,
+    /// When this pane's process was started. Lets the detection loop poll a
+    /// just-launched command pane quickly until the agent it runs shows up
+    /// (see `crate::detection::is_awaiting_launched_agent`).
+    pub launched_at: Instant,
     pub current_interval: Duration,
     /// Whether the attached client currently has this pane as its active
     /// view (`ilium_ipc::ClientRequest::SetPaneFocus`). While true,

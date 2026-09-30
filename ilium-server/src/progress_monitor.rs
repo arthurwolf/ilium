@@ -410,11 +410,8 @@ async fn run_probe(
     limits: ProbeExecutionLimits,
 ) -> Result<ProgressTaskReport, ProgressProbeError> {
     validate_command(command)?;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut child_command = tokio::process::Command::new(&shell);
+    let mut child_command = probe_shell_command(command);
     child_command
-        .arg("-c")
-        .arg(command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -572,6 +569,44 @@ async fn run_probe(
     })
 }
 
+/// Builds the platform shell invocation that runs the probe command line.
+///
+/// Unix honours `$SHELL` (falling back to `/bin/sh`) and passes the command as
+/// a single `-c` argument.
+#[cfg(unix)]
+fn probe_shell_command(command: &str) -> tokio::process::Command {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let mut shell_command = tokio::process::Command::new(shell);
+    shell_command.arg("-c").arg(command);
+    shell_command
+}
+
+/// Builds the platform shell invocation that runs the probe command line.
+///
+/// Windows always uses `cmd.exe` (`%COMSPEC%`). `$SHELL` is deliberately
+/// ignored: under Git Bash or MSYS it holds a POSIX path such as
+/// `/usr/bin/bash` that `CreateProcess` cannot resolve (`ERROR_PATH_NOT_FOUND`),
+/// and the `/bin/sh` fallback never exists. The command line is appended with
+/// `raw_arg` inside one pair of outer quotes: Rust's ordinary argument quoting
+/// escapes embedded `"` as `\"`, which `cmd.exe` does not understand, whereas
+/// `/S` tells `cmd.exe` to strip exactly the first and last quote and run the
+/// remainder verbatim. `/D` skips `AutoRun` registry commands so they cannot
+/// change or pollute the probe's output.
+#[cfg(windows)]
+fn probe_shell_command(command: &str) -> tokio::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    let shell = std::env::var_os("COMSPEC")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "cmd.exe".into());
+    let mut shell_command = tokio::process::Command::new(shell);
+    shell_command
+        .as_std_mut()
+        .args(["/D", "/S", "/C"])
+        .raw_arg(format!("\"{command}\""));
+    shell_command
+}
+
 struct BoundedOutput {
     bytes: Vec<u8>,
     exceeded: bool,
@@ -664,18 +699,86 @@ fn unix_millis() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+/// Cross-platform probe command lines shared by this crate's tests.
+///
+/// Probe commands run through the platform shell (`/bin/sh -c` on Unix,
+/// `cmd.exe /D /S /C` on Windows), so fixtures must be spelled per platform.
+#[cfg(test)]
+pub(crate) mod test_probes {
+    use std::path::Path;
+
+    /// A command whose stdout is exactly `text` (plus a trailing newline on
+    /// Windows, which `echo` cannot suppress and the JSON parser ignores).
+    pub(crate) fn emit_text(text: &str) -> String {
+        #[cfg(unix)]
+        {
+            format!("printf '%s' '{}'", text.replace('\'', "'\\''"))
+        }
+        #[cfg(windows)]
+        {
+            assert_cmd_safe(text);
+            format!("echo {text}")
+        }
+    }
+
+    /// Prints `probe failed` on stderr and exits with status 7.
+    pub(crate) fn stderr_then_exit_seven() -> String {
+        #[cfg(unix)]
+        {
+            "printf '%s' 'probe failed' >&2; exit 7".to_string()
+        }
+        #[cfg(windows)]
+        {
+            "echo probe failed 1>&2 & exit 7".to_string()
+        }
+    }
+
+    /// Appends one `x` line to `log`, pauses briefly so concurrent callers
+    /// overlap, then emits `text`.
+    pub(crate) fn append_marker_pause_emit(log: &Path, text: &str) -> String {
+        let log = log.to_str().expect("temporary path is UTF-8");
+        #[cfg(unix)]
+        {
+            format!("printf x >> '{log}'; sleep 0.1; {}", emit_text(text))
+        }
+        #[cfg(windows)]
+        {
+            assert_cmd_safe(log);
+            format!(
+                "echo x>>\"{log}\" & {} & {}",
+                sleep_seconds(1),
+                emit_text(text)
+            )
+        }
+    }
+
+    /// A command that idles for about `seconds` without producing output.
+    pub(crate) fn sleep_seconds(seconds: u32) -> String {
+        #[cfg(unix)]
+        {
+            format!("sleep {seconds}")
+        }
+        #[cfg(windows)]
+        {
+            // `timeout.exe` refuses redirected stdin; `ping -n N` waits N-1
+            // seconds between echoes.
+            format!("ping -n {} 127.0.0.1 >nul", seconds + 1)
+        }
+    }
+
+    /// Rejects characters that `cmd.exe` would interpret instead of echoing.
+    #[cfg(windows)]
+    fn assert_cmd_safe(text: &str) {
+        assert!(
+            !text.contains(['&', '|', '<', '>', '^', '%', '!', '\n', '\r']),
+            "fixture text contains a cmd.exe metacharacter: {text}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn shell_json(json: &str) -> String {
-        format!("printf '%s' {}", shell_single_quote(json))
-    }
-
-    fn shell_single_quote(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
-
     #[tokio::test]
     async fn preflight_accepts_all_exact_wire_statuses_and_normalizes_done() {
         for status in ["not-started-yet", "running", "error", "done"] {
@@ -687,7 +790,7 @@ mod tests {
             let json = format!(
                 r#"{{"job_id":"render-42","status":"{status}","percent":42,"message":"phase 2"{error}}}"#
             );
-            let result = preflight(&shell_json(&json)).await.unwrap();
+            let result = preflight(&test_probes::emit_text(&json)).await.unwrap();
             assert_eq!(
                 result.report.status,
                 match status {
@@ -713,23 +816,32 @@ mod tests {
             r#"{"job_id":"job","status":"running","percent":101}"#,
             r#"{"job_id":"job","status":"running","percent":5,"message":"bad\nline"}"#,
         ] {
-            let error = preflight(&shell_json(json)).await.unwrap_err();
+            let error = preflight(&test_probes::emit_text(json)).await.unwrap_err();
             assert_eq!(error.kind, ProgressProbeFailureKind::InvalidReport);
         }
     }
 
     #[tokio::test]
     async fn probe_bounds_stdout_and_execution_time() {
-        let tiny = ProbeExecutionLimits {
+        // The output bound is independent of the timeout, so give it ample
+        // time: spawning `cmd.exe` on a loaded Windows runner can exceed 100 ms.
+        let tiny_output = ProbeExecutionLimits {
+            timeout: Duration::from_secs(10),
+            maximum_stdout_bytes: 16,
+            maximum_stderr_bytes: 16,
+        };
+        let oversized = run_probe(&test_probes::emit_text("12345678901234567"), tiny_output)
+            .await
+            .unwrap_err();
+        assert_eq!(oversized.kind, ProgressProbeFailureKind::OutputTooLarge);
+        let tiny_timeout = ProbeExecutionLimits {
             timeout: Duration::from_millis(100),
             maximum_stdout_bytes: 16,
             maximum_stderr_bytes: 16,
         };
-        let oversized = run_probe("printf '12345678901234567'", tiny)
+        let timed_out = run_probe(&test_probes::sleep_seconds(3), tiny_timeout)
             .await
             .unwrap_err();
-        assert_eq!(oversized.kind, ProgressProbeFailureKind::OutputTooLarge);
-        let timed_out = run_probe("sleep 2", tiny).await.unwrap_err();
         assert_eq!(timed_out.kind, ProgressProbeFailureKind::Timeout);
     }
 
@@ -813,6 +925,11 @@ mod tests {
                 .kind,
             ProgressProbeFailureKind::InvalidStatusTransition
         );
+    }
+
+    #[cfg(unix)]
+    fn shell_single_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 
     #[cfg(unix)]

@@ -237,8 +237,8 @@ fn read_process_value<T: Copy + Default>(
     address: usize,
 ) -> Option<T> {
     let mut value = T::default();
-    let mut slice = std::slice::from_mut(&mut value);
-    read_process_slice(process, address, &mut slice).map(|()| value)
+    let slice = std::slice::from_mut(&mut value);
+    read_process_slice(process, address, slice).map(|()| value)
 }
 
 /// Fills `destination` from `address` in another process, or answers `None`

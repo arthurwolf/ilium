@@ -587,13 +587,32 @@ fn claude_session_id_from_arguments(arguments: &[String]) -> Option<String> {
     (!seen_conflict).then_some(found_candidate).flatten()
 }
 
+/// The program an argument names, as a lowercase file name without a Windows
+/// launcher extension.
+///
+/// A provider's resume grammar is anchored on its own executable in the
+/// process's argument vector. That vector holds the path the process was
+/// started by, and on Windows the file is `codex.exe` (or `codex.cmd` for a
+/// shim), so comparing the bare file name to `codex` never matches there and
+/// the positional session ID after it is never read.
+fn program_name(argument: &str) -> Option<String> {
+    let file_name = std::path::Path::new(argument).file_name()?.to_str()?;
+    let lowercase = file_name.to_ascii_lowercase();
+    let without_extension = ["exe", "cmd", "bat", "com"]
+        .iter()
+        .find_map(|extension| {
+            lowercase
+                .strip_suffix(extension)
+                .and_then(|stem| stem.strip_suffix('.'))
+        })
+        .unwrap_or(&lowercase);
+    Some(without_extension.to_string())
+}
+
 fn codex_session_id_from_arguments(arguments: &[String]) -> Option<String> {
-    let executable_index = arguments.iter().position(|argument| {
-        std::path::Path::new(argument)
-            .file_name()
-            .and_then(|name| name.to_str())
-            == Some("codex")
-    })?;
+    let executable_index = arguments
+        .iter()
+        .position(|argument| program_name(argument).as_deref() == Some("codex"))?;
     arguments
         .get(executable_index + 1)
         .filter(|argument| *argument == "resume")?;
@@ -606,9 +625,7 @@ fn codex_session_id_from_arguments(arguments: &[String]) -> Option<String> {
 fn antigravity_session_id_from_arguments(arguments: &[String]) -> Option<String> {
     let executable_index = arguments.iter().position(|argument| {
         matches!(
-            std::path::Path::new(argument)
-                .file_name()
-                .and_then(|name| name.to_str()),
+            program_name(argument).as_deref(),
             Some("agy") | Some("antigravity") | Some("antimatter")
         )
     })?;
@@ -5525,6 +5542,51 @@ mod tests {
         assert_eq!(
             BuiltinAgentProvider::resume_binding(&format!("agy --conversation {session_id}")),
             Some((provider, session_id.to_string()))
+        );
+    }
+
+    /// The provider's resume grammar is anchored on its own executable, and on
+    /// Windows that executable is `codex.exe` (or a `.cmd` shim), not `codex`.
+    #[test]
+    fn positional_resume_is_read_after_a_windows_launcher_extension() {
+        let session_id = "4e8767e0-8b01-4329-bfc6-a6087b1b1f9e";
+        let provider = BuiltinAgentProvider::Codex;
+        for program in [
+            "codex",
+            "/usr/local/bin/codex",
+            "codex.exe",
+            "CODEX.EXE",
+            "codex.cmd",
+            "/tmp/fixtures/codex.exe",
+        ] {
+            assert_eq!(
+                provider.session_id_from_arguments(&[
+                    program.to_string(),
+                    "resume".to_string(),
+                    session_id.to_string(),
+                ]),
+                Some(session_id.to_string()),
+                "{program} must anchor the resume grammar"
+            );
+        }
+        for program in ["codex-helper", "notcodex.exe", "codex.exe.bak", "codex.txt"] {
+            assert_eq!(
+                provider.session_id_from_arguments(&[
+                    program.to_string(),
+                    "resume".to_string(),
+                    session_id.to_string(),
+                ]),
+                None,
+                "{program} is not the codex executable"
+            );
+        }
+        assert_eq!(
+            BuiltinAgentProvider::Antigravity.session_id_from_arguments(&[
+                "agy.exe".to_string(),
+                "--conversation".to_string(),
+                session_id.to_string(),
+            ]),
+            Some(session_id.to_string())
         );
     }
 

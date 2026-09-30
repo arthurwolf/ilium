@@ -96,7 +96,10 @@ jobs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: diagnostics-${{ matrix.rust_target }}
-        path: ${{ runner.temp }}/native-work/**/*.log
+        path: |
+          ${{ runner.temp }}/native-work/*.log
+          ${{ runner.temp }}/native-work/*/*.log
+          ${{ runner.temp }}/native-work/*/*.json
         if-no-files-found: warn
         retention-days: 30
     strategy:

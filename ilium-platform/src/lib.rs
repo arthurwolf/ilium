@@ -10,7 +10,8 @@
 //!
 //! - [`secure_fs`] -- creating directories and files only the current user can
 //!   read, which the log file, the session snapshot, and the start lock all
-//!   need for the same reason.
+//!   need for the same reason, plus directory handles that never follow a link
+//!   (`openat` on Unix, handle-relative `NtCreateFile` on Windows).
 //! - [`file_lock`] -- one cross-process exclusive lock, used to serialize
 //!   competing first-attach processes so two clients cannot start rival
 //!   servers for one project.
@@ -46,6 +47,8 @@ pub mod detached;
 pub mod file_lock;
 #[cfg(unix)]
 pub mod interruptible_reader;
+#[cfg(windows)]
+mod nofollow_windows;
 pub mod open_external;
 pub mod paths;
 pub mod process_control;

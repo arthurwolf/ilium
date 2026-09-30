@@ -48,6 +48,10 @@ const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// screen classification remains one-second responsive; only the expensive
 /// whole-host discovery scan is reused between those ticks.
 const MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE: Duration = Duration::from_secs(5);
+/// How long after launch a pane started with an explicit command keeps the
+/// focused cadence while no agent has been recognised in it. See
+/// [`is_awaiting_launched_agent`].
+const LAUNCH_FAST_POLL_WINDOW: Duration = Duration::from_secs(60);
 
 /// Spawns the detection loop as a single tracked task and returns its
 /// handle. The loop runs until aborted (session shutdown) -- it has no
@@ -920,11 +924,21 @@ async fn run_due_panes(
                 None,
             );
 
-            runtime.detection_schedule.current_interval = interval_for(
+            let polled_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
                 &detection_config,
             );
+            runtime.detection_schedule.current_interval = if is_awaiting_launched_agent(
+                &runtime.origin,
+                &new_status,
+                runtime.detection_schedule.launched_at,
+                now,
+            ) {
+                polled_interval.min(FOCUSED_POLL_INTERVAL)
+            } else {
+                polled_interval
+            };
             runtime.detection_schedule.next_due =
                 if screen_changed_after_snapshot || runtime.pending_idle_confirmation {
                     // Bounded catch-up, not a flat 1s reschedule: a pane whose
@@ -2165,6 +2179,32 @@ fn settle_agent_status(
 /// never lag behind the coarser working/idle tiers, regardless of what
 /// its last classification was.
 ///
+/// Whether a pane that was started *with a command* is still waiting for that
+/// command to become the agent it will be recognised as.
+///
+/// The first check of a new pane runs the instant it is spawned, when the
+/// process tree can still be the shell that is about to `exec` the command
+/// (the exec itself is slow where the OS vets a freshly written executable,
+/// and a `node` shim takes longer still). That check classifies the pane as a
+/// plain shell, which polls on the idle tier -- 45 s by default -- so the agent
+/// would sit unrecognised for most of a minute, and nothing shortens that wait:
+/// the output it then prints only brings the next check forward for a pane
+/// already known to hold an agent. Until an agent is seen (or the window
+/// lapses), such a pane is rechecked at the focused cadence instead.
+///
+/// Only command panes: a plain shell's agent is started by the user typing it,
+/// and that Enter already forces a recheck.
+fn is_awaiting_launched_agent(
+    origin: &crate::pane::TerminalOrigin,
+    status: &PaneStatus,
+    launched_at: Instant,
+    now: Instant,
+) -> bool {
+    matches!(origin, crate::pane::TerminalOrigin::Command(_))
+        && matches!(status, PaneStatus::PlainShell)
+        && now.saturating_duration_since(launched_at) < LAUNCH_FAST_POLL_WINDOW
+}
+
 /// Takes `&DetectionConfig` rather than `&ServerState` -- this is a pure
 /// decision over the classified status, the focus flag, and the two
 /// configured durations, with no need for anything else `ServerState`
@@ -2550,6 +2590,7 @@ mod tests {
     fn force_check_is_debounced() {
         let mut schedule = crate::pane::DetectionSchedule {
             next_due: Instant::now() + Duration::from_secs(999),
+            launched_at: Instant::now(),
             current_interval: Duration::from_secs(45),
             client_focused: false,
             last_forced: None,
@@ -2593,6 +2634,52 @@ mod tests {
 
     fn agent(activity: AgentActivity) -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Claude, activity, None)
+    }
+
+    /// A command pane whose first check found only the shell must be rechecked
+    /// quickly, for a bounded time, and never once it holds an agent.
+    #[test]
+    fn a_launched_command_pane_without_an_agent_is_rechecked_quickly_for_a_while() {
+        use crate::pane::TerminalOrigin;
+
+        let launched_at = Instant::now();
+        let command = TerminalOrigin::Command("codex".to_string());
+        let within_window = launched_at + LAUNCH_FAST_POLL_WINDOW - Duration::from_millis(1);
+        let after_window = launched_at + LAUNCH_FAST_POLL_WINDOW;
+
+        assert!(is_awaiting_launched_agent(
+            &command,
+            &PaneStatus::PlainShell,
+            launched_at,
+            within_window
+        ));
+        assert!(
+            !is_awaiting_launched_agent(
+                &command,
+                &PaneStatus::PlainShell,
+                launched_at,
+                after_window
+            ),
+            "the fast cadence is bounded, so a command that is not an agent stops costing scans"
+        );
+        assert!(
+            !is_awaiting_launched_agent(
+                &command,
+                &agent(AgentActivity::Idle),
+                launched_at,
+                within_window
+            ),
+            "a recognised agent returns to its own tier"
+        );
+        assert!(
+            !is_awaiting_launched_agent(
+                &TerminalOrigin::PlainShell,
+                &PaneStatus::PlainShell,
+                launched_at,
+                within_window
+            ),
+            "a plain shell's agent is started by typing, which already forces a recheck"
+        );
     }
 
     #[test]

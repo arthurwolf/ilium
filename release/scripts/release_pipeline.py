@@ -183,6 +183,10 @@ def logged(command, root, log, environment=None, timeout=10_800):
     log = Path(log)
     with log.open('xb') as output:
         result = subprocess.run(list(map(str, command)), cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+    if result.returncode != 0:
+        # Diagnostic artifacts can fail to upload; keep the decisive lines in the job log.
+        emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code=result.returncode,
+             log_tail=log.read_bytes()[-6000:].decode('utf-8', 'replace'))
     require(result.returncode == 0, 'command failed; inspect owned log ' + str(log))
     emit('result', operation=Path(str(command[0])).name, state='passed', log=str(log), log_sha256=sha(log))
 
@@ -221,6 +225,10 @@ def native(arguments):
         probe_link.unlink(); probe_target.unlink()
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
+        # The bundled libonnxruntime sits beside the executables; the installed
+        # pair must find it with no LD_LIBRARY_PATH (audit strips it).
+        environment.pop('RUSTFLAGS', None)
+        environment['CARGO_ENCODED_RUSTFLAGS'] = '-Clink-arg=-Wl,-rpath,$ORIGIN'
     cargo_home = work / 'cargo-home'
     cargo_target = work / 'cargo-target'
     ort_register = release_tool.read_json(root / 'release/ort-source.json')
@@ -241,6 +249,10 @@ def native(arguments):
         environment.update(release_tool.read_json(ort_output / 'environment.json'))
         if target['os'] == 'windows':
             environment['PATH'] = environment['ORT_LIB_LOCATION'] + os.pathsep + environment['PATH']
+        elif target['os'] == 'macos':
+            # Debug test binaries link the source-built dylib through @rpath of
+            # the build host; dyld finds it only when the directory is named.
+            environment['DYLD_LIBRARY_PATH'] = environment['ORT_LIB_LOCATION']
     else:
         cargo_home.mkdir(); cargo_target.mkdir()
         environment.update(CARGO_HOME=str(cargo_home), CARGO_TARGET_DIR=str(cargo_target))

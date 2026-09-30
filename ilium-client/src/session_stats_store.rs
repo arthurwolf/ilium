@@ -357,7 +357,9 @@ mod tests {
     fn a_pass_reads_the_transcript_and_a_second_pass_is_throttled() {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
-        let project_path = project.path().canonicalize().unwrap();
+        // The locator slugs the platform-canonical form; `std`'s Windows
+        // `\\?\` spelling would land the fixture in a different directory.
+        let project_path = ilium_platform::paths::canonicalize(project.path()).unwrap();
         let id = "11111111-1111-4111-8111-111111111111";
         write_claude_transcript(home.path(), &project_path, id);
 

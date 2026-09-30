@@ -325,11 +325,11 @@ impl WorktreeDialogState {
             .replace("{repo_name}", &name)
             .replace("{project}", &main.path.to_string_lossy())
             .replace("{branch_slug}", &slug);
-        let path = PathBuf::from(rendered);
+        let path = PathBuf::from(native_separators(&rendered));
         if path.is_absolute() {
             path
         } else {
-            main.path.join(".ilium/worktrees").join(slug)
+            main.path.join(".ilium").join("worktrees").join(slug)
         }
     }
 
@@ -474,6 +474,21 @@ impl WorktreeDialogState {
             }
         }
     }
+}
+
+/// Location templates are written with `/` on every platform, while the
+/// directory names substituted into them carry the platform's own separator.
+/// On Windows that would leave a path like `C:\\repos\\app/.ilium/worktrees`
+/// in an editable field; rewriting the template's slashes keeps one spelling.
+fn native_separators(rendered: &str) -> String {
+    replace_forward_slashes(rendered, std::path::MAIN_SEPARATOR)
+}
+
+fn replace_forward_slashes(text: &str, separator: char) -> String {
+    if separator == '/' {
+        return text.to_string();
+    }
+    text.replace('/', &separator.to_string())
 }
 
 fn validate_new_path(path: &Path, facts: &RepoFacts) -> Result<(), String> {
@@ -909,17 +924,32 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    /// Absolute on the platform running the test: a rooted path without a
+    /// drive letter is relative on Windows, which `validate_new_path` rejects.
+    fn projects_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(r"C:\projects")
+        } else {
+            PathBuf::from("/projects")
+        }
+    }
+
+    fn path_text(path: PathBuf) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
     fn facts() -> RepoFacts {
+        let acme = projects_root().join("acme");
         RepoFacts {
-            repo_common_dir: PathBuf::from("/projects/acme/.git"),
-            checkout_root: PathBuf::from("/projects/acme"),
+            repo_common_dir: acme.join(".git"),
+            checkout_root: acme.clone(),
             project_subpath: PathBuf::new(),
             current_branch: Some("topic".into()),
             default_base_ref: "main".into(),
             default_base_commit: "abcdef123456".into(),
             local_branches: vec!["main".into(), "agent/task".into()],
             worktrees: vec![WorkspaceWorktreeFact {
-                path: PathBuf::from("/projects/acme"),
+                path: acme,
                 branch: Some("topic".into()),
                 created_by_ilium: false,
                 is_dirty: true,
@@ -950,7 +980,10 @@ mod tests {
         state.apply_facts(facts());
         assert_eq!(state.branch.buf, "agent/task-2");
         assert_eq!(state.base_ref.buf, "topic");
-        assert_eq!(state.path.buf, "/projects/acme.worktrees/agent-task-2");
+        assert_eq!(
+            state.path.buf,
+            path_text(projects_root().join("acme.worktrees").join("agent-task-2"))
+        );
         assert!(state.dirty_reminder().is_some());
         assert!(matches!(
             state.validated_request().unwrap().1,
@@ -1028,7 +1061,13 @@ mod tests {
         assert_eq!(state.base_ref.buf, "main");
         assert_eq!(
             state.path.buf,
-            "/projects/acme/.ilium/worktrees/feature-task"
+            path_text(
+                projects_root()
+                    .join("acme")
+                    .join(".ilium")
+                    .join("worktrees")
+                    .join("feature-task")
+            )
         );
         assert_eq!(
             state.close_policy,
@@ -1062,14 +1101,14 @@ mod tests {
         let mut state = dialog(WorktreeDialogMode::New);
         let mut snapshot = facts();
         snapshot.worktrees.push(WorkspaceWorktreeFact {
-            path: PathBuf::from("/projects/existing"),
+            path: projects_root().join("existing"),
             branch: Some("feature".into()),
             created_by_ilium: true,
             is_dirty: false,
             occupied_pane_id: Some(NodeId(9)),
         });
         state.apply_facts(snapshot);
-        state.path = TextPromptState::new("/projects/acme/nested");
+        state.path = TextPromptState::new(path_text(projects_root().join("acme").join("nested")));
         assert!(state.validated_request().unwrap_err().contains("overlaps"));
         state.set_mode(WorktreeDialogMode::Existing);
         state.selected_existing = 1;
@@ -1082,6 +1121,18 @@ mod tests {
             state.validated_request().unwrap().1,
             WorkspaceCreateSpec::Existing { .. }
         ));
+    }
+
+    #[test]
+    fn template_slashes_become_the_platform_separator_without_touching_other_text() {
+        assert_eq!(
+            replace_forward_slashes(r"C:\repos\app/.ilium/worktrees/x", '\\'),
+            r"C:\repos\app\.ilium\worktrees\x"
+        );
+        assert_eq!(
+            replace_forward_slashes("/repos/app/.ilium", '/'),
+            "/repos/app/.ilium"
+        );
     }
 
     #[test]

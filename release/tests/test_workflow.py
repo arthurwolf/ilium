@@ -229,7 +229,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("--windows-ort-report", code)
         self.assertNotIn('runner-generated reviewed CRT inventory', code)
         self.assertIn('build_windows_ort.py', (ROOT / '.github/workflows/release.yml').read_text())
-        self.assertIn('${{ runner.temp }}/native-work/**/*.log', (ROOT / '.github/workflows/release.yml').read_text())
+        self.assertIn('${{ runner.temp }}/native-work/*/*.log', (ROOT / '.github/workflows/release.yml').read_text())
 
     def test_aggregate_real_archive_parsing_and_source_tamper_gates(self):
         arguments = self.create_native_fixture()

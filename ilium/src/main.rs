@@ -1319,10 +1319,30 @@ fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
-/// True if `argument` is safe to place bare (unquoted) in a POSIX shell
+/// True when the pane command line will be parsed by `cmd.exe` rather than a
+/// POSIX shell. Mirrors the server's shell choice (`SHELL`, else `COMSPEC`): a
+/// Git Bash/MSYS `SHELL` still takes POSIX quoting.
+fn pane_shell_is_cmd() -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    std::env::var("SHELL")
+        .ok()
+        .and_then(|shell| {
+            std::path::Path::new(&shell)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| stem.eq_ignore_ascii_case("cmd"))
+        })
+        .unwrap_or(true)
+}
+
+/// True if `argument` is safe to place bare (unquoted) in the pane shell's
 /// command line: non-empty, and made up only of characters that never
-/// trigger word-splitting, globbing, expansion, or redirection.
-fn is_shell_safe_bare_word(argument: &str) -> bool {
+/// trigger word-splitting, globbing, expansion, or redirection. Under
+/// `cmd.exe` a backslash and `~` (8.3 short names such as `RUNNER~1`) are
+/// ordinary path characters.
+fn is_shell_safe_bare_word(argument: &str, cmd_shell: bool) -> bool {
     !argument.is_empty()
         && argument.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
@@ -1330,14 +1350,20 @@ fn is_shell_safe_bare_word(argument: &str) -> bool {
                     byte,
                     b'_' | b'-' | b'.' | b'/' | b'=' | b',' | b':' | b'@' | b'+'
                 )
+                || (cmd_shell && matches!(byte, b'\\' | b'~'))
         })
 }
 
-/// Quotes `argument` for `$SHELL -c` only if `is_shell_safe_bare_word` says
-/// it needs it; otherwise returns it unchanged.
+/// Quotes `argument` for the pane shell only if `is_shell_safe_bare_word`
+/// says it needs it; otherwise returns it unchanged.
 fn shell_quote_if_needed(argument: &str) -> String {
-    if is_shell_safe_bare_word(argument) {
+    let cmd_shell = pane_shell_is_cmd();
+    if is_shell_safe_bare_word(argument, cmd_shell) {
         return argument.to_string();
+    }
+    if cmd_shell {
+        // `cmd.exe` has no single quotes; double them inside a double-quoted word.
+        return format!("\"{}\"", argument.replace('"', "\"\""));
     }
     // Close the current single-quoted segment, emit a backslash-escaped
     // single quote, then reopen single-quoting -- the standard POSIX
@@ -1359,6 +1385,14 @@ mod tests {
         workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
+
+    #[test]
+    fn cmd_shell_keeps_backslash_and_short_name_paths_bare() {
+        let path = r"C:\Users\RUNNER~1\x\codex.exe";
+        assert!(super::is_shell_safe_bare_word(path, true));
+        assert!(!super::is_shell_safe_bare_word(path, false));
+        assert!(!super::is_shell_safe_bare_word("a b", true));
+    }
 
     fn project_session(name: &str) -> session::ProjectSession {
         session::ProjectSession {
@@ -1464,9 +1498,17 @@ mod tests {
 
     #[test]
     fn default_worktree_path_uses_main_checkout_for_a_linked_project_subdirectory() {
+        // A rooted path without a drive letter is not absolute on Windows, and
+        // the code under test rejects relative main-worktree paths, so the
+        // fixture needs a base that is absolute on the platform running it.
+        let work = if cfg!(windows) {
+            PathBuf::from(r"C:\work")
+        } else {
+            PathBuf::from("/work")
+        };
         let facts = ilium_ipc::RepoFacts {
-            repo_common_dir: PathBuf::from("/work/api/.git"),
-            checkout_root: PathBuf::from("/work/api.worktrees/existing-agent"),
+            repo_common_dir: work.join("api").join(".git"),
+            checkout_root: work.join("api.worktrees").join("existing-agent"),
             project_subpath: PathBuf::from("crates/service"),
             current_branch: Some("main".into()),
             default_base_ref: "main".into(),
@@ -1474,14 +1516,14 @@ mod tests {
             local_branches: vec!["main".into()],
             worktrees: vec![
                 ilium_ipc::WorkspaceWorktreeFact {
-                    path: PathBuf::from("/work/api"),
+                    path: work.join("api"),
                     branch: Some("main".into()),
                     created_by_ilium: false,
                     is_dirty: false,
                     occupied_pane_id: None,
                 },
                 ilium_ipc::WorkspaceWorktreeFact {
-                    path: PathBuf::from("/work/api.worktrees/existing-agent"),
+                    path: work.join("api.worktrees").join("existing-agent"),
                     branch: Some("agent/existing".into()),
                     created_by_ilium: true,
                     is_dirty: false,
@@ -1499,7 +1541,7 @@ mod tests {
         };
         assert_eq!(
             default_workspace_path(&facts, "agent/fix-login").unwrap(),
-            PathBuf::from("/work/api.worktrees/agent-fix-login")
+            work.join("api.worktrees").join("agent-fix-login")
         );
     }
 

@@ -111,6 +111,43 @@ async fn wait_for_transient_frame(condition: impl FnMut() -> bool, timeout: Dura
     wait_until_polling(condition, timeout, Duration::from_millis(2)).await
 }
 
+/// How long a value sampled off the screen must stay unchanged to count as
+/// settled. Longer than the tree's widening and row transitions (about 180 ms),
+/// so a column read after it is the layout's resting one.
+const SETTLED_LAYOUT_DURATION: Duration = Duration::from_millis(500);
+
+/// Samples `sample` until it yields the same `Some` value continuously for
+/// `settle`, and returns it; `None` if that never happens within `timeout`.
+///
+/// For coordinates read off an animating layout and used for a later mouse
+/// event: a value seen once is not the value the layout ends at, and how far
+/// apart the two are depends on how loaded the machine is.
+async fn wait_for_stable_value<T: PartialEq>(
+    mut sample: impl FnMut() -> Option<T>,
+    settle: Duration,
+    timeout: Duration,
+) -> Option<T> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut candidate: Option<(T, tokio::time::Instant)> = None;
+    loop {
+        let now = tokio::time::Instant::now();
+        match (sample(), candidate.take()) {
+            (Some(value), Some((held, since))) if held == value => {
+                if now.saturating_duration_since(since) >= settle {
+                    return Some(value);
+                }
+                candidate = Some((held, since));
+            }
+            (Some(value), _) => candidate = Some((value, now)),
+            (None, _) => {}
+        }
+        if now >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn wait_until_polling(
     mut condition: impl FnMut() -> bool,
     timeout: Duration,
@@ -556,8 +593,11 @@ fn walk_log_files(root: &Path) -> Vec<(PathBuf, String)> {
 /// and the test using it, were Unix-only. The PID comes from
 /// `SessionStream::peer_process_id`, which both transports already answer.
 async fn isolated_server_identity(xdg: &IsolatedXdgDirs, project_dir: &Path) -> (PathBuf, u32) {
-    let project_root = project_dir
-        .canonicalize()
+    // The CLI's own resolution, not `std::fs::canonicalize`: on Windows the
+    // latter keeps the `\\?\` extended-length prefix the CLI strips, which
+    // changes the digest the session endpoint is named by -- so this would
+    // name a pipe no server ever listens on.
+    let project_root = ilium_platform::paths::canonicalize(project_dir)
         .expect("the test's project directory exists");
     let socket_path = ilium::session::socket_path_in(&xdg.socket_dir, &project_root, SESSION_NAME);
     let endpoint = ilium_transport::SessionEndpoint::from_path(&socket_path);
@@ -745,8 +785,10 @@ fn active_log_path_from_metadata(metadata: &str) -> Option<PathBuf> {
 }
 
 fn process_log_for_project(log_root: &Path, project_dir: &Path) -> Option<(PathBuf, String)> {
-    let project_path = project_dir
-        .canonicalize()
+    // Spelled as the server records it (`ilium_platform::paths`): the log holds
+    // the CLI's path, without the extended-length prefix Windows'
+    // `std::fs::canonicalize` would add to this search text.
+    let project_path = ilium_platform::paths::canonicalize(project_dir)
         .ok()?
         .to_string_lossy()
         .into_owned();
@@ -868,7 +910,7 @@ fn detection_diagnostics(log_root: &Path, project_dir: &Path) -> String {
 fn process_log_diagnostics(log_root: &Path, project_dir: &Path) -> String {
     let mut report = format!(
         "log root: {log_root:?}\nproject dir as given: {project_dir:?}\ncanonical project path: {:?}\n",
-        project_dir.canonicalize()
+        ilium_platform::paths::canonicalize(project_dir)
     );
     let Ok(entries) = std::fs::read_dir(log_root) else {
         report.push_str("log root is not readable\n");
@@ -1241,7 +1283,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // adjacent Order by submenu through the rendered menu row. The checked
     // Manual label proves the submenu reflects the live setting before a
     // different choice is selected.
-    let default_rows = tui.with_screen(|screen| rows_containing(screen, "default"));
+    let default_rows = tui
+        .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS));
     assert_eq!(
         default_rows.len(),
         1,
@@ -2112,10 +2155,11 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     std::fs::rename(&staged_replacement, &restartable_binary)
         .expect("atomically replace running client path");
 
-    let default_rows = tui.with_screen(|screen| rows_containing(screen, "default"));
+    let default_rows = tui
+        .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS));
     assert_eq!(default_rows.len(), 1, "expected one default-group row");
     let menu_column = 8;
-    tui.write(&sgr_mouse_down(2, menu_column, default_rows[0]))
+    tui.write(&sgr_mouse_click(2, menu_column, default_rows[0]))
         .expect("right-click default group");
     assert!(
         wait_until(|| tui.screen_text().contains("Restart"), WAIT_TIMEOUT).await,
@@ -2124,7 +2168,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     );
     let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
     assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
-    tui.write(&sgr_mouse_down(0, menu_column + 1, restart_rows[0]))
+    tui.write(&sgr_mouse_click(0, menu_column + 1, restart_rows[0]))
         .expect("click Restart context action");
 
     assert!(
@@ -2572,6 +2616,17 @@ fn rows_containing(screen: &vt100::Screen, needle: &str) -> Vec<u16> {
         .collect()
 }
 
+/// How many leftmost columns are guaranteed to hold the tree panel's own text,
+/// whatever width the focus-dependent panel currently has (32 unfocused, 64
+/// focused in the pinned baseline). Tree labels sit well inside it, and the pane
+/// on the right starts beyond it.
+///
+/// Row lookups by a common word must use it: a shell pane's own output is on
+/// the same terminal rows, and macOS' default login shell prints "The default
+/// interactive shell is now zsh" -- which a whole-row search for "default"
+/// finds *above* the real group row, so the click lands on a different row.
+const TREE_TEXT_COLUMNS: u16 = 30;
+
 /// Finds text only inside the leftmost rendered cells. A full terminal row
 /// also contains the right pane, whose title may repeat an agent label and
 /// must never be mistaken for the corresponding tree row during mouse tests.
@@ -2739,6 +2794,19 @@ fn sgr_mouse_release(button: u8, column: u16, row: u16) -> Vec<u8> {
     // release of a held button is a release of a button that was not held,
     // which every surface here already ignores.
     format!("\x1b[<{button};{column};{row}m\x1b[<3;{column};{row}m").into_bytes()
+}
+
+/// A complete click of `button`: the press and its release at the same cell.
+///
+/// For the surfaces that act on the press itself (modal buttons, context-menu
+/// items, row actions), so a scenario does not have to remember the release
+/// that keeps the *next* press a press on a console reporting button state
+/// (see [`sgr_mouse_release`]). The release lands after the surface has
+/// already reacted, where it is, like every unmatched release, ignored.
+fn sgr_mouse_click(button: u8, column: u16, row: u16) -> Vec<u8> {
+    let mut bytes = sgr_mouse_down(button, column, row);
+    bytes.extend(sgr_mouse_release(button, column, row));
+    bytes
 }
 
 /// Encodes xterm SGR pointer motion while the left button remains held.
@@ -2932,7 +3000,9 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // The selected default group contains both panes, so Close opens the real
     // destructive confirmation. Cancel it with the rendered mouse button and
     // prove the obscured tree received no leaked click or close request.
-    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    let default_row = tui
+        .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS))
+        [0];
     tui.write(&sgr_mouse_down(0, 8, default_row))
         .expect("select the populated default group");
     tui.write(&sgr_mouse_up(8, default_row))
@@ -2955,7 +3025,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     );
     let confirmation_layout = ilium_client::modal::confirm_dialog_layout_for_size(120, 40);
     let cancel_button = confirmation_layout.actions.cancel_button;
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         cancel_button.x + cancel_button.width / 2,
         cancel_button.y,
@@ -3054,7 +3124,9 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // Return to the tree, select the remaining pane's parent, then confirm its
     // destructive close with the other rendered button. This complements the
     // cancellation proof above and exercises both mouse outcomes end to end.
-    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    let default_row = tui
+        .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS))
+        [0];
     tui.write(&sgr_mouse_down(0, 8, default_row))
         .expect("select the final populated default group");
     tui.write(&sgr_mouse_up(8, default_row))
@@ -3067,7 +3139,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         tui.screen_text()
     );
     let close_button = confirmation_layout.actions.confirm_button;
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         close_button.x + close_button.width / 2,
         close_button.y,
@@ -3224,7 +3296,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
     let target_row = target_rows[0];
     let context_column = 70;
-    tui.write(&sgr_mouse_down(2, context_column, target_row))
+    tui.write(&sgr_mouse_click(2, context_column, target_row))
         .expect("right-click target source line");
     assert!(
         wait_until(
@@ -3241,7 +3313,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
 
     // The menu renders its first item directly below its title. Create Agent
     // is the third canonical line action after Copy line and Copy entire file.
-    tui.write(&sgr_mouse_down(0, context_column + 1, target_row + 3))
+    tui.write(&sgr_mouse_click(0, context_column + 1, target_row + 3))
         .expect("click create-agent line action");
     assert!(
         wait_until(
@@ -3260,7 +3332,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
 
     let dialog = ilium_client::agent_from_line::dialog_layout_for_size(120, 40);
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         dialog.agent_row.x + 24,
         dialog.agent_row.y,
@@ -3271,7 +3343,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
         "expected Codex selection, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         dialog.create_button.x + dialog.create_button.width / 2,
         dialog.create_button.y,
@@ -3689,7 +3761,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     );
     let board_dialog = ilium_client::modal::create_board_dialog_layout_for_size(120, 40);
     let create_board_button = board_dialog.actions.confirm_button;
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         create_board_button.x + create_board_button.width / 2,
         create_board_button.y,
@@ -3916,7 +3988,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let dialog_board_rows =
         tui.with_screen(|screen| rows_containing_in_order(screen, &[BOARD_ICON, "Board"]));
     assert_eq!(dialog_board_rows.len(), 1);
-    tui.write(&sgr_mouse_down(0, 8, dialog_board_rows[0]))
+    tui.write(&sgr_mouse_click(0, 8, dialog_board_rows[0]))
         .expect("focus dialog-backed board after reattach");
     assert!(
         wait_until(
@@ -3997,7 +4069,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
                 let screen = tui.screen_text();
                 screen.contains("Chatroom")
                     && screen.contains(TERMINAL_ICON)
-                    && screen.contains("cat")
+                    && screen.contains(IDLE_PANE_LABEL)
             },
             WAIT_TIMEOUT
         )
@@ -4007,8 +4079,8 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     );
     // Locate the actual rendered row and right-click it. The popup's second
     // content row is the terminal-only scheduled-input action.
-    let terminal_rows =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "cat"]));
+    let terminal_rows = tui
+        .with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, IDLE_PANE_LABEL]));
     assert_eq!(
         terminal_rows.len(),
         1,
@@ -4021,7 +4093,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         .expect("focus terminal row before scheduling");
     tui.write(&sgr_mouse_up(menu_column, terminal_row))
         .expect("release terminal row focus click");
-    tui.write(&sgr_mouse_down(2, menu_column, terminal_row))
+    tui.write(&sgr_mouse_click(2, menu_column, terminal_row))
         .expect("right-click terminal row");
     assert!(
         wait_until(
@@ -4032,13 +4104,13 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         "expected scheduled-input context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_down(0, menu_column + 1, terminal_row + 2))
+    tui.write(&sgr_mouse_click(0, menu_column + 1, terminal_row + 2))
         .expect("click scheduled-input context action");
     assert!(
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Schedule input for cat")
+                screen.contains(&format!("Schedule input for {IDLE_PANE_LABEL}"))
                     && screen.contains("Hours")
                     && screen.contains("Minutes")
                     && screen.contains("Seconds")
@@ -4059,8 +4131,12 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     assert!(
         wait_until(
             || {
+                // Any second of the four-second countdown, not only its first:
+                // each lasts a second, and a sample on a loaded machine
+                // can land after the first has already ticked over.
                 let screen = tui.screen_text();
-                screen.contains("4s") && screen.contains(IDLE_PANE_LABEL)
+                (1..=4).any(|seconds| screen.contains(&format!("{seconds}s")))
+                    && screen.contains(IDLE_PANE_LABEL)
             },
             WAIT_TIMEOUT,
         )
@@ -4202,35 +4278,36 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     // renderer's animated width or fixed-slot geometry in this PTY test.
     tui.write(&sgr_mouse_move(8, shell_row_before))
         .expect("hover boundary pane row");
-    assert!(
-        wait_until(
-            || {
-                tui.with_screen(|screen| {
-                    let columns = screen.size().1;
-                    (0..columns).any(|column| {
-                        screen
-                            .cell(shell_row_before, column)
-                            .is_some_and(|cell| cell.contents().contains("🔼"))
-                    })
+    // The icon is only as settled as the widening tree it sits in: sampled
+    // the moment it first appears, its column is a mid-animation one on a slow
+    // runner, and the press then lands on whatever slid under that cell. So
+    // take the column once it has stopped moving.
+    let move_up_column = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                let columns = screen.size().1;
+                (0..columns).find(|column| {
+                    screen
+                        .cell(shell_row_before, *column)
+                        .is_some_and(|cell| cell.contents().contains("🔼"))
                 })
-            },
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "expected the hovered pane's Up icon, got: {:?}",
-        tui.screen_text()
-    );
-    let move_up_column = tui.with_screen(|screen| {
-        let columns = screen.size().1;
-        (0..columns)
-            .find(|column| {
-                screen
-                    .cell(shell_row_before, *column)
-                    .is_some_and(|cell| cell.contents().contains("🔼"))
             })
-            .expect("find rendered Up action column")
-    });
-    tui.write(&sgr_mouse_down(0, move_up_column, shell_row_before))
+        },
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let Some(move_up_column) = move_up_column else {
+        panic!(
+            "expected the hovered pane's settled Up icon, got: {:?}",
+            tui.screen_text()
+        );
+    };
+    // The pointer travels to the icon before pressing it, as a hand does, so
+    // the hover that revealed the action is still held over the row.
+    tui.write(&sgr_mouse_move(move_up_column, shell_row_before))
+        .expect("move onto the boundary pane Up action");
+    tui.write(&sgr_mouse_click(0, move_up_column, shell_row_before))
         .expect("click boundary pane Up action");
 
     assert!(
@@ -4525,7 +4602,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
 
     let menu_column = 80;
     let menu_row = 10;
-    tui.write(&sgr_mouse_down(2, menu_column, menu_row))
+    tui.write(&sgr_mouse_click(2, menu_column, menu_row))
         .expect("right-click detected Codex terminal");
     assert!(
         wait_until(
@@ -4536,7 +4613,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         "expected detected-agent context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_down(0, menu_column + 1, menu_row + 1))
+    tui.write(&sgr_mouse_click(0, menu_column + 1, menu_row + 1))
         .expect("open agent debug log");
     tui.write(b"\x1b[H")
         .expect("jump to the oldest retained debug events");
@@ -4600,7 +4677,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     let (save_column, save_row) = tui
         .with_screen(|screen| first_cell_containing(screen, "💾"))
         .expect("find top Save button");
-    tui.write(&sgr_mouse_down(0, save_column, save_row))
+    tui.write(&sgr_mouse_click(0, save_column, save_row))
         .expect("click top Save button");
     assert!(
         wait_until(
@@ -4618,7 +4695,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     );
     let save_prompt_layout = ilium_client::modal::text_prompt_dialog_layout_for_size(140, 44);
     let save_prompt_button = save_prompt_layout.actions.confirm_button;
-    tui.write(&sgr_mouse_down(
+    tui.write(&sgr_mouse_click(
         0,
         save_prompt_button.x + save_prompt_button.width / 2,
         save_prompt_button.y,
@@ -5564,7 +5641,9 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         tui.screen_text()
     );
 
-    let default_row = tui.with_screen(|screen| rows_containing(screen, "default"))[0];
+    let default_row = tui
+        .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS))
+        [0];
     tui.write(&sgr_mouse_down(2, 8, default_row))
         .expect("open tree context menu");
     tui.write(&sgr_mouse_release(2, 8, default_row))

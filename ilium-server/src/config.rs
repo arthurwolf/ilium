@@ -564,13 +564,13 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         Err(source) => {
             return Err(ServerError::ConfigLoad {
                 path,
-                source: ConfigLoadError::Read(source),
+                source: Box::new(ConfigLoadError::Read(source)),
             });
         }
     };
     let raw: RawConfig = toml::from_str(&contents).map_err(|source| ServerError::ConfigLoad {
         path: path.clone(),
-        source: ConfigLoadError::Parse(source),
+        source: Box::new(ConfigLoadError::Parse(source)),
     })?;
 
     let detection = DetectionConfig::from_raw(&raw.detection);
@@ -582,7 +582,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         .collect::<Result<Vec<_>, ConfigLoadError>>()
         .map_err(|source| ServerError::ConfigLoad {
             path: path.clone(),
-            source,
+            source: Box::new(source),
         })?;
 
     let session_recovery = raw
@@ -593,7 +593,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
         .transpose()
         .map_err(|source| ServerError::ConfigLoad {
             path: path.clone(),
-            source,
+            source: Box::new(source),
         })?
         .unwrap_or_default();
 
@@ -601,7 +601,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
     if http_api_port == 0 {
         return Err(ServerError::ConfigLoad {
             path,
-            source: ConfigLoadError::InvalidHttpApiPort,
+            source: Box::new(ConfigLoadError::InvalidHttpApiPort),
         });
     }
 
@@ -977,10 +977,8 @@ mod tests {
         let result = load(&dir);
         assert!(matches!(
             result,
-            Err(ServerError::ConfigLoad {
-                source: ConfigLoadError::InvalidCustomSignature(_),
-                ..
-            })
+            Err(ServerError::ConfigLoad { ref source, .. })
+                if matches!(**source, ConfigLoadError::InvalidCustomSignature(_))
         ));
     }
 
@@ -996,10 +994,8 @@ mod tests {
         let result = load(&dir);
         assert!(matches!(
             result,
-            Err(ServerError::ConfigLoad {
-                source: ConfigLoadError::InvalidSessionRecoveryPolicy(_),
-                ..
-            })
+            Err(ServerError::ConfigLoad { ref source, .. })
+                if matches!(**source, ConfigLoadError::InvalidSessionRecoveryPolicy(_))
         ));
     }
 
@@ -1044,10 +1040,8 @@ mod tests {
         let result = load(&dir);
         assert!(matches!(
             result,
-            Err(ServerError::ConfigLoad {
-                source: ConfigLoadError::InvalidCustomSignature(_),
-                ..
-            })
+            Err(ServerError::ConfigLoad { ref source, .. })
+                if matches!(**source, ConfigLoadError::InvalidCustomSignature(_))
         ));
     }
 
