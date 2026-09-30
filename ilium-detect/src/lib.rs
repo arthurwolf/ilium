@@ -1393,7 +1393,7 @@ pub fn refresh(system: &mut System) {
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::OnlyIfNotSet),
+        ProcessRefreshKind::nothing().with_cmd(command_line_refresh),
     );
 }
 
@@ -1421,6 +1421,18 @@ struct AgentProcessMatch {
 }
 
 impl ProcessChildrenIndex {
+    // macOS keeps a process's name and first-read arguments for its whole
+    // life (sysinfo only re-reads them when the start second changes), so a
+    // pane process first observed between `fork` and `exec` -- still wearing
+    // the server's identity -- would never be recognised as the agent it
+    // becomes. Re-reading the arguments each tick repairs that; matching falls
+    // back to `argv[0]`, so the stale name no longer matters. Elsewhere the
+    // name follows exec and the arguments really never change.
+    let command_line_refresh = if cfg!(target_os = "macos") {
+        UpdateKind::Always
+    } else {
+        UpdateKind::OnlyIfNotSet
+    };
     /// Builds the index from `system`'s current process snapshot. `system`
     /// must already have been [`refresh`]ed -- this reads whatever
     /// pid/parent pairs are already populated, it does not refresh
